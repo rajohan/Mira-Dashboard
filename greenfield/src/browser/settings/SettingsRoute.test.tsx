@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 import type { TRPCRequestOptions } from "@trpc/client";
@@ -26,6 +26,7 @@ import { createDashboardRouter, type DashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { openClawGatewayRestartRecoveryStoragePrefix } from "./openClawSettingsOperations.ts";
 import {
     openClawConfigurationQueryKey,
     openClawSkillsQueryKey,
@@ -212,8 +213,58 @@ function unknownOutcomeError(): Error {
     });
 }
 
+function authenticatedStatusFor(
+    userId: string,
+    sessionId: string
+): Extract<AuthStatus, { state: "authenticated" }> {
+    return {
+        ...authenticatedStatus,
+        session: { ...authenticatedStatus.session, id: sessionId },
+        user: { ...authenticatedStatus.user, id: userId },
+    };
+}
+
+function successfulBackupResponse(body = '{"models":{}}'): Response {
+    return new Response(body, {
+        headers: {
+            "content-disposition": 'attachment; filename="openclaw.json"',
+            "content-length": String(new TextEncoder().encode(body).byteLength),
+            "content-type": "application/json",
+        },
+        status: 200,
+    });
+}
+
+function installBackupObjectUrlMocks() {
+    const createDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    const createObjectUrl = mock((_backup: Blob) => "blob:openclaw-backup-test");
+    const revokeObjectUrl = mock((_url: string) => {});
+    Object.defineProperties(URL, {
+        createObjectURL: { configurable: true, value: createObjectUrl },
+        revokeObjectURL: { configurable: true, value: revokeObjectUrl },
+    });
+    return {
+        createObjectUrl,
+        restore() {
+            if (createDescriptor === undefined) {
+                Reflect.deleteProperty(URL, "createObjectURL");
+            } else {
+                Object.defineProperty(URL, "createObjectURL", createDescriptor);
+            }
+            if (revokeDescriptor === undefined) {
+                Reflect.deleteProperty(URL, "revokeObjectURL");
+            } else {
+                Object.defineProperty(URL, "revokeObjectURL", revokeDescriptor);
+            }
+        },
+        revokeObjectUrl,
+    };
+}
+
 class SettingsTransport implements DashboardTrpcTransport {
     readonly calls: TransportCall[] = [];
+    authentication: AuthStatus = authenticatedStatus;
     configuration: OpenClawConfigurationSnapshot = configuration;
     configurationError: Error | undefined;
     mutationHandler: (
@@ -241,10 +292,15 @@ class SettingsTransport implements DashboardTrpcTransport {
                 return Promise.resolve(accountSecuritySummary);
             }
             case "auth.sessions": {
-                return Promise.resolve({ sessions: [authenticatedStatus.session] });
+                return Promise.resolve({
+                    sessions:
+                        this.authentication.state === "authenticated"
+                            ? [this.authentication.session]
+                            : [],
+                });
             }
             case "auth.status": {
-                return Promise.resolve(authenticatedStatus);
+                return Promise.resolve(this.authentication);
             }
             case "automationSecurity.listPrincipals": {
                 return Promise.resolve({
@@ -284,6 +340,7 @@ function renderSettings(
     transport: SettingsTransport,
     initialEntry = "/settings?view=openclaw"
 ): {
+    readonly dispose: () => Promise<void>;
     readonly queryClient: ReturnType<typeof createDashboardQueryClient>;
     readonly router: DashboardRouter;
 } {
@@ -295,19 +352,36 @@ function renderSettings(
     const collections = createDashboardBrowserCollections(queryClient, trpcClient);
     queryClients.push(queryClient);
     collectionRegistries.push(collections);
-    mountedViews.push(
-        render(
-            <DashboardBrowserApplication
-                collections={collections}
-                queryClient={queryClient}
-                realtimeClient={noOpDashboardRealtimeClient}
-                router={router}
-                trpcClient={trpcClient}
-                webAuthnClient={unexpectedWebAuthnClient}
-            />
-        )
+    const view = render(
+        <DashboardBrowserApplication
+            collections={collections}
+            queryClient={queryClient}
+            realtimeClient={noOpDashboardRealtimeClient}
+            router={router}
+            trpcClient={trpcClient}
+            webAuthnClient={unexpectedWebAuthnClient}
+        />
     );
-    return { queryClient, router };
+    mountedViews.push(view);
+    return {
+        async dispose() {
+            await act(async () => {
+                view.unmount();
+                await collections.cleanup();
+                queryClient.clear();
+            });
+            const viewIndex = mountedViews.indexOf(view);
+            if (viewIndex !== -1) mountedViews.splice(viewIndex, 1);
+            const collectionsIndex = collectionRegistries.indexOf(collections);
+            if (collectionsIndex !== -1) {
+                collectionRegistries.splice(collectionsIndex, 1);
+            }
+            const queryClientIndex = queryClients.indexOf(queryClient);
+            if (queryClientIndex !== -1) queryClients.splice(queryClientIndex, 1);
+        },
+        queryClient,
+        router,
+    };
 }
 
 function expectConfigurationControlsDisabled(): void {
@@ -327,11 +401,19 @@ function expectConfigurationControlsDisabled(): void {
 }
 
 afterEach(async () => {
-    for (const view of mountedViews.splice(0)) view.unmount();
-    await Promise.all(
-        collectionRegistries.splice(0).map((collections) => collections.cleanup())
-    );
-    for (const queryClient of queryClients.splice(0)) queryClient.clear();
+    await act(async () => {
+        for (const view of mountedViews.splice(0)) view.unmount();
+        await Promise.all(
+            collectionRegistries.splice(0).map((collections) => collections.cleanup())
+        );
+        for (const queryClient of queryClients.splice(0)) queryClient.clear();
+    });
+    for (let index = globalThis.sessionStorage.length - 1; index >= 0; index -= 1) {
+        const key = globalThis.sessionStorage.key(index);
+        if (key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix)) {
+            globalThis.sessionStorage.removeItem(key);
+        }
+    }
 });
 
 describe("Dashboard Settings route", () => {
@@ -438,7 +520,12 @@ describe("Dashboard Settings route", () => {
             expect(screen.getByRole("heading", { name: section })).toBeTruthy();
         }
         expect(screen.queryByRole("textbox", { name: /json/iu })).toBeNull();
-        expect(screen.queryByRole("button", { name: /backup|restart/iu })).toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Download configuration backup" })
+        ).toBeEnabled();
+        expect(
+            screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+        ).toBeEnabled();
         expect(
             screen.getByRole("button", { name: "Session visibility" })
         ).toHaveTextContent("Current agent");
@@ -635,6 +722,450 @@ describe("Dashboard Settings route", () => {
         renderSettings(absentTransport);
 
         expect(await screen.findByText("Not reported")).toBeTruthy();
+    });
+
+    test("observes a one-shot backup GET before reporting a completed download", async () => {
+        const transport = new SettingsTransport();
+        const ticketId = "019fe633-9133-4ba0-8b80-809dd80dfb40";
+        transport.mutationHandler = (path) => {
+            if (path !== "openClawSettings.createConfigurationBackup") {
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+            }
+            return Promise.resolve({
+                downloadUrl: `/api/openclaw-settings/configuration-backups/${ticketId}`,
+                expiresAtMs: Date.now() + 60_000,
+                ticketId,
+            });
+        };
+        const fetchBackup = spyOn(globalThis, "fetch").mockImplementation(() =>
+            Promise.resolve(successfulBackupResponse())
+        );
+        const objectUrls = installBackupObjectUrlMocks();
+        let activatedDownload:
+            | { readonly download: string; readonly href: string }
+            | undefined;
+        const anchorClick = spyOn(
+            HTMLAnchorElement.prototype,
+            "click"
+        ).mockImplementation(function (this: HTMLAnchorElement) {
+            activatedDownload = { download: this.download, href: this.href };
+        });
+        try {
+            const { queryClient } = renderSettings(transport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Download configuration backup",
+                })
+            );
+
+            expect(
+                await screen.findByText("OpenClaw configuration backup downloaded.")
+            ).toBeTruthy();
+            expect(fetchBackup).toHaveBeenCalledWith(
+                `/api/openclaw-settings/configuration-backups/${ticketId}`,
+                expect.objectContaining({
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    method: "GET",
+                    signal: expect.any(AbortSignal),
+                })
+            );
+            expect(anchorClick).toHaveBeenCalledTimes(1);
+            expect(activatedDownload).toEqual({
+                download: "openclaw.json",
+                href: "blob:openclaw-backup-test",
+            });
+            expect(objectUrls.createObjectUrl).toHaveBeenCalledTimes(1);
+            expect(objectUrls.revokeObjectUrl).toHaveBeenCalledWith(
+                "blob:openclaw-backup-test"
+            );
+            expect(transport.calls.filter(({ kind }) => kind === "mutation")).toEqual([
+                expect.objectContaining({
+                    input: { confirmation: "export-openclaw-configuration" },
+                    path: "openClawSettings.createConfigurationBackup",
+                }),
+            ]);
+            expect(JSON.stringify(queryClient.getQueryCache().getAll())).not.toContain(
+                ticketId
+            );
+        } finally {
+            anchorClick.mockRestore();
+            fetchBackup.mockRestore();
+            objectUrls.restore();
+        }
+    });
+
+    for (const failure of [
+        {
+            message:
+                "The configuration backup is no longer authorized for this session. Sign in or verify your identity again, then request a new backup.",
+            status: 401,
+        },
+        {
+            message:
+                "The configuration backup ticket expired or was already used. Request a new backup.",
+            status: 410,
+        },
+        {
+            message:
+                "The configuration backup is temporarily unavailable. Request a new backup and try again shortly.",
+            status: 503,
+        },
+    ] as const) {
+        test(`reports backup GET ${failure.status} without false download success`, async () => {
+            const transport = new SettingsTransport();
+            const ticketId = "019fe633-9133-4ba0-8b80-809dd80dfb40";
+            transport.mutationHandler = (path) => {
+                if (path !== "openClawSettings.createConfigurationBackup") {
+                    return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+                }
+                return Promise.resolve({
+                    downloadUrl: `/api/openclaw-settings/configuration-backups/${ticketId}`,
+                    expiresAtMs: Date.now() + 60_000,
+                    ticketId,
+                });
+            };
+            const fetchBackup = spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(
+                    new Response("private raw backup failure detail", {
+                        status: failure.status,
+                    })
+                )
+            );
+            const anchorClick = spyOn(
+                HTMLAnchorElement.prototype,
+                "click"
+            ).mockImplementation(() => {});
+            try {
+                renderSettings(transport);
+                const user = userEvent.setup();
+                await screen.findByRole("textbox", { name: "Primary model" });
+                await user.click(
+                    screen.getByRole("button", {
+                        name: "Download configuration backup",
+                    })
+                );
+
+                expect(await screen.findByText(failure.message)).toBeTruthy();
+                expect(
+                    screen.queryByText("OpenClaw configuration backup downloaded.")
+                ).toBeNull();
+                expect(
+                    screen.queryByText(/private raw backup failure detail/iu)
+                ).toBeNull();
+                expect(anchorClick).not.toHaveBeenCalled();
+            } finally {
+                anchorClick.mockRestore();
+                fetchBackup.mockRestore();
+            }
+        });
+    }
+
+    test("reuses the restart recovery key after a same-session reload and clears it on success", async () => {
+        const transport = new SettingsTransport();
+        let restartAttemptCount = 0;
+        transport.mutationHandler = (path) => {
+            if (path !== "openClawSettings.restartGateway") {
+                return Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+            }
+            restartAttemptCount += 1;
+            return restartAttemptCount === 1
+                ? Promise.reject(unknownOutcomeError())
+                : Promise.resolve({
+                      completedAtMs: Date.now(),
+                      jobRunId: "019fe633-9133-7ba0-a5f9-809dd80dfb40",
+                      status: "restarted",
+                  });
+        };
+        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
+        try {
+            const firstView = renderSettings(transport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            );
+            await screen.findByText(
+                /could not confirm whether the Gateway restart completed/iu
+            );
+            const firstCall = transport.calls.find(
+                ({ kind, path }) =>
+                    kind === "mutation" && path === "openClawSettings.restartGateway"
+            );
+            expect(firstCall?.input).toMatchObject({
+                confirmation: "restart-openclaw-gateway",
+                idempotencyKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+            });
+            expect(
+                screen.getByRole("link", { name: "Review Dashboard jobs" })
+            ).toHaveAttribute("href", "/jobs");
+
+            await firstView.dispose();
+            renderSettings(transport);
+            const reloadedUser = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await reloadedUser.click(
+                await screen.findByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            );
+            expect(
+                await screen.findByText("OpenClaw Gateway restart completed.")
+            ).toBeTruthy();
+            await waitFor(() =>
+                expect(
+                    transport.calls.filter(
+                        ({ kind, path }) =>
+                            kind === "mutation" &&
+                            path === "openClawSettings.restartGateway"
+                    )
+                ).toHaveLength(2)
+            );
+            const calls = transport.calls.filter(
+                ({ kind, path }) =>
+                    kind === "mutation" && path === "openClawSettings.restartGateway"
+            );
+            expect(calls[0]?.input).toMatchObject({
+                confirmation: "restart-openclaw-gateway",
+            });
+            expect(calls[1]?.input).toEqual(calls[0]?.input);
+            expect(
+                screen.queryByRole("button", {
+                    name: "Discard recovery key for new intent",
+                })
+            ).toBeNull();
+            expect(
+                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            ).toBeEnabled();
+            expect(
+                Array.from({ length: globalThis.sessionStorage.length }, (_, index) =>
+                    globalThis.sessionStorage.key(index)
+                ).filter((key) =>
+                    key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix)
+                )
+            ).toHaveLength(0);
+            expect(confirmRestart).toHaveBeenCalledTimes(2);
+        } finally {
+            confirmRestart.mockRestore();
+        }
+    });
+
+    test("preserves restart recovery when retry and discard confirmations are declined", async () => {
+        const transport = new SettingsTransport();
+        transport.mutationHandler = (path) =>
+            path === "openClawSettings.restartGateway"
+                ? Promise.reject(unknownOutcomeError())
+                : Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
+        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
+        try {
+            renderSettings(transport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            );
+            await screen.findByText(
+                /could not confirm whether the Gateway restart completed/iu
+            );
+            const restartCalls = () =>
+                transport.calls.filter(
+                    ({ kind, path }) =>
+                        kind === "mutation" && path === "openClawSettings.restartGateway"
+                );
+            expect(restartCalls()).toHaveLength(1);
+            const recoveryKey = Array.from(
+                { length: globalThis.sessionStorage.length },
+                (_, index) => globalThis.sessionStorage.key(index)
+            ).find((key) => key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix));
+            if (recoveryKey === undefined || recoveryKey === null) {
+                throw new Error("Gateway restart recovery key was not persisted");
+            }
+            const recoveryValue = globalThis.sessionStorage.getItem(recoveryKey);
+            if (recoveryValue === null) {
+                throw new Error("Gateway restart recovery value was not persisted");
+            }
+            expect(recoveryValue).toMatch(/^[0-9a-f]{32}$/u);
+
+            confirmRestart.mockReturnValue(false);
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            );
+            expect(restartCalls()).toHaveLength(1);
+            expect(globalThis.sessionStorage.getItem(recoveryKey)).toBe(recoveryValue);
+            expect(
+                screen.getByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            ).toBeEnabled();
+
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Discard recovery key for new intent",
+                })
+            );
+            expect(restartCalls()).toHaveLength(1);
+            expect(globalThis.sessionStorage.getItem(recoveryKey)).toBe(recoveryValue);
+            expect(
+                screen.getByRole("button", {
+                    name: "Discard recovery key for new intent",
+                })
+            ).toBeEnabled();
+            expect(
+                screen.queryByText(/Previous Gateway restart recovery key discarded/iu)
+            ).toBeNull();
+            expect(confirmRestart).toHaveBeenCalledTimes(3);
+        } finally {
+            confirmRestart.mockRestore();
+        }
+    });
+
+    test("isolates persisted restart recovery by exact authenticated identity", async () => {
+        const firstTransport = new SettingsTransport();
+        firstTransport.mutationHandler = () => Promise.reject(unknownOutcomeError());
+        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
+        try {
+            const firstView = renderSettings(firstTransport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                await screen.findByRole("button", {
+                    name: "Restart OpenClaw Gateway",
+                })
+            );
+            await screen.findByText(
+                /could not confirm whether the Gateway restart completed/iu
+            );
+            const firstInput = firstTransport.calls.find(
+                ({ path }) => path === "openClawSettings.restartGateway"
+            )?.input;
+
+            await firstView.dispose();
+            const secondTransport = new SettingsTransport();
+            secondTransport.authentication = authenticatedStatusFor(
+                "019fd974-54a2-74dd-a64b-d4186f8d8830",
+                "b".repeat(32)
+            );
+            secondTransport.mutationHandler = () =>
+                Promise.resolve({
+                    completedAtMs: Date.now(),
+                    jobRunId: "019fe633-9133-7ba0-a5f9-809dd80dfb41",
+                    status: "restarted",
+                });
+            renderSettings(secondTransport);
+            await screen.findByRole("textbox", { name: "Primary model" });
+            const secondUser = userEvent.setup();
+            expect(
+                await screen.findByRole("button", {
+                    name: "Restart OpenClaw Gateway",
+                })
+            ).toBeEnabled();
+            expect(
+                screen.queryByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            ).toBeNull();
+            await secondUser.click(
+                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            );
+            await screen.findByText("OpenClaw Gateway restart completed.");
+            const secondInput = secondTransport.calls.find(
+                ({ path }) => path === "openClawSettings.restartGateway"
+            )?.input;
+            expect(secondInput).not.toEqual(firstInput);
+            expect(
+                Array.from({ length: globalThis.sessionStorage.length }, (_, index) =>
+                    globalThis.sessionStorage.key(index)
+                ).filter((key) =>
+                    key?.startsWith(openClawGatewayRestartRecoveryStoragePrefix)
+                )
+            ).toHaveLength(1);
+        } finally {
+            confirmRestart.mockRestore();
+        }
+    });
+
+    test("requires an explicit warned reset before creating a new restart intent", async () => {
+        const transport = new SettingsTransport();
+        let restartAttemptCount = 0;
+        transport.mutationHandler = () => {
+            restartAttemptCount += 1;
+            return restartAttemptCount === 1
+                ? Promise.reject(unknownOutcomeError())
+                : Promise.resolve({
+                      completedAtMs: Date.now(),
+                      jobRunId: "019fe633-9133-7ba0-a5f9-809dd80dfb42",
+                      status: "restarted",
+                  });
+        };
+        const confirmRestart = spyOn(globalThis, "confirm").mockReturnValue(true);
+        try {
+            renderSettings(transport);
+            const user = userEvent.setup();
+            await screen.findByRole("textbox", { name: "Primary model" });
+            await user.click(
+                await screen.findByRole("button", {
+                    name: "Restart OpenClaw Gateway",
+                })
+            );
+            await screen.findByText(
+                /could not confirm whether the Gateway restart completed/iu
+            );
+            expect(
+                screen.getByText(/configuration refresh does not prove restart status/iu)
+            ).toBeTruthy();
+            expect(
+                screen.getByRole("link", { name: "Review Dashboard jobs" })
+            ).toHaveAttribute("href", "/jobs");
+
+            await user.click(
+                screen.getByRole("button", {
+                    name: "Discard recovery key for new intent",
+                })
+            );
+            expect(
+                await screen.findByText(
+                    /Previous Gateway restart recovery key discarded/iu
+                )
+            ).toBeTruthy();
+            expect(
+                screen.queryByRole("button", {
+                    name: "Retry Gateway restart request",
+                })
+            ).toBeNull();
+
+            const newIntentUser = userEvent.setup();
+            await newIntentUser.click(
+                screen.getByRole("button", { name: "Restart OpenClaw Gateway" })
+            );
+            await waitFor(() =>
+                expect(
+                    transport.calls.filter(
+                        ({ path }) => path === "openClawSettings.restartGateway"
+                    )
+                ).toHaveLength(2)
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByRole("button", {
+                        name: "Restart OpenClaw Gateway",
+                    })
+                ).toBeEnabled()
+            );
+            const restartInputs = transport.calls
+                .filter(({ path }) => path === "openClawSettings.restartGateway")
+                .map(({ input }) => input);
+            expect(restartInputs[1]).not.toEqual(restartInputs[0]);
+            expect(confirmRestart).toHaveBeenNthCalledWith(
+                2,
+                expect.stringMatching(/second time[\s\S]*Review Dashboard jobs/iu)
+            );
+        } finally {
+            confirmRestart.mockRestore();
+        }
     });
 
     test("submits one exact agent tool override intent without browser policy arrays", async () => {

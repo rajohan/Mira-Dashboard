@@ -948,6 +948,102 @@ describe("workspace files service", () => {
         ).toMatchObject({ reason: "access-denied" });
     });
 
+    test("publishes oversized reviewed sources as read-only bounded prefixes", async () => {
+        const { openClawRoot, service } = fixture({ includeOpenClaw: true });
+        const sourceSizeBytes = workspaceFileLimits.maximumManifestFileBytes + 1;
+        const configSecret = "service-oversized-secret";
+        Fs.writeFileSync(
+            Path.join(openClawRoot, "openclaw.json"),
+            `${configSecret}${"a".repeat(sourceSizeBytes - configSecret.length)}`
+        );
+        Fs.chmodSync(Path.join(openClawRoot, "openclaw.json"), 0o600);
+        Fs.writeFileSync(
+            Path.join(openClawRoot, "hooks", "transforms", "agentmail.ts"),
+            Buffer.alloc(sourceSizeBytes, 0x62)
+        );
+
+        const roots = await service.listRoots(actor);
+        const openClaw = roots.roots.find(({ id }) => id === "openclaw-config")!;
+        const rootListing = await service.list(actor, {
+            directoryId: openClaw.resourceId,
+            limit: 10,
+        });
+        const config = rootListing.entries.find(({ name }) => name === "openclaw.json")!;
+        expect(config).toMatchObject({
+            requiresSecretReveal: true,
+            sizeBytes: sourceSizeBytes,
+            truncated: true,
+            writable: false,
+        });
+        expect(
+            await captureFailure(() =>
+                service.prepareContent(actor, {
+                    disposition: "preview",
+                    resourceId: config.resourceId,
+                })
+            )
+        ).toMatchObject({ reason: "too-large" });
+
+        const revealed = await service.prepareReveal(actor, {
+            resourceId: config.resourceId,
+        });
+        expect(revealed).toMatchObject({
+            previewKind: "text",
+            sizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+            sourceSizeBytes,
+            truncated: true,
+        });
+        const rawPrefix = await service.readContent(actor, revealed.ticketId, undefined);
+        expect(rawPrefix.bytes).toHaveLength(workspaceFileLimits.maximumTextPreviewBytes);
+        expect(new TextDecoder().decode(rawPrefix.bytes)).toStartWith(configSecret);
+        expect(
+            await captureFailure(() =>
+                service.prepareWrite(actor, {
+                    expectedRevision: config.revision,
+                    mimeType: "application/json",
+                    revealTicketId: revealed.ticketId,
+                    resourceId: config.resourceId,
+                    sizeBytes: 2,
+                })
+            )
+        ).toMatchObject({ reason: "access-denied" });
+
+        const hooks = rootListing.entries.find(({ name }) => name === "hooks")!;
+        const hooksListing = await service.list(actor, {
+            directoryId: hooks.resourceId,
+            limit: 10,
+        });
+        const transforms = hooksListing.entries.find(
+            ({ name }) => name === "transforms"
+        )!;
+        const transformsListing = await service.list(actor, {
+            directoryId: transforms.resourceId,
+            limit: 10,
+        });
+        const agentmail = transformsListing.entries.find(
+            ({ name }) => name === "agentmail.ts"
+        )!;
+        expect(agentmail).toMatchObject({
+            previewKind: "download-only",
+            sizeBytes: sourceSizeBytes,
+            truncated: true,
+            writable: false,
+        });
+        const ticket = await service.prepareContent(actor, {
+            disposition: "preview",
+            resourceId: agentmail.resourceId,
+        });
+        expect(ticket).toMatchObject({
+            previewKind: "text",
+            sizeBytes: workspaceFileLimits.maximumTextPreviewBytes,
+            sourceSizeBytes,
+            truncated: true,
+        });
+        const prefix = await service.readContent(actor, ticket.ticketId, undefined);
+        expect(prefix.bytes).toHaveLength(workspaceFileLimits.maximumTextPreviewBytes);
+        expect(prefix.bytes.every((byte) => byte === 0x62)).toBe(true);
+    });
+
     test("repairs invalid config JSON only through the actor-bound reveal revision", async () => {
         const { commands, openClawRoot, service } = fixture({
             includeOpenClaw: true,

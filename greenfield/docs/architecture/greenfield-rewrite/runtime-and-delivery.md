@@ -414,14 +414,26 @@ limits. The replacement units invoke the exact project-local Bun runtime and rel
 bind logs beneath project state, and enforce the measured web/worker resource ceilings. Both units
 preserve the explicit `MIRA_DASHBOARD_OPENCLAW_ROOT`; web treats it as a fixed descriptor-read
 manifest, while worker uses a separate exact replacement manifest for `openclaw.json` and
-`hooks/transforms/agentmail.ts`. The manifest admits at most 2 MiB per reviewed
-full-redaction/replacement source, while web text preview remains capped at 1 MiB. Legacy
-configuration GET parity remains planned until bounded oversized-source list/prefix behavior is
-implemented separately. The worker's atomic replacement needs
+`hooks/transforms/agentmail.ts`. Exact replacement admits at most 2 MiB per reviewed source, while
+web preview remains capped at 1 MiB. Larger reviewed sources are listable but read-only and expose
+only a revision-stable 1 MiB prefix with explicit truncation metadata; raw configuration still
+requires a short-lived actor-bound recent-MFA ticket. The worker's atomic replacement needs
 target-directory write access for its private stage file, `renameat2` exchange, and exact rolling
 `.bak` sibling, so the unit does not advertise an exact-file `ReadWritePaths` sandbox that would fail
 at runtime. Descriptor validation, per-file bounds, CAS, and the fixed worker manifest are the write
 boundary.
+
+The web process also derives the fixed `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` descriptor boundary
+from that same reviewed root. It exposes no configurable media directory, recursive listing, or
+browser-supplied path route. Local-history transcript carriers become opaque session/message-bound
+references and reuse `GET`/`HEAD /api/chat/media/:attachmentId`; each access reauthorizes the exact
+projected transcript association before descriptor traversal begins. The local adapter enforces
+same-owner/same-device no-follow traversal, one-link regular files, stable identity, a 16 MiB body
+ceiling, and a 1 MiB text-preview ceiling. Its retained root descriptor and process-local reference
+state are disposed with the web runtime, while bounded history refresh reconstructs only an already
+authorized association after restart. The stable identifier prefix is a non-secret routing hint;
+serialized refresh admission, per-class cooldown, an eight-request queue bound, and a global
+page-weighted token budget—not identifier secrecy—bound restart work.
 
 Persistent state remains inside the existing Dashboard project layout at
 `<project-root>/production/state`, but outside every immutable release directory. Production

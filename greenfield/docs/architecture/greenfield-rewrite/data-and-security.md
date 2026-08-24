@@ -510,6 +510,26 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 - File and media operations resolve against named allowlisted roots, reject traversal, verify
   containment after symlink resolution, avoid following unsafe links, and enforce size/MIME
   limits before parsing or preview.
+- Local-history media does not restore the legacy browser-supplied path boundary. Hash-pinned
+  projection recognizes the bounded canonical and reviewed legacy transcript carriers, strips each
+  recognized `MEDIA:` directive before browser delivery, and registers only an opaque non-path
+  reference bound to the exact session, message, source slot, and normalized server-only locator.
+  The stable 48-bit prefix is an unkeyed, non-secret routing hint rather than cryptographic opacity.
+  The identifier is not a capability: every `GET` or `HEAD /api/chat/media/:attachmentId` request
+  requires an authenticated principal with `chat:read`, reprojects the exact message through
+  `chat.message.get`, verifies the same attachment URL, and opens no file until that authorization
+  succeeds. A bounded history refresh can reconstruct the same association after process-local
+  reference loss, but cannot widen it to another session or message. Refresh work is globally
+  token-budgeted, class-cooled, serialized, capped at eight active-plus-waiting requests, and retains
+  its work slot after a caller deadline until the provider operation actually settles.
+- The local reader is descriptor-rooted beneath the exact
+  `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` directory. It rejects traversal, network locations,
+  symlinks, hardlinks, special files, cross-device nodes, unsafe ownership or modes, and file
+  identity changes; it never returns a locator in browser data, response headers, errors, audit, or
+  logs. Local bodies are capped at 16 MiB, text preview at 1 MiB, and SVG, HTML, unknown, or other
+  active content remains download-only. The existing Chat media concurrency and in-flight-byte
+  admission applies to both managed and local sources, with private/no-store responses and no
+  listing or path-query operation.
 - The Files and Terminal surfaces may share the explicit `MIRA_DASHBOARD_WORKSPACE_ROOT`. Files
   keeps descriptor-anchored containment for each operation. Terminal uses the same named root only
   to select the interactive shell's initial working directory: it is not a filesystem sandbox, and
@@ -517,12 +537,12 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 - Files' separate web-and-worker `MIRA_DASHBOARD_OPENCLAW_ROOT` is not a general recursive browser.
   Its descriptor adapter synthesizes only the directory prefixes needed to reach the exact reviewed
   `openclaw.json` and `hooks/transforms/agentmail.ts` manifest entries, verifies
-  same-owner/same-device regular files, rejects links, world-writable nodes, traversal, and
-  oversized content, and redacts valid configuration JSON before default ticket creation or range
-  selection. The two reviewed full-redaction/replacement entries have a 2 MiB bound, while text
-  preview remains capped at 1 MiB and larger admitted text is download-only. Legacy configuration
-  GET parity therefore remains planned: legacy lists unbounded source sizes and returns a bounded
-  prefix for oversized files, which this stricter manifest does not claim to reproduce. Invalid JSON
+  same-owner/same-device regular files, rejects links, world-writable nodes, and traversal, and
+  redacts valid configuration JSON before default ticket creation or range selection. The two
+  reviewed full-redaction/replacement entries have a 2 MiB write bound, while text preview remains
+  capped at 1 MiB. An oversized reviewed source remains listable but read-only and exposes only a
+  revision-stable prefix of at most 1 MiB with explicit truncation and source-size metadata; an
+  oversized masked configuration prefix stays fail-closed until recent-MFA reveal. Invalid JSON
   publishes only safe listing metadata so the reviewed entry stays selectable; its masked preview
   fails closed without returning bytes. Raw configuration is available only through an explicit
   recent-MFA mutation and a short-lived actor-bound no-store ticket, which lets the operator inspect
@@ -542,6 +562,21 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
   stage file beside the target, so the worker unit deliberately retains its prior writable OpenClaw
   namespace rather than claiming an exact-file systemd exception that Linux VFS cannot enforce; the
   descriptor manifest is the write boundary.
+- The exact OpenClaw configuration export is not a database or host backup. A session-only,
+  recent-MFA procedure reads only descriptor-anchored `openclaw.json` and returns an opaque
+  actor/authenticator-bound ticket, never the secret bytes. Its same-origin raw route is
+  private/no-store, permits metadata-only `HEAD`, consumes `GET` once, and applies both stored-byte
+  capacity and live transfer concurrency/byte admission. The descriptor adapter zeroes its read
+  result after producing a caller-owned source copy; ticket issue synchronously copies that source,
+  the service zeroes its copy on every outcome, and consumption transfers the stored copy to the raw
+  handler for immediate zeroing after it creates a stream-owned copy. Ticket expiry, transfer
+  completion or cancellation, and shutdown zero every retained byte buffer. Raw configuration is excluded from tRPC,
+  browser caches, audit, logs, provider errors, and job state.
+- Gateway restart is a distinct durable worker action. Fail-closed audit and recent-MFA/session
+  authority must both succeed before enqueue; an idempotency-key readback reconciles ambiguous
+  repository settlement. The action holds the exclusive resource class, has one attempt, is not
+  retry-safe or cancellable, and invokes a fixed argv without a shell or captured output. Unknown
+  enqueue or process completion never causes an automatic second restart.
 - Dashboard's worker-owned rotation engine uses an exact reviewed per-file manifest for Dashboard,
   OpenClaw, and managed application/container logs rather than treating a directory as a recursive
   wildcard. Ubuntu system logrotate remains responsible only for the exact `rsyslog`, `apport`,

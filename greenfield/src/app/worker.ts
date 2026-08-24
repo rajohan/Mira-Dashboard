@@ -38,6 +38,7 @@ import {
     createProcessTerminationController,
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
+import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import {
     createDescriptorWorkspaceFileStructuralWriter,
     type WorkerWorkspaceFileRootConfiguration,
@@ -64,6 +65,7 @@ import {
     createManagedLogRotationEngine,
     type ManagedLogRotationEngine,
 } from "../worker/logs/managedLogRotation.ts";
+import { createFixedOpenClawGatewayLifecycle } from "../worker/openClaw/gatewayLifecycle.ts";
 import { type DashboardWorkerRuntime } from "../worker/runtime.ts";
 import { taskNotificationWorkerLoop } from "../worker/taskNotifications.ts";
 import {
@@ -91,11 +93,15 @@ export interface DashboardWorkerProcessDependencies {
     readonly createLogMaintenanceExecutor: (
         layout: DashboardProjectLayout
     ) => LogMaintenanceExecutor;
+    readonly createOpenClawGatewayLifecycle: (
+        openClawRoot: string
+    ) => OpenClawGatewayLifecycleExecutionPort;
     readonly createRuntime: (
         layout: DashboardProjectLayout,
         release: RuntimeRelease,
         logger: StructuredLogger,
         persistentGatewayTransport: PersistentGatewayTaskNotificationTransport,
+        openClawGateway: OpenClawGatewayLifecycleExecutionPort,
         workspaceRoot: WorkerWorkspaceFileRootConfiguration,
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor,
@@ -172,11 +178,14 @@ const defaultDependencies = Object.freeze({
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
     createLogMaintenanceExecutor: createWorkerLogMaintenanceExecutor,
+    createOpenClawGatewayLifecycle: (openClawRoot) =>
+        createFixedOpenClawGatewayLifecycle({ openClawRoot }),
     createRuntime: (
         layout,
         release,
         _logger,
         gatewayTransport,
+        openClawGateway,
         workspaceRoot,
         openClawRoot,
         logMaintenance,
@@ -195,6 +204,7 @@ const defaultDependencies = Object.freeze({
             },
             logMaintenance,
             moltbook,
+            openClawGateway,
             persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
@@ -300,6 +310,9 @@ export async function runDashboardWorkerProcess(
             url: configuration.gatewayUrl,
         });
         const logMaintenance = dependencies.createLogMaintenanceExecutor(layout);
+        const openClawGateway = dependencies.createOpenClawGatewayLifecycle(
+            openClawRoot.path
+        );
         const moltbook = createMoltbookDashboardCollector({
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
@@ -309,6 +322,7 @@ export async function runDashboardWorkerProcess(
             release,
             logger,
             gatewayTransport,
+            openClawGateway,
             workspaceRoot,
             openClawRoot,
             logMaintenance,

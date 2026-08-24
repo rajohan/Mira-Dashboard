@@ -265,7 +265,7 @@ describe("reviewed pre-cutover parity inventory", () => {
         ]);
     });
 
-    test("records the bounded OpenClaw settings slice without claiming export or restart", async () => {
+    test("records the bounded OpenClaw settings and operations slice", async () => {
         const reviewed = await loadReviewedParityInventory();
         const settingsRoute = reviewed.frontend.routes.find(
             ({ path }) => path === "/settings"
@@ -297,10 +297,10 @@ describe("reviewed pre-cutover parity inventory", () => {
             ["GET /api/skills", "implemented", ["openClawSettings.listSkills"]],
             [
                 "POST /api/backup",
-                "planned",
+                "implemented",
                 ["openClawSettings.createConfigurationBackup"],
             ],
-            ["POST /api/restart", "planned", ["openClawSettings.restartGateway"]],
+            ["POST /api/restart", "implemented", ["openClawSettings.restartGateway"]],
             [
                 "POST /api/skills/:name",
                 "implemented",
@@ -368,13 +368,13 @@ describe("reviewed pre-cutover parity inventory", () => {
         ).toEqual([
             [
                 "GET /api/config-files",
-                "planned",
+                "implemented",
                 "procedure",
                 ["files.list", "files.listRoots"],
             ],
             [
                 "GET /api/config-files/*",
-                "planned",
+                "implemented",
                 "raw-http",
                 "GET /api/files/content/:ticketId",
             ],
@@ -404,10 +404,10 @@ describe("reviewed pre-cutover parity inventory", () => {
             ],
         ]);
         expect(mediaEndpoint?.target).toEqual({
-            delivery: "planned",
+            delivery: "implemented",
             kind: "raw-http",
             method: "GET",
-            path: "/api/media/*",
+            path: "/api/chat/media/:attachmentId",
             phase: "phase-5",
         });
     });

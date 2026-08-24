@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
+import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import type {
     TaskNotificationChatSender,
     TaskNotificationQueue,
@@ -21,7 +22,12 @@ import {
     type LogMaintenanceExecutionPort,
     type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";
-import { jobActionDefinitions } from "./actionRegistry.ts";
+import {
+    jobActionDefinitions,
+    openClawGatewayRestartJobActionDefinition,
+    workspaceFileReplaceJobActionDefinition,
+    workspaceFileWriteJobActionDefinition,
+} from "./actionRegistry.ts";
 import {
     createJobWorkerCoordinator,
     type JobWorkerCoordinator,
@@ -38,6 +44,7 @@ export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
+    readonly openClawGateway: OpenClawGatewayLifecycleExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort & {
         readonly dispose: () => Promise<void> | void;
     };
@@ -397,15 +404,27 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
+            const actionDefinitions = Object.freeze([
+                ...jobActionDefinitions,
+                openClawGatewayRestartJobActionDefinition,
+                ...(options.workspaceFiles === undefined
+                    ? []
+                    : [
+                          workspaceFileWriteJobActionDefinition,
+                          workspaceFileReplaceJobActionDefinition,
+                      ]),
+            ]);
             const findAction = createJobWorkerActionResolver({
+                actionDefinitions,
                 logMaintenance: options.logMaintenance,
                 moltbook: options.moltbook,
+                openClawGateway: options.openClawGateway,
                 ...(options.workspaceFiles === undefined
                     ? {}
                     : { workspaceFiles: options.workspaceFiles }),
             });
             coordinator = dependencies.createCoordinator({
-                actionDefinitions: jobActionDefinitions,
+                actionDefinitions,
                 commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
                 databaseReleaseId: options.releaseId,
                 findAction,

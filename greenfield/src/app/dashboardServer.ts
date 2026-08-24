@@ -66,11 +66,19 @@ import {
     type OpenClawCronHeartbeatReader,
 } from "../server/domains/openClawCron/service.ts";
 import { createSqliteOpenClawCronIntentStore } from "../server/domains/openClawCron/sqliteIntentStore.ts";
+import type { OpenClawConfigurationBackupTicketStore } from "../server/domains/openClawSettings/configurationBackup.ts";
+import {
+    createOpenClawConfigurationBackupRawHttpHandler,
+    type OpenClawConfigurationBackupRawHttpHandler,
+} from "../server/domains/openClawSettings/configurationBackupRawHttp.ts";
+import { createWorkspaceFileOpenClawConfigurationBackupSource } from "../server/domains/openClawSettings/configurationBackupSource.ts";
+import { createOpenClawConfigurationBackupTicketStore } from "../server/domains/openClawSettings/configurationBackupTickets.ts";
 import { createSqliteOpenClawSettingsOperationAuditWriter } from "../server/domains/openClawSettings/operationAudit.ts";
 import {
     OpenClawSettingsProviderError,
     type OpenClawSettingsProvider,
 } from "../server/domains/openClawSettings/provider.ts";
+import { createOpenClawGatewayRestartQueue } from "../server/domains/openClawSettings/restartQueue.ts";
 import { createOpenClawSettingsService } from "../server/domains/openClawSettings/service.ts";
 import { createOpenClawTasksRealtimePublisher } from "../server/domains/openClawTasks/realtime.ts";
 import {
@@ -106,9 +114,13 @@ import { createSecurityAuditLifecycleRepository } from "../server/domains/securi
 import { createSystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";
 import { createTaskService } from "../server/domains/tasks/service.ts";
+import { createDescriptorOpenClawLocalHistoryMediaFetcher } from "../server/platform/chat/descriptorOpenClawLocalHistoryMediaFetcher.ts";
 import { createElevenLabsSpeechProvider } from "../server/platform/chat/elevenLabsSpeechProvider.ts";
 import { createInMemoryChatAttachmentStore } from "../server/platform/chat/inMemoryChatAttachmentStore.ts";
-import { createInMemoryChatMediaReferences } from "../server/platform/chat/inMemoryChatMediaReferences.ts";
+import {
+    chatMediaAttachmentMatchesSession,
+    createInMemoryChatMediaReferences,
+} from "../server/platform/chat/inMemoryChatMediaReferences.ts";
 import {
     type WebConfiguration,
     parseWebConfiguration,
@@ -162,6 +174,7 @@ import {
 } from "../server/platform/runtime/processSignals.ts";
 import {
     chatMessageAuthorizesMediaReference,
+    createChatMediaSourceFetcher,
     createChatRawHttpHandler,
     createOpenClawOutgoingMediaFetcher,
     type ChatRawHttpHandler,
@@ -206,6 +219,7 @@ export interface DashboardServerOptions extends Omit<
     | "monitoringCatalogService"
     | "monitoringService"
     | "openClawCronService"
+    | "openClawConfigurationBackupRawHttpHandler"
     | "openClawSettingsService"
     | "openClawTasksService"
     | "securityAuditLifecycle"
@@ -255,6 +269,54 @@ interface DashboardChatMediaReferenceRefreshDependencies {
     readonly gatewaySessionsService: Pick<GatewaySessionsService, "list">;
 }
 
+interface DashboardChatMediaReferenceRouting {
+    readonly refreshClass?: string;
+    readonly sessions: readonly { readonly key: string }[];
+}
+
+export const dashboardChatMediaReferenceRefreshPageMaximum = 32;
+
+async function resolveDashboardChatMediaReferenceRouting(
+    gatewaySessionsService: Pick<GatewaySessionsService, "list">,
+    attachmentId: string | undefined,
+    signal: AbortSignal
+): Promise<DashboardChatMediaReferenceRouting> {
+    const snapshot = await gatewaySessionsService.list({ filter: "ALL" }, signal);
+    if (attachmentId === undefined) return { sessions: snapshot.sessions };
+    const sessions = snapshot.sessions.filter((session) =>
+        chatMediaAttachmentMatchesSession(attachmentId, session.key)
+    );
+    return sessions.length === 1
+        ? {
+              refreshClass: attachmentId.replaceAll("-", "").slice(0, 12),
+              sessions,
+          }
+        : { sessions: [] };
+}
+
+/**
+ * Classifies one cache-miss id against the current bounded session inventory.
+ * A unique routing-hint match gets its own class; legacy, random, ambiguous,
+ * and unavailable inventories share the raw handler's single fallback class.
+ * @param dependencies Bounded Gateway session read port.
+ * @returns Abort-aware asynchronous refresh classifier.
+ */
+export function createDashboardChatMediaReferenceRefreshClass(
+    dependencies: Pick<
+        DashboardChatMediaReferenceRefreshDependencies,
+        "gatewaySessionsService"
+    >
+): (attachmentId: string, signal: AbortSignal) => Promise<string | undefined> {
+    return async (attachmentId, signal) => {
+        const routing = await resolveDashboardChatMediaReferenceRouting(
+            dependencies.gatewaySessionsService,
+            attachmentId,
+            signal
+        );
+        return routing.refreshClass;
+    };
+}
+
 /**
  * Rehydrates the bounded visible media-reference window after process loss.
  * @param dependencies Bounded session and chat-history read ports.
@@ -262,23 +324,60 @@ interface DashboardChatMediaReferenceRefreshDependencies {
  */
 export function createDashboardChatMediaReferenceRefresh(
     dependencies: DashboardChatMediaReferenceRefreshDependencies
-): (signal: AbortSignal) => Promise<void> {
-    return async (signal) => {
+): (
+    signal: AbortSignal,
+    attachmentId?: string,
+    mode?: "legacy" | "targeted"
+) => Promise<void> {
+    let legacyFallbackSessionOffset = 0;
+    return async (signal, attachmentId, mode) => {
         const snapshot = await dependencies.gatewaySessionsService.list(
             { filter: "ALL" },
             signal
         );
-        for (const session of snapshot.sessions) {
+        const candidateSessions =
+            attachmentId === undefined
+                ? snapshot.sessions
+                : snapshot.sessions.filter((session) =>
+                      chatMediaAttachmentMatchesSession(attachmentId, session.key)
+                  );
+        const routedSessions =
+            attachmentId === undefined ||
+            (mode !== "legacy" && candidateSessions.length === 1)
+                ? candidateSessions
+                : [];
+        const fallbackSessionCount = snapshot.sessions.length;
+        let sessions = routedSessions;
+        if (
+            attachmentId !== undefined &&
+            routedSessions.length === 0 &&
+            mode !== "targeted"
+        ) {
+            sessions = Array.from(
+                { length: fallbackSessionCount },
+                (_, offset) =>
+                    snapshot.sessions[
+                        (legacyFallbackSessionOffset + offset) % fallbackSessionCount
+                    ]!
+            );
+        }
+        let pagesRead = 0;
+        let sessionsRead = 0;
+        for (const session of sessions) {
+            if (pagesRead >= dashboardChatMediaReferenceRefreshPageMaximum) break;
+            sessionsRead += 1;
             try {
                 let cursor = "0";
                 const visitedCursors = new Set<string>();
                 for (
                     let pageIndex = 0;
-                    pageIndex < chatHistoryRetainedPageMaximum;
+                    pageIndex < chatHistoryRetainedPageMaximum &&
+                    pagesRead < dashboardChatMediaReferenceRefreshPageMaximum;
                     pageIndex += 1
                 ) {
                     if (visitedCursors.has(cursor)) break;
                     visitedCursors.add(cursor);
+                    pagesRead += 1;
                     const page = await dependencies.chatService.history(
                         {
                             cursor,
@@ -293,6 +392,15 @@ export function createDashboardChatMediaReferenceRefresh(
             } catch (error) {
                 if (signal.aborted) throw error;
             }
+        }
+        if (
+            attachmentId !== undefined &&
+            routedSessions.length === 0 &&
+            sessionsRead > 0 &&
+            fallbackSessionCount > 0
+        ) {
+            legacyFallbackSessionOffset =
+                (legacyFallbackSessionOffset + sessionsRead) % fallbackSessionCount;
         }
     };
 }
@@ -442,11 +550,20 @@ export async function createDashboardServer(
     let chatMediaReferences:
         | ReturnType<typeof createInMemoryChatMediaReferences>
         | undefined;
+    let openClawLocalHistoryMediaFetcher:
+        | ReturnType<typeof createDescriptorOpenClawLocalHistoryMediaFetcher>
+        | undefined;
     let chatService: ChatService | undefined;
     let chatMaintenance: DashboardChatRuntimeMaintenance | undefined;
     let chatTranscriptLifecycleSupervisor: ChatTranscriptLifecycleSupervisor | undefined;
     let openClawTasksService: OpenClawTasksService | undefined;
     let openClawCronHeartbeatReader: OpenClawCronHeartbeatReader | undefined;
+    let openClawConfigurationBackupRawHttpHandler:
+        | OpenClawConfigurationBackupRawHttpHandler
+        | undefined;
+    let openClawConfigurationBackupTickets:
+        | OpenClawConfigurationBackupTicketStore
+        | undefined;
     let workspaceFilesService: WorkspaceFilesService | undefined;
     let openClawTasksSupervisor:
         | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
@@ -455,38 +572,25 @@ export async function createDashboardServer(
         if (compositionDisposed) return;
         compositionDisposed = true;
         let failure: unknown;
-        try {
-            await chatMaintenance?.stop();
-        } catch (error) {
-            failure = error;
-        }
-        try {
-            await chatTranscriptLifecycleSupervisor?.stop();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await openClawTasksSupervisor?.stop();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await workspaceFilesService?.dispose();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await openClawCronHeartbeatReader?.disposeHeartbeat();
-        } catch (error) {
-            failure ??= error;
-        }
-        try {
-            await chatService?.dispose();
-        } catch (error) {
-            failure ??= error;
-        }
-        chatAttachmentStore?.dispose();
-        chatMediaReferences?.dispose();
+        const disposeIndependently = async (
+            dispose: () => Promise<void> | void
+        ): Promise<void> => {
+            try {
+                await dispose();
+            } catch (error) {
+                failure ??= error;
+            }
+        };
+        await disposeIndependently(() => chatMaintenance?.stop());
+        await disposeIndependently(() => chatTranscriptLifecycleSupervisor?.stop());
+        await disposeIndependently(() => openClawTasksSupervisor?.stop());
+        await disposeIndependently(() => workspaceFilesService?.dispose());
+        await disposeIndependently(() => openClawCronHeartbeatReader?.disposeHeartbeat());
+        await disposeIndependently(() => chatService?.dispose());
+        await disposeIndependently(() => openClawConfigurationBackupTickets?.dispose());
+        await disposeIndependently(() => openClawLocalHistoryMediaFetcher?.dispose());
+        await disposeIndependently(() => chatAttachmentStore?.dispose());
+        await disposeIndependently(() => chatMediaReferences?.dispose());
         if (failure instanceof Error) throw failure;
         if (failure !== undefined) {
             throw new Error("Dashboard composition disposal failed", {
@@ -718,22 +822,26 @@ export async function createDashboardServer(
                       writeAdmission: databaseRuntime,
                   });
         let workspaceFileRawHttpHandler: WorkspaceFileRawHttpHandler | undefined;
+        let openClawConfigurationBackupSource:
+            | ReturnType<typeof createWorkspaceFileOpenClawConfigurationBackupSource>
+            | undefined;
         if (
             options.workspaceFileRoot !== undefined &&
             options.workspaceFileUploadSpoolRoot !== undefined
         ) {
+            const workspaceFileReader = createDescriptorWorkspaceFileReader({
+                roots: [
+                    options.workspaceFileRoot,
+                    ...(options.openClawFileRoot === undefined
+                        ? []
+                        : [options.openClawFileRoot]),
+                ],
+            });
             workspaceFilesService = createWorkspaceFilesService({
                 ...(domainNow === undefined
                     ? {}
                     : { nowMs: () => domainNow().getTime() }),
-                reader: createDescriptorWorkspaceFileReader({
-                    roots: [
-                        options.workspaceFileRoot,
-                        ...(options.openClawFileRoot === undefined
-                            ? []
-                            : [options.openClawFileRoot]),
-                    ],
-                }),
+                reader: workspaceFileReader,
                 scheduler: createWorkspaceFileJobScheduler({
                     ...(domainNow === undefined
                         ? {}
@@ -755,6 +863,27 @@ export async function createDashboardServer(
                 browserOrigin,
                 service: workspaceFilesService,
             });
+            if (options.openClawFileRoot !== undefined) {
+                openClawConfigurationBackupSource =
+                    createWorkspaceFileOpenClawConfigurationBackupSource(
+                        workspaceFileReader
+                    );
+                openClawConfigurationBackupTickets =
+                    createOpenClawConfigurationBackupTicketStore(
+                        domainNow === undefined
+                            ? {}
+                            : { nowMs: () => domainNow().getTime() }
+                    );
+                openClawConfigurationBackupRawHttpHandler =
+                    createOpenClawConfigurationBackupRawHttpHandler({
+                        authenticateCredential: (credential) =>
+                            authenticator.authenticate(credential),
+                        authorizeAccess: (identity) =>
+                            authenticationLifecycle.authorizeRecentMfa(identity),
+                        browserOrigin,
+                        tickets: openClawConfigurationBackupTickets,
+                    });
+            }
         }
         const gatewayConnectionService = createGatewayConnectionService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
@@ -811,6 +940,13 @@ export async function createDashboardServer(
                     },
                     outcome: "server-error",
                 }),
+            ...(openClawConfigurationBackupSource === undefined ||
+            openClawConfigurationBackupTickets === undefined
+                ? {}
+                : {
+                      backupSource: openClawConfigurationBackupSource,
+                      backupTickets: openClawConfigurationBackupTickets,
+                  }),
             onMutationQueueWait: ({ queueDepth, waitMs }) =>
                 options.applicationRuntime.logger.info({
                     component: "openclaw-settings",
@@ -828,6 +964,13 @@ export async function createDashboardServer(
                     : createPersistentGatewayOpenClawSettingsProvider(
                           persistentGatewayTransport
                       ),
+            restartQueue: createOpenClawGatewayRestartQueue({
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                repository: jobRepository,
+                wakeEventPump,
+            }),
         });
         const chatRepository =
             persistentGatewayTransport === undefined
@@ -904,9 +1047,19 @@ export async function createDashboardServer(
                 throw new Error("Chat transcript lifecycle composition is unavailable");
             }
             chatAttachmentStore = createInMemoryChatAttachmentStore();
-            chatMediaReferences = createInMemoryChatMediaReferences(
-                domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }
-            );
+            chatMediaReferences = createInMemoryChatMediaReferences({
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                ...(options.openClawFileRoot === undefined
+                    ? {}
+                    : {
+                          localMediaRoot: path.join(
+                              options.openClawFileRoot.path,
+                              "media"
+                          ),
+                      }),
+            });
             chatService = createChatService({
                 attachmentConsumer: chatAttachmentStore,
                 attachmentPreparer: chatAttachmentStore,
@@ -980,7 +1133,24 @@ export async function createDashboardServer(
             });
             openClawTasksSupervisor.start();
 
-            if (options.gatewayToken !== undefined) {
+            if (options.openClawFileRoot !== undefined) {
+                openClawLocalHistoryMediaFetcher =
+                    createDescriptorOpenClawLocalHistoryMediaFetcher({
+                        openClawRoot: options.openClawFileRoot,
+                    });
+            }
+            if (
+                options.gatewayToken !== undefined ||
+                openClawLocalHistoryMediaFetcher !== undefined
+            ) {
+                const gatewayManagedMediaFetcher =
+                    options.gatewayToken === undefined
+                        ? undefined
+                        : createOpenClawOutgoingMediaFetcher({
+                              gatewayUrl: options.gatewayUrl,
+                              token: options.gatewayToken,
+                          });
+                const localHistoryMediaFetcher = openClawLocalHistoryMediaFetcher;
                 const mediaHandler = createChatRawHttpHandler({
                     attachmentStore: chatAttachmentStore,
                     authenticateCredential: (credential) =>
@@ -996,15 +1166,41 @@ export async function createDashboardServer(
                         return chatMessageAuthorizesMediaReference(result, reference);
                     },
                     browserOrigin,
-                    mediaFetcher: createOpenClawOutgoingMediaFetcher({
-                        gatewayUrl: options.gatewayUrl,
-                        token: options.gatewayToken,
+                    mediaFetcher: createChatMediaSourceFetcher({
+                        ...(gatewayManagedMediaFetcher === undefined
+                            ? {}
+                            : { gatewayManaged: gatewayManagedMediaFetcher }),
+                        ...(localHistoryMediaFetcher === undefined
+                            ? {}
+                            : {
+                                  localHistory: {
+                                      fetch: (request) =>
+                                          request.source.kind === "openclaw-local-history"
+                                              ? localHistoryMediaFetcher.fetch({
+                                                    method: request.method,
+                                                    ...(request.range === undefined
+                                                        ? {}
+                                                        : { range: request.range }),
+                                                    segments: request.source.segments,
+                                                    signal: request.signal,
+                                                })
+                                              : Promise.resolve(
+                                                    new Response(null, {
+                                                        status: 404,
+                                                    })
+                                                ),
+                                  },
+                              }),
                     }),
                     mediaReferences: chatMediaReferences,
                     refreshMediaReferences: createDashboardChatMediaReferenceRefresh({
                         chatService: activeChatService,
                         gatewaySessionsService,
                     }),
+                    mediaReferenceRefreshClass:
+                        createDashboardChatMediaReferenceRefreshClass({
+                            gatewaySessionsService,
+                        }),
                 });
                 const speechHandler = createChatSpeechRawHttpHandler({
                     authenticateCredential: (credential) =>
@@ -1150,6 +1346,9 @@ export async function createDashboardServer(
             monitoringCatalogService,
             monitoringService,
             openClawCronService,
+            ...(openClawConfigurationBackupRawHttpHandler === undefined
+                ? {}
+                : { openClawConfigurationBackupRawHttpHandler }),
             openClawSettingsService,
             ...(openClawTasksService === undefined ? {} : { openClawTasksService }),
             port: options.port,

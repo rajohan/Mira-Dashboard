@@ -397,12 +397,24 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
+    "openClawSettings.createConfigurationBackup": [
+        "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
+        "TOO_MANY_REQUESTS",
+        "UNAUTHORIZED",
+    ],
     "openClawSettings.getConfiguration": [
         "FORBIDDEN",
         "SERVICE_UNAVAILABLE",
         "UNAUTHORIZED",
     ],
     "openClawSettings.listSkills": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "openClawSettings.restartGateway": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "SERVICE_UNAVAILABLE",
+        "UNAUTHORIZED",
+    ],
     "openClawSettings.setSkillEnabled": [
         "CONFLICT",
         "FORBIDDEN",

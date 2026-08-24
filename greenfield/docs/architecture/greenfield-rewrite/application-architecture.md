@@ -450,8 +450,19 @@ Browser reads are session-only; writes require recent MFA again after fail-close
 and at the actual post-handshake pre-dispatch boundary. The web process serializes these controls
 through a sixteen-operation active-plus-waiting ceiling; aborted waiters are removed from the FIFO
 immediately instead of retaining unbounded work behind a slow Gateway operation.
-Configuration export and Gateway restart deliberately remain separate later boundaries: the former
-needs an actor-bound no-store raw ticket, while the latter needs a durable worker-owned action.
+Configuration export and Gateway restart remain separate privileged boundaries. Export reads only
+the exact descriptor-anchored `openclaw.json` source after recent-MFA reauthorization, copies it
+into a short-lived capacity-bounded actor/authenticator ticket, and serves it once through a
+same-origin private/no-store raw `GET`; `HEAD` inspects metadata without consuming the ticket.
+The descriptor adapter erases its read result after returning a caller-owned copy; ticket issue
+copies synchronously while the service erases its source copy, and consumption transfers the stored
+copy to the raw handler, which erases it immediately after creating a separate stream-owned copy.
+Stored and in-flight secret bytes are erased on expiry, transfer settlement, cancellation, or
+shutdown and never enter tRPC, Query cache, audit, logs, or durable records. Restart instead enqueues the fixed
+`openclaw.gateway.restart` action after fail-closed audit and dispatch-time authorization. The job
+is exclusive, caller-idempotent, single-attempt, non-retry-safe, and non-cancellable; only the
+worker owns its fixed no-shell lifecycle command. Ambiguous enqueue or terminal settlement is
+reconciled by durable run identity and never blindly dispatches a second restart.
 
 ### Current-protocol Control UI projections
 
@@ -720,6 +731,27 @@ is only a transport envelope. Companion compute is session-scoped but requester-
 per-session/process concurrency, per-actor rolling rate admission, reset supersession, and safe busy
 errors. OpenClaw background tasks remain a separate bounded provider projection invalidated through
 `openclaw.tasks`; neither companion exchanges nor task payloads become durable chat events.
+
+The same `GET`/`HEAD /api/chat/media/:attachmentId` proxy also securely narrows legacy local-history
+media without restoring a path-query API or adding a browser route. The hash-pinned OpenClaw adapter
+recognizes bounded canonical `__openclaw.media` entries plus the reviewed legacy path, URL, type, and
+`MEDIA:` carriers. Recognized directives are removed from projected text even when their candidates
+are rejected, so a local locator never becomes browser content. Valid local candidates register a
+stable opaque reference bound to the exact session, message, source slot, and normalized server-only
+locator; the reference exposes neither a host path nor directory-listing authority. Its stable
+48-bit session prefix is only a non-secret refresh-routing hint, not cryptographic opacity or a
+capability.
+
+Media delivery resolves that reference only after principal authentication, `chat:read`, and
+an exact `chat.message.get` reauthorization prove that the same projected message still contains the
+same attachment URL. Local bytes are opened only afterward through a descriptor-rooted reader fixed
+to `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media`. Managed outgoing media keeps its existing Gateway source;
+both sources share the raw handler's range, preview, timeout, response-header, and work-admission
+policies. Local files are limited to 16 MiB, bounded text preview is limited to 1 MiB, and the server
+determines final MIME and disposition rather than trusting transcript hints.
+Restart rehydration admits at most eight active-plus-waiting requests, serializes actual work,
+applies per-routing-class cooldowns, and enforces a global page-weighted token budget. A timed-out
+request cannot release the work slot until the underlying refresh actually settles.
 
 Chat voice is another raw protocol edge, not a second REST domain. An optional
 `ELEVENLABS_API_KEY` remains redacted in the web process and is never sent to the browser, SQLite,

@@ -20,6 +20,9 @@ export const chatAttachmentLimits = Object.freeze({
     ticketTtlMs: 5 * 60 * 1000,
 });
 
+/** Maximum body exposed by a browser-renderable local or managed text preview. */
+export const chatTextPreviewMaximumBytes = 1024 * 1024;
+
 /** Prefixes intentionally exposed by OpenClaw's reviewed attachment picker. */
 export const chatAttachmentAllowedMimePrefixes = Object.freeze(["text/"] as const);
 
@@ -439,7 +442,7 @@ export const chatRawHttpContracts = [
         },
         statusCodes: [200, 206, 400, 401, 403, 404, 405, 415, 416, 429, 502],
         summary:
-            "Proxies bounded transcript-authorized media; preview additionally enforces safe MIME policy and a one-MiB text cap.",
+            "Serves bounded transcript-authorized managed or local-history media through an opaque reference; preview additionally enforces safe MIME policy and a one-MiB text cap.",
     },
     {
         access: chatMediaRawAccess,
@@ -451,6 +454,6 @@ export const chatRawHttpContracts = [
         response: { kind: "none" },
         statusCodes: [200, 206, 400, 401, 403, 404, 405, 415, 416, 429, 502],
         summary:
-            "Checks bounded transcript-authorized media metadata without returning a body.",
+            "Checks bounded transcript-authorized managed or local-history media metadata without returning a body.",
     },
 ] as const satisfies readonly RawHttpContract[];

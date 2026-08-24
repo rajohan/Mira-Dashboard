@@ -1,6 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 
-import type { WorkspaceFileEntry } from "../../contracts/files.ts";
+import { workspaceFileLimits, type WorkspaceFileEntry } from "../../contracts/files.ts";
 import { WorkspaceFileEditorPane } from "./WorkspaceFileEditorPane.tsx";
 
 const { render, screen } = await import("@testing-library/react");
@@ -63,7 +63,16 @@ function renderEditor(
                         mimeType: selectedEntry.mimeType!,
                         previewKind: "text",
                         revision,
-                        sizeBytes: selectedEntry.sizeBytes!,
+                        sizeBytes:
+                            selectedEntry.truncated === true
+                                ? workspaceFileLimits.maximumTextPreviewBytes
+                                : selectedEntry.sizeBytes!,
+                        ...(selectedEntry.truncated === true
+                            ? {
+                                  sourceSizeBytes: selectedEntry.sizeBytes!,
+                                  truncated: true as const,
+                              }
+                            : {}),
                         ticketId: "33333333-3333-4333-8333-333333333333",
                         url: "/api/files/content/33333333-3333-4333-8333-333333333333",
                     },
@@ -138,6 +147,28 @@ describe("WorkspaceFileEditorPane viewers", () => {
         expect(screen.getByText("Secrets revealed")).toBeTruthy();
         expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Replace file" })).toBeTruthy();
+    });
+
+    test("renders an oversized-source prefix as explicitly read-only", () => {
+        const selectedEntry: WorkspaceFileEntry = {
+            ...entry(
+                "agentmail.ts",
+                "text/plain",
+                workspaceFileLimits.maximumManifestFileBytes + 1
+            ),
+            previewKind: "download-only",
+            truncated: true,
+            writable: true,
+        };
+        renderEditor(selectedEntry, "export const prefix = true;\n");
+
+        expect(screen.getByText("Prefix only")).toBeTruthy();
+        expect(
+            screen.getByText(/Only its bounded first 1 MiB prefix is available/u)
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Download prefix" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Replace file" })).toBeNull();
     });
 
     test("keeps a long file name on one line with only refresh below the actions", () => {

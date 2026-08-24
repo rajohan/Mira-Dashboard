@@ -12,6 +12,10 @@ import {
     type ChatSessionSettingsOutput,
 } from "../../../contracts/chat.ts";
 import {
+    chatAttachmentLimits,
+    chatTextPreviewMaximumBytes,
+} from "../../../contracts/chatMedia.ts";
+import {
     chatMessageHydrationMaximumBytes,
     chatMessageSchema,
     chatMessagePartSchema,
@@ -84,14 +88,43 @@ export type PersistentGatewayChatProviderTransport = Pick<
     | "subscribeChat"
 >;
 
+export type PersistentGatewayChatMediaSource =
+    | Readonly<{
+          kind: "gateway-managed";
+          upstreamAttachmentId: string;
+      }>
+    | Readonly<{
+          kind: "openclaw-local-history";
+          segments: readonly string[];
+      }>;
+
+export interface PersistentGatewayRegisteredLocalMedia {
+    readonly attachmentId: string;
+    readonly fileName: string;
+    /** Internal path-free key used only to deduplicate projected carriers. */
+    readonly locatorFingerprint: string;
+}
+
+export interface PersistentGatewayRegisteredManagedMedia {
+    readonly attachmentId: string;
+}
+
 export interface PersistentGatewayChatMediaReferenceRegistrar {
-    readonly register: (
+    readonly registerLocal: (
+        reference: Readonly<{
+            candidate: string;
+            messageId: string;
+            sessionKey: string;
+            sourceSlot: string;
+        }>
+    ) => PersistentGatewayRegisteredLocalMedia | undefined;
+    readonly registerManaged: (
         reference: Readonly<{
             attachmentId: string;
             messageId: string;
             sessionKey: string;
         }>
-    ) => void;
+    ) => PersistentGatewayRegisteredManagedMedia;
 }
 
 const upstreamInFlightRunSchema = v.strictObject({
@@ -132,6 +165,33 @@ const inlineRasterAttachmentMimeTypes: ReadonlySet<string> = new Set([
     "image/png",
     "image/webp",
 ]);
+const localHistoryMediaMaximum = 32;
+const localHistoryMediaTypeByExtension: ReadonlyMap<string, string> = new Map([
+    ["aac", "audio/aac"],
+    ["avif", "image/avif"],
+    ["bmp", "image/bmp"],
+    ["csv", "text/csv"],
+    ["flac", "audio/flac"],
+    ["gif", "image/gif"],
+    ["heic", "image/heic"],
+    ["heif", "image/heif"],
+    ["jpeg", "image/jpeg"],
+    ["jpg", "image/jpeg"],
+    ["json", "application/json"],
+    ["md", "text/markdown"],
+    ["mp3", "audio/mpeg"],
+    ["oga", "audio/ogg"],
+    ["ogg", "audio/ogg"],
+    ["opus", "audio/opus"],
+    ["pdf", "application/pdf"],
+    ["png", "image/png"],
+    ["svg", "image/svg+xml"],
+    ["txt", "text/plain"],
+    ["wav", "audio/wav"],
+    ["webp", "image/webp"],
+]);
+const localHistoryMediaTypePattern =
+    /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/u;
 const upstreamMessageGetSchema = v.variant("ok", [
     v.object({ message: v.unknown(), ok: v.literal(true) }),
     v.object({
@@ -405,6 +465,204 @@ async function requestReadMutation(
     }
 }
 
+interface LocalHistoryMediaFact {
+    readonly candidates: readonly string[];
+    readonly contentType?: unknown;
+    readonly fileName?: unknown;
+    readonly sizeBytes?: unknown;
+    readonly sourceSlot: string;
+}
+
+interface ParsedMediaDirectiveText {
+    readonly candidates: readonly string[];
+    readonly overflow: boolean;
+    readonly text: string | undefined;
+}
+
+function mediaCandidate(value: unknown): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const candidate = value.trim();
+    return candidate.length > 0 && candidate.length <= 4096 ? candidate : undefined;
+}
+
+function mediaArray(value: unknown): readonly unknown[] {
+    return Array.isArray(value) ? value : [];
+}
+
+function canonicalMediaSource(
+    message: Readonly<Record<string, unknown>>,
+    metadata: Readonly<Record<string, unknown>>
+): readonly unknown[] {
+    if (Array.isArray(metadata.media)) return metadata.media;
+    return metadata.media === undefined || metadata.media === null
+        ? mediaArray(message.media)
+        : [];
+}
+
+function structuredLocalHistoryMedia(
+    message: Readonly<Record<string, unknown>>,
+    metadata: Readonly<Record<string, unknown>>
+): readonly LocalHistoryMediaFact[] | undefined {
+    const canonical = canonicalMediaSource(message, metadata);
+    const paths = mediaArray(message.MediaPaths);
+    const urls = mediaArray(message.MediaUrls);
+    const types = mediaArray(message.MediaTypes);
+    if (
+        [canonical, paths, urls, types].some(
+            (values) => values.length > localHistoryMediaMaximum
+        )
+    ) {
+        return undefined;
+    }
+    const singularPresent =
+        message.MediaPath !== undefined ||
+        message.MediaUrl !== undefined ||
+        message.MediaType !== undefined;
+    const slots = Math.max(
+        canonical.length,
+        paths.length,
+        urls.length,
+        types.length,
+        singularPresent ? 1 : 0
+    );
+    if (slots > localHistoryMediaMaximum) return undefined;
+    // A partially populated type array is ambiguous upstream. Treat the whole
+    // legacy array as an absent hint rather than assigning types to wrong slots.
+    const legacyTypes = types.length > 0 && types.length < slots ? [] : types;
+    const facts: LocalHistoryMediaFact[] = [];
+    for (let index = 0; index < slots; index += 1) {
+        const canonicalFact = asRecord(canonical[index]);
+        const canonicalPath = mediaCandidate(canonicalFact?.path);
+        const canonicalUrl = mediaCandidate(canonicalFact?.url);
+        const legacyPath =
+            mediaCandidate(paths[index]) ??
+            (index === 0 ? mediaCandidate(message.MediaPath) : undefined);
+        const legacyUrl =
+            mediaCandidate(urls[index]) ??
+            (paths.length > 0 || index === 0
+                ? mediaCandidate(message.MediaUrl)
+                : undefined);
+        const candidates = [canonicalPath, canonicalUrl, legacyPath, legacyUrl].filter(
+            (candidate, candidateIndex, values): candidate is string =>
+                candidate !== undefined && values.indexOf(candidate) === candidateIndex
+        );
+        if (candidates.length === 0) continue;
+        facts.push({
+            candidates: Object.freeze(candidates),
+            contentType:
+                canonicalFact?.contentType ??
+                legacyTypes[index] ??
+                (index === 0 ? message.MediaType : undefined),
+            fileName: canonicalFact?.fileName,
+            sizeBytes: canonicalFact?.sizeBytes,
+            sourceSlot: `structured:${index}`,
+        });
+    }
+    return facts;
+}
+
+function mediaDirectiveTokens(value: string): readonly string[] {
+    const tokens: string[] = [];
+    let index = 0;
+    while (index < value.length && tokens.length <= localHistoryMediaMaximum) {
+        while (/\s/u.test(value[index] ?? "")) index += 1;
+        if (index >= value.length) break;
+        const quote =
+            value[index] === '"' || value[index] === "'" ? value[index] : undefined;
+        if (quote !== undefined) index += 1;
+        let token = "";
+        let closed = quote === undefined;
+        while (index < value.length) {
+            const character = value[index]!;
+            if (quote !== undefined && character === quote) {
+                index += 1;
+                closed = true;
+                break;
+            }
+            if (quote === undefined && /\s/u.test(character)) break;
+            token += character;
+            index += 1;
+            if (token.length > 4096) break;
+        }
+        if (quote === undefined) {
+            while (index < value.length && !/\s/u.test(value[index]!)) index += 1;
+        }
+        if (closed && token.length > 0 && token.length <= 4096) tokens.push(token);
+        while (/\s/u.test(value[index] ?? "")) index += 1;
+    }
+    return tokens;
+}
+
+function parseMediaDirectiveText(text: string): ParsedMediaDirectiveText {
+    const candidates: string[] = [];
+    const visibleLines: string[] = [];
+    let fence: Readonly<{ character: "`" | "~"; length: number }> | undefined;
+    let overflow = false;
+    let removedDirective = false;
+    for (const line of text.split("\n")) {
+        const trimmed = line.trimStart();
+        const marker = trimmed.match(/^(`{3,}|~{3,})/u)?.[1];
+        if (marker !== undefined) {
+            const character = marker[0] as "`" | "~";
+            if (fence === undefined) {
+                fence = { character, length: marker.length };
+            } else if (fence.character === character && marker.length >= fence.length) {
+                fence = undefined;
+            }
+            visibleLines.push(line);
+            continue;
+        }
+        const directive = fence === undefined ? trimmed.match(/^MEDIA:(.*)$/iu) : null;
+        if (directive === null) {
+            visibleLines.push(line);
+            continue;
+        }
+        removedDirective = true;
+        for (const candidate of mediaDirectiveTokens(directive[1] ?? "")) {
+            if (candidates.length >= localHistoryMediaMaximum) {
+                overflow = true;
+                break;
+            }
+            candidates.push(candidate);
+        }
+    }
+    const visible = removedDirective
+        ? visibleLines
+              .join("\n")
+              .replaceAll(/\n{3,}/gu, "\n\n")
+              .trim()
+        : text;
+    return Object.freeze({
+        candidates: Object.freeze(candidates),
+        overflow,
+        text: visible.length === 0 ? undefined : visible,
+    });
+}
+
+function localHistoryMediaType(value: unknown, fileName: string): string {
+    const declared = boundedControlString(value, 127)
+        ?.split(";", 1)[0]
+        ?.trim()
+        .toLowerCase();
+    if (declared !== undefined && localHistoryMediaTypePattern.test(declared)) {
+        return declared;
+    }
+    const extension = fileName.match(/\.([^.]+)$/u)?.[1]?.toLowerCase();
+    return (
+        (extension === undefined
+            ? undefined
+            : localHistoryMediaTypeByExtension.get(extension)) ??
+        "application/octet-stream"
+    );
+}
+
+function localHistoryMediaSize(value: unknown): number | undefined {
+    const size = safeInteger(value);
+    return size !== undefined && size <= chatAttachmentLimits.maximumFileBytes
+        ? size
+        : undefined;
+}
+
 function managedMediaUrl(
     value: unknown,
     expectedSessionKey: string,
@@ -421,13 +679,18 @@ function managedMediaUrl(
     } catch {
         return undefined;
     }
-    const attachmentId = match[2]!.toLowerCase();
-    registrar.register({
-        attachmentId,
-        messageId,
-        sessionKey: expectedSessionKey,
-    });
-    return `/api/chat/media/${attachmentId}`;
+    const upstreamAttachmentId = match[2]!.toLowerCase();
+    let registered: PersistentGatewayRegisteredManagedMedia;
+    try {
+        registered = registrar.registerManaged({
+            attachmentId: upstreamAttachmentId,
+            messageId,
+            sessionKey: expectedSessionKey,
+        });
+    } catch {
+        throw new ChatProviderUnavailableError();
+    }
+    return `/api/chat/media/${registered.attachmentId}`;
 }
 
 function attachmentRenderPolicy(
@@ -448,6 +711,36 @@ function attachmentRenderPolicy(
     return "download-only";
 }
 
+function projectedAttachment(
+    attachmentId: string,
+    fileName: string,
+    mediaType: string,
+    partId: string,
+    sizeBytes?: number,
+    requireKnownBoundedTextSize = false
+): ProjectedChatMessagePart {
+    const url = `/api/chat/media/${attachmentId}`;
+    const candidateRenderPolicy = attachmentRenderPolicy(mediaType);
+    const renderPolicy =
+        requireKnownBoundedTextSize &&
+        candidateRenderPolicy === "bounded-text" &&
+        (sizeBytes === undefined || sizeBytes > chatTextPreviewMaximumBytes)
+            ? "download-only"
+            : candidateRenderPolicy;
+    return {
+        downloadUrl: `${url}?disposition=download`,
+        fileName,
+        id: partId,
+        kind: "attachment",
+        mediaType,
+        renderPolicy,
+        ...(sizeBytes === undefined ? {} : { sizeBytes }),
+        url: `${url}?disposition=${
+            renderPolicy === "download-only" ? "download" : "preview"
+        }`,
+    };
+}
+
 function projectAttachmentPart(
     block: Readonly<Record<string, unknown>>,
     partId: string,
@@ -464,19 +757,108 @@ function projectAttachmentPart(
         return undefined;
     }
     const sizeBytes = safeInteger(attachment.sizeBytes);
-    const renderPolicy = attachmentRenderPolicy(mediaType);
-    return {
-        downloadUrl: `${url}?disposition=download`,
+    return projectedAttachment(
+        url.slice("/api/chat/media/".length),
         fileName,
-        id: partId,
-        kind: "attachment",
         mediaType,
-        renderPolicy,
-        ...(sizeBytes === undefined ? {} : { sizeBytes }),
-        url: `${url}?disposition=${
-            renderPolicy === "download-only" ? "download" : "preview"
-        }`,
-    };
+        partId,
+        sizeBytes,
+        true
+    );
+}
+
+function projectLocalHistoryMedia(
+    facts: readonly LocalHistoryMediaFact[],
+    sessionKey: string,
+    messageId: string,
+    registrar: PersistentGatewayChatMediaReferenceRegistrar,
+    existingParts: readonly unknown[]
+): readonly ProjectedChatMessagePart[] | undefined {
+    if (facts.length > localHistoryMediaMaximum) return undefined;
+    const seen = new Set<string>();
+    for (const part of existingParts) {
+        const record = asRecord(part);
+        const url = typeof record?.url === "string" ? record.url : "";
+        const match = url.match(/^\/api\/chat\/media\/([^?]+)\?/u);
+        if (record?.kind === "attachment" && match !== null) {
+            seen.add(`managed:${match[1]}`);
+        }
+    }
+    const attachments: ProjectedChatMessagePart[] = [];
+    for (const fact of facts) {
+        let resolved:
+            | Readonly<{ attachmentId: string; kind: "managed" }>
+            | Readonly<{
+                  kind: "local";
+                  registered: PersistentGatewayRegisteredLocalMedia;
+              }>
+            | undefined;
+        for (const candidate of fact.candidates) {
+            const managedUrl = managedMediaUrl(
+                candidate,
+                sessionKey,
+                messageId,
+                registrar
+            );
+            const managedAttachmentId = managedUrl?.slice("/api/chat/media/".length);
+            if (managedAttachmentId !== undefined) {
+                resolved = { attachmentId: managedAttachmentId, kind: "managed" };
+                break;
+            }
+            let registered: PersistentGatewayRegisteredLocalMedia | undefined;
+            try {
+                registered = registrar.registerLocal({
+                    candidate,
+                    messageId,
+                    sessionKey,
+                    sourceSlot: fact.sourceSlot,
+                });
+            } catch {
+                throw new ChatProviderUnavailableError();
+            }
+            if (registered !== undefined) {
+                resolved = { kind: "local", registered };
+                break;
+            }
+        }
+        if (resolved === undefined) continue;
+        if (resolved.kind === "managed") {
+            const managedAttachmentId = resolved.attachmentId;
+            const key = `managed:${managedAttachmentId}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const fileName = boundedControlString(fact.fileName, 255) ?? "attachment";
+            attachments.push(
+                projectedAttachment(
+                    managedAttachmentId,
+                    fileName,
+                    localHistoryMediaType(fact.contentType, fileName),
+                    `history-media:${attachments.length + 1}`,
+                    localHistoryMediaSize(fact.sizeBytes),
+                    true
+                )
+            );
+            continue;
+        }
+        const registered = resolved.registered;
+        const key = `local:${registered.locatorFingerprint}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // Local bytes are classified again by the descriptor fetcher. Only a
+        // filename-derived type is reproducible without trusting provider metadata.
+        const mediaType = localHistoryMediaType(undefined, registered.fileName);
+        attachments.push(
+            projectedAttachment(
+                registered.attachmentId,
+                registered.fileName,
+                mediaType,
+                `history-media:${attachments.length + 1}`,
+                localHistoryMediaSize(fact.sizeBytes),
+                true
+            )
+        );
+    }
+    return attachments;
 }
 
 function projectMessageParts(
@@ -487,12 +869,45 @@ function projectMessageParts(
 ): readonly unknown[] | undefined {
     const rawContent = message.content;
     const rawRole = boundedControlString(message.role, 32)?.toLowerCase();
+    const acceptsDirectiveMedia = rawRole === "assistant";
+    const structuredMedia = structuredLocalHistoryMedia(
+        message,
+        historyMetadata(message)
+    );
+    if (structuredMedia === undefined) return undefined;
+    const directiveMedia: LocalHistoryMediaFact[] = [];
+    let directiveOverflow = false;
+    const visibleText = (
+        value: unknown,
+        maximum: number
+    ): Readonly<{ text?: string }> | undefined => {
+        const raw = boundedString(value, maximum);
+        if (raw === undefined) return undefined;
+        if (!acceptsDirectiveMedia) {
+            return raw.length === 0 ? {} : { text: raw };
+        }
+        const parsed = parseMediaDirectiveText(raw);
+        directiveOverflow ||= parsed.overflow;
+        for (const candidate of parsed.candidates) {
+            if (directiveMedia.length >= localHistoryMediaMaximum) {
+                directiveOverflow = true;
+                break;
+            }
+            directiveMedia.push({
+                candidates: Object.freeze([candidate]),
+                sourceSlot: `directive:${directiveMedia.length}`,
+            });
+        }
+        return parsed.text === undefined ? {} : { text: parsed.text };
+    };
     const streamFallback = asRecord(message.openclawStreamFallback);
     let commentaryText: string | undefined;
     if (rawRole === "assistant" && streamFallback?.source === "segment") {
         const itemId = boundedControlString(streamFallback.itemId, 256);
         const replacementText = boundedString(streamFallback.replacementText, 256 * 1024);
-        if (itemId !== undefined) commentaryText = replacementText;
+        if (itemId !== undefined && replacementText !== undefined) {
+            commentaryText = parseMediaDirectiveText(replacementText).text;
+        }
     }
     let blocks: readonly unknown[];
     if (rawRole?.startsWith("tool") === true) {
@@ -554,9 +969,11 @@ function projectMessageParts(
         const partId = String(index + 1);
         const block = asRecord(rawBlock);
         if (block === undefined) {
-            const text = boundedString(rawBlock, 256 * 1024);
-            if (text === undefined) return undefined;
-            parts.push({ id: partId, kind: "text", text });
+            const projected = visibleText(rawBlock, 256 * 1024);
+            if (projected === undefined) return undefined;
+            if (projected.text !== undefined) {
+                parts.push({ id: partId, kind: "text", text: projected.text });
+            }
             continue;
         }
         const attachment = projectAttachmentPart(
@@ -572,13 +989,15 @@ function projectMessageParts(
         }
         const type = typeof block.type === "string" ? block.type.toLowerCase() : "";
         if (type === "text" || type === "output_text") {
-            const text = boundedString(block.text, 256 * 1024);
-            if (text === undefined) return undefined;
-            parts.push({
-                id: partId,
-                kind: commentaryText === text ? "thinking" : "text",
-                text,
-            });
+            const projected = visibleText(block.text, 256 * 1024);
+            if (projected === undefined) return undefined;
+            if (projected.text !== undefined) {
+                parts.push({
+                    id: partId,
+                    kind: commentaryText === projected.text ? "thinking" : "text",
+                    text: projected.text,
+                });
+            }
             continue;
         }
         if (
@@ -588,9 +1007,11 @@ function projectMessageParts(
             type === "analysis" ||
             type === "commentary"
         ) {
-            const text = boundedString(block.thinking ?? block.text, 256 * 1024);
-            if (text === undefined) return undefined;
-            parts.push({ id: partId, kind: "thinking", text });
+            const projected = visibleText(block.thinking ?? block.text, 256 * 1024);
+            if (projected === undefined) return undefined;
+            if (projected.text !== undefined) {
+                parts.push({ id: partId, kind: "thinking", text: projected.text });
+            }
             continue;
         }
         if (
@@ -665,14 +1086,19 @@ function projectMessageParts(
                 providerName = resolvedProviderName;
                 providerCallId = resolvedProviderCallId;
             }
-            const output = safeJsonText(
+            const outputValue =
                 block.result ??
-                    block.output ??
-                    providerVisibleToolResult(block.content) ??
-                    block.text ??
-                    block.error,
-                32 * 1024
-            );
+                block.output ??
+                providerVisibleToolResult(block.content) ??
+                block.text ??
+                block.error;
+            let output: string | undefined;
+            if (typeof outputValue === "string") {
+                const boundedToolOutput = boundedString(outputValue, 32 * 1024);
+                output = boundedToolOutput === "" ? undefined : boundedToolOutput;
+            } else {
+                output = safeJsonText(outputValue, 32 * 1024);
+            }
             parts.push({
                 callId: providerCallId ?? partId,
                 ...(providerCallId === undefined ? { callIdSource: "synthetic" } : {}),
@@ -700,11 +1126,28 @@ function projectMessageParts(
         });
     }
     if (parts.length === 0) {
-        const fallbackText = boundedString(message.text, 256 * 1024);
-        if (fallbackText !== undefined) {
-            parts.push({ id: "1", kind: "text", text: fallbackText });
+        const fallback = visibleText(message.text, 256 * 1024);
+        if (fallback?.text !== undefined) {
+            parts.push({ id: "1", kind: "text", text: fallback.text });
         }
     }
+    if (
+        directiveOverflow ||
+        structuredMedia.length + directiveMedia.length > localHistoryMediaMaximum
+    ) {
+        return undefined;
+    }
+    const mediaParts = projectLocalHistoryMedia(
+        [...structuredMedia, ...directiveMedia],
+        sessionKey,
+        messageId,
+        registrar,
+        parts
+    );
+    if (mediaParts === undefined || parts.length + mediaParts.length > 128) {
+        return undefined;
+    }
+    parts.push(...mediaParts);
     return parts;
 }
 
@@ -748,7 +1191,11 @@ function projectHistoryMessage(
         role = "tool";
     }
     if (role === undefined) throw new ChatProviderUnavailableError();
-    const preview = boundedString(message.text, 4096);
+    const rawPreview = boundedString(message.text, 4096);
+    let preview = rawPreview;
+    if (rawPreview !== undefined && rawRole === "assistant") {
+        preview = parseMediaDirectiveText(rawPreview).text;
+    }
     const parts = projectMessageParts(message, sessionKey, id, registrar);
     const hydrationRequired = metadata.truncated === true || parts === undefined;
     const projected = {

@@ -144,6 +144,28 @@ function ticketMatchesPreviewKind(ticket: WorkspaceFileContentTicket): boolean {
     }
 }
 
+function ticketMatchesEntry(
+    ticket: WorkspaceFileContentTicket,
+    entry: WorkspaceFileEntry
+): boolean {
+    if (ticket.revision !== entry.revision) return false;
+    if (ticket.truncated === true) {
+        // Directory rows retain the full descriptor size. The ticket separates that
+        // source size from the bounded prefix bytes delivered by the raw endpoint.
+        const sourceSizeBytes = ticket.sourceSizeBytes;
+        const prefixSizeBytes = ticket.sizeBytes;
+        return (
+            entry.truncated === true &&
+            entry.sizeBytes !== undefined &&
+            sourceSizeBytes !== undefined &&
+            sourceSizeBytes === entry.sizeBytes &&
+            sourceSizeBytes > prefixSizeBytes &&
+            prefixSizeBytes <= workspaceFileLimits.maximumTextPreviewBytes
+        );
+    }
+    return entry.truncated !== true && ticket.sourceSizeBytes === undefined;
+}
+
 /**
  * Issues a short-lived preview ticket and materializes only bounded UTF-8 text.
  * @param client Files-only validated browser client.
@@ -175,7 +197,7 @@ async function materializeWorkspaceFilePreview(
 ): Promise<WorkspaceFilePreparedPreview> {
     if (
         ticket.expiresAtMs <= Date.now() ||
-        ticket.revision !== entry.revision ||
+        !ticketMatchesEntry(ticket, entry) ||
         !ticketMatchesPreviewKind(ticket)
     ) {
         throw new WorkspaceFileTransferError("protocol");
@@ -240,7 +262,7 @@ export async function revealWorkspaceFileSecrets(
 
 function activateDownload(ticket: WorkspaceFileContentTicket): void {
     const anchor = document.createElement("a");
-    anchor.download = ticket.fileName;
+    anchor.download = ticket.truncated ? `${ticket.fileName}.prefix` : ticket.fileName;
     anchor.href = ticket.url;
     anchor.hidden = true;
     document.body.append(anchor);
@@ -259,7 +281,7 @@ export async function downloadWorkspaceFile(
         { disposition: "download", resourceId: entry.resourceId },
         { signal }
     );
-    if (ticket.expiresAtMs <= Date.now() || ticket.revision !== entry.revision) {
+    if (ticket.expiresAtMs <= Date.now() || !ticketMatchesEntry(ticket, entry)) {
         throw new WorkspaceFileTransferError("protocol");
     }
     activateDownload(ticket);

@@ -3,11 +3,12 @@ import Fs from "node:fs";
 import Os from "node:os";
 import Path from "node:path";
 
+import { workspaceFileLimits } from "../../../contracts/files.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import { createDescriptorWorkspaceFileReader } from "../../platform/files/descriptorWorkspaceFileReader.ts";
 import { createDescriptorWorkspaceFileUploadSpool } from "../../platform/files/descriptorWorkspaceFileUploadSpool.ts";
 import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
-import type { WorkspaceFileWriteScheduler } from "./ports.ts";
+import type { WorkspaceFileReader, WorkspaceFileWriteScheduler } from "./ports.ts";
 import {
     createWorkspaceFileRawHttpHandler,
     type WorkspaceFileRawHttpHandler,
@@ -69,6 +70,7 @@ function fixture(
     options: {
         readonly authorization?: "authorized" | "step-up-required";
         readonly principal?: AuthenticatedPrincipal;
+        readonly reader?: WorkspaceFileReader;
         readonly scheduler?: Partial<WorkspaceFileWriteScheduler>;
     } = {}
 ) {
@@ -104,16 +106,18 @@ function fixture(
     const service = createWorkspaceFilesService({
         generateId: () => uuid(nextId++),
         nowMs: () => now,
-        reader: createDescriptorWorkspaceFileReader({
-            roots: [
-                {
-                    id: "workspace",
-                    label: "Workspace",
-                    path: root,
-                    writable: true,
-                },
-            ],
-        }),
+        reader:
+            options.reader ??
+            createDescriptorWorkspaceFileReader({
+                roots: [
+                    {
+                        id: "workspace",
+                        label: "Workspace",
+                        path: root,
+                        writable: true,
+                    },
+                ],
+            }),
         scheduler,
         spool: createDescriptorWorkspaceFileUploadSpool(spoolRoot, {
             nowMs: () => now,
@@ -229,6 +233,111 @@ describe("workspace files raw HTTP boundary", () => {
         );
         expect(invalidRange.status).toBe(416);
         expect(invalidRange.headers.get("content-range")).toBe("bytes */6");
+    });
+
+    test("serves a bounded source prefix with explicit truncation metadata", async () => {
+        const prefix = new TextEncoder().encode("bounded prefix");
+        const sourceSizeBytes = workspaceFileLimits.maximumDownloadBytes + 1;
+        const revision = "a".repeat(64);
+        const directory = {
+            kind: "directory" as const,
+            locator: { rootId: "openclaw-config", segments: [] },
+            name: "OpenClaw Config",
+            revision: "0".repeat(64),
+            writable: false,
+        };
+        const file = {
+            kind: "file" as const,
+            locator: {
+                rootId: "openclaw-config",
+                segments: ["hooks", "transforms", "agentmail.ts"],
+            },
+            mimeType: "text/plain",
+            name: "agentmail.ts",
+            previewKind: "text" as const,
+            revision,
+            sizeBytes: prefix.byteLength,
+            sourceSizeBytes,
+            truncated: true as const,
+            writable: false,
+        };
+        const reader: WorkspaceFileReader = {
+            describe(locator) {
+                return Promise.resolve(locator.segments.length === 0 ? directory : file);
+            },
+            dispose() {},
+            list() {
+                return Promise.resolve({ directory, entries: [file] });
+            },
+            read(_locator, _expectedRevision, range) {
+                const start = range?.start ?? 0;
+                const endExclusive = range?.endExclusive ?? prefix.byteLength;
+                return Promise.resolve({
+                    bytes: prefix.slice(start, endExclusive),
+                    fileName: file.name,
+                    mimeType: file.mimeType,
+                    previewKind: file.previewKind,
+                    revision,
+                    sizeBytes: prefix.byteLength,
+                    sourceSizeBytes,
+                    truncated: true,
+                });
+            },
+            roots() {
+                return [
+                    {
+                        id: "openclaw-config",
+                        label: "OpenClaw Config",
+                        writable: false,
+                    },
+                ];
+            },
+        };
+        const { handler, service } = fixture({ reader });
+        const roots = await service.listRoots(fileActor);
+        const page = await service.list(fileActor, {
+            directoryId: roots.roots[0]!.resourceId,
+            limit: 10,
+        });
+        const ticket = await service.prepareContent(fileActor, {
+            disposition: "download",
+            resourceId: page.entries[0]!.resourceId,
+        });
+
+        const full = await response(handler, request(ticket.url));
+        expect(full.status).toBe(200);
+        expect(await full.text()).toBe("bounded prefix");
+        expect(full.headers.get("content-disposition")).toContain("agentmail.ts.prefix");
+        expect(full.headers.get("x-mira-file-source-size")).toBe(String(sourceSizeBytes));
+        expect(full.headers.get("x-mira-file-truncated")).toBe("true");
+
+        const head = await response(handler, request(ticket.url, { method: "HEAD" }));
+        expect(head.status).toBe(200);
+        expect(head.headers.get("content-length")).toBe(String(prefix.byteLength));
+        expect(head.headers.get("x-mira-file-source-size")).toBe(String(sourceSizeBytes));
+        expect(head.headers.get("x-mira-file-truncated")).toBe("true");
+        expect(await head.text()).toBe("");
+
+        const partial = await response(
+            handler,
+            request(ticket.url, { headers: { range: "bytes=8-13" } })
+        );
+        expect(partial.status).toBe(206);
+        expect(await partial.text()).toBe("prefix");
+        expect(partial.headers.get("content-range")).toBe(
+            `bytes 8-13/${prefix.byteLength}`
+        );
+
+        const beyondPrefix = await response(
+            handler,
+            request(ticket.url, {
+                headers: { range: `bytes=${prefix.byteLength}-` },
+            })
+        );
+        expect(beyondPrefix.status).toBe(416);
+        expect(beyondPrefix.headers.get("content-range")).toBe(
+            `bytes */${prefix.byteLength}`
+        );
     });
 
     test("fails closed for cross-origin, capability, actor, stale, and expired tickets", async () => {

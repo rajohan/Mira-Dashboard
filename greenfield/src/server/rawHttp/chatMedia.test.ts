@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 
 import { Redacted } from "effect";
 
@@ -9,8 +9,14 @@ import { createInMemoryChatMediaReferences } from "../platform/chat/inMemoryChat
 import { dashboardSessionCookieName } from "./authenticationCredentials.ts";
 import {
     chatMessageAuthorizesMediaReference,
+    chatMediaReferenceRefreshCooldownMs,
+    chatMediaReferenceRefreshMaximumPending,
+    chatMediaReferenceRefreshTokenCapacity,
+    chatMediaReferenceRefreshTokenRefillMs,
+    chatMediaReferenceRefreshTimeoutMs,
     chatOutgoingMediaMaximumBytes,
     chatOutgoingTextPreviewMaximumBytes,
+    createChatMediaSourceFetcher,
     createChatRawHttpHandler,
     createOpenClawOutgoingMediaFetcher,
     type ChatRawHttpHandler,
@@ -28,6 +34,7 @@ const attachmentId = "00000000-0000-4000-8000-000000000002";
 const crossSessionAttachmentId = "00000000-0000-4000-8000-000000000003";
 const unknownMessageAttachmentId = "00000000-0000-4000-8000-000000000004";
 const mismatchedAttachmentId = "00000000-0000-4000-8000-000000000005";
+const differentClassAttachmentId = "11111111-1111-4000-8000-000000000001";
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const singleChatMediaWorkLimits: ChatRawHttpWorkLimits = {
     maximumConcurrentDownloads: 1,
@@ -110,6 +117,13 @@ async function handlerStatus(
 ): Promise<number | undefined> {
     const response = await handler(request, new URL(request.url));
     return response?.status;
+}
+
+function routedAttachmentId(routingClass: string, ordinal: number): string {
+    if (!/^[0-9a-f]{12}$/u.test(routingClass)) {
+        throw new TypeError("Test routing class is invalid");
+    }
+    return `${routingClass.slice(0, 8)}-${routingClass.slice(8)}-4000-8000-${ordinal.toString(16).padStart(12, "0")}`;
 }
 
 function requestInputUrl(input: string | URL | Request): string {
@@ -527,6 +541,64 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("reauthorizes a managed compatibility alias against its routed transcript id", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const registered = references.registerManaged({
+            attachmentId,
+            messageId: "message-managed-alias",
+            sessionKey: "agent:main:main",
+        });
+        const authorizationIds: string[] = [];
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: (input) => {
+                authorizationIds.push(input.attachmentId);
+                return chatMessageAuthorizesMediaReference(
+                    {
+                        message: {
+                            content: {
+                                kind: "complete",
+                                parts: [
+                                    {
+                                        fileName: "managed.png",
+                                        id: "attachment-part-managed",
+                                        kind: "attachment",
+                                        mediaType: "image/png",
+                                        renderPolicy: "inline-image",
+                                        url: `/api/chat/media/${registered.attachmentId}?disposition=preview`,
+                                    },
+                                ],
+                            },
+                            id: "message-managed-alias",
+                            role: "assistant",
+                            source: "gateway-history",
+                        },
+                        status: "available",
+                    },
+                    input
+                );
+            },
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () =>
+                    Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    ),
+            },
+            mediaReferences: references,
+        });
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=preview`
+        );
+
+        expect(await handlerStatus(handler, request)).toBe(200);
+        expect(authorizationIds).toEqual([registered.attachmentId]);
+        store.dispose();
+        references.dispose();
+    });
+
     test("reauthorizes an expired media association before rejecting it", async () => {
         const now = { value: 1000 };
         const store = createInMemoryChatAttachmentStore();
@@ -572,6 +644,44 @@ describe("chat raw HTTP media boundary", () => {
         references.dispose();
     });
 
+    test("reauthorizes a local-history reference before dispatching any file read", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        references.register({
+            attachmentId,
+            messageId: "message-local",
+            sessionKey: "agent:main:main",
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["history", "private.png"],
+            },
+        });
+        let fetchCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => false,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () => {
+                    fetchCount += 1;
+                    return Promise.resolve(
+                        new Response(png, { headers: { "content-type": "image/png" } })
+                    );
+                },
+            },
+            mediaReferences: references,
+        });
+        const request = authenticatedRequest(
+            `/api/chat/media/${attachmentId}?disposition=preview`
+        );
+
+        expect(await handlerStatus(handler, request)).toBe(404);
+        expect(fetchCount).toBe(0);
+        store.dispose();
+        references.dispose();
+    });
+
     test("refreshes an empty post-restart reference cache before returning 404", async () => {
         const store = createInMemoryChatAttachmentStore();
         const references = createInMemoryChatMediaReferences();
@@ -588,8 +698,9 @@ describe("chat raw HTTP media boundary", () => {
                     ),
             },
             mediaReferences: references,
-            refreshMediaReferences: () => {
+            refreshMediaReferences: (_signal, requestedAttachmentId) => {
                 refreshCount += 1;
+                expect(requestedAttachmentId).toBe(attachmentId);
                 references.register({
                     attachmentId,
                     messageId: "message-after-restart",
@@ -632,6 +743,11 @@ describe("chat raw HTTP media boundary", () => {
                     ),
             },
             mediaReferences: references,
+            workLimits: {
+                ...singleChatMediaWorkLimits,
+                maximumConcurrentDownloads: 2,
+                maximumDownloadBytes: 2 * chatOutgoingMediaMaximumBytes,
+            },
             refreshMediaReferences: async () => {
                 refreshCount += 1;
                 markRefreshStarted();
@@ -662,6 +778,447 @@ describe("chat raw HTTP media boundary", () => {
 
         releaseRefresh();
         expect(await Promise.all([first, second])).toEqual([200, 200]);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("does not reserve media capacity and scopes miss cooldowns per routing class", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        references.register({
+            attachmentId: unknownMessageAttachmentId,
+            messageId: "message-local",
+            sessionKey: "agent:main:main",
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["history", "private.png"],
+            },
+        });
+        let refreshCount = 0;
+        let localFetchCount = 0;
+        let releaseRefresh!: () => void;
+        const refreshReleased = new Promise<void>((resolve) => {
+            releaseRefresh = resolve;
+        });
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: (request) => {
+                    expect(request.source.kind).toBe("openclaw-local-history");
+                    localFetchCount += 1;
+                    return Promise.resolve(new Response(png));
+                },
+            },
+            mediaReferences: references,
+            refreshMediaReferences: async () => {
+                refreshCount += 1;
+                await refreshReleased;
+            },
+            workLimits: singleChatMediaWorkLimits,
+        });
+
+        const first = handlerStatus(
+            handler,
+            authenticatedRequest(`/api/chat/media/${attachmentId}?disposition=download`)
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${unknownMessageAttachmentId}?disposition=download`
+                )
+            )
+        ).toBe(200);
+        expect(localFetchCount).toBe(1);
+        const sharedMiss = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+            )
+        );
+        await Promise.resolve();
+        expect(refreshCount).toBe(1);
+        releaseRefresh();
+        expect(await Promise.all([first, sharedMiss])).toEqual([404, 404]);
+        expect(refreshCount).toBe(1);
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${attachmentId}?disposition=download`
+                )
+            )
+        ).toBe(404);
+        expect(refreshCount).toBe(1);
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                )
+            )
+        ).toBe(404);
+        expect(refreshCount).toBe(2);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("groups callback-classified legacy ids into one bounded cooldown", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let nowMs = 10_000;
+        const dateNow = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferenceRefreshClass() {},
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                return Promise.resolve();
+            },
+        });
+
+        try {
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${attachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(1);
+
+            for (
+                let elapsedMs = chatMediaReferenceRefreshTokenRefillMs;
+                elapsedMs < chatMediaReferenceRefreshCooldownMs;
+                elapsedMs += chatMediaReferenceRefreshTokenRefillMs
+            ) {
+                nowMs = 10_000 + elapsedMs;
+                expect(
+                    await handlerStatus(
+                        handler,
+                        authenticatedRequest(
+                            `/api/chat/media/${attachmentId}?disposition=download`
+                        )
+                    )
+                ).toBe(404);
+            }
+            expect(refreshCount).toBe(1);
+
+            nowMs = 10_000 + chatMediaReferenceRefreshCooldownMs;
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(2);
+        } finally {
+            dateNow.mockRestore();
+            store.dispose();
+            references.dispose();
+        }
+    });
+
+    test("aborts a cache-miss refresh at its absolute deadline", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const scheduler = new ManualChatRawHttpScheduler();
+        let refreshSignal: AbortSignal | undefined;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: {
+                fetch: () => Promise.resolve(new Response(png)),
+            },
+            mediaReferences: references,
+            refreshMediaReferences: (signal) => {
+                refreshSignal = signal;
+                return new Promise<void>((_resolve, reject) => {
+                    signal.addEventListener(
+                        "abort",
+                        () => reject(new DOMException("Aborted", "AbortError")),
+                        { once: true }
+                    );
+                });
+            },
+            scheduler,
+            workLimits: singleChatMediaWorkLimits,
+        });
+
+        const request = handlerStatus(
+            handler,
+            authenticatedRequest(`/api/chat/media/${attachmentId}?disposition=download`)
+        );
+        for (
+            let attempt = 0;
+            attempt < 20 && scheduler.pendingCount === 0;
+            attempt += 1
+        ) {
+            await Promise.resolve();
+        }
+        expect(scheduler.pendingCount).toBe(1);
+        scheduler.advance(chatMediaReferenceRefreshTimeoutMs);
+        expect(await request).toBe(404);
+        expect(refreshSignal?.aborted).toBeTrue();
+        expect(scheduler.pendingCount).toBe(0);
+        store.dispose();
+        references.dispose();
+    });
+
+    test("holds a timed-out refresh slot until ignored work actually settles", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const scheduler = new ManualChatRawHttpScheduler();
+        const firstWork = Promise.withResolvers<void>();
+        const secondWork = Promise.withResolvers<void>();
+        const refreshSignals: AbortSignal[] = [];
+        let nowMs = 1000;
+        const dateNow = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferences: references,
+            refreshMediaReferences: (signal) => {
+                refreshSignals.push(signal);
+                return refreshSignals.length === 1
+                    ? firstWork.promise
+                    : secondWork.promise;
+            },
+            scheduler,
+            workLimits: {
+                ...singleChatMediaWorkLimits,
+                maximumConcurrentDownloads: 2,
+                maximumDownloadBytes: 2 * chatOutgoingMediaMaximumBytes,
+            },
+        });
+        try {
+            const firstRequest = handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${attachmentId}?disposition=download`
+                )
+            );
+            for (
+                let attempt = 0;
+                attempt < 20 && scheduler.pendingCount === 0;
+                attempt += 1
+            ) {
+                await Promise.resolve();
+            }
+            scheduler.advance(chatMediaReferenceRefreshTimeoutMs);
+            expect(await firstRequest).toBe(404);
+            expect(refreshSignals).toHaveLength(1);
+            expect(refreshSignals[0]?.aborted).toBeTrue();
+
+            const secondRequest = handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${differentClassAttachmentId}?disposition=download`
+                )
+            );
+            for (let index = 0; index < 5; index += 1) await Promise.resolve();
+            expect(refreshSignals).toHaveLength(1);
+
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${crossSessionAttachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshSignals).toHaveLength(1);
+
+            firstWork.resolve();
+            for (
+                let attempt = 0;
+                attempt < 20 && refreshSignals.length < 2;
+                attempt += 1
+            ) {
+                await Promise.resolve();
+            }
+            expect(refreshSignals).toHaveLength(2);
+
+            secondWork.resolve();
+            expect(await secondRequest).toBe(404);
+            expect(refreshSignals).toHaveLength(2);
+
+            nowMs += chatMediaReferenceRefreshCooldownMs;
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${attachmentId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshSignals).toHaveLength(3);
+            expect(scheduler.pendingCount).toBe(0);
+        } finally {
+            dateNow.mockRestore();
+            firstWork.resolve();
+            secondWork.resolve();
+            store.dispose();
+            references.dispose();
+        }
+    });
+
+    test("globally rate-limits unique refresh classes and refills one token", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        let nowMs = 10_000;
+        const dateNow = jest.spyOn(Date, "now").mockImplementation(() => nowMs);
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                return Promise.resolve();
+            },
+        });
+        try {
+            for (
+                let index = 0;
+                index < chatMediaReferenceRefreshTokenCapacity;
+                index += 1
+            ) {
+                expect(
+                    await handlerStatus(
+                        handler,
+                        authenticatedRequest(
+                            `/api/chat/media/${routedAttachmentId(`${index + 1}`.repeat(12), index + 1)}?disposition=download`
+                        )
+                    )
+                ).toBe(404);
+            }
+            const limitedId = routedAttachmentId("777777777777", 7);
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${limitedId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(chatMediaReferenceRefreshTokenCapacity);
+
+            nowMs += chatMediaReferenceRefreshTokenRefillMs;
+            expect(
+                await handlerStatus(
+                    handler,
+                    authenticatedRequest(
+                        `/api/chat/media/${limitedId}?disposition=download`
+                    )
+                )
+            ).toBe(404);
+            expect(refreshCount).toBe(chatMediaReferenceRefreshTokenCapacity + 1);
+        } finally {
+            dateNow.mockRestore();
+            store.dispose();
+            references.dispose();
+        }
+    });
+
+    test("bounds queued refreshes and removes an aborted waiter immediately", async () => {
+        const store = createInMemoryChatAttachmentStore();
+        const references = createInMemoryChatMediaReferences();
+        const firstWork = Promise.withResolvers<void>();
+        let refreshCount = 0;
+        const handler = createChatRawHttpHandler({
+            attachmentStore: store,
+            authenticateCredential: authentication(principal()),
+            authorizeMedia: () => true,
+            browserOrigin: origin,
+            mediaFetcher: { fetch: () => Promise.resolve(new Response(png)) },
+            mediaReferences: references,
+            refreshMediaReferences: () => {
+                refreshCount += 1;
+                return refreshCount === 1 ? firstWork.promise : Promise.resolve();
+            },
+        });
+        const active = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${routedAttachmentId("111111111111", 1)}?disposition=download`
+            )
+        );
+        for (let attempt = 0; attempt < 20 && refreshCount === 0; attempt += 1) {
+            await Promise.resolve();
+        }
+        expect(refreshCount).toBe(1);
+
+        const queuedControllers = Array.from(
+            { length: chatMediaReferenceRefreshMaximumPending - 1 },
+            () => new AbortController()
+        );
+        const queued = queuedControllers.map((controller, index) =>
+            handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${routedAttachmentId(`${index + 2}`.repeat(12), index + 2)}?disposition=download`,
+                    { signal: controller.signal }
+                )
+            )
+        );
+        await Promise.resolve();
+        expect(
+            await handlerStatus(
+                handler,
+                authenticatedRequest(
+                    `/api/chat/media/${routedAttachmentId("aaaaaaaaaaaa", 10)}?disposition=download`
+                )
+            )
+        ).toBe(404);
+        expect(refreshCount).toBe(1);
+
+        queuedControllers[0]!.abort();
+        expect(await queued[0]).toBe(404);
+        const replacement = handlerStatus(
+            handler,
+            authenticatedRequest(
+                `/api/chat/media/${routedAttachmentId("bbbbbbbbbbbb", 11)}?disposition=download`
+            )
+        );
+        await Promise.resolve();
+        expect(refreshCount).toBe(1);
+
+        firstWork.resolve();
+        expect(await Promise.all([active, ...queued.slice(1), replacement])).toEqual(
+            Array.from({ length: chatMediaReferenceRefreshMaximumPending }, () => 404)
+        );
+        expect(refreshCount).toBeLessThanOrEqual(chatMediaReferenceRefreshTokenCapacity);
         store.dispose();
         references.dispose();
     });
@@ -1099,6 +1656,10 @@ describe("chat raw HTTP media boundary", () => {
             range: "bytes=0-3",
             sessionKey: "agent:main:main",
             signal: new AbortController().signal,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId: attachmentId,
+            },
         });
 
         expect(response.status).toBe(302);
@@ -1114,5 +1675,69 @@ describe("chat raw HTTP media boundary", () => {
             redirect: "manual",
         });
         expect(JSON.stringify(observed[0]?.input)).not.toContain("gateway-secret");
+    });
+
+    test("dispatches only the exact authorized media source without path projection", async () => {
+        const managedRequests: OpenClawOutgoingMediaRequest[] = [];
+        const localRequests: OpenClawOutgoingMediaRequest[] = [];
+        const fetcher = createChatMediaSourceFetcher({
+            gatewayManaged: {
+                fetch: (request) => {
+                    managedRequests.push(request);
+                    return Promise.resolve(new Response("managed"));
+                },
+            },
+            localHistory: {
+                fetch: (request) => {
+                    localRequests.push(request);
+                    return Promise.resolve(new Response("local"));
+                },
+            },
+        });
+        const sharedRequest = {
+            attachmentId,
+            method: "GET" as const,
+            sessionKey: "agent:main:main",
+            signal: new AbortController().signal,
+        };
+
+        const managedResponse = await fetcher.fetch({
+            ...sharedRequest,
+            source: {
+                kind: "gateway-managed",
+                upstreamAttachmentId: attachmentId,
+            },
+        });
+        expect(await managedResponse.text()).toBe("managed");
+        const localResponse = await fetcher.fetch({
+            ...sharedRequest,
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["history", "diagram.png"],
+            },
+        });
+        expect(await localResponse.text()).toBe("local");
+        expect(managedRequests).toHaveLength(1);
+        expect(localRequests).toEqual([
+            {
+                ...sharedRequest,
+                source: {
+                    kind: "openclaw-local-history",
+                    segments: ["history", "diagram.png"],
+                },
+            },
+        ]);
+
+        const managedOnly = createChatMediaSourceFetcher({
+            gatewayManaged: { fetch: () => Promise.resolve(new Response("managed")) },
+        });
+        const unavailableResponse = await managedOnly.fetch({
+            ...sharedRequest,
+            source: {
+                kind: "openclaw-local-history",
+                segments: ["missing.png"],
+            },
+        });
+        expect(unavailableResponse.status).toBe(404);
     });
 });

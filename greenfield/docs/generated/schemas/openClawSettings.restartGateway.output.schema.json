@@ -1,0 +1,28 @@
+{
+  "$id": "urn:mira-dashboard:openClawSettings.restartGateway.output",
+  "type": "object",
+  "properties": {
+    "completedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "jobRunId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "status": {
+      "const": "restarted"
+    }
+  },
+  "required": [
+    "completedAtMs",
+    "jobRunId",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -5,6 +5,7 @@ import type {
     OpenClawConfigurationSnapshot,
     UpdateOpenClawConfigurationResult,
 } from "../../../contracts/openClawSettings.ts";
+import { OpenClawConfigurationBackupError } from "./configurationBackup.ts";
 import {
     openClawSettingsAuditTargetFingerprint,
     type OpenClawSettingsOperationAuditInput,
@@ -13,6 +14,7 @@ import {
     OpenClawSettingsProviderError,
     type OpenClawSettingsProvider,
 } from "./provider.ts";
+import { OpenClawGatewayRestartQueueError } from "./restartQueue.ts";
 import {
     createOpenClawSettingsService,
     openClawSettingsMutationMaximumPending,
@@ -153,6 +155,54 @@ describe("OpenClaw settings service", () => {
         const failure = await captureFailure(() => invalid.getConfiguration());
         expect(failure).toBeInstanceOf(OpenClawSettingsServiceError);
         expect(failure).toMatchObject({ reason: "provider-data-invalid" });
+    });
+
+    test("erases the temporary configuration-export source after ticket issue success or failure", async () => {
+        const expectedBytes = new TextEncoder().encode('{"token":"private"}\n');
+        for (const issueFailure of [false, true]) {
+            const sourceBytes = Uint8Array.from(expectedBytes);
+            let issuedBytes: Uint8Array | undefined;
+            const service = createOpenClawSettingsService({
+                auditWriter: { record: () => Promise.resolve() },
+                backupSource: { read: () => Promise.resolve(sourceBytes) },
+                backupTickets: {
+                    consume: () => {
+                        throw new Error("not used");
+                    },
+                    dispose() {},
+                    inspect: () => {
+                        throw new Error("not used");
+                    },
+                    issue: (_actor, bytes) => {
+                        issuedBytes = Uint8Array.from(bytes);
+                        if (issueFailure) {
+                            throw new OpenClawConfigurationBackupError("capacity");
+                        }
+                        return {
+                            downloadUrl:
+                                "/api/openclaw-settings/configuration-backups/00000000-0000-4000-8000-000000000001",
+                            expiresAtMs: 1,
+                            ticketId: "00000000-0000-4000-8000-000000000001",
+                        };
+                    },
+                },
+                provider: provider(),
+            });
+
+            const operation = service.createConfigurationBackup(
+                { confirmation: "export-openclaw-configuration" },
+                controlContext
+            );
+            if (issueFailure) {
+                const failure = await captureFailure(() => operation);
+                expect(failure).toMatchObject({ reason: "capacity" });
+            } else {
+                const result = await operation;
+                expect(result.ticketId).toBe("00000000-0000-4000-8000-000000000001");
+            }
+            expect(issuedBytes).toEqual(expectedBytes);
+            expect(sourceBytes).toEqual(new Uint8Array(sourceBytes.byteLength));
+        }
     });
 
     test("durably audits and reauthorizes at the provider dispatch boundary", async () => {
@@ -334,6 +384,85 @@ describe("OpenClaw settings service", () => {
 
         expect(failure).toBe(authorizationFailure);
         expect(settlements).toEqual(["attempted", "failed"]);
+    });
+
+    test("fails closed when the restart queue swallows dispatch authorization failure", async () => {
+        const settlements: string[] = [];
+        const authorizationFailure = new Error("session changed");
+        const service = createOpenClawSettingsService({
+            auditWriter: {
+                record: (input) => {
+                    settlements.push(input.settlement);
+                    return Promise.resolve();
+                },
+            },
+            provider: provider(),
+            restartQueue: {
+                restart: async ({ authorizeDispatch }) => {
+                    try {
+                        await authorizeDispatch();
+                    } catch {
+                        return {
+                            completedAtMs: 1000,
+                            jobRunId: "019fdf50-0000-7000-8000-000000000020",
+                            status: "restarted",
+                        };
+                    }
+                    throw new Error("Expected authorization to fail");
+                },
+            },
+        });
+
+        const failure = await captureFailure(() =>
+            service.restartGateway(
+                {
+                    confirmation: "restart-openclaw-gateway",
+                    idempotencyKey: "019fdf50-0000-4000-8000-000000000012",
+                },
+                {
+                    ...controlContext,
+                    reauthorize: () => {
+                        throw authorizationFailure;
+                    },
+                }
+            )
+        );
+
+        expect(failure).toBe(authorizationFailure);
+        expect(settlements).toEqual(["attempted", "failed"]);
+    });
+
+    test("classifies an uncertain restart enqueue settlement as partial", async () => {
+        const settlements: string[] = [];
+        const service = createOpenClawSettingsService({
+            auditWriter: {
+                record: (input) => {
+                    settlements.push(input.settlement);
+                    return Promise.resolve();
+                },
+            },
+            provider: provider(),
+            restartQueue: {
+                restart: async ({ authorizeDispatch }) => {
+                    await authorizeDispatch();
+                    throw new OpenClawGatewayRestartQueueError("unknown-outcome");
+                },
+            },
+        });
+
+        const failure = await captureFailure(() =>
+            service.restartGateway(
+                {
+                    confirmation: "restart-openclaw-gateway",
+                    idempotencyKey: "019fdf50-0000-4000-8000-000000000012",
+                },
+                controlContext
+            )
+        );
+
+        expect(failure).toBeInstanceOf(OpenClawSettingsServiceError);
+        expect(failure).toMatchObject({ reason: "unknown-outcome" });
+        expect(settlements).toEqual(["attempted", "partial"]);
     });
 
     test("serializes hash-fenced mutations until the prior operation settles", async () => {

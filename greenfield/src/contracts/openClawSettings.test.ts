@@ -2,17 +2,22 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
-import { procedureContracts } from "./contractRegistry.ts";
+import { procedureContracts, rawHttpContracts } from "./contractRegistry.ts";
 import {
+    createOpenClawConfigurationBackupInputSchema,
+    createOpenClawConfigurationBackupResultSchema,
     listOpenClawSkillsResultSchema,
     openClawConfigurationSnapshotSchema,
     openClawConfigurationUpstreamMaximumBytes,
     openClawGatewaySkillSources,
     openClawReviewedAgentToolIds,
     openClawSettingsProcedureContracts,
+    openClawSettingsRawHttpContracts,
     openClawSkillMaximum,
     openClawSkillsUpstreamMaximumBytes,
     openClawSkillSources,
+    restartOpenClawGatewayInputSchema,
+    restartOpenClawGatewayResultSchema,
     updateOpenClawConfigurationInputSchema,
 } from "./openClawSettings.ts";
 
@@ -154,6 +159,38 @@ describe("OpenClaw settings contracts", () => {
                     requestBody: "default",
                 },
             },
+            {
+                access: {
+                    capabilities: ["openclaw-settings:write"],
+                    kind: "recent-auth",
+                    principalKinds: ["session"],
+                    whenMfaDisabled: "deny",
+                    whenMfaEnabled: "mfa",
+                },
+                kind: "mutation",
+                name: "openClawSettings.createConfigurationBackup",
+                transport: {
+                    batching: "forbidden",
+                    handler: "default",
+                    requestBody: "default",
+                },
+            },
+            {
+                access: {
+                    capabilities: ["openclaw-settings:write"],
+                    kind: "recent-auth",
+                    principalKinds: ["session"],
+                    whenMfaDisabled: "deny",
+                    whenMfaEnabled: "mfa",
+                },
+                kind: "mutation",
+                name: "openClawSettings.restartGateway",
+                transport: {
+                    batching: "forbidden",
+                    handler: "default",
+                    requestBody: "default",
+                },
+            },
         ]);
         expect(
             procedureContracts
@@ -167,6 +204,56 @@ describe("OpenClaw settings contracts", () => {
             "SERVICE_UNAVAILABLE",
             "UNAUTHORIZED",
         ]);
+    });
+
+    test("keeps secret exports out of tRPC and publishes one-shot raw download metadata", () => {
+        expect(
+            v.parse(createOpenClawConfigurationBackupInputSchema, {
+                confirmation: "export-openclaw-configuration",
+            })
+        ).toEqual({ confirmation: "export-openclaw-configuration" });
+        const ticketId = "019fe633-9133-4ba0-8b80-809dd80dfb40";
+        expect(
+            v.parse(createOpenClawConfigurationBackupResultSchema, {
+                downloadUrl: `/api/openclaw-settings/configuration-backups/${ticketId}`,
+                expiresAtMs: 1_786_464_060_000,
+                ticketId,
+            })
+        ).toMatchObject({ ticketId });
+        expect(
+            v.safeParse(createOpenClawConfigurationBackupResultSchema, {
+                bytes: '{"token":"secret"}',
+                downloadUrl: `/api/openclaw-settings/configuration-backups/${ticketId}`,
+                expiresAtMs: 1_786_464_060_000,
+                ticketId,
+            }).success
+        ).toBe(false);
+        expect(
+            openClawSettingsRawHttpContracts.map(({ method, path }) => [method, path])
+        ).toEqual([
+            ["GET", "/api/openclaw-settings/configuration-backups/:ticketId"],
+            ["HEAD", "/api/openclaw-settings/configuration-backups/:ticketId"],
+        ]);
+        expect(
+            rawHttpContracts.filter(({ path }) =>
+                path.startsWith("/api/openclaw-settings/configuration-backups/")
+            )
+        ).toHaveLength(2);
+    });
+
+    test("requires a stable caller idempotency key for fixed Gateway restart", () => {
+        const input = {
+            confirmation: "restart-openclaw-gateway" as const,
+            idempotencyKey: "restart-gateway-019fe633-9133-4ba0-8b80-809dd80dfb40",
+        };
+        expect(v.parse(restartOpenClawGatewayInputSchema, input)).toEqual(input);
+        expect(
+            v.parse(restartOpenClawGatewayResultSchema, {
+                completedAtMs: 1_786_464_060_000,
+                jobRunId: "019fe633-9133-7ba0-a5f9-809dd80dfb40",
+                status: "restarted",
+            })
+        ).toMatchObject({ status: "restarted" });
     });
 
     test("accepts only the bounded secret-free configuration projection", () => {

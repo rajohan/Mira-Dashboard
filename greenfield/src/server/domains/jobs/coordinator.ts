@@ -17,6 +17,7 @@ import {
     type JobActionRegistration,
     type JobCacheAttemptCommit,
     type JobCacheAttemptWriteResult,
+    type JobExecutableActionDefinition,
     JobActionRetryableError,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
@@ -100,7 +101,7 @@ export interface JobWorkerCoordinatorTimings {
 }
 
 export interface JobWorkerCoordinatorOptions {
-    readonly actionDefinitions?: readonly JobActionDefinition[];
+    readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly databaseReleaseId: string;
     readonly commitCacheAttempt?: (input: {
         readonly at: Date;
@@ -328,6 +329,12 @@ function scheduleInsert(registration: JobActionDefinition, at: Date): ScheduledJ
         throw new RangeError("Default job schedule has no representable occurrence");
     }
     return schedule;
+}
+
+function isScheduledActionDefinition(
+    definition: JobExecutableActionDefinition
+): definition is JobActionDefinition {
+    return "scheduleId" in definition;
 }
 
 function scheduledRunIdentity(
@@ -1062,9 +1069,9 @@ export function createJobWorkerCoordinator(
 
     const initialize = async (): Promise<void> => {
         const at = new Date(nowMs());
-        const schedules = actionDefinitions.map((definition) =>
-            scheduleInsert(definition, at)
-        );
+        const schedules = actionDefinitions
+            .filter((definition) => isScheduledActionDefinition(definition))
+            .map((definition) => scheduleInsert(definition, at));
         await options.repository.reconcileSchedules({
             at,
             retiredRunCancellation: {

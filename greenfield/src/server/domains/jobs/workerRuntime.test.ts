@@ -33,6 +33,9 @@ const baseRuntimeOptions = {
         run: () => Promise.resolve(undefined),
     }),
     moltbook: testMoltbookCollector,
+    openClawGateway: Object.freeze({
+        restart: () => Promise.resolve(),
+    }),
     pid: 123,
     releaseId: "a".repeat(40),
     sideEffects: {
@@ -134,6 +137,21 @@ function runtimeFixture(initializationFailure?: Error) {
             expect(options.repository).toBe(repository);
             expect(options.commitCacheAttempt).toBeFunction();
             expect(options.findAction?.("maintenance.rotate-logs")).toBeDefined();
+            const actionKeys = options.actionDefinitions?.map(
+                (definition) => definition.actionKey
+            );
+            if (actionKeys === undefined) {
+                throw new Error("Worker action definitions were not provided");
+            }
+            expect(new Set(actionKeys).size).toBe(actionKeys.length);
+            expect(
+                actionKeys.filter((key) => key === "openclaw.gateway.restart")
+            ).toHaveLength(1);
+            expect(options.findAction?.("openclaw.gateway.restart")).toMatchObject({
+                cancellationPolicy: "never",
+                resourceClass: "exclusive",
+                retrySafe: false,
+            });
             return coordinator;
         },
         createDatabaseRuntime() {

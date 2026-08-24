@@ -10,6 +10,7 @@ import {
     createJobWorkerActionResolver,
     createLogMaintenanceJobExecutor,
     createMoltbookDashboardExecutor,
+    createOpenClawGatewayRestartJobExecutor,
     createSystemHostExecutor,
     createWorkspaceFileWriteJobExecutor,
     createJobWorkerActionRegistry,
@@ -43,11 +44,37 @@ describe("worker-only job executor registry", () => {
         const findAction = createJobWorkerActionResolver({
             logMaintenance: { run: () => Promise.resolve(undefined) },
             moltbook: testMoltbookCollector,
+            openClawGateway: { restart: () => Promise.resolve() },
         });
         expect(findAction("system.worker-smoke")).toBeDefined();
         expect(findAction("cache.refresh.system-host")).toBeDefined();
         expect(findAction("maintenance.rotate-logs")).toBeDefined();
+        expect(findAction("openclaw.gateway.restart")).toMatchObject({
+            cancellationPolicy: "never",
+            resourceClass: "exclusive",
+            retrySafe: false,
+        });
         expect(findAction("system.shell")).toBeUndefined();
+    });
+
+    test("persists only a fixed restart result and forwards the action signal", async () => {
+        const signals: Array<AbortSignal | undefined> = [];
+        const executor = createOpenClawGatewayRestartJobExecutor({
+            restart(signal) {
+                signals.push(signal);
+                return Promise.resolve();
+            },
+        });
+
+        expect(await Effect.runPromise(executor(executionContext([]), {}))).toEqual({
+            completedAtMs: 5000,
+            status: "restarted",
+        });
+        expect(signals).toEqual([expect.any(AbortSignal)]);
+        const failure = await Effect.runPromise(
+            executor(executionContext([]), { command: "shell" })
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(Error);
     });
 
     test("fails closed for missing, extra, and duplicate executor keys", () => {

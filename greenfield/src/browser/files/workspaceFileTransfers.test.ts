@@ -100,6 +100,64 @@ describe("workspace file transfers", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
+    test("binds an oversized source while validating only delivered prefix bytes", async () => {
+        const sourceSizeBytes = workspaceFileLimits.maximumManifestFileBytes + 1;
+        const prefixEntry: WorkspaceFileEntry = {
+            ...entry,
+            previewKind: "download-only",
+            sizeBytes: sourceSizeBytes,
+            truncated: true,
+            writable: false,
+        };
+        const prefixTicket: WorkspaceFileContentTicket = {
+            ...contentTicket(),
+            sizeBytes: 5,
+            sourceSizeBytes,
+            truncated: true,
+        };
+        const fetcher = jest.fn(() => Promise.resolve(new Response("hello")));
+
+        expect(prefixEntry.sizeBytes).toBe(sourceSizeBytes);
+        expect(prefixTicket.sourceSizeBytes).toBe(prefixEntry.sizeBytes);
+        expect(prefixTicket.sizeBytes).toBe(5);
+
+        const result = await prepareWorkspaceFilePreview(
+            client({ query: () => Promise.resolve(prefixTicket) }),
+            prefixEntry,
+            new AbortController().signal,
+            fetcher
+        );
+        expect(result).toEqual({ content: "hello", ticket: prefixTicket });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        const wrongPrefixTicket = { ...prefixTicket, sizeBytes: 4 };
+        const wrongPrefixResponse = Promise.resolve(new Response("hello"));
+        const wrongTicketPrefixLength = await prepareWorkspaceFilePreview(
+            client({
+                query: () => Promise.resolve(wrongPrefixTicket),
+            }),
+            prefixEntry,
+            new AbortController().signal,
+            () => wrongPrefixResponse
+        ).catch((error: unknown) => error);
+        expect(wrongTicketPrefixLength).toMatchObject({ category: "protocol" });
+
+        const rejected = await prepareWorkspaceFilePreview(
+            client({
+                query: () =>
+                    Promise.resolve({
+                        ...prefixTicket,
+                        sourceSizeBytes: sourceSizeBytes + 1,
+                    }),
+            }),
+            prefixEntry,
+            new AbortController().signal,
+            fetcher
+        ).catch((error: unknown) => error);
+        expect(rejected).toMatchObject({ category: "protocol" });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
     test("forwards an oversized reveal authority without materializing raw config", async () => {
         const oversizedTextBytes = workspaceFileLimits.maximumTextPreviewBytes + 1;
         const uploadTicketId = "44444444-4444-4444-8444-444444444444";

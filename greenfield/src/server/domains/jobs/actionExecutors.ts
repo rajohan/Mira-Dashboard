@@ -8,6 +8,7 @@ import {
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
 import type { JsonObject } from "../../../shared/json.ts";
+import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
@@ -19,6 +20,9 @@ import {
     JobActionRetryableError,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
+    openClawGatewayRestartJobActionDefinition,
+    openClawGatewayRestartJobActionKey,
+    openClawGatewayRestartJobResultSchema,
     validateJobActionRegistration,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileReplaceJobActionKey,
@@ -267,6 +271,27 @@ export function createLogMaintenanceJobExecutor(
 }
 
 /**
+ * Adapts the fixed worker lifecycle port without persisting CLI output or diagnostics.
+ * @returns The fixed durable restart executor.
+ */
+export function createOpenClawGatewayRestartJobExecutor(
+    gateway: OpenClawGatewayLifecycleExecutionPort
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.tryPromise({
+            catch: () => new Error("OpenClaw Gateway restart action failed"),
+            try: async (signal) => {
+                v.parse(emptyPayloadSchema, payload);
+                await gateway.restart(signal);
+                return v.parse(openClawGatewayRestartJobResultSchema, {
+                    completedAtMs: context.nowMs(),
+                    status: "restarted",
+                });
+            },
+        });
+}
+
+/**
  * Adapts one schema-validated spooled command to the worker-only structural writer.
  * @param writer Worker-owned descriptor writer.
  * @returns Durable action executor without web-process filesystem authority.
@@ -363,8 +388,10 @@ export function createJobWorkerActionRegistry(
  * @returns A fail-closed resolver containing every reviewed worker action.
  */
 export interface JobWorkerActionResolverDependencies {
+    readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly logMaintenance: LogMaintenanceExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
+    readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
 }
 
@@ -373,13 +400,19 @@ export function createJobWorkerActionResolver(
 ): JobWorkerActionResolver {
     const workspaceFiles = dependencies.workspaceFiles;
     const definitions =
-        workspaceFiles === undefined
-            ? jobActionDefinitions
-            : Object.freeze([
-                  ...jobActionDefinitions,
-                  workspaceFileWriteJobActionDefinition,
-                  workspaceFileReplaceJobActionDefinition,
-              ]);
+        dependencies.actionDefinitions ??
+        Object.freeze([
+            ...jobActionDefinitions,
+            ...(dependencies.openClawGateway === undefined
+                ? []
+                : [openClawGatewayRestartJobActionDefinition]),
+            ...(workspaceFiles === undefined
+                ? []
+                : [
+                      workspaceFileWriteJobActionDefinition,
+                      workspaceFileReplaceJobActionDefinition,
+                  ]),
+        ]);
     const executors = [
         Object.freeze({
             actionKey: "cache.refresh.system-host",
@@ -395,6 +428,16 @@ export function createJobWorkerActionResolver(
             actionKey: logMaintenanceJobActionKey,
             execute: createLogMaintenanceJobExecutor(dependencies.logMaintenance),
         }),
+        ...(dependencies.openClawGateway === undefined
+            ? []
+            : [
+                  Object.freeze({
+                      actionKey: openClawGatewayRestartJobActionKey,
+                      execute: createOpenClawGatewayRestartJobExecutor(
+                          dependencies.openClawGateway
+                      ),
+                  }),
+              ]),
         Object.freeze({
             actionKey: "system.worker-smoke",
             execute: workerSmokeExecutor,

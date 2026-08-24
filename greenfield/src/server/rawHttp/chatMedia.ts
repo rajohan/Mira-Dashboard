@@ -1,7 +1,10 @@
 import { Redacted } from "effect";
 
 import type { ChatMessageGetOutput } from "../../contracts/chat.ts";
-import { chatAttachmentLimits } from "../../contracts/chatMedia.ts";
+import {
+    chatAttachmentLimits,
+    chatTextPreviewMaximumBytes,
+} from "../../contracts/chatMedia.ts";
 import type { AuthenticatedPrincipal } from "../../contracts/security.ts";
 import { parseAuthenticationResolution } from "../domains/security/authenticationResolution.ts";
 import type { InMemoryChatAttachmentStore } from "../platform/chat/inMemoryChatAttachmentStore.ts";
@@ -14,9 +17,18 @@ import { readAuthenticationHttpCredentials } from "./authenticationCredentials.t
 import { isAllowedRequestSource } from "./requestSecurity.ts";
 
 export const chatOutgoingMediaMaximumBytes = 16 * 1024 * 1024;
-export const chatOutgoingTextPreviewMaximumBytes = 1024 * 1024;
+export const chatOutgoingTextPreviewMaximumBytes = chatTextPreviewMaximumBytes;
 export const chatOutgoingMediaTimeoutMs = 30_000;
 export const chatAttachmentUploadTimeoutMs = 60_000;
+export const chatMediaReferenceRefreshTimeoutMs = 15_000;
+export const chatMediaReferenceRefreshCooldownMs = 30_000;
+export const chatMediaReferenceRefreshCooldownMaximum = 256;
+export const chatMediaReferenceRefreshMaximumPending = 8;
+export const chatMediaReferenceRefreshTokenCapacity = 6;
+export const chatMediaReferenceRefreshTokenRefillMs = 5000;
+
+const chatMediaLegacyReferenceRefreshClass = "legacy";
+const chatMediaReferenceRefreshClassPattern = /^[0-9a-f]{12}$/u;
 
 type ChatRawHttpTimerHandle = object;
 
@@ -129,10 +141,47 @@ export interface OpenClawOutgoingMediaRequest {
     readonly range?: string;
     readonly sessionKey: string;
     readonly signal: AbortSignal;
+    readonly source: ChatMediaReference["source"];
 }
 
 export interface OpenClawOutgoingMediaFetcher {
     readonly fetch: (request: OpenClawOutgoingMediaRequest) => Promise<Response>;
+}
+
+export interface ChatMediaSourceFetcherOptions {
+    readonly gatewayManaged?: OpenClawOutgoingMediaFetcher;
+    readonly localHistory?: Pick<OpenClawOutgoingMediaFetcher, "fetch">;
+}
+
+/**
+ * Dispatches one already-authorized opaque reference to its exact server-only source.
+ * Missing source adapters are indistinguishable from absent media.
+ * @returns A source-aware fetcher that preserves the existing raw media response contract.
+ */
+export function createChatMediaSourceFetcher(
+    options: ChatMediaSourceFetcherOptions
+): OpenClawOutgoingMediaFetcher {
+    if (options.gatewayManaged === undefined && options.localHistory === undefined) {
+        throw new TypeError("Chat media source composition is unavailable");
+    }
+    return Object.freeze({
+        fetch(request: OpenClawOutgoingMediaRequest): Promise<Response> {
+            switch (request.source.kind) {
+                case "gateway-managed": {
+                    return (
+                        options.gatewayManaged?.fetch(request) ??
+                        Promise.resolve(new Response(null, { status: 404 }))
+                    );
+                }
+                case "openclaw-local-history": {
+                    return (
+                        options.localHistory?.fetch(request) ??
+                        Promise.resolve(new Response(null, { status: 404 }))
+                    );
+                }
+            }
+        },
+    });
 }
 
 export interface ChatRawHttpHandlerOptions {
@@ -145,7 +194,19 @@ export interface ChatRawHttpHandlerOptions {
     readonly browserOrigin?: string;
     readonly mediaFetcher: OpenClawOutgoingMediaFetcher;
     readonly mediaReferences: InMemoryChatMediaReferences;
-    readonly refreshMediaReferences?: (signal: AbortSignal) => Promise<void>;
+    /**
+     * Returns the bounded session-routing class for a projected id. Returning
+     * undefined groups an unmatched or legacy id into one shared fallback class.
+     */
+    readonly mediaReferenceRefreshClass?: (
+        attachmentId: string,
+        signal: AbortSignal
+    ) => Promise<string | undefined> | string | undefined;
+    readonly refreshMediaReferences?: (
+        signal: AbortSignal,
+        attachmentId?: string,
+        mode?: "legacy" | "targeted"
+    ) => Promise<void>;
     readonly scheduler?: ChatRawHttpScheduler;
     readonly uploadTimeoutMs?: number;
     readonly workLimits?: ChatRawHttpWorkLimits;
@@ -155,6 +216,83 @@ export type ChatRawHttpHandler = (
     request: Request,
     requestUrl: URL
 ) => Promise<Response | undefined>;
+
+interface ChatMediaReferenceRefreshClassification {
+    readonly refreshClass: string;
+    readonly workTokens: number;
+}
+
+async function resolveChatMediaReferenceRefreshClass(
+    attachmentId: string,
+    classify: ChatRawHttpHandlerOptions["mediaReferenceRefreshClass"],
+    signal: AbortSignal
+): Promise<ChatMediaReferenceRefreshClassification> {
+    if (classify === undefined) {
+        return {
+            refreshClass: attachmentId.replaceAll("-", "").slice(0, 12),
+            workTokens: 1,
+        };
+    }
+    try {
+        const candidate = await classify(attachmentId, signal);
+        return candidate !== undefined &&
+            chatMediaReferenceRefreshClassPattern.test(candidate)
+            ? { refreshClass: candidate, workTokens: 1 }
+            : {
+                  refreshClass: chatMediaLegacyReferenceRefreshClass,
+                  workTokens: chatMediaReferenceRefreshTokenCapacity,
+              };
+    } catch {
+        if (signal.aborted) throw requestAbortReason(signal);
+        return {
+            refreshClass: chatMediaLegacyReferenceRefreshClass,
+            workTokens: chatMediaReferenceRefreshTokenCapacity,
+        };
+    }
+}
+
+function requestAbortReason(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("The operation was aborted", "AbortError");
+}
+
+function waitForRefresh<T>(
+    work: Promise<T>,
+    signal: AbortSignal,
+    onSettled?: () => void
+): Promise<T> {
+    if (signal.aborted) {
+        onSettled?.();
+        return Promise.reject(requestAbortReason(signal));
+    }
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const finish = (settle: () => void): void => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            onSettled?.();
+            settle();
+        };
+        const onAbort = (): void => {
+            finish(() => reject(requestAbortReason(signal)));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        work.then(
+            (value) => finish(() => resolve(value)),
+            (error: unknown) =>
+                finish(() =>
+                    reject(
+                        error instanceof Error
+                            ? error
+                            : new Error("Chat media reference refresh failed")
+                    )
+                )
+        ).catch(() => {});
+        if (signal.aborted) onAbort();
+    });
+}
 
 function noStoreResponse(body: string | null, status: number): Response {
     return new Response(body, {
@@ -487,14 +625,8 @@ async function proxyMedia(
     reference: ChatMediaReference,
     disposition: ChatMediaDisposition,
     options: ChatRawHttpHandlerOptions,
-    downloadAdmission: RawHttpWorkAdmission
+    downloadLease: RawHttpWorkLease
 ): Promise<Response> {
-    const downloadLease = downloadAdmission.tryAcquire(
-        request.method === "GET" ? chatOutgoingMediaMaximumBytes : 1
-    );
-    if (downloadLease === undefined) {
-        return noStoreResponse("Media capacity exceeded", 429);
-    }
     try {
         const range = request.headers.get("range")?.trim();
         if (range !== undefined && !singleRangePattern.test(range)) {
@@ -524,6 +656,7 @@ async function proxyMedia(
                 ...(range === undefined ? {} : { range }),
                 sessionKey: reference.sessionKey,
                 signal: request.signal,
+                source: reference.source,
             });
         } catch {
             return noStoreResponse("Bad Gateway", 502);
@@ -632,7 +765,7 @@ async function proxyMedia(
             status: upstream.status,
         });
     } finally {
-        downloadLease?.release();
+        downloadLease.release();
     }
 }
 
@@ -662,20 +795,238 @@ export function createChatRawHttpHandler(
         workLimits.maximumConcurrentDownloads,
         workLimits.maximumDownloadBytes
     );
-    let mediaReferenceRefresh: Promise<void> | undefined;
-    const refreshMediaReferences = async (signal: AbortSignal): Promise<void> => {
-        if (options.refreshMediaReferences === undefined) return;
-        const activeRefresh = mediaReferenceRefresh;
-        if (activeRefresh !== undefined) {
-            await activeRefresh;
+    interface MediaReferenceRefreshGateWaiter {
+        readonly reject: (reason: unknown) => void;
+        readonly resolve: (admitted: true) => void;
+        readonly signal: AbortSignal;
+        onAbort?: () => void;
+    }
+    let mediaReferenceRefresh:
+        | Readonly<{
+              requestClass: string;
+              refreshClass: string;
+              response: Promise<void>;
+              work: Promise<void>;
+          }>
+        | undefined;
+    let mediaReferenceRefreshGateActive = false;
+    let mediaReferenceRefreshFollowerCount = 0;
+    const mediaReferenceRefreshGateWaiters: MediaReferenceRefreshGateWaiter[] = [];
+    const mediaReferenceRefreshNotBeforeMs = new Map<string, number>();
+    const mediaReferenceRefreshClassifications = new Map<
+        string,
+        ChatMediaReferenceRefreshClassification & { readonly expiresAtMs: number }
+    >();
+    let mediaReferenceRefreshTokens = chatMediaReferenceRefreshTokenCapacity;
+    let mediaReferenceRefreshTokenRefilledAtMs: number | undefined;
+
+    const refreshPendingCount = (): number =>
+        Number(mediaReferenceRefreshGateActive) +
+        mediaReferenceRefreshGateWaiters.length +
+        mediaReferenceRefreshFollowerCount;
+
+    const acquireMediaReferenceRefreshGate = (signal: AbortSignal): Promise<boolean> => {
+        if (signal.aborted) return Promise.reject(requestAbortReason(signal));
+        if (!mediaReferenceRefreshGateActive) {
+            mediaReferenceRefreshGateActive = true;
+            return Promise.resolve(true);
+        }
+        if (refreshPendingCount() >= chatMediaReferenceRefreshMaximumPending) {
+            return Promise.resolve(false);
+        }
+        return new Promise<true>((resolve, reject) => {
+            const waiter: MediaReferenceRefreshGateWaiter = {
+                reject,
+                resolve,
+                signal,
+            };
+            const onAbort = (): void => {
+                const index = mediaReferenceRefreshGateWaiters.indexOf(waiter);
+                if (index === -1) return;
+                mediaReferenceRefreshGateWaiters.splice(index, 1);
+                signal.removeEventListener("abort", onAbort);
+                reject(requestAbortReason(signal));
+            };
+            waiter.onAbort = onAbort;
+            mediaReferenceRefreshGateWaiters.push(waiter);
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) onAbort();
+        });
+    };
+
+    const releaseMediaReferenceRefreshGate = (): void => {
+        const waiter = mediaReferenceRefreshGateWaiters.shift();
+        if (waiter === undefined) {
+            mediaReferenceRefreshGateActive = false;
             return;
         }
-        const refresh = options.refreshMediaReferences(signal);
-        mediaReferenceRefresh = refresh;
+        if (waiter.onAbort !== undefined) {
+            waiter.signal.removeEventListener("abort", waiter.onAbort);
+        }
+        waiter.resolve(true);
+    };
+
+    const consumeMediaReferenceRefreshTokens = (nowMs: number, count = 1): boolean => {
+        if (!Number.isSafeInteger(nowMs) || nowMs < 0) return false;
+        if (mediaReferenceRefreshTokenRefilledAtMs === undefined) {
+            mediaReferenceRefreshTokenRefilledAtMs = nowMs;
+        } else if (nowMs < mediaReferenceRefreshTokenRefilledAtMs) {
+            mediaReferenceRefreshTokenRefilledAtMs = nowMs;
+        } else {
+            const refillCount = Math.floor(
+                (nowMs - mediaReferenceRefreshTokenRefilledAtMs) /
+                    chatMediaReferenceRefreshTokenRefillMs
+            );
+            if (refillCount > 0) {
+                mediaReferenceRefreshTokens = Math.min(
+                    chatMediaReferenceRefreshTokenCapacity,
+                    mediaReferenceRefreshTokens + refillCount
+                );
+                mediaReferenceRefreshTokenRefilledAtMs +=
+                    refillCount * chatMediaReferenceRefreshTokenRefillMs;
+            }
+        }
+        if (
+            !Number.isSafeInteger(count) ||
+            count < 1 ||
+            count > chatMediaReferenceRefreshTokenCapacity ||
+            mediaReferenceRefreshTokens < count
+        ) {
+            return false;
+        }
+        mediaReferenceRefreshTokens -= count;
+        return true;
+    };
+
+    const refreshMediaReferences = async (
+        attachmentId: string,
+        requestSignal: AbortSignal
+    ): Promise<void> => {
+        if (options.refreshMediaReferences === undefined) return;
+        const requestClass = attachmentId.replaceAll("-", "").slice(0, 12);
+        const activeRefresh = mediaReferenceRefresh;
+        const cachedClassification =
+            mediaReferenceRefreshClassifications.get(requestClass);
+        if (
+            activeRefresh?.requestClass === requestClass ||
+            activeRefresh?.refreshClass === requestClass ||
+            (cachedClassification !== undefined &&
+                activeRefresh?.refreshClass === cachedClassification.refreshClass)
+        ) {
+            if (refreshPendingCount() >= chatMediaReferenceRefreshMaximumPending) {
+                return;
+            }
+            mediaReferenceRefreshFollowerCount += 1;
+            await waitForRefresh(activeRefresh.response, requestSignal, () => {
+                mediaReferenceRefreshFollowerCount -= 1;
+            });
+            return;
+        }
+        if (!(await acquireMediaReferenceRefreshGate(requestSignal))) return;
+        let workOwnsGate = false;
         try {
-            await refresh;
+            requestSignal.throwIfAborted();
+            if (options.mediaReferences.resolve(attachmentId) !== undefined) return;
+            const startedAtMs = Date.now();
+            let reservedTokens = 0;
+            let classification = mediaReferenceRefreshClassifications.get(requestClass);
+            if (
+                classification !== undefined &&
+                classification.expiresAtMs <= startedAtMs
+            ) {
+                mediaReferenceRefreshClassifications.delete(requestClass);
+                classification = undefined;
+            }
+            if (classification === undefined) {
+                if (!consumeMediaReferenceRefreshTokens(startedAtMs)) return;
+                reservedTokens = 1;
+                const resolved = await resolveChatMediaReferenceRefreshClass(
+                    attachmentId,
+                    options.mediaReferenceRefreshClass,
+                    requestSignal
+                );
+                classification = Object.freeze({
+                    ...resolved,
+                    expiresAtMs: startedAtMs + chatMediaReferenceRefreshCooldownMs,
+                });
+                if (
+                    mediaReferenceRefreshClassifications.size >=
+                    chatMediaReferenceRefreshCooldownMaximum
+                ) {
+                    const oldest = mediaReferenceRefreshClassifications
+                        .keys()
+                        .next().value;
+                    if (oldest !== undefined) {
+                        mediaReferenceRefreshClassifications.delete(oldest);
+                    }
+                }
+                mediaReferenceRefreshClassifications.set(requestClass, classification);
+            }
+            requestSignal.throwIfAborted();
+            const { refreshClass } = classification;
+            const classifiedAtMs = Date.now();
+            const notBeforeMs = mediaReferenceRefreshNotBeforeMs.get(refreshClass) ?? 0;
+            if (classifiedAtMs < notBeforeMs) return;
+            const remainingTokens = classification.workTokens - reservedTokens;
+            if (
+                remainingTokens > 0 &&
+                !consumeMediaReferenceRefreshTokens(classifiedAtMs, remainingTokens)
+            ) {
+                return;
+            }
+            mediaReferenceRefreshNotBeforeMs.delete(refreshClass);
+            if (
+                mediaReferenceRefreshNotBeforeMs.size >=
+                chatMediaReferenceRefreshCooldownMaximum
+            ) {
+                const oldest = mediaReferenceRefreshNotBeforeMs.keys().next().value;
+                if (oldest !== undefined) {
+                    mediaReferenceRefreshNotBeforeMs.delete(oldest);
+                }
+            }
+            mediaReferenceRefreshNotBeforeMs.set(
+                refreshClass,
+                classifiedAtMs + chatMediaReferenceRefreshCooldownMs
+            );
+            const deadlineController = new AbortController();
+            let rejectDeadline!: (reason: unknown) => void;
+            const deadline = new Promise<never>((_resolve, reject) => {
+                rejectDeadline = reject;
+            });
+            const work = Promise.resolve().then(() =>
+                options.refreshMediaReferences!(
+                    deadlineController.signal,
+                    attachmentId,
+                    classification.workTokens > 1 ? "legacy" : "targeted"
+                )
+            );
+            const response = Promise.race([work, deadline]);
+            const refresh = Object.freeze({
+                refreshClass,
+                requestClass,
+                response,
+                work,
+            });
+            mediaReferenceRefresh = refresh;
+            workOwnsGate = true;
+            const deadlineHandle = scheduler.setTimeout(() => {
+                deadlineController.abort();
+                rejectDeadline(
+                    new DOMException("The operation timed out", "TimeoutError")
+                );
+            }, chatMediaReferenceRefreshTimeoutMs);
+            void work
+                .finally(() => {
+                    scheduler.clearTimeout(deadlineHandle);
+                    if (mediaReferenceRefresh === refresh) {
+                        mediaReferenceRefresh = undefined;
+                    }
+                    releaseMediaReferenceRefreshGate();
+                })
+                .catch(() => {});
+            await waitForRefresh(response, requestSignal);
         } finally {
-            if (mediaReferenceRefresh === refresh) mediaReferenceRefresh = undefined;
+            if (!workOwnsGate) releaseMediaReferenceRefreshGate();
         }
     };
     return async (request, requestUrl) => {
@@ -780,7 +1131,7 @@ export function createChatRawHttpHandler(
         let reference = options.mediaReferences.resolve(media![1]!);
         if (reference === undefined) {
             try {
-                await refreshMediaReferences(request.signal);
+                await refreshMediaReferences(media![1]!, request.signal);
             } catch {
                 // A refresh failure is intentionally indistinguishable from absence.
             }
@@ -791,7 +1142,8 @@ export function createChatRawHttpHandler(
         try {
             authorized = await options.authorizeMedia(
                 {
-                    attachmentId: reference.attachmentId,
+                    attachmentId:
+                        reference.authorizationAttachmentId ?? reference.attachmentId,
                     messageId: reference.messageId,
                     principal: authentication.principal,
                     sessionKey: reference.sessionKey,
@@ -802,12 +1154,18 @@ export function createChatRawHttpHandler(
             authorized = false;
         }
         if (!authorized) return noStoreResponse("Not found", 404);
+        const downloadLease = downloadAdmission.tryAcquire(
+            request.method === "GET" ? chatOutgoingMediaMaximumBytes : 1
+        );
+        if (downloadLease === undefined) {
+            return noStoreResponse("Media capacity exceeded", 429);
+        }
         return proxyMedia(
             request,
             reference,
             disposition as ChatMediaDisposition,
             options,
-            downloadAdmission
+            downloadLease
         );
     };
 }
@@ -850,10 +1208,13 @@ export function createOpenClawOutgoingMediaFetcher(
     const fetchImplementation = options.fetch ?? globalThis.fetch;
     return Object.freeze({
         async fetch(request: OpenClawOutgoingMediaRequest): Promise<Response> {
+            if (request.source.kind !== "gateway-managed") {
+                return new Response(null, { status: 404 });
+            }
             const url = new URL(
                 `/api/chat/media/outgoing/${encodeURIComponent(
                     request.sessionKey
-                )}/${request.attachmentId}/full`,
+                )}/${request.source.upstreamAttachmentId}/full`,
                 base
             );
             const timeoutSignal = AbortSignal.timeout(timeoutMs);

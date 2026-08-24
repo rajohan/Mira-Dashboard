@@ -253,10 +253,13 @@ function contentHeaders(
 ): Headers {
     const inline =
         metadata.disposition === "preview" && metadata.previewKind !== "download-only";
+    const transferFileName = metadata.truncated
+        ? `${metadata.fileName}.prefix`
+        : metadata.fileName;
     const headers = new Headers({
         "accept-ranges": "bytes",
         "cache-control": "private, no-store",
-        "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodedFileName(metadata.fileName)}`,
+        "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodedFileName(transferFileName)}`,
         "content-length": String(bodyBytes),
         "content-security-policy": "sandbox; default-src 'none'",
         "content-type": metadata.mimeType,
@@ -264,6 +267,10 @@ function contentHeaders(
         "referrer-policy": "no-referrer",
         "x-content-type-options": "nosniff",
     });
+    if (metadata.truncated === true && metadata.sourceSizeBytes !== undefined) {
+        headers.set("x-mira-file-source-size", String(metadata.sourceSizeBytes));
+        headers.set("x-mira-file-truncated", "true");
+    }
     if (range !== undefined) {
         headers.set(
             "content-range",

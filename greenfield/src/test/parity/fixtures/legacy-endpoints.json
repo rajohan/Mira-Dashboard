@@ -336,10 +336,10 @@
             "id": "GET /api/config-files",
             "method": "GET",
             "path": "/api/config-files",
-            "purpose": "Lists OpenClaw config files.",
+            "purpose": "Lists the reviewed OpenClaw config manifest, including oversized sources as read-only bounded-prefix entries without host paths.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["files.list", "files.listRoots"],
                 "phase": "phase-5"
@@ -349,10 +349,10 @@
             "id": "GET /api/config-files/*",
             "method": "GET",
             "path": "/api/config-files/*",
-            "purpose": "Reads a config file under OpenClaw root.",
+            "purpose": "Reads an actor-bound exact representation or stable bounded prefix from the reviewed OpenClaw config manifest.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "GET",
                 "path": "/api/files/content/:ticketId",
@@ -691,13 +691,13 @@
             "id": "GET /api/media",
             "method": "GET",
             "path": "/api/media",
-            "purpose": "Serves or safely previews media bytes from OpenClaw media roots.",
+            "purpose": "Securely narrows local-history media to transcript-visible files beneath the reviewed OpenClaw media root; the browser receives only opaque message/session-bound references and never supplies a host path or lists media.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "GET",
-                "path": "/api/media/*",
+                "path": "/api/chat/media/:attachmentId",
                 "phase": "phase-5"
             }
         },
@@ -1343,10 +1343,10 @@
             "id": "POST /api/backup",
             "method": "POST",
             "path": "/api/backup",
-            "purpose": "Creates config backup.",
+            "purpose": "Creates a short-lived actor/session-bound ticket for one same-origin, recent-MFA, secret-bearing exact OpenClaw configuration export.",
             "section": "OpenClaw Config",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawSettings.createConfigurationBackup"],
                 "phase": "phase-5"
@@ -1840,7 +1840,7 @@
             "purpose": "Queues an OpenClaw Gateway restart and waits for its persisted result.",
             "section": "OpenClaw Config",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["openClawSettings.restartGateway"],
                 "phase": "phase-5"
