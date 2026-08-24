@@ -75,6 +75,30 @@ const staleEnrollmentSummary = {
     ...enrollmentSummary,
     recentAuth: { mfa: { recent: false }, password: { recent: false } },
 } as const satisfies AccountSecuritySummary;
+
+function stalePasswordEnrollmentFixtures(): DashboardStoryFixtures {
+    let failNextSessionRefresh = false;
+    return accountSecurityFixtures(staleEnrollmentSummary, {
+        mutations: {
+            "accountSecurity.reauthenticatePassword": dashboardStoryResolver(() => {
+                failNextSessionRefresh = true;
+                return {
+                    session: currentSession,
+                    verifiedAtMs: nowMs,
+                };
+            }),
+        },
+        queries: {
+            "auth.status": dashboardStoryResolver(() => {
+                if (failNextSessionRefresh) {
+                    failNextSessionRefresh = false;
+                    throw new TypeError("Safe session refresh failure");
+                }
+                return authenticatedDashboardStoryStatus;
+            }),
+        },
+    });
+}
 const allMfaStaleSummary = {
     ...readySummary,
     mfa: {
@@ -312,22 +336,7 @@ export const InitialError: Story = {
 
 export const StalePasswordEnrollment: Story = {
     args: {
-        fixtures: accountSecurityFixtures(staleEnrollmentSummary, {
-            mutations: {
-                "accountSecurity.reauthenticatePassword": dashboardStoryValue({
-                    session: currentSession,
-                    verifiedAtMs: nowMs,
-                }),
-            },
-            queries: {
-                "auth.status": dashboardStoryResolver((_input, callIndex) => {
-                    if (callIndex === 2) {
-                        throw new TypeError("Safe session refresh failure");
-                    }
-                    return authenticatedDashboardStoryStatus;
-                }),
-            },
-        }),
+        fixtures: stalePasswordEnrollmentFixtures(),
         route: "/account-security",
     },
     play: async ({ canvasElement }) => {
