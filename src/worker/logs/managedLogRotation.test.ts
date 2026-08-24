@@ -24,7 +24,7 @@ import type {
     ManagedLogFileTarget,
     ManagedLogManifest,
 } from "./managedLogManifest.ts";
-import { validateManagedLogManifest } from "./managedLogManifest.ts";
+import { managedLogManifest, validateManagedLogManifest } from "./managedLogManifest.ts";
 import { createManagedLogRotationEngine } from "./managedLogRotation.ts";
 
 const roots: string[] = [];
@@ -884,5 +884,13 @@ describe("managed log rotation engine", () => {
                 statePath: `/tmp/state/${logRotationEpochProjectionFileName}`,
             })
         ).toThrow("Managed log manifest is invalid");
+    });
+
+    test("trusts the declarative Submaker directory and runtime owners", () => {
+        const submaker = managedLogManifest.fileTargets.find(
+            ({ id }) => id === "docker.submaker"
+        );
+        expect(submaker?.trustedOwnerIds).toContain(1001);
+        expect(submaker?.trustedOwnerIds).toContain(ownerId);
     });
 });

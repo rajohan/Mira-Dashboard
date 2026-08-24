@@ -139,7 +139,7 @@ export const managedLogManifest: ManagedLogManifest = Object.freeze({
             trustedOwnerIds: trustedContainerOwnerIds(1001),
         }),
         managedFile("docker.submaker", "/opt/docker/data/submaker/logs/app.log", {
-            trustedOwnerIds: trustedContainerOwnerIds(1000),
+            trustedOwnerIds: trustedContainerOwnerIds(1001),
         }),
         managedFile("docker.traefik", "/opt/docker/data/traefik/access.log", {
             trustedOwnerIds: trustedContainerOwnerIds(1001),

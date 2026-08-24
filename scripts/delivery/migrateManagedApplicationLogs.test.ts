@@ -1,11 +1,21 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { link, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    chown,
+    link,
+    lstat,
+    mkdir,
+    mkdtemp,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { migrateManagedApplicationLogs } from "./provisioning/log-maintenance/migrateManagedApplicationLogs.ts";
 
 const temporaryDirectories: string[] = [];
+const testUserId = (process.getuid?.() ?? 1) === 0 ? 1 : (process.getuid?.() ?? 1);
 
 async function captureFailure(operation: Promise<void>): Promise<Error> {
     try {
@@ -23,21 +33,22 @@ async function fixture(): Promise<{ readonly directory: string; readonly file: s
     const file = path.join(directory, "web-stdout.log");
     await mkdir(directory, { mode: 0o700 });
     await writeFile(file, "entry\n", { mode: 0o600 });
+    if ((process.getuid?.() ?? 1) === 0) {
+        await Promise.all([chown(directory, testUserId, 0), chown(file, testUserId, 0)]);
+    }
     return { directory, file };
 }
 
 describe("managed application log migration", () => {
     test("readmits fixed private logs through held descriptors", async () => {
         const item = await fixture();
-        const userId = process.getuid?.() ?? 1;
-
-        await migrateManagedApplicationLogs(userId, {
+        await migrateManagedApplicationLogs(testUserId, {
             directoryPath: item.directory,
             requireRoot: () => true,
         });
 
         const status = await lstat(item.file);
-        expect(status.uid).toBe(userId);
+        expect(status.uid).toBe(testUserId);
         expect(status.mode & 0o7777).toBe(0o600);
     });
 
@@ -45,7 +56,7 @@ describe("managed application log migration", () => {
         const root = await mkdtemp(path.join(os.tmpdir(), "mira-managed-app-missing-"));
         temporaryDirectories.push(root);
         expect(
-            await migrateManagedApplicationLogs(process.getuid?.() ?? 1, {
+            await migrateManagedApplicationLogs(testUserId, {
                 directoryPath: path.join(root, "missing"),
                 requireRoot: () => true,
             })
@@ -62,7 +73,7 @@ describe("managed application log migration", () => {
         await symlink(external, item.file);
 
         const failure = await captureFailure(
-            migrateManagedApplicationLogs(process.getuid?.() ?? 1, {
+            migrateManagedApplicationLogs(testUserId, {
                 directoryPath: item.directory,
                 requireRoot: () => true,
             })
@@ -77,7 +88,7 @@ describe("managed application log migration", () => {
         await link(item.file, path.join(item.directory, "alias.log"));
 
         const failure = await captureFailure(
-            migrateManagedApplicationLogs(process.getuid?.() ?? 1, {
+            migrateManagedApplicationLogs(testUserId, {
                 directoryPath: item.directory,
                 requireRoot: () => true,
             })
