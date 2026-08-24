@@ -36,7 +36,10 @@ import {
 } from "../support/automationHttpSystem.ts";
 import { CookieJar, postTrpcMutation, trpcData } from "../support/mfaHttpSystem.ts";
 import { withTestTimeout } from "../support/promise.ts";
-import { createTestApplicationRuntime } from "../support/requestContext.ts";
+import {
+    createTestApplicationRuntime,
+    createTestStructuredLogger,
+} from "../support/requestContext.ts";
 
 const leaseInvalidationTimeoutMs = secondsToMilliseconds(5);
 async function createSystemPrincipal(
@@ -316,6 +319,7 @@ describe("real HTTP automation credential lifecycle", () => {
         );
         const unusedMetrics = Effect.die("Metrics are not used in this test");
         const runtime = createApplicationRuntime({
+            logger: createTestStructuredLogger(),
             realtimeEventPumpLayer: Layer.succeed(
                 RealtimeEventPumpService,
                 RealtimeEventPumpService.of({

@@ -61,7 +61,178 @@ function errorReasonsLabel(contract: ProcedureContract): string {
  * @returns Generated Markdown index.
  */
 export function renderGeneratedIndex(): string {
-    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit database, configuration, and browser route/feature references plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
+    return `${documentHeader("Generated Dashboard Reference", "bun run docs:generate")}## Current Generated Subset\n\n- [tRPC procedures](procedures.md)\n- [Raw HTTP routes](raw-http.md)\n- [Realtime events](realtime-events.md)\n- [Application configuration](configuration.md)\n- [Packages and runtime](packages-and-runtime.md)\n- [Transport schemas](schemas/)\n\n## Required Before Cutover\n\nThe target generator must also emit database and browser route/feature references plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.\n`;
+}
+
+/** Registry metadata required to render one application configuration field. */
+export interface ConfigurationDocumentationInput {
+    readonly allowedValues: readonly string[] | null;
+    readonly browserExposure: "none" | "presence-only" | "value";
+    readonly defaultValue: string | null;
+    readonly description: string;
+    readonly environmentName: string;
+    readonly field: string;
+    readonly operationalEffect: string;
+    readonly overridePolicy: {
+        readonly development: boolean;
+        readonly test: boolean;
+    };
+    readonly restartRequired: boolean;
+    readonly roles: readonly string[];
+    readonly secret: boolean;
+    readonly validationConstraints: string;
+    readonly valueType: string;
+}
+
+function markdownTableCell(value: string): string {
+    const backslash = String.fromCodePoint(92);
+    return value
+        .replaceAll(backslash, String.raw`\\`)
+        .replaceAll("|", String.raw`\|`)
+        .replaceAll(/\r?\n/gu, " ");
+}
+
+function assertNonEmptyString(value: unknown, label: string): asserts value is string {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`Application configuration metadata is missing ${label}`);
+    }
+}
+
+function assertConfigurationMetadata(
+    entry: ConfigurationDocumentationInput,
+    index: number
+): void {
+    const prefix = `entry ${index}`;
+    assertNonEmptyString(entry.environmentName, `${prefix}.environmentName`);
+    assertNonEmptyString(entry.field, `${prefix}.field`);
+    assertNonEmptyString(entry.valueType, `${prefix}.valueType`);
+    assertNonEmptyString(entry.description, `${prefix}.description`);
+    assertNonEmptyString(entry.operationalEffect, `${prefix}.operationalEffect`);
+    assertNonEmptyString(entry.validationConstraints, `${prefix}.validationConstraints`);
+    if (entry.defaultValue !== null && typeof entry.defaultValue !== "string") {
+        throw new Error(
+            `Application configuration metadata is missing ${prefix}.defaultValue`
+        );
+    }
+    if (
+        entry.allowedValues !== null &&
+        (!Array.isArray(entry.allowedValues) ||
+            entry.allowedValues.length === 0 ||
+            entry.allowedValues.some(
+                (allowedValue) =>
+                    typeof allowedValue !== "string" || allowedValue.trim().length === 0
+            ))
+    ) {
+        throw new Error(
+            `Application configuration metadata is missing ${prefix}.allowedValues`
+        );
+    }
+    if (
+        !Array.isArray(entry.roles) ||
+        entry.roles.length === 0 ||
+        entry.roles.some((role) => typeof role !== "string" || role.trim().length === 0)
+    ) {
+        throw new Error(`Application configuration metadata is missing ${prefix}.roles`);
+    }
+    if (
+        entry.browserExposure !== "none" &&
+        entry.browserExposure !== "presence-only" &&
+        entry.browserExposure !== "value"
+    ) {
+        throw new Error(
+            `Application configuration metadata is missing ${prefix}.browserExposure`
+        );
+    }
+    if (
+        typeof entry.secret !== "boolean" ||
+        typeof entry.restartRequired !== "boolean" ||
+        typeof entry.overridePolicy !== "object" ||
+        entry.overridePolicy === null ||
+        typeof entry.overridePolicy.development !== "boolean" ||
+        typeof entry.overridePolicy.test !== "boolean"
+    ) {
+        throw new Error(`Application configuration metadata is incomplete at ${prefix}`);
+    }
+    if (entry.secret && entry.browserExposure === "value") {
+        throw new Error(
+            `Secret application configuration metadata permits browser value exposure at ${prefix}`
+        );
+    }
+}
+
+function allowedValuesLabel(entry: ConfigurationDocumentationInput): string {
+    if (entry.secret) return `\`${entry.valueType}\`; values withheld`;
+    if (entry.allowedValues === null) return `\`${entry.valueType}\``;
+    const allowedValues = entry.allowedValues
+        .map((value) => `\`${markdownTableCell(value)}\``)
+        .join(", ");
+    return `\`${entry.valueType}\`; ${allowedValues}`;
+}
+
+function defaultBehaviorLabel(entry: ConfigurationDocumentationInput): string {
+    if (entry.secret) {
+        return entry.defaultValue === null
+            ? "Required; value withheld"
+            : "Default value withheld";
+    }
+    if (entry.defaultValue === null) return "Required";
+    if (entry.defaultValue.length === 0) return "Empty by default";
+    return `\`${markdownTableCell(entry.defaultValue)}\``;
+}
+
+function browserExposureLabel(
+    exposure: ConfigurationDocumentationInput["browserExposure"]
+): string {
+    const labels = {
+        none: "None",
+        "presence-only": "Presence only",
+        value: "Value",
+    } as const;
+    return labels[exposure];
+}
+
+function overridePolicyLabel(
+    policy: ConfigurationDocumentationInput["overridePolicy"]
+): string {
+    if (policy.development && policy.test) return "Development and test";
+    if (policy.development) return "Development only";
+    if (policy.test) return "Test only";
+    return "None";
+}
+
+/**
+ * Renders immutable application configuration metadata as Markdown.
+ * @param registry Authoritative application configuration registry.
+ * @returns Generated Markdown document with secret values omitted.
+ */
+export function renderConfiguration(
+    registry: readonly ConfigurationDocumentationInput[]
+): string {
+    if (registry.length === 0) {
+        throw new Error("Application configuration registry is empty");
+    }
+
+    const environmentNames = new Set<string>();
+    const fields = new Set<string>();
+    for (const [index, entry] of registry.entries()) {
+        assertConfigurationMetadata(entry, index);
+        if (environmentNames.has(entry.environmentName) || fields.has(entry.field)) {
+            throw new Error("Application configuration registry contains duplicates");
+        }
+        environmentNames.add(entry.environmentName);
+        fields.add(entry.field);
+    }
+
+    const rows = registry
+        .toSorted((left, right) =>
+            left.environmentName.localeCompare(right.environmentName)
+        )
+        .map(
+            (entry) =>
+                `| \`${markdownTableCell(entry.environmentName)}\` | \`${markdownTableCell(entry.field)}\` | ${allowedValuesLabel(entry)} | ${markdownTableCell(entry.validationConstraints)} | ${defaultBehaviorLabel(entry)} | ${entry.roles.map((role) => `\`${markdownTableCell(role)}\``).join(", ")} | ${entry.secret ? "Yes" : "No"} | ${browserExposureLabel(entry.browserExposure)} | ${markdownTableCell(entry.operationalEffect)} | ${entry.restartRequired ? "Required" : "Not required"} | ${overridePolicyLabel(entry.overridePolicy)} | ${markdownTableCell(entry.description)} |`
+        );
+
+    return `${documentHeader("Application Configuration", "bun run docs:generate")}Configuration metadata is generated from the immutable application registry. For secret fields, values, enumerated values, and defaults are never rendered.\n\n| Environment | Typed field | Type / enumerated values | Validation constraints | Default behavior | Process roles | Secret | Browser exposure | Operational effect | Restart | Development/test overrides | Description |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /**

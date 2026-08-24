@@ -7,9 +7,10 @@
 - [tRPC procedures](procedures.md)
 - [Raw HTTP routes](raw-http.md)
 - [Realtime events](realtime-events.md)
+- [Application configuration](configuration.md)
 - [Packages and runtime](packages-and-runtime.md)
 - [Transport schemas](schemas/)
 
 ## Required Before Cutover
 
-The target generator must also emit database, configuration, and browser route/feature references plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.
+The target generator must also emit database and browser route/feature references plus OpenAPI 3.1 for true raw HTTP endpoints. The generated browser documentation route must render the complete checked-in set. These artifacts are future gates, not current generated outputs.

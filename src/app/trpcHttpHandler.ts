@@ -140,10 +140,11 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
         trustedProxyAddresses: options.trustedProxyAddresses,
     });
 
-    return async function handleTrpcHttpRequest(
+    async function dispatchTrpcHttpRequest(
         request: Request,
         requestUrl: URL,
-        bunServer: TrpcBunServer
+        bunServer: TrpcBunServer,
+        requestId: string
     ): Promise<Response> {
         if (!isAllowedRequestSource(request, options.browserOrigin)) {
             await cancelRequestBody(request, "tRPC request source is forbidden");
@@ -207,15 +208,39 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     mfaLoginLifecycle: options.mfaLoginLifecycle,
                     pendingLoginCredential: credentials.pendingLogin,
                     request: req,
+                    requestId,
                     responseHeaders: resHeaders,
                 }),
             endpoint: trpcEndpoint,
             maxBatchSize: trpcMaximumBatchSize,
+            onError: ({ error, path, type }) => {
+                if (
+                    error.code !== "INTERNAL_SERVER_ERROR" ||
+                    request.signal.aborted ||
+                    adapterRequest.signal.aborted
+                ) {
+                    return;
+                }
+                options.applicationRuntime.logger.error({
+                    component: "trpc",
+                    event: "trpc.request.defect",
+                    failure: error.cause ?? error,
+                    fields: {
+                        kind: "trpc-defect",
+                        path,
+                        procedureType: type,
+                    },
+                    outcome: "server-error",
+                    requestId,
+                });
+            },
             req: adapterRequest,
             responseMeta: () => ({
                 headers: new Headers({ "cache-control": "no-store" }),
             }),
             router: appRouter,
         });
-    };
+    }
+
+    return dispatchTrpcHttpRequest;
 }

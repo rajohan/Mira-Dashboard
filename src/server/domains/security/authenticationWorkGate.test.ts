@@ -5,6 +5,7 @@ import { Effect, Layer, Stream } from "effect";
 import { RealtimeEventPumpService } from "../../platform/realtime/eventPumpService.ts";
 import { createApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
 import { captureFailure } from "../../test/support/promise.ts";
+import { createTestStructuredLogger } from "../../test/support/requestContext.ts";
 import {
     AuthenticationUpstreamUnavailableError,
     AuthenticationWorkTimeoutError,
@@ -19,6 +20,8 @@ const inertRealtimeLayer = Layer.succeed(
     })
 );
 
+const testStructuredLogger = createTestStructuredLogger();
+
 describe("process authentication work service", () => {
     test("serializes TOTP work and rejects overflow beyond the bounded queue", async () => {
         const runtime = createApplicationRuntime({
@@ -26,6 +29,7 @@ describe("process authentication work service", () => {
                 totpMaximumConcurrent: 1,
                 totpMaximumQueued: 1,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const releaseFirst = Promise.withResolvers<void>();
@@ -69,6 +73,7 @@ describe("process authentication work service", () => {
                 passwordMaximumConcurrent: 1,
                 passwordMaximumQueued: 1,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const releaseFirst = Promise.withResolvers<void>();
@@ -107,6 +112,7 @@ describe("process authentication work service", () => {
 
     test("preserves password-work defects for the existing domain contract", async () => {
         const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const expected = new Error("simulated password implementation defect");
@@ -131,6 +137,7 @@ describe("process authentication work service", () => {
                 gatewayMaximumConcurrent: 1,
                 gatewayMaximumQueued: 0,
             },
+            logger: testStructuredLogger,
             realtimeEventPumpLayer: inertRealtimeLayer,
         });
         const pending = Promise.withResolvers<boolean>();
@@ -189,12 +196,14 @@ describe("process authentication work service", () => {
         expect(() =>
             createApplicationRuntime({
                 authenticationWork: { passwordMaximumConcurrent: 0 },
+                logger: testStructuredLogger,
                 realtimeEventPumpLayer: inertRealtimeLayer,
             })
         ).toThrow(RangeError);
         expect(() =>
             createApplicationRuntime({
                 authenticationWork: { totpMaximumQueued: -1 },
+                logger: testStructuredLogger,
                 realtimeEventPumpLayer: inertRealtimeLayer,
             })
         ).toThrow(RangeError);

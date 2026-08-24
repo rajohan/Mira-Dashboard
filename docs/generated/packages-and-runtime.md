@@ -79,6 +79,7 @@
 | `drizzle-kit` | `1.0.0-rc.4` | `1.0.0-rc.4` | development |
 | `eventsource` | `4.1.0` | `4.1.0` | development |
 | `happy-dom` | `^20.11.1` | `20.11.1` | development |
+| `jsonc-parser` | `3.3.1` | `3.3.1` | development |
 | `oxfmt` | `^0.62.0` | `0.62.0` | development |
 | `oxlint` | `^1.77.0` | `1.77.0` | development |
 | `oxlint-config-presets` | `^0.1.18` | `0.1.18` | development |

@@ -2,13 +2,15 @@ import { describe, expect, test } from "bun:test";
 
 import { addMilliseconds, secondsToMilliseconds } from "date-fns";
 import { maxTime } from "date-fns/constants";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Logger, Stream } from "effect";
 
 import {
     captureFailure,
     rejectOnAbort,
     withTestTimeout,
 } from "../../test/support/promise.ts";
+import { createTestStructuredLogger } from "../../test/support/requestContext.ts";
+import { createStructuredLogger } from "../observability/structuredLogger.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import {
     isRealtimeEventStreamError,
@@ -40,6 +42,8 @@ const stableLease: RenewableStreamLease = {
     renew: () => Promise.resolve(stableLease),
 };
 
+const testStructuredLogger = createTestStructuredLogger();
+
 function createInertApplicationRuntime() {
     const service = RealtimeEventPumpService.of({
         metricsSnapshot: Effect.die("Realtime metrics are not used"),
@@ -47,11 +51,79 @@ function createInertApplicationRuntime() {
         wake: Effect.void,
     });
     return createApplicationRuntime({
+        logger: testStructuredLogger,
         realtimeEventPumpLayer: Layer.succeed(RealtimeEventPumpService, service),
     });
 }
 
 describe("application Effect runtime", () => {
+    test("installs the supplied structured logger without the default Effect logger", async () => {
+        const lines: string[] = [];
+        const logger = createStructuredLogger({
+            identity: {
+                bun: "test-bun",
+                pid: 1,
+                processRole: "web",
+                release: "test-release",
+                service: "mira-dashboard",
+            },
+            sink: {
+                write(line) {
+                    lines.push(line);
+                },
+            },
+        });
+        let activeLoggerCount = 0;
+        let includesDefaultLogger = true;
+        const service = RealtimeEventPumpService.of({
+            metricsSnapshot: Effect.die("Realtime metrics are not used"),
+            stream: () =>
+                Stream.fromEffect(
+                    Effect.gen(function* () {
+                        const activeLoggers = yield* Effect.service(
+                            Logger.CurrentLoggers
+                        );
+                        activeLoggerCount = activeLoggers.size;
+                        includesDefaultLogger = activeLoggers.has(Logger.defaultLogger);
+                        yield* Effect.logInfo("ignored runtime logger message").pipe(
+                            Effect.annotateLogs({
+                                component: "application-runtime",
+                                event: "runtime.logger.connected",
+                            })
+                        );
+                        return delivery;
+                    })
+                ),
+            wake: Effect.void,
+        });
+        const runtime = createApplicationRuntime({
+            logger,
+            realtimeEventPumpLayer: Layer.succeed(RealtimeEventPumpService, service),
+        });
+
+        try {
+            await runtime.initialize();
+            expect(runtime.logger).toBe(logger);
+            const deliveries = await runtime.services.realtimeEvents.stream(
+                { afterId: "0" },
+                stableLease
+            );
+
+            expect(await Array.fromAsync(deliveries)).toEqual([delivery]);
+            expect(activeLoggerCount).toBe(1);
+            expect(includesDefaultLogger).toBe(false);
+            expect(lines).toHaveLength(1);
+            expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+                component: "application-runtime",
+                event: "runtime.logger.connected",
+                level: "info",
+            });
+            expect(lines[0]).not.toContain("ignored runtime logger message");
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
     test("coordinates graceful listener completion on the shared runtime", async () => {
         const runtime = createInertApplicationRuntime();
         const stopCalls: boolean[] = [];
@@ -263,7 +335,10 @@ describe("application Effect runtime", () => {
                     })
             )
         );
-        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: layer,
+        });
         const controller = new AbortController();
 
         await runtime.initialize();
@@ -302,7 +377,10 @@ describe("application Effect runtime", () => {
                 wake: Effect.void,
             })
         );
-        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: layer,
+        });
         let observed: unknown;
 
         try {
@@ -337,7 +415,10 @@ describe("application Effect runtime", () => {
                 wake: Effect.void,
             })
         );
-        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: layer,
+        });
         const controller = new AbortController();
         controller.abort();
 
@@ -375,7 +456,10 @@ describe("application Effect runtime", () => {
                 wake: Effect.void,
             })
         );
-        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: layer,
+        });
         const deliveries = await runtime.services.realtimeEvents.stream(
             { afterId: "0" },
             stableLease
@@ -419,7 +503,10 @@ describe("application Effect runtime", () => {
                 wake: Effect.void,
             })
         );
-        const runtime = createApplicationRuntime({ realtimeEventPumpLayer: layer });
+        const runtime = createApplicationRuntime({
+            logger: testStructuredLogger,
+            realtimeEventPumpLayer: layer,
+        });
         const controller = new AbortController();
         let iterator: AsyncIterator<RealtimeEventDelivery> | undefined;
 

@@ -20,6 +20,7 @@ import {
 } from "../support/automationHttpSystem.ts";
 import { postTrpcMutation, trpcData } from "../support/mfaHttpSystem.ts";
 import { withTestTimeout } from "../support/promise.ts";
+import { createTestStructuredLogger } from "../support/requestContext.ts";
 
 const leaseDurationMs = secondsToMilliseconds(1);
 const invalidationTimeoutMs = secondsToMilliseconds(5);
@@ -39,6 +40,7 @@ function createQuietAutomationRuntime() {
     });
     const realtimeEventPumpLayer = Layer.succeed(RealtimeEventPumpService, eventPump);
     return createApplicationRuntime({
+        logger: createTestStructuredLogger(),
         realtimeEventPumpLayer,
     });
 }

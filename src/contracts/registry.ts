@@ -3,6 +3,20 @@ import type * as v from "valibot";
 /** Schema type accepted by the contract documentation generator. */
 export type ContractSchema = v.GenericSchema;
 
+/** Exhaustive expected tRPC codes that procedures may intentionally expose. */
+export const contractErrorCodes = [
+    "BAD_REQUEST",
+    "CONFLICT",
+    "FORBIDDEN",
+    "NOT_FOUND",
+    "PRECONDITION_FAILED",
+    "SERVICE_UNAVAILABLE",
+    "TOO_MANY_REQUESTS",
+    "UNAUTHORIZED",
+] as const;
+
+export type ContractErrorCode = (typeof contractErrorCodes)[number];
+
 /** Stable client-action reasons attached to authentication policy errors. */
 export const contractAuthenticationErrorReasons = [
     "mfa_enrollment_required",
@@ -43,7 +57,7 @@ export interface ProcedureContract {
     access: ContractAccess;
     domain: string;
     errorReasons?: readonly ContractAuthenticationErrorReason[];
-    errors: readonly string[];
+    errors: readonly ContractErrorCode[];
     input: ContractSchema;
     inputSchemaId: string;
     kind: "mutation" | "query" | "subscription";
@@ -52,6 +66,33 @@ export interface ProcedureContract {
     outputSchemaId: string;
     summary: string;
     transport: ProcedureTransportContract;
+}
+
+/**
+ * Fails closed for duplicate procedure names or error metadata that is
+ * unregistered, duplicated, or unstable.
+ * @param contracts Procedure names and their declared expected error codes.
+ */
+export function assertProcedureContractErrors(
+    contracts: readonly Pick<ProcedureContract, "errors" | "name">[]
+): void {
+    const names = contracts.map(({ name }) => name);
+    if (new Set(names).size !== names.length) {
+        throw new TypeError("Procedure contract names must be unique");
+    }
+    const registered = new Set<string>(contractErrorCodes);
+    for (const contract of contracts) {
+        const errors = [...contract.errors];
+        if (
+            errors.some((error) => !registered.has(error)) ||
+            new Set(errors).size !== errors.length ||
+            errors.join("\n") !== errors.toSorted().join("\n")
+        ) {
+            throw new TypeError(
+                `Procedure contract errors are invalid for ${contract.name}`
+            );
+        }
+    }
 }
 
 /** Response-body contract for one raw HTTP operation. */

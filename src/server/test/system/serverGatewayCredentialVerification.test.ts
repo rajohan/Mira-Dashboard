@@ -19,6 +19,7 @@ import {
     postTrpcMutation,
 } from "../support/mfaHttpSystem.ts";
 import { captureFailure } from "../support/promise.ts";
+import { createTestStructuredLogger } from "../support/requestContext.ts";
 
 const validGatewayCredential = "valid-gateway-token";
 
@@ -27,6 +28,7 @@ function createGatewayVerificationRuntime() {
         "Gateway verification system tests do not use realtime metrics"
     );
     return createApplicationRuntime({
+        logger: createTestStructuredLogger(),
         realtimeEventPumpLayer: Layer.succeed(
             RealtimeEventPumpService,
             RealtimeEventPumpService.of({

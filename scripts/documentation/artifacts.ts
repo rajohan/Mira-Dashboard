@@ -5,9 +5,11 @@ import {
 } from "../../src/contracts/contractRegistry.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
 import { bunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
+import { applicationConfigurationRegistry } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { convertContractSchema, type SchemaTypeMode } from "./jsonSchema.ts";
 import {
     type PackageDocumentationInput,
+    renderConfiguration,
     renderGeneratedIndex,
     renderPackagesAndRuntime,
     renderProcedures,
@@ -87,6 +89,7 @@ export function buildDocumentationArtifacts(
     };
     const artifacts = new Map<string, string>([
         ["README.md", renderGeneratedIndex()],
+        ["configuration.md", renderConfiguration(applicationConfigurationRegistry)],
         ["packages-and-runtime.md", renderPackagesAndRuntime(packageInput)],
         ["procedures.md", renderProcedures(procedureContracts)],
         ["raw-http.md", renderRawHttp(rawHttpContracts)],
