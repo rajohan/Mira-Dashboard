@@ -176,7 +176,7 @@
         "src/server/domains/cache/operationalSignals.test.ts": 44,
         "src/worker/docker/composeDiscovery.test.ts": 44,
         "scripts/development/developmentMigrationIdentity.test.ts": 42,
-        "scripts/delivery/provisionManagedContainerLogs.test.ts": 42,
+        "scripts/delivery/migrateManagedApplicationLogs.test.ts": 42,
         "src/server/domains/docker/service.test.ts": 42,
         "src/server/test/system/serverAuthenticationResponses.test.ts": 40,
         "src/worker/docker/registryClient.test.ts": 39,
