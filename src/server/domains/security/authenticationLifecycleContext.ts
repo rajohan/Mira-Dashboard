@@ -17,9 +17,7 @@ import type {
 } from "./authenticationLifecycleTypes.ts";
 import {
     browserSessionAbsoluteDurationMs,
-    browserSessionIdleDurationDefaultMs,
-    browserSessionIdleDurationMaximumMs,
-    browserSessionIdleDurationMinimumMs,
+    parseBrowserSessionIdleDurationMs,
 } from "./authenticationPolicy.ts";
 import {
     authenticationWorkBudgetMaximumUnits,
@@ -41,11 +39,7 @@ import {
     type GatewayAuthenticationWorkFailure,
 } from "./authenticationWorkGate.ts";
 import { hashDashboardPassword, verifyDashboardPassword } from "./password.ts";
-import {
-    recentAuthenticationWindowDefaultMs,
-    recentAuthenticationWindowMaximumMs,
-    recentAuthenticationWindowMinimumMs,
-} from "./recentAuthentication.ts";
+import { parseRecentAuthenticationWindowMs } from "./recentAuthentication.ts";
 import type {
     BrowserSessionRecord,
     SecurityUserRecord,
@@ -131,15 +125,9 @@ export function createAuthenticationLifecycleContext(
         }
         return value;
     };
-    const sessionIdleDurationMs =
-        dependencies.sessionIdleDurationMs ?? browserSessionIdleDurationDefaultMs;
-    if (
-        !Number.isSafeInteger(sessionIdleDurationMs) ||
-        sessionIdleDurationMs < browserSessionIdleDurationMinimumMs ||
-        sessionIdleDurationMs > browserSessionIdleDurationMaximumMs
-    ) {
-        throw new RangeError("Session idle duration is invalid");
-    }
+    const sessionIdleDurationMs = parseBrowserSessionIdleDurationMs(
+        dependencies.sessionIdleDurationMs
+    );
     const gatewayVerificationTimeoutMs =
         dependencies.gatewayVerificationTimeoutMs ?? gatewayVerificationTimeoutDefaultMs;
     if (
@@ -156,15 +144,9 @@ export function createAuthenticationLifecycleContext(
             authenticationWorkBudgetMaximumUnits,
             authenticationWorkBudgetWindowMs
         );
-    const recentAuthenticationWindowMs =
-        dependencies.recentAuthenticationWindowMs ?? recentAuthenticationWindowDefaultMs;
-    if (
-        !Number.isSafeInteger(recentAuthenticationWindowMs) ||
-        recentAuthenticationWindowMs < recentAuthenticationWindowMinimumMs ||
-        recentAuthenticationWindowMs > recentAuthenticationWindowMaximumMs
-    ) {
-        throw new RangeError("Recent-auth window is invalid");
-    }
+    const recentAuthenticationWindowMs = parseRecentAuthenticationWindowMs(
+        dependencies.recentAuthenticationWindowMs
+    );
 
     const context: AuthenticationLifecycleContext = {
         accountPasswordRateLimitTargets: (userId) => [

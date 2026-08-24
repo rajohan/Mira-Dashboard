@@ -6,6 +6,10 @@ import {
     MfaAccountStateChangedError,
 } from "./accountLifecycleState.ts";
 import type { MfaAccountLifecycleService } from "./accountLifecycleTypes.ts";
+import {
+    possessionFactorSnapshotIsConsistent,
+    readAccountPossessionFactorSnapshot,
+} from "./accountWebAuthnState.ts";
 
 type RemoveFactorOperation = Pick<MfaAccountLifecycleService, "removeTotpFactor">;
 
@@ -16,6 +20,7 @@ type RemoveFactorPort = Pick<
     | "recentAuthenticationWindowMs"
     | "repository"
     | "sessionIdleDurationMs"
+    | "webAuthnRelyingParty"
 >;
 
 /**
@@ -31,6 +36,7 @@ export function createRemoveTotpFactorOperation(
         recentAuthenticationWindowMs,
         repository,
         sessionIdleDurationMs,
+        webAuthnRelyingParty,
     } = context;
 
     return Object.freeze({
@@ -55,7 +61,20 @@ export function createRemoveTotpFactorOperation(
                     input.factorId
                 );
                 if (factor === undefined) return { status: "not-found" };
-                if (unit.countConfirmedTotpFactors(identity.userId) <= 1) {
+                const factors = readAccountPossessionFactorSnapshot(
+                    unit,
+                    identity.userId
+                );
+                if (!possessionFactorSnapshotIsConsistent(factors)) {
+                    throw new MfaAccountStateChangedError();
+                }
+                const usableAfterRemoval =
+                    factors.confirmedTotpCount -
+                    1 +
+                    factors.webAuthnCredentials.filter(
+                        ({ rpId }) => rpId === webAuthnRelyingParty?.rpId
+                    ).length;
+                if (usableAfterRemoval <= 0) {
                     return { status: "final-factor" };
                 }
                 const removed = unit.deleteTotpFactor(identity.userId, factor.id);

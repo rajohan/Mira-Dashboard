@@ -18,7 +18,7 @@ const bearerHeaderSchema = v.pipe(
     v.transform((header) => header.slice("Bearer ".length))
 );
 
-export type CookieValue =
+type CookieValue =
     | { readonly kind: "absent" }
     | { readonly kind: "invalid" }
     | { readonly kind: "present"; readonly value: string };
@@ -43,7 +43,7 @@ export interface AuthenticationHttpCredentials {
     readonly pendingLogin: PendingLoginCredential;
 }
 
-export function readSingleCookie(request: Request, name: string): CookieValue {
+function readSingleCookie(request: Request, name: string): CookieValue {
     const header = request.headers.get("cookie");
     if (header === null) return { kind: "absent" };
 

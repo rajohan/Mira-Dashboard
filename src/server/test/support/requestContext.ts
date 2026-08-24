@@ -7,8 +7,8 @@ import type {
 import type { AuthenticationLifecycleService } from "../../domains/security/authenticationLifecycle.ts";
 import type { AuthenticationResolution } from "../../domains/security/authenticationResolution.ts";
 import type {
+    AuthenticationVerificationWorkOptions,
     AuthenticationWorkRuntimeService,
-    GatewayAuthenticationWorkOptions,
 } from "../../domains/security/authenticationWorkGate.ts";
 import type { MfaAccountLifecycleService } from "../../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../../domains/security/mfa/loginLifecycle.ts";
@@ -105,22 +105,25 @@ const inertAuthenticationWorkGate: AuthenticationWorkRuntimeService["passwordWor
         },
     });
 
+function runInertAuthenticationVerification<T>(
+    work: (signal: AbortSignal) => Promise<T>,
+    options: AuthenticationVerificationWorkOptions<T>
+): Promise<T> {
+    options.signal?.throwIfAborted();
+    const decision = options.onBeforeStart?.() ?? { proceed: true as const };
+    if (!decision.proceed) return Promise.resolve(decision.value);
+    const signal = options.signal ?? new AbortController().signal;
+    return work(signal).then((value) => {
+        options.onResultBeforeRelease?.(value);
+        return value;
+    });
+}
+
 const inertAuthenticationRuntime: AuthenticationWorkRuntimeService = Object.freeze({
     passwordWorkGate: inertAuthenticationWorkGate,
     totpWorkGate: inertAuthenticationWorkGate,
-    runGatewayVerification<T>(
-        work: (signal: AbortSignal) => Promise<T>,
-        options: GatewayAuthenticationWorkOptions<T>
-    ) {
-        options.signal?.throwIfAborted();
-        const decision = options.onBeforeStart?.() ?? { proceed: true as const };
-        if (!decision.proceed) return Promise.resolve(decision.value);
-        const signal = options.signal ?? new AbortController().signal;
-        return work(signal).then((value) => {
-            options.onResultBeforeRelease?.(value);
-            return value;
-        });
-    },
+    runGatewayVerification: runInertAuthenticationVerification,
+    runWebAuthnVerification: runInertAuthenticationVerification,
 });
 
 /**
@@ -159,11 +162,20 @@ export function createTestMfaAccountLifecycleService(
     overrides: Partial<MfaAccountLifecycleService> = {}
 ): MfaAccountLifecycleService {
     return Object.freeze({
+        beginWebAuthnEnrollment:
+            overrides.beginWebAuthnEnrollment ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        beginWebAuthnStepUp:
+            overrides.beginWebAuthnStepUp ??
+            (() => Promise.resolve({ status: "session-changed" })),
         beginTotpEnrollment:
             overrides.beginTotpEnrollment ??
             (() => Promise.resolve({ status: "session-changed" })),
         confirmTotpEnrollment:
             overrides.confirmTotpEnrollment ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        confirmWebAuthnEnrollment:
+            overrides.confirmWebAuthnEnrollment ??
             (() => Promise.resolve({ status: "session-changed" })),
         disableMfa:
             overrides.disableMfa ??
@@ -173,6 +185,8 @@ export function createTestMfaAccountLifecycleService(
             (() => Promise.resolve({ status: "session-changed" })),
         removeTotpFactor:
             overrides.removeTotpFactor ?? (() => ({ status: "session-changed" })),
+        removeWebAuthnCredential:
+            overrides.removeWebAuthnCredential ?? (() => ({ status: "session-changed" })),
         rotateRecoveryCodes:
             overrides.rotateRecoveryCodes ??
             (() => Promise.resolve({ status: "session-changed" })),
@@ -181,6 +195,9 @@ export function createTestMfaAccountLifecycleService(
             (() => Promise.resolve({ status: "session-changed" })),
         stepUpTotp:
             overrides.stepUpTotp ??
+            (() => Promise.resolve({ status: "session-changed" })),
+        stepUpWebAuthn:
+            overrides.stepUpWebAuthn ??
             (() => Promise.resolve({ status: "session-changed" })),
         summary: overrides.summary ?? (() => ({ status: "session-changed" })),
     });
@@ -198,11 +215,17 @@ export function createTestMfaLoginLifecycleService(
         beginPendingLogin:
             overrides.beginPendingLogin ??
             (() => ({ status: "mfa-unavailable" as const })),
+        beginWebAuthnLogin:
+            overrides.beginWebAuthnLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
         completeRecoveryLogin:
             overrides.completeRecoveryLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
         completeTotpLogin:
             overrides.completeTotpLogin ??
+            (() => Promise.resolve({ status: "service-unavailable" })),
+        completeWebAuthnLogin:
+            overrides.completeWebAuthnLogin ??
             (() => Promise.resolve({ status: "service-unavailable" })),
         pendingLoginSummary: overrides.pendingLoginSummary ?? ((): undefined => {}),
         revokePendingLogin: overrides.revokePendingLogin ?? (() => false),

@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
+import { recoveryCodeCount } from "../shared/recoveryCodePolicy.ts";
 import {
     hasUniqueArrayItems,
     nonnegativeSafeIntegerSchema,
@@ -15,27 +16,38 @@ import {
 import type { ProcedureContract } from "./registry.ts";
 import { securityRecordIdSchema } from "./security.ts";
 import { emptyInputSchema } from "./system.ts";
+import {
+    webAuthnAuthenticationInputSchema,
+    webAuthnAuthenticationOptionsSchema,
+    webAuthnRegistrationOptionsSchema,
+    webAuthnRegistrationResponseSchema,
+    webAuthnRpIdSchema,
+    webAuthnTransportListSchema,
+} from "./webauthn.ts";
 
 const accountSecurityTimestampSchema = timestampMillisecondsSchema(
     "Account-security timestamp is invalid"
 );
 
-export const recoveryCodeCount = 10;
-export const totpFactorLabelMaximumLength = 128;
-export const totpFactorMaximumPerUser = 4;
+export { recoveryCodeCount } from "../shared/recoveryCodePolicy.ts";
+export const factorLabelMaximumLength = 128;
+export const possessionFactorMaximumPerUser = 4;
+export const totpFactorLabelMaximumLength = factorLabelMaximumLength;
+export const totpFactorMaximumPerUser = possessionFactorMaximumPerUser;
+export const webAuthnCredentialMaximumPerUser = possessionFactorMaximumPerUser;
 
 /**
  * Validates the Unicode code-point and control-safety policy for factor labels.
  * @param value Candidate factor label.
  * @returns Whether the label satisfies the account-security policy.
  */
-export function isValidTotpFactorLabel(value: string): boolean {
+export function isValidFactorLabel(value: string): boolean {
     let codePointLength = 0;
     let hasNonWhitespaceCodePoint = false;
     for (const codePoint of value) {
         codePointLength += 1;
         if (
-            codePointLength > totpFactorLabelMaximumLength ||
+            codePointLength > factorLabelMaximumLength ||
             /\p{Cc}|\p{Cf}/u.test(codePoint)
         ) {
             return false;
@@ -45,20 +57,35 @@ export function isValidTotpFactorLabel(value: string): boolean {
     return codePointLength > 0 && hasNonWhitespaceCodePoint;
 }
 
-export const totpFactorLabelSchema = v.pipe(
-    v.string("TOTP factor label is invalid"),
-    v.minLength(1, "TOTP factor label is invalid"),
+export const isValidTotpFactorLabel = isValidFactorLabel;
+
+export const factorLabelSchema = v.pipe(
+    v.string("Factor label is invalid"),
+    v.minLength(1, "Factor label is invalid"),
     // Valibot counts UTF-16 code units; two units per allowed code point keeps
     // the full astral-character budget reachable before the domain predicate.
-    v.maxLength(totpFactorLabelMaximumLength * 2, "TOTP factor label is invalid"),
-    v.check(isValidTotpFactorLabel, "TOTP factor label is invalid")
+    v.maxLength(factorLabelMaximumLength * 2, "Factor label is invalid"),
+    v.check(isValidFactorLabel, "Factor label is invalid")
 );
+
+export const totpFactorLabelSchema = factorLabelSchema;
 
 export const totpFactorSummarySchema = v.strictObject({
     confirmedAtMs: accountSecurityTimestampSchema,
     createdAtMs: accountSecurityTimestampSchema,
     id: securityRecordIdSchema,
     label: totpFactorLabelSchema,
+});
+
+export const webAuthnCredentialSummarySchema = v.strictObject({
+    backedUp: v.boolean(),
+    createdAtMs: accountSecurityTimestampSchema,
+    deviceType: v.picklist(["multiDevice", "singleDevice"]),
+    id: securityRecordIdSchema,
+    label: factorLabelSchema,
+    lastUsedAtMs: v.optional(accountSecurityTimestampSchema),
+    transports: webAuthnTransportListSchema,
+    usable: v.boolean(),
 });
 
 const staleVerificationSchema = v.strictObject({
@@ -82,23 +109,34 @@ const totpFactorListSchema = v.pipe(
     v.maxLength(totpFactorMaximumPerUser, "TOTP factor list is outside its budget")
 );
 
+const webAuthnCredentialListSchema = v.pipe(
+    v.array(webAuthnCredentialSummarySchema, "WebAuthn credential list is invalid"),
+    v.minLength(1, "Enabled MFA requires a WebAuthn credential"),
+    v.maxLength(
+        webAuthnCredentialMaximumPerUser,
+        "WebAuthn credential list is outside its budget"
+    )
+);
+
 const disabledMfaSummarySchema = v.strictObject({
     enabled: v.literal(false),
-    methods: v.tuple([]),
+    methods: v.strictTuple([]),
     recoveryCodesRemaining: v.literal(0),
-    totpFactors: v.tuple([]),
+    totpFactors: v.strictTuple([]),
+    webAuthnCredentials: v.strictTuple([]),
 });
-const enabledMfaWithoutRecoverySchema = v.strictObject({
+const enabledTotpMfaWithoutRecoverySchema = v.strictObject({
     enabled: v.literal(true),
     enabledAtMs: accountSecurityTimestampSchema,
-    methods: v.tuple([v.literal("totp")]),
+    methods: v.strictTuple([v.literal("totp")]),
     recoveryCodesRemaining: v.literal(0),
     totpFactors: totpFactorListSchema,
+    webAuthnCredentials: v.strictTuple([]),
 });
-const enabledMfaWithRecoverySchema = v.strictObject({
+const enabledTotpMfaWithRecoverySchema = v.strictObject({
     enabled: v.literal(true),
     enabledAtMs: accountSecurityTimestampSchema,
-    methods: v.tuple([v.literal("recovery"), v.literal("totp")]),
+    methods: v.strictTuple([v.literal("recovery"), v.literal("totp")]),
     recoveryCodesRemaining: v.pipe(
         v.number("Recovery-code count is invalid"),
         v.safeInteger("Recovery-code count is invalid"),
@@ -106,12 +144,94 @@ const enabledMfaWithRecoverySchema = v.strictObject({
         v.maxValue(recoveryCodeCount, "Recovery-code count is invalid")
     ),
     totpFactors: totpFactorListSchema,
+    webAuthnCredentials: v.strictTuple([]),
 });
 
-export const accountMfaSummarySchema = v.union([
+const enabledWebAuthnMfaWithoutRecoverySchema = v.strictObject({
+    enabled: v.literal(true),
+    enabledAtMs: accountSecurityTimestampSchema,
+    methods: v.strictTuple([v.literal("webauthn")]),
+    recoveryCodesRemaining: v.literal(0),
+    totpFactors: v.strictTuple([]),
+    webAuthnCredentials: webAuthnCredentialListSchema,
+});
+
+const enabledWebAuthnMfaWithRecoverySchema = v.strictObject({
+    enabled: v.literal(true),
+    enabledAtMs: accountSecurityTimestampSchema,
+    methods: v.strictTuple([v.literal("recovery"), v.literal("webauthn")]),
+    recoveryCodesRemaining: v.pipe(
+        v.number("Recovery-code count is invalid"),
+        v.safeInteger("Recovery-code count is invalid"),
+        v.minValue(1, "Recovery-code count is invalid"),
+        v.maxValue(recoveryCodeCount, "Recovery-code count is invalid")
+    ),
+    totpFactors: v.strictTuple([]),
+    webAuthnCredentials: webAuthnCredentialListSchema,
+});
+
+const enabledMixedMfaWithoutRecoverySchema = v.strictObject({
+    enabled: v.literal(true),
+    enabledAtMs: accountSecurityTimestampSchema,
+    methods: v.strictTuple([v.literal("totp"), v.literal("webauthn")]),
+    recoveryCodesRemaining: v.literal(0),
+    totpFactors: totpFactorListSchema,
+    webAuthnCredentials: webAuthnCredentialListSchema,
+});
+
+const enabledMixedMfaWithRecoverySchema = v.strictObject({
+    enabled: v.literal(true),
+    enabledAtMs: accountSecurityTimestampSchema,
+    methods: v.strictTuple([
+        v.literal("recovery"),
+        v.literal("totp"),
+        v.literal("webauthn"),
+    ]),
+    recoveryCodesRemaining: v.pipe(
+        v.number("Recovery-code count is invalid"),
+        v.safeInteger("Recovery-code count is invalid"),
+        v.minValue(1, "Recovery-code count is invalid"),
+        v.maxValue(recoveryCodeCount, "Recovery-code count is invalid")
+    ),
+    totpFactors: totpFactorListSchema,
+    webAuthnCredentials: webAuthnCredentialListSchema,
+});
+
+const accountMfaSummaryUnionSchema = v.union([
     disabledMfaSummarySchema,
-    enabledMfaWithoutRecoverySchema,
-    enabledMfaWithRecoverySchema,
+    enabledTotpMfaWithoutRecoverySchema,
+    enabledTotpMfaWithRecoverySchema,
+    enabledWebAuthnMfaWithoutRecoverySchema,
+    enabledWebAuthnMfaWithRecoverySchema,
+    enabledMixedMfaWithoutRecoverySchema,
+    enabledMixedMfaWithRecoverySchema,
+]);
+
+/**
+ * Checks the aggregate factor cap across TOTP and WebAuthn inventories.
+ * @param value Structurally valid account MFA summary.
+ * @returns Whether the combined possession-factor count is within policy.
+ */
+export function hasValidPossessionFactorInventory(
+    value: v.InferOutput<typeof accountMfaSummaryUnionSchema>
+): boolean {
+    return (
+        value.totpFactors.length + value.webAuthnCredentials.length <=
+        possessionFactorMaximumPerUser
+    );
+}
+
+export const accountMfaSummarySchema = v.pipe(
+    accountMfaSummaryUnionSchema,
+    v.check(
+        hasValidPossessionFactorInventory,
+        "Possession factor inventory is outside its budget"
+    )
+);
+
+export const webAuthnAvailabilitySchema = v.variant("available", [
+    v.strictObject({ available: v.literal(false) }),
+    v.strictObject({ available: v.literal(true), rpId: webAuthnRpIdSchema }),
 ]);
 
 export const accountSecuritySummarySchema = v.strictObject({
@@ -121,6 +241,7 @@ export const accountSecuritySummarySchema = v.strictObject({
         mfa: recentVerificationSchema,
         password: recentVerificationSchema,
     }),
+    webAuthn: webAuthnAvailabilitySchema,
 });
 
 export const passwordReauthenticationInputSchema = v.strictObject({
@@ -154,6 +275,19 @@ export const recoveryStepUpResultSchema = v.strictObject({
         v.minValue(0, "Recovery-code count is invalid"),
         v.maxValue(recoveryCodeCount - 1, "Recovery-code count is invalid")
     ),
+    session: authSessionSummarySchema,
+    verifiedAtMs: accountSecurityTimestampSchema,
+});
+
+export const beginWebAuthnStepUpResultSchema = v.strictObject({
+    expiresAtMs: accountSecurityTimestampSchema,
+    options: webAuthnAuthenticationOptionsSchema,
+});
+
+export const webAuthnStepUpInputSchema = webAuthnAuthenticationInputSchema;
+
+export const webAuthnStepUpResultSchema = v.strictObject({
+    method: v.literal("webauthn"),
     session: authSessionSummarySchema,
     verifiedAtMs: accountSecurityTimestampSchema,
 });
@@ -216,12 +350,49 @@ export const confirmTotpEnrollmentResultSchema = v.variant("enabledNow", [
     firstTotpFactorResultSchema,
 ]);
 
+export const beginWebAuthnEnrollmentResultSchema = v.strictObject({
+    expiresAtMs: accountSecurityTimestampSchema,
+    options: webAuthnRegistrationOptionsSchema,
+});
+
+export const confirmWebAuthnEnrollmentInputSchema = v.strictObject({
+    label: v.optional(factorLabelSchema),
+    response: webAuthnRegistrationResponseSchema,
+});
+
+const additionalWebAuthnCredentialResultSchema = v.strictObject({
+    credential: webAuthnCredentialSummarySchema,
+    enabledNow: v.literal(false),
+});
+
+const firstWebAuthnCredentialResultSchema = v.strictObject({
+    credential: webAuthnCredentialSummarySchema,
+    enabledNow: v.literal(true),
+    recoveryCodes: recoveryCodeSetSchema,
+    revokedSessions: nonnegativeSafeIntegerSchema("Revoked-session count is invalid"),
+    session: authSessionSummarySchema,
+});
+
+export const confirmWebAuthnEnrollmentResultSchema = v.variant("enabledNow", [
+    additionalWebAuthnCredentialResultSchema,
+    firstWebAuthnCredentialResultSchema,
+]);
+
 export const removeTotpFactorInputSchema = v.strictObject({
     factorId: securityRecordIdSchema,
 });
 
 export const removeTotpFactorResultSchema = v.strictObject({
     factorId: securityRecordIdSchema,
+    removed: v.literal(true),
+});
+
+export const removeWebAuthnCredentialInputSchema = v.strictObject({
+    credentialId: securityRecordIdSchema,
+});
+
+export const removeWebAuthnCredentialResultSchema = v.strictObject({
+    credentialId: securityRecordIdSchema,
     removed: v.literal(true),
 });
 
@@ -330,6 +501,40 @@ export const accountSecurityProcedureContracts = [
         transport: authenticationMutationTransport,
     },
     {
+        access: sessionAccess,
+        domain: "account-security",
+        errorReasons: ["mfa_enrollment_required"],
+        errors: ["CONFLICT", "FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+        input: emptyInputSchema,
+        inputSchemaId: "accountSecurity.beginWebAuthnStepUp.input",
+        kind: "mutation",
+        name: "accountSecurity.beginWebAuthnStepUp",
+        output: beginWebAuthnStepUpResultSchema,
+        outputSchemaId: "accountSecurity.beginWebAuthnStepUp.output",
+        summary: "Creates one session-bound WebAuthn step-up challenge.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: sessionAccess,
+        domain: "account-security",
+        errorReasons: ["mfa_enrollment_required"],
+        errors: [
+            "CONFLICT",
+            "FORBIDDEN",
+            "SERVICE_UNAVAILABLE",
+            "TOO_MANY_REQUESTS",
+            "UNAUTHORIZED",
+        ],
+        input: webAuthnStepUpInputSchema,
+        inputSchemaId: "accountSecurity.stepUpWebAuthn.input",
+        kind: "mutation",
+        name: "accountSecurity.stepUpWebAuthn",
+        output: webAuthnStepUpResultSchema,
+        outputSchemaId: "accountSecurity.stepUpWebAuthn.output",
+        summary: "Consumes a WebAuthn challenge and rotates the verified session.",
+        transport: authenticationMutationTransport,
+    },
+    {
         access: factorEnrollmentAccess,
         domain: "account-security",
         errorReasons: ["step_up_required"],
@@ -364,6 +569,41 @@ export const accountSecurityProcedureContracts = [
         transport: authenticationMutationTransport,
     },
     {
+        access: factorEnrollmentAccess,
+        domain: "account-security",
+        errorReasons: ["step_up_required"],
+        errors: ["CONFLICT", "FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+        input: emptyInputSchema,
+        inputSchemaId: "accountSecurity.beginWebAuthnEnrollment.input",
+        kind: "mutation",
+        name: "accountSecurity.beginWebAuthnEnrollment",
+        output: beginWebAuthnEnrollmentResultSchema,
+        outputSchemaId: "accountSecurity.beginWebAuthnEnrollment.output",
+        summary: "Creates one session-bound roaming-key registration challenge.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: factorEnrollmentAccess,
+        domain: "account-security",
+        errorReasons: ["step_up_required"],
+        errors: [
+            "CONFLICT",
+            "FORBIDDEN",
+            "SERVICE_UNAVAILABLE",
+            "TOO_MANY_REQUESTS",
+            "UNAUTHORIZED",
+        ],
+        input: confirmWebAuthnEnrollmentInputSchema,
+        inputSchemaId: "accountSecurity.confirmWebAuthnEnrollment.input",
+        kind: "mutation",
+        name: "accountSecurity.confirmWebAuthnEnrollment",
+        output: confirmWebAuthnEnrollmentResultSchema,
+        outputSchemaId: "accountSecurity.confirmWebAuthnEnrollment.output",
+        summary:
+            "Verifies and stores a WebAuthn credential, enabling MFA when it is first.",
+        transport: authenticationMutationTransport,
+    },
+    {
         access: recentMfaAccess,
         domain: "account-security",
         errorReasons: recentMfaErrorReasons,
@@ -375,6 +615,21 @@ export const accountSecurityProcedureContracts = [
         output: removeTotpFactorResultSchema,
         outputSchemaId: "accountSecurity.removeTotpFactor.output",
         summary: "Removes a TOTP factor without removing the final possession factor.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: recentMfaAccess,
+        domain: "account-security",
+        errorReasons: recentMfaErrorReasons,
+        errors: ["CONFLICT", "FORBIDDEN", "NOT_FOUND", "UNAUTHORIZED"],
+        input: removeWebAuthnCredentialInputSchema,
+        inputSchemaId: "accountSecurity.removeWebAuthnCredential.input",
+        kind: "mutation",
+        name: "accountSecurity.removeWebAuthnCredential",
+        output: removeWebAuthnCredentialResultSchema,
+        outputSchemaId: "accountSecurity.removeWebAuthnCredential.output",
+        summary:
+            "Removes a WebAuthn credential without removing the final possession factor.",
         transport: authenticationMutationTransport,
     },
     {
@@ -408,6 +663,12 @@ export const accountSecurityProcedureContracts = [
 ] as const satisfies readonly ProcedureContract[];
 
 export type AccountSecuritySummary = v.InferOutput<typeof accountSecuritySummarySchema>;
+export type BeginWebAuthnEnrollmentResult = v.InferOutput<
+    typeof beginWebAuthnEnrollmentResultSchema
+>;
+export type BeginWebAuthnStepUpResult = v.InferOutput<
+    typeof beginWebAuthnStepUpResultSchema
+>;
 export type BeginTotpEnrollmentInput = v.InferOutput<
     typeof beginTotpEnrollmentInputSchema
 >;
@@ -419,6 +680,12 @@ export type ConfirmTotpEnrollmentInput = v.InferOutput<
 >;
 export type ConfirmTotpEnrollmentResult = v.InferOutput<
     typeof confirmTotpEnrollmentResultSchema
+>;
+export type ConfirmWebAuthnEnrollmentInput = v.InferOutput<
+    typeof confirmWebAuthnEnrollmentInputSchema
+>;
+export type ConfirmWebAuthnEnrollmentResult = v.InferOutput<
+    typeof confirmWebAuthnEnrollmentResultSchema
 >;
 export type DisableMfaInput = v.InferOutput<typeof disableMfaInputSchema>;
 export type DisableMfaResult = v.InferOutput<typeof disableMfaResultSchema>;
@@ -433,6 +700,12 @@ export type RecoveryStepUpInput = v.InferOutput<typeof recoveryStepUpInputSchema
 export type RecoveryStepUpResult = v.InferOutput<typeof recoveryStepUpResultSchema>;
 export type RemoveTotpFactorInput = v.InferOutput<typeof removeTotpFactorInputSchema>;
 export type RemoveTotpFactorResult = v.InferOutput<typeof removeTotpFactorResultSchema>;
+export type RemoveWebAuthnCredentialInput = v.InferOutput<
+    typeof removeWebAuthnCredentialInputSchema
+>;
+export type RemoveWebAuthnCredentialResult = v.InferOutput<
+    typeof removeWebAuthnCredentialResultSchema
+>;
 export type RotateRecoveryCodesResult = v.InferOutput<
     typeof rotateRecoveryCodesResultSchema
 >;
@@ -440,3 +713,8 @@ export type TotpEnrollment = v.InferOutput<typeof totpEnrollmentSchema>;
 export type TotpFactorSummary = v.InferOutput<typeof totpFactorSummarySchema>;
 export type TotpStepUpInput = v.InferOutput<typeof totpStepUpInputSchema>;
 export type TotpStepUpResult = v.InferOutput<typeof totpStepUpResultSchema>;
+export type WebAuthnCredentialSummary = v.InferOutput<
+    typeof webAuthnCredentialSummarySchema
+>;
+export type WebAuthnStepUpInput = v.InferOutput<typeof webAuthnStepUpInputSchema>;
+export type WebAuthnStepUpResult = v.InferOutput<typeof webAuthnStepUpResultSchema>;

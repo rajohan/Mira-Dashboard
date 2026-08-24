@@ -1,6 +1,6 @@
 import { addMilliseconds, getTime } from "date-fns";
 
-import { totpFactorMaximumPerUser } from "../../../../contracts/accountSecurity.ts";
+import { possessionFactorMaximumPerUser } from "../../../../contracts/accountSecurity.ts";
 import { totpEnrollmentLifetimeMaximumMs } from "../../../database/schema/userTotpFactors.ts";
 import { sessionActor } from "../authenticationSession.ts";
 import type { MfaAccountLifecycleContext } from "./accountLifecycleContext.ts";
@@ -68,8 +68,9 @@ export function createBeginTotpEnrollmentOperation(
                     return { status: "step-up-required" as const };
                 }
                 if (
-                    reader.countConfirmedTotpFactors(identity.userId) >=
-                    totpFactorMaximumPerUser
+                    reader.countConfirmedTotpFactors(identity.userId) +
+                        reader.countWebAuthnCredentials(identity.userId) >=
+                    possessionFactorMaximumPerUser
                 ) {
                     return { status: "factor-limit" as const };
                 }
@@ -122,8 +123,9 @@ export function createBeginTotpEnrollmentOperation(
                         return { status: "step-up-required" as const };
                     }
                     if (
-                        unit.countConfirmedTotpFactors(identity.userId) >=
-                        totpFactorMaximumPerUser
+                        unit.countConfirmedTotpFactors(identity.userId) +
+                            unit.countWebAuthnCredentials(identity.userId) >=
+                        possessionFactorMaximumPerUser
                     ) {
                         return { status: "factor-limit" as const };
                     }

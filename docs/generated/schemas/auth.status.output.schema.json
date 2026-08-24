@@ -41,12 +41,13 @@
               "items": {
                 "enum": [
                   "recovery",
-                  "totp"
+                  "totp",
+                  "webauthn"
                 ],
                 "type": "string"
               },
               "minItems": 1,
-              "maxItems": 2,
+              "maxItems": 3,
               "uniqueItems": true
             },
             "username": {
@@ -89,12 +90,13 @@
               "items": {
                 "enum": [
                   "recovery",
-                  "totp"
+                  "totp",
+                  "webauthn"
                 ],
                 "type": "string"
               },
               "minItems": 1,
-              "maxItems": 2,
+              "maxItems": 3,
               "uniqueItems": true
             },
             "username": {
@@ -123,7 +125,8 @@
               "enum": [
                 "password",
                 "recovery",
-                "totp"
+                "totp",
+                "webauthn"
               ],
               "type": "string"
             },

@@ -15,9 +15,11 @@ import { DrizzleMfaLifecycleUnitOfWork } from "./lifecycleRepositoryUnitOfWork.t
 export { pendingLoginAttemptMaximum } from "./lifecycleRepositoryTypes.ts";
 export type {
     AdvanceTotpLastUsedStepInput,
+    AdvanceWebAuthnCredentialInput,
     ConfirmTotpFactorInput,
     ConsumePendingLoginInput,
     ConsumeRecoveryCodeInput,
+    ConsumeWebAuthnChallengeInput,
     DeleteSessionForRotationInput,
     IncrementPendingLoginAttemptInput,
     MfaLifecycleReader,
@@ -34,6 +36,10 @@ export type {
     MfaTotpFactorInsert,
     MfaTotpFactorRecord,
     MfaUserRecord,
+    MfaWebAuthnChallengeInsert,
+    MfaWebAuthnChallengeRecord,
+    MfaWebAuthnCredentialInsert,
+    MfaWebAuthnCredentialRecord,
     PruneMfaRateLimitBucketsInput,
     PruneMfaSessionsInput,
     UpdateUserMfaStateInput,
@@ -59,15 +65,22 @@ export function createMfaLifecycleRepository(
         countConfirmedTotpFactors: reader.countConfirmedTotpFactors.bind(reader),
         countTotpFactors: reader.countTotpFactors.bind(reader),
         countUnusedRecoveryCodes: reader.countUnusedRecoveryCodes.bind(reader),
+        countWebAuthnCredentials: reader.countWebAuthnCredentials.bind(reader),
         findConfirmedTotpFactor: reader.findConfirmedTotpFactor.bind(reader),
         findPendingLogin: reader.findPendingLogin.bind(reader),
+        findPendingLoginWebAuthnChallenge:
+            reader.findPendingLoginWebAuthnChallenge.bind(reader),
         findRateLimitBucket: reader.findRateLimitBucket.bind(reader),
         findRecoveryCode: reader.findRecoveryCode.bind(reader),
         findSession: reader.findSession.bind(reader),
         findTotpFactor: reader.findTotpFactor.bind(reader),
         findUserById: reader.findUserById.bind(reader),
+        findSessionWebAuthnChallenge: reader.findSessionWebAuthnChallenge.bind(reader),
+        findWebAuthnCredential: reader.findWebAuthnCredential.bind(reader),
+        findWebAuthnCredentialById: reader.findWebAuthnCredentialById.bind(reader),
         listConfirmedTotpFactors: reader.listConfirmedTotpFactors.bind(reader),
         listRecoveryCodes: reader.listRecoveryCodes.bind(reader),
+        listWebAuthnCredentials: reader.listWebAuthnCredentials.bind(reader),
         withImmediateTransaction<T>(
             callback: (unit: MfaLifecycleUnitOfWork) => SynchronousResult<T> | never
         ): T {

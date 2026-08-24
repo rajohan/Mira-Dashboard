@@ -7,10 +7,13 @@ import type {
 import { createPendingLoginOperations } from "./loginPendingLifecycle.ts";
 import { createRecoveryLoginOperation } from "./loginRecoveryProof.ts";
 import { createTotpLoginOperation } from "./loginTotpProof.ts";
+import { createWebAuthnLoginChallengeOperation } from "./loginWebAuthnChallenge.ts";
+import { createWebAuthnLoginProofOperation } from "./loginWebAuthnProof.ts";
 
 export type {
     BeginPendingLoginInput,
     BeginPendingLoginResult,
+    BeginWebAuthnLoginLifecycleResult,
     CompleteMfaLoginResult,
     MfaLoginLifecycleDependencies,
     MfaLoginLifecycleService,
@@ -29,5 +32,7 @@ export function createMfaLoginLifecycleService(
         ...createPendingLoginOperations(context),
         ...createRecoveryLoginOperation(context, coordinator),
         ...createTotpLoginOperation(context, coordinator),
+        ...createWebAuthnLoginChallengeOperation(context),
+        ...createWebAuthnLoginProofOperation(context, coordinator),
     });
 }

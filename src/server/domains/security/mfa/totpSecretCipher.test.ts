@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
-import { captureFailure } from "../../../test/support/promise.ts";
 import {
-    createTotpSecretCipher,
     encryptedTotpSecretEnvelopeSchema,
     totpEncryptionKeyIdSchema,
-} from "./totpSecretCipher.ts";
+} from "../../../shared/totpSecretFormat.ts";
+import { captureFailure } from "../../../test/support/promise.ts";
+import { createTotpSecretCipher } from "./totpSecretCipher.ts";
 
 const userId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 const factorId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
@@ -155,7 +155,7 @@ describe("TOTP secret cipher", () => {
         }
     });
 
-    test("exports persistence validators for key ids and envelopes", async () => {
+    test("uses the shared persistence validators for key ids and envelopes", async () => {
         const cipher = await createTotpSecretCipher(keyRing(), {
             randomBytes: () => new Uint8Array(12).fill(6),
         });

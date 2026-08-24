@@ -6,7 +6,7 @@ import {
     AuthenticationWorkCapacityError,
     AuthenticationWorkService,
     authenticationWorkLayer,
-    type GatewayAuthenticationWorkOptions,
+    type AuthenticationVerificationWorkOptions,
 } from "../../domains/security/authenticationWorkGate.ts";
 import type { RealtimeEventDelivery } from "../realtime/eventPump.ts";
 import type { RealtimeEventStreamOptions } from "../realtime/eventPumpService.ts";
@@ -130,7 +130,7 @@ export function createApplicationRuntime(
             }),
             runGatewayVerification<T>(
                 work: (signal: AbortSignal) => Promise<T>,
-                workOptions: GatewayAuthenticationWorkOptions<T>
+                workOptions: AuthenticationVerificationWorkOptions<T>
             ) {
                 return runAuthenticationEffect(
                     AuthenticationWorkService.pipe(
@@ -139,6 +139,27 @@ export function createApplicationRuntime(
                                 work,
                                 workOptions.timeoutMs,
                                 workOptions.onBeforeStart,
+                                workOptions.onCancellationBeforeRelease,
+                                workOptions.onFailureBeforeRelease,
+                                workOptions.onResultBeforeRelease
+                            )
+                        )
+                    ),
+                    workOptions.signal
+                );
+            },
+            runWebAuthnVerification<T>(
+                work: (signal: AbortSignal) => Promise<T>,
+                workOptions: AuthenticationVerificationWorkOptions<T>
+            ) {
+                return runAuthenticationEffect(
+                    AuthenticationWorkService.pipe(
+                        Effect.flatMap((service) =>
+                            service.runWebAuthnVerification(
+                                work,
+                                workOptions.timeoutMs,
+                                workOptions.onBeforeStart,
+                                workOptions.onCancellationBeforeRelease,
                                 workOptions.onFailureBeforeRelease,
                                 workOptions.onResultBeforeRelease
                             )

@@ -3,8 +3,9 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import {
-    isValidTotpFactorLabel,
-    totpFactorLabelMaximumLength,
+    accountMfaSummarySchema,
+    factorLabelMaximumLength,
+    isValidFactorLabel,
     totpFactorLabelSchema,
 } from "../../src/contracts/accountSecurity.ts";
 import {
@@ -14,6 +15,10 @@ import {
     hasValidAuthPasswordLength,
     isValidBrowserSessionUserAgent,
 } from "../../src/contracts/auth.ts";
+import {
+    webAuthnAuthenticationResponseSchema,
+    webAuthnTransportListSchema,
+} from "../../src/contracts/webauthn.ts";
 import { hasUniqueArrayItems } from "../../src/shared/validation.ts";
 import { convertContractSchema } from "./jsonSchema.ts";
 
@@ -35,6 +40,61 @@ describe("contract JSON Schema conversion", () => {
         expect(convertContractSchema(schema, "test.unique", "input")).toMatchObject({
             type: "array",
             uniqueItems: true,
+        });
+    });
+
+    test("documents WebAuthn transport bounds while keeping sorting runtime-only", () => {
+        expect(
+            convertContractSchema(
+                webAuthnTransportListSchema,
+                "test.webAuthnTransports",
+                "output"
+            )
+        ).toMatchObject({
+            items: {
+                enum: ["ble", "cable", "hybrid", "internal", "nfc", "smart-card", "usb"],
+            },
+            maxItems: 7,
+            type: "array",
+            uniqueItems: true,
+        });
+
+        const undocumentedTransform = v.pipe(
+            v.array(v.string()),
+            v.transform((values) => values.toSorted())
+        );
+        expect(() =>
+            convertContractSchema(
+                undocumentedTransform,
+                "test.unknownTransform",
+                "output"
+            )
+        ).toThrow('The "transform" action cannot be converted to JSON Schema.');
+    });
+
+    test("documents runtime-only WebAuthn identifier equality", () => {
+        expect(
+            convertContractSchema(
+                webAuthnAuthenticationResponseSchema,
+                "test.webAuthnAuthenticationResponse",
+                "input"
+            )
+        ).toMatchObject({
+            $comment:
+                "Live Valibot validation additionally requires id and rawId to match exactly.",
+        });
+    });
+
+    test("documents the runtime-only aggregate possession-factor cap", () => {
+        expect(
+            convertContractSchema(
+                accountMfaSummarySchema,
+                "test.accountMfaSummary",
+                "output"
+            )
+        ).toMatchObject({
+            $comment:
+                "Live Valibot validation additionally limits the combined TOTP and WebAuthn possession-factor inventory to four.",
         });
     });
 
@@ -74,7 +134,7 @@ describe("contract JSON Schema conversion", () => {
             "input"
         );
         expect(document).toMatchObject({
-            maxLength: totpFactorLabelMaximumLength,
+            maxLength: factorLabelMaximumLength,
             minLength: 1,
             type: "string",
         });
@@ -87,18 +147,18 @@ describe("contract JSON Schema conversion", () => {
             for (const _codePoint of value) codePointLength += 1;
             return (
                 codePointLength >= 1 &&
-                codePointLength <= totpFactorLabelMaximumLength &&
+                codePointLength <= factorLabelMaximumLength &&
                 documentedPattern.test(value)
             );
         };
         const expectParity = (value: string): void => {
-            expect(documentAccepts(value)).toBe(isValidTotpFactorLabel(value));
+            expect(documentAccepts(value)).toBe(isValidFactorLabel(value));
         };
 
         for (const value of [
             "Primary authenticator",
             ` ${String.fromCodePoint(parseHexadecimalCodePoint("00A0"))}Authenticator `,
-            "😀".repeat(totpFactorLabelMaximumLength),
+            "😀".repeat(factorLabelMaximumLength),
             "\uD800",
             "",
             " ",
@@ -112,8 +172,8 @@ describe("contract JSON Schema conversion", () => {
                 parseHexadecimalCodePoint("205F"),
                 parseHexadecimalCodePoint("3000")
             ),
-            "a".repeat(totpFactorLabelMaximumLength + 1),
-            "😀".repeat(totpFactorLabelMaximumLength + 1),
+            "a".repeat(factorLabelMaximumLength + 1),
+            "😀".repeat(factorLabelMaximumLength + 1),
         ]) {
             expectParity(value);
         }

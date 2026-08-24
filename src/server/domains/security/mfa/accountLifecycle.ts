@@ -10,19 +10,25 @@ import { createAccountRecoveryCodeRotationOperation } from "./accountRecoveryCod
 import { createAccountRecoveryStepUpOperation } from "./accountRecoveryStepUp.ts";
 import { createAccountSecuritySummaryOperation } from "./accountSecuritySummary.ts";
 import { createAccountTotpStepUpOperation } from "./accountTotpStepUp.ts";
+import { createAccountWebAuthnOperations } from "./accountWebAuthnOperations.ts";
 
 export type {
     AccountSecuritySummaryResult,
     BeginTotpEnrollmentResult,
+    BeginWebAuthnEnrollmentResult,
+    BeginWebAuthnStepUpResult,
     ConfirmTotpEnrollmentResult,
+    ConfirmWebAuthnEnrollmentResult,
     DisableMfaResult,
     MfaAccountLifecycleDependencies,
     MfaAccountLifecycleService,
     PasswordReauthenticationResult,
     RecoveryStepUpResult,
     RemoveTotpFactorResult,
+    RemoveWebAuthnCredentialResult,
     RotateRecoveryCodesResult,
     TotpStepUpResult,
+    WebAuthnStepUpResult,
 } from "./accountLifecycleTypes.ts";
 
 /**
@@ -42,5 +48,6 @@ export function createMfaAccountLifecycleService(
         ...createAccountRecoveryStepUpOperation(context),
         ...createAccountSecuritySummaryOperation(context),
         ...createAccountTotpStepUpOperation(context),
+        ...createAccountWebAuthnOperations(context),
     });
 }

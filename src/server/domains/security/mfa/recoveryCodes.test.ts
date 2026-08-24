@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { recoveryCodeCount } from "../../../../shared/recoveryCodePolicy.ts";
 import {
-    dashboardRecoveryCodeCount,
     dashboardRecoveryCodeHashInput,
     generateDashboardRecoveryCodes,
     parseDashboardRecoveryCode,
@@ -22,9 +22,9 @@ describe("Dashboard recovery-code material", () => {
             },
         });
 
-        expect(generated).toHaveLength(dashboardRecoveryCodeCount);
+        expect(generated).toHaveLength(recoveryCodeCount);
         expect(new Set(generated.map((code) => code.selector)).size).toBe(
-            dashboardRecoveryCodeCount
+            recoveryCodeCount
         );
         expect(generated[0]?.code).toBe(
             "00000000000000000000000000000001-00000000000000000000000000000002"

@@ -2,7 +2,7 @@ import * as v from "valibot";
 
 import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
 
-const securityAuditReasons = new Set([
+const securityAuditReasonValues = [
     "gateway_unavailable",
     "identity_changed",
     "invalid_credentials",
@@ -12,20 +12,16 @@ const securityAuditReasons = new Set([
     "recovery_pending_invalid",
     "totp_invalid",
     "totp_pending_invalid",
-]);
+    "webauthn_configuration_mismatch",
+    "webauthn_invalid",
+    "webauthn_pending_invalid",
+] as const;
+type SecurityAuditReason = (typeof securityAuditReasonValues)[number];
+const securityAuditReasons: ReadonlySet<string> = new Set(securityAuditReasonValues);
 
 export interface SecurityAuditMetadata {
-    readonly reason?:
-        | "gateway_unavailable"
-        | "identity_changed"
-        | "invalid_credentials"
-        | "invalid_current_password"
-        | "invalid_gateway"
-        | "recovery_invalid"
-        | "recovery_pending_invalid"
-        | "totp_invalid"
-        | "totp_pending_invalid";
-    readonly method?: "password" | "recovery" | "totp";
+    readonly reason?: SecurityAuditReason;
+    readonly method?: "password" | "recovery" | "totp" | "webauthn";
     readonly pendingMfa?: boolean;
     readonly revoked?: boolean;
     readonly revokedSessions?: number;
@@ -76,7 +72,8 @@ export function serializeRedactedAuditMetadata(
     if (
         metadata.method === "password" ||
         metadata.method === "recovery" ||
-        metadata.method === "totp"
+        metadata.method === "totp" ||
+        metadata.method === "webauthn"
     ) {
         sanitized.method = metadata.method;
     }

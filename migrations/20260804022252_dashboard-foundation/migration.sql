@@ -21,9 +21,30 @@ CREATE TABLE `audit_events` (
 	CONSTRAINT "audit_events_target_check" CHECK(length("target_type") BETWEEN 1 AND 64 AND instr("target_type", char(0)) = 0 AND substr("target_type", 1, 1) GLOB '[a-z0-9]' AND "target_type" = lower("target_type") AND "target_type" NOT GLOB '*[^a-z0-9._-]*' AND length("target_id") BETWEEN 1 AND 256 AND instr("target_id", char(0)) = 0 AND length(trim("target_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)
 ) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
+CREATE TABLE `auth_challenges` (
+	`authentication_version` integer NOT NULL,
+	`challenge` text NOT NULL,
+	`config_fingerprint` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`id` text PRIMARY KEY,
+	`pending_login_id` text,
+	`purpose` text NOT NULL,
+	`session_id` text,
+	CONSTRAINT `fk_auth_challenges_pending_login_id_auth_pending_logins_id_fk` FOREIGN KEY (`pending_login_id`) REFERENCES `auth_pending_logins`(`id`) ON DELETE CASCADE,
+	CONSTRAINT `fk_auth_challenges_session_id_auth_sessions_id_fk` FOREIGN KEY (`session_id`) REFERENCES `auth_sessions`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "auth_challenges_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "auth_challenges_challenge_check" CHECK(length("challenge") BETWEEN 32 AND 256 AND instr("challenge", char(0)) = 0 AND "challenge" NOT GLOB '*[^A-Za-z0-9_-]*' AND (length("challenge") % 4 = 0 OR (length("challenge") % 4 = 2 AND substr("challenge", -1, 1) GLOB '[AQgw]') OR (length("challenge") % 4 = 3 AND substr("challenge", -1, 1) GLOB '[AEIMQUYcgkosw048]'))),
+	CONSTRAINT "auth_challenges_config_fingerprint_check" CHECK(length("config_fingerprint") = 64 AND instr("config_fingerprint", char(0)) = 0 AND "config_fingerprint" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_challenges_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "auth_challenges_binding_check" CHECK(("purpose" = 'login' AND "pending_login_id" IS NOT NULL AND "session_id" IS NULL) OR ("purpose" IN ('registration', 'step-up') AND "session_id" IS NOT NULL AND "pending_login_id" IS NULL)),
+	CONSTRAINT "auth_challenges_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at" AND "expires_at" <= "created_at" + 300000)
+) STRICT;
+--> statement-breakpoint
 CREATE TABLE `auth_pending_logins` (
 	`allows_recovery` integer NOT NULL,
 	`allows_totp` integer NOT NULL,
+	`allows_webauthn` integer NOT NULL,
 	`attempt_count` integer DEFAULT 0 NOT NULL,
 	`authentication_version` integer NOT NULL,
 	`created_at` integer NOT NULL,
@@ -37,7 +58,7 @@ CREATE TABLE `auth_pending_logins` (
 	`validator_version` integer DEFAULT 1 NOT NULL,
 	CONSTRAINT `fk_auth_pending_logins_replaced_session_id_auth_sessions_id_fk` FOREIGN KEY (`replaced_session_id`) REFERENCES `auth_sessions`(`id`) ON DELETE SET NULL,
 	CONSTRAINT `fk_auth_pending_logins_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-	CONSTRAINT "auth_pending_logins_methods_check" CHECK("allows_recovery" IN (0, 1) AND "allows_totp" IN (0, 1) AND ("allows_recovery" + "allows_totp") >= 1),
+	CONSTRAINT "auth_pending_logins_methods_check" CHECK("allows_recovery" IN (0, 1) AND "allows_totp" IN (0, 1) AND "allows_webauthn" IN (0, 1) AND ("allows_recovery" + "allows_totp" + "allows_webauthn") >= 1),
 	CONSTRAINT "auth_pending_logins_attempt_count_check" CHECK("attempt_count" BETWEEN 0 AND 8),
 	CONSTRAINT "auth_pending_logins_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "auth_pending_logins_id_check" CHECK(length("id") = 32 AND instr("id", char(0)) = 0 AND "id" NOT GLOB '*[^0-9a-f]*'),
@@ -77,7 +98,7 @@ CREATE TABLE `auth_sessions` (
 	`validator_version` integer DEFAULT 1 NOT NULL,
 	CONSTRAINT `fk_auth_sessions_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
 	CONSTRAINT "auth_sessions_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
-	CONSTRAINT "auth_sessions_auth_method_check" CHECK("auth_method" IN ('password', 'recovery', 'totp')),
+	CONSTRAINT "auth_sessions_auth_method_check" CHECK("auth_method" IN ('password', 'recovery', 'totp', 'webauthn')),
 	CONSTRAINT "auth_sessions_expiry_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at"),
 	CONSTRAINT "auth_sessions_authentication_time_check" CHECK("authenticated_at" BETWEEN 0 AND 8640000000000000 AND "authenticated_at" <= "created_at"),
 	CONSTRAINT "auth_sessions_last_seen_check" CHECK("last_seen_at" BETWEEN 0 AND 8640000000000000 AND "last_seen_at" >= "created_at" AND "last_seen_at" < "expires_at"),
@@ -278,6 +299,33 @@ CREATE TABLE `user_totp_factors` (
 	CONSTRAINT "user_totp_factors_confirmation_check" CHECK(("confirmed_at" IS NULL AND "last_used_step" IS NULL) OR ("confirmed_at" IS NOT NULL AND "last_used_step" IS NOT NULL AND "confirmed_at" BETWEEN 0 AND 8640000000000000 AND "confirmed_at" >= "created_at" AND "confirmed_at" < "enrollment_expires_at" AND "last_used_step" BETWEEN 0 AND 9007199254740991))
 ) STRICT;
 --> statement-breakpoint
+CREATE TABLE `user_webauthn_credentials` (
+	`algorithm` integer NOT NULL,
+	`backed_up` integer NOT NULL,
+	`counter` integer NOT NULL,
+	`created_at` integer NOT NULL,
+	`credential_id` text NOT NULL,
+	`device_type` text NOT NULL,
+	`id` text PRIMARY KEY,
+	`label` text NOT NULL,
+	`last_used_at` integer,
+	`public_key` blob NOT NULL,
+	`rp_id` text NOT NULL,
+	`transport_mask` integer NOT NULL,
+	`user_id` text NOT NULL,
+	CONSTRAINT `fk_user_webauthn_credentials_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "user_webauthn_credentials_algorithm_check" CHECK("algorithm" = -7),
+	CONSTRAINT "user_webauthn_credentials_counter_check" CHECK("counter" BETWEEN 0 AND 4294967295),
+	CONSTRAINT "user_webauthn_credentials_credential_id_check" CHECK(length("credential_id") BETWEEN 8 AND 1024 AND instr("credential_id", char(0)) = 0 AND "credential_id" NOT GLOB '*[^A-Za-z0-9_-]*' AND (length("credential_id") % 4 = 0 OR (length("credential_id") % 4 = 2 AND substr("credential_id", -1, 1) GLOB '[AQgw]') OR (length("credential_id") % 4 = 3 AND substr("credential_id", -1, 1) GLOB '[AEIMQUYcgkosw048]'))),
+	CONSTRAINT "user_webauthn_credentials_device_state_check" CHECK("backed_up" IN (0, 1) AND "device_type" IN ('singleDevice', 'multiDevice') AND NOT ("device_type" = 'singleDevice' AND "backed_up" = 1)),
+	CONSTRAINT "user_webauthn_credentials_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "user_webauthn_credentials_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "user_webauthn_credentials_public_key_check" CHECK(length("public_key") BETWEEN 1 AND 2048),
+	CONSTRAINT "user_webauthn_credentials_rp_id_check" CHECK(length("rp_id") BETWEEN 1 AND 253 AND instr("rp_id", char(0)) = 0 AND length(trim("rp_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0),
+	CONSTRAINT "user_webauthn_credentials_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND ("last_used_at" IS NULL OR ("last_used_at" BETWEEN 0 AND 8640000000000000 AND "last_used_at" >= "created_at"))),
+	CONSTRAINT "user_webauthn_credentials_transport_mask_check" CHECK("transport_mask" BETWEEN 0 AND 127)
+) STRICT;
+--> statement-breakpoint
 CREATE TABLE `users` (
 	`authentication_version` integer DEFAULT 1 NOT NULL,
 	`created_at` integer NOT NULL,
@@ -299,6 +347,9 @@ CREATE TABLE `users` (
 CREATE INDEX `audit_events_occurred_id_idx` ON `audit_events` (`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `audit_events_request_occurred_idx` ON `audit_events` (`request_id`,`occurred_at`,`id`) WHERE "audit_events"."request_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `audit_events_target_occurred_idx` ON `audit_events` (`target_type`,`target_id`,`occurred_at`,`id`);--> statement-breakpoint
+CREATE INDEX `auth_challenges_expires_at_idx` ON `auth_challenges` (`expires_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `auth_challenges_pending_login_purpose_unique` ON `auth_challenges` (`pending_login_id`,`purpose`) WHERE ("auth_challenges"."pending_login_id" is not null);--> statement-breakpoint
+CREATE UNIQUE INDEX `auth_challenges_session_purpose_unique` ON `auth_challenges` (`session_id`,`purpose`) WHERE ("auth_challenges"."session_id" is not null);--> statement-breakpoint
 CREATE INDEX `auth_pending_logins_expires_at_idx` ON `auth_pending_logins` (`expires_at`,`id`);--> statement-breakpoint
 CREATE INDEX `auth_pending_logins_replaced_session_id_idx` ON `auth_pending_logins` (`replaced_session_id`);--> statement-breakpoint
 CREATE INDEX `auth_pending_logins_user_expires_at_idx` ON `auth_pending_logins` (`user_id`,`expires_at`,`id`);--> statement-breakpoint
@@ -327,6 +378,8 @@ CREATE INDEX `user_recovery_codes_user_used_created_idx` ON `user_recovery_codes
 CREATE INDEX `user_totp_factors_pending_user_expiry_idx` ON `user_totp_factors` (`user_id`,`enrollment_expires_at`,`id`) WHERE ("user_totp_factors"."confirmed_at" is null);--> statement-breakpoint
 CREATE INDEX `user_totp_factors_confirmed_user_created_idx` ON `user_totp_factors` (`user_id`,`created_at`,`id`) WHERE ("user_totp_factors"."confirmed_at" is not null);--> statement-breakpoint
 CREATE INDEX `user_totp_factors_pending_expiry_idx` ON `user_totp_factors` (`enrollment_expires_at`,`id`) WHERE ("user_totp_factors"."confirmed_at" is null);--> statement-breakpoint
+CREATE UNIQUE INDEX `user_webauthn_credentials_credential_id_unique` ON `user_webauthn_credentials` (`credential_id`);--> statement-breakpoint
+CREATE INDEX `user_webauthn_credentials_user_created_idx` ON `user_webauthn_credentials` (`user_id`,`created_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`);--> statement-breakpoint
 CREATE TRIGGER reports_validate_metadata_insert
 BEFORE INSERT ON reports

@@ -4,15 +4,15 @@ import * as v from "valibot";
 
 import { nonnegativeSafeIntegerSchema } from "../../../shared/validation.ts";
 import {
+    encryptedTotpSecretEnvelopeSchema,
+    totpEncryptionKeyIdSchema,
+} from "../../shared/totpSecretFormat.ts";
+import {
     totpEnrollmentLifetimeMaximumMs,
     userTotpFactors,
 } from "../schema/userTotpFactors.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
-import {
-    controlSafeSecurityLabelSchema,
-    encryptedTotpSecretEnvelopeSchema,
-    mfaSecretKeyIdSchema,
-} from "./securityScalars.ts";
+import { controlSafeSecurityLabelSchema } from "./securityScalars.ts";
 
 function totpFactorStateIsValid(factor: {
     readonly confirmedAt?: Date | null;
@@ -45,7 +45,7 @@ const totpFactorRefinements = {
     id: uuidV7TextSchema,
     label: () => controlSafeSecurityLabelSchema,
     lastUsedStep: () => v.nullable(nonnegativeSafeIntegerSchema("TOTP step is invalid")),
-    secretKeyId: () => mfaSecretKeyIdSchema,
+    secretKeyId: () => totpEncryptionKeyIdSchema,
     userId: uuidV7TextSchema,
 };
 

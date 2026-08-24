@@ -1,8 +1,10 @@
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
+import { authChallenges } from "../../../database/schema/authChallenges.ts";
 import { authPendingLogins } from "../../../database/schema/authPendingLogins.ts";
 import { userRecoveryCodes } from "../../../database/schema/userRecoveryCodes.ts";
 import { userTotpFactors } from "../../../database/schema/userTotpFactors.ts";
+import { userWebAuthnCredentials } from "../../../database/schema/userWebAuthnCredentials.ts";
 import { DrizzleAuthenticationRateLimitStore } from "../authenticationRateLimitStore.ts";
 import { DrizzleBrowserSessionStore } from "../browserSessionStore.ts";
 import type { SecurityPersistenceDatabase } from "../securityPersistenceTypes.ts";
@@ -13,6 +15,8 @@ import {
     parsePendingLogin,
     parseRecoveryCode,
     parseTotpFactor,
+    parseWebAuthnChallenge,
+    parseWebAuthnCredential,
 } from "./lifecycleRepositoryRecords.ts";
 import type {
     MfaLifecycleReader,
@@ -22,6 +26,8 @@ import type {
     MfaSessionRecord,
     MfaTotpFactorRecord,
     MfaUserRecord,
+    MfaWebAuthnChallengeRecord,
+    MfaWebAuthnCredentialRecord,
 } from "./lifecycleRepositoryTypes.ts";
 
 export class DrizzleMfaLifecycleReader implements MfaLifecycleReader {
@@ -71,6 +77,16 @@ export class DrizzleMfaLifecycleReader implements MfaLifecycleReader {
         );
     }
 
+    countWebAuthnCredentials(userId: string): number {
+        return checkedMfaCount(
+            this.database
+                .select({ count: sql<number>`count(*)` })
+                .from(userWebAuthnCredentials)
+                .where(eq(userWebAuthnCredentials.userId, userId))
+                .get()
+        );
+    }
+
     findConfirmedTotpFactor(
         userId: string,
         factorId: string
@@ -96,6 +112,22 @@ export class DrizzleMfaLifecycleReader implements MfaLifecycleReader {
             .where(eq(authPendingLogins.id, id))
             .get();
         return row === undefined ? undefined : parsePendingLogin(row);
+    }
+
+    findPendingLoginWebAuthnChallenge(
+        pendingLoginId: string
+    ): MfaWebAuthnChallengeRecord | undefined {
+        const row = this.database
+            .select()
+            .from(authChallenges)
+            .where(
+                and(
+                    eq(authChallenges.pendingLoginId, pendingLoginId),
+                    eq(authChallenges.purpose, "login")
+                )
+            )
+            .get();
+        return row === undefined ? undefined : parseWebAuthnChallenge(row);
     }
 
     findRateLimitBucket(bucketKey: string): MfaRateLimitBucket | undefined {
@@ -138,6 +170,57 @@ export class DrizzleMfaLifecycleReader implements MfaLifecycleReader {
         return this.users.findUserById(userId);
     }
 
+    findSessionWebAuthnChallenge(
+        sessionId: string,
+        purpose: "registration" | "step-up"
+    ): MfaWebAuthnChallengeRecord | undefined {
+        const row = this.database
+            .select()
+            .from(authChallenges)
+            .where(
+                and(
+                    eq(authChallenges.sessionId, sessionId),
+                    eq(authChallenges.purpose, purpose)
+                )
+            )
+            .get();
+        return row === undefined ? undefined : parseWebAuthnChallenge(row);
+    }
+
+    findWebAuthnCredential(
+        userId: string,
+        credentialId: string
+    ): MfaWebAuthnCredentialRecord | undefined {
+        const row = this.database
+            .select()
+            .from(userWebAuthnCredentials)
+            .where(
+                and(
+                    eq(userWebAuthnCredentials.userId, userId),
+                    eq(userWebAuthnCredentials.credentialId, credentialId)
+                )
+            )
+            .get();
+        return row === undefined ? undefined : parseWebAuthnCredential(row);
+    }
+
+    findWebAuthnCredentialById(
+        userId: string,
+        id: string
+    ): MfaWebAuthnCredentialRecord | undefined {
+        const row = this.database
+            .select()
+            .from(userWebAuthnCredentials)
+            .where(
+                and(
+                    eq(userWebAuthnCredentials.userId, userId),
+                    eq(userWebAuthnCredentials.id, id)
+                )
+            )
+            .get();
+        return row === undefined ? undefined : parseWebAuthnCredential(row);
+    }
+
     listConfirmedTotpFactors(userId: string, limit: number): MfaTotpFactorRecord[] {
         return this.database
             .select()
@@ -163,5 +246,22 @@ export class DrizzleMfaLifecycleReader implements MfaLifecycleReader {
             .limit(checkedMfaListLimit(limit))
             .all()
             .map((row) => parseRecoveryCode(row));
+    }
+
+    listWebAuthnCredentials(
+        userId: string,
+        limit: number
+    ): MfaWebAuthnCredentialRecord[] {
+        return this.database
+            .select()
+            .from(userWebAuthnCredentials)
+            .where(eq(userWebAuthnCredentials.userId, userId))
+            .orderBy(
+                asc(userWebAuthnCredentials.createdAt),
+                asc(userWebAuthnCredentials.id)
+            )
+            .limit(checkedMfaListLimit(limit))
+            .all()
+            .map((row) => parseWebAuthnCredential(row));
     }
 }

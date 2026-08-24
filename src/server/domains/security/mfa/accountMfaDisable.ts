@@ -180,6 +180,7 @@ export function createAccountMfaDisableOperation(
                             throw new MfaAccountStateChangedError();
                         }
                         unit.deleteTotpFactorsForUser(identity.userId);
+                        unit.deleteWebAuthnCredentialsForUser(identity.userId);
                         unit.deleteRecoveryCodesForUser(identity.userId);
                         unit.deletePendingLoginsForUser(identity.userId);
                         const rotated = rotateSession(

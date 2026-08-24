@@ -1,9 +1,11 @@
 import type {
     AuthSessionSummary,
     AuthUser,
+    BeginWebAuthnLoginResult as BeginWebAuthnLoginOutput,
     PendingLoginSummary,
     RecoveryLoginInput,
     TotpLoginInput,
+    WebAuthnLoginInput,
 } from "../../../../contracts/auth.ts";
 import type {
     GeneratedOpaqueToken,
@@ -14,12 +16,17 @@ import type {
     AuthenticationRequestMetadata,
 } from "../authenticationSession.ts";
 import type { AuthenticationWorkBudget } from "../authenticationWorkBudget.ts";
-import type { AuthenticationWorkGate } from "../authenticationWorkGate.ts";
+import type {
+    AuthenticationWorkGate,
+    AuthenticationWorkRuntimeService,
+} from "../authenticationWorkGate.ts";
 import type {
     MfaLifecycleRepository,
     MfaUserRecord,
 } from "./lifecycleRepositoryTypes.ts";
 import type { TotpSecretCipher } from "./totpSecretCipher.ts";
+import type { WebAuthnAdapter } from "./webauthn/adapter.ts";
+import type { WebAuthnRelyingPartyConfiguration } from "./webauthn/relyingPartyConfiguration.ts";
 
 export interface BeginPendingLoginInput {
     readonly clearedPasswordRateLimitBucketKey?: string;
@@ -51,8 +58,18 @@ export type CompleteMfaLoginResult =
     | { readonly status: "service-unavailable" }
     | { readonly status: "state-changed" };
 
+export type BeginWebAuthnLoginLifecycleResult =
+    | ({ readonly status: "created" } & BeginWebAuthnLoginOutput)
+    | { readonly status: "not-available" }
+    | { readonly status: "service-unavailable" }
+    | { readonly status: "state-changed" };
+
 export interface MfaLoginLifecycleService {
     beginPendingLogin(input: BeginPendingLoginInput): BeginPendingLoginResult;
+    beginWebAuthnLogin(
+        credential: ParsedOpaqueToken,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<BeginWebAuthnLoginLifecycleResult>;
     completeRecoveryLogin(
         credential: ParsedOpaqueToken,
         input: RecoveryLoginInput,
@@ -63,11 +80,27 @@ export interface MfaLoginLifecycleService {
         input: TotpLoginInput,
         metadata: AuthenticationRequestMetadata
     ): Promise<CompleteMfaLoginResult>;
+    completeWebAuthnLogin(
+        credential: ParsedOpaqueToken,
+        input: WebAuthnLoginInput,
+        metadata: AuthenticationRequestMetadata
+    ): Promise<CompleteMfaLoginResult>;
     pendingLoginSummary(credential: ParsedOpaqueToken): PendingLoginSummary | undefined;
     revokePendingLogin(
         credential: ParsedOpaqueToken,
         metadata: AuthenticationRequestMetadata
     ): boolean;
+}
+
+export interface MfaLoginWebAuthnDependencies {
+    readonly adapter: WebAuthnAdapter;
+    readonly relyingParty: WebAuthnRelyingPartyConfiguration;
+    readonly verificationTimeoutMs?: number;
+    readonly workBudget?: AuthenticationWorkBudget;
+    readonly workRuntime: Pick<
+        AuthenticationWorkRuntimeService,
+        "runWebAuthnVerification"
+    >;
 }
 
 export interface MfaLoginLifecycleDependencies {
@@ -86,4 +119,5 @@ export interface MfaLoginLifecycleDependencies {
         hashInput: string,
         validatorHash: string
     ) => Promise<boolean>;
+    readonly webAuthn?: MfaLoginWebAuthnDependencies;
 }

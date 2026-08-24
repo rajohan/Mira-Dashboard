@@ -1,12 +1,16 @@
 import * as v from "valibot";
 
+import { authChallengeSelectSchema } from "../../../database/validation/authChallenges.ts";
 import { authPendingLoginSelectSchema } from "../../../database/validation/authPendingLogins.ts";
 import { userRecoveryCodeSelectSchema } from "../../../database/validation/userRecoveryCodes.ts";
 import { userTotpFactorSelectSchema } from "../../../database/validation/userTotpFactors.ts";
+import { userWebAuthnCredentialSelectSchema } from "../../../database/validation/userWebAuthnCredentials.ts";
 import type {
     MfaPendingLoginRecord,
     MfaRecoveryCodeRecord,
     MfaTotpFactorRecord,
+    MfaWebAuthnChallengeRecord,
+    MfaWebAuthnCredentialRecord,
 } from "./lifecycleRepositoryTypes.ts";
 
 export function requiredMfaRow<T>(row: T | undefined, operation: string): T {
@@ -41,4 +45,12 @@ export function parseTotpFactor(row: unknown): MfaTotpFactorRecord {
 
 export function parseRecoveryCode(row: unknown): MfaRecoveryCodeRecord {
     return v.parse(userRecoveryCodeSelectSchema, row);
+}
+
+export function parseWebAuthnChallenge(row: unknown): MfaWebAuthnChallengeRecord {
+    return v.parse(authChallengeSelectSchema, row);
+}
+
+export function parseWebAuthnCredential(row: unknown): MfaWebAuthnCredentialRecord {
+    return v.parse(userWebAuthnCredentialSelectSchema, row);
 }
