@@ -51,7 +51,10 @@ if [ "${1-}" = projected-web-runtime ]; then
         /home/ubuntu/projects/mira-dashboard/production/releases/current/server/web.js
 fi
 
-mapping="X-mount.idmap=u:${web_uid}:${owner_uid}:1 g:${web_gid}:${owner_gid}:1"
+# mount(8) expects the source filesystem identity first and the identity exposed
+# through the mount second. Project/state/OpenClaw are owned by the operator and
+# must appear owned by the isolated web principal inside the service namespace.
+mapping="X-mount.idmap=u:${owner_uid}:${web_uid}:1 g:${owner_gid}:${web_gid}:1"
 mount_idmapped() {
     source_path=$1
     destination_path=$2
