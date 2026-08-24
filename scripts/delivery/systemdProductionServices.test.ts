@@ -496,15 +496,17 @@ describe("production root-systemd service control", () => {
             "InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/opt/docker"
         );
         expect(web).toContain("ExecStart=!/usr/local/libexec/mira-dashboard-web-runtime");
-        for (const path of [
-            "/run/docker.sock",
-            "/var/run/docker.sock",
-            "/opt/docker",
-            "/run/systemd/private",
-            "/run/dbus/system_bus_socket",
+        for (const [path, kind] of [
+            ["/run/docker.sock", "sock"],
+            ["/var/run/docker.sock", "sock"],
+            ["/opt/docker", "dir"],
+            ["/run/systemd/private", "sock"],
+            ["/run/dbus/system_bus_socket", "sock"],
         ]) {
-            expect(webRuntime).toContain(`[ ! -e ${path} ]`);
+            expect(webRuntime).toContain(`assert_inaccessible_mount ${path} ${kind}`);
         }
+        expect(webRuntime).toContain('"tmpfs[/systemd/inaccessible/$kind]"');
+        expect(webRuntime).not.toContain("[ ! -e /run/docker.sock ]");
         expect(webRuntime).toContain("--clear-groups");
         expect(webRuntime).toContain("--bounding-set=-all");
         expect(webRuntime).toContain(
