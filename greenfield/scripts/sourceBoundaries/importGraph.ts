@@ -1,4 +1,5 @@
-import * as babel from "@babel/core";
+import { analyze } from "@typescript-eslint/scope-manager";
+import { parseSync } from "oxc-parser";
 
 import {
     runtimeAuthorityIdentifierNames,
@@ -29,6 +30,51 @@ import {
 export interface SourceImportBinding {
     readonly imported: string;
     readonly typeOnly: boolean;
+}
+
+function lineAtOffset(offset: number, lineStarts: readonly number[]): number {
+    let lower = 0;
+    let upper = lineStarts.length;
+    while (lower < upper) {
+        const middle = Math.floor((lower + upper) / 2);
+        if ((lineStarts[middle] ?? 0) <= offset) lower = middle + 1;
+        else upper = middle;
+    }
+    return Math.max(1, lower);
+}
+
+function attachSourceLocations(ast: AstRecord, source: string): void {
+    const lineStarts = [0];
+    for (let index = 0; index < source.length; index += 1) {
+        if (source[index] === "\n") lineStarts.push(index + 1);
+    }
+    const seen = new Set<object>();
+    function visit(value: unknown): void {
+        if (!isRecord(value) || seen.has(value)) return;
+        seen.add(value);
+        if (typeof value.start === "number" && typeof value.end === "number") {
+            value.loc = {
+                start: { line: lineAtOffset(value.start, lineStarts) },
+                end: { line: lineAtOffset(value.end, lineStarts) },
+            };
+        }
+        for (const child of Object.values(value)) {
+            if (Array.isArray(child)) {
+                for (const item of child) visit(item);
+            } else visit(child);
+        }
+    }
+    visit(ast);
+}
+
+function isTypeOnlyImportDefinition(definition: {
+    readonly node?: unknown;
+    readonly parent?: unknown;
+}): boolean {
+    return (
+        (isRecord(definition.node) && definition.node.importKind === "type") ||
+        (isRecord(definition.parent) && definition.parent.importKind === "type")
+    );
 }
 
 /** Static module edge extracted from one JavaScript or TypeScript source file. */
@@ -81,10 +127,6 @@ export interface SourceAnalysis {
     readonly runtimeAuthorityEscapes: readonly SourceRuntimeAuthorityEscape[];
     readonly typeScriptSuppressionDirectives: readonly SourceTypeScriptSuppressionDirective[];
 }
-
-type BabelParserPlugins = NonNullable<
-    NonNullable<babel.InputOptions["parserOpts"]>["plugins"]
->;
 
 function importFromCall(
     node: AstRecord,
@@ -276,13 +318,6 @@ function visitAst(
     }
 }
 
-function parserPlugins(filename: string): BabelParserPlugins {
-    const plugins: BabelParserPlugins = [];
-    if (/\.(?:cts|mts|ts|tsx)$/u.test(filename)) plugins.push("typescript");
-    if (/\.(?:jsx|tsx)$/u.test(filename)) plugins.push("jsx");
-    return plugins;
-}
-
 /**
  * Parses module edges and direct runtime-environment reads from supported source text.
  * @param source JavaScript or TypeScript source text.
@@ -293,19 +328,23 @@ export async function parseSourceAnalysis(
     source: string,
     filename: string
 ): Promise<SourceAnalysis> {
-    const result = await babel.parseAsync(source, {
-        babelrc: false,
-        configFile: false,
-        filename,
-        parserOpts: {
-            createImportExpressions: true,
-            plugins: parserPlugins(filename),
-        },
+    await Promise.resolve();
+    const result = parseSync(filename, source, {
+        astType: "ts",
+        preserveParens: true,
+        range: true,
+        showSemanticErrors: true,
         sourceType: "unambiguous",
     });
-    if (result === null) {
-        throw new Error(`Babel did not return an AST for ${filename}`);
+    if (result.errors.length > 0) {
+        throw new SyntaxError(result.errors.map(({ message }) => message).join("\n"));
     }
+    const ast = result.program as unknown as AstRecord;
+    ast.comments = result.comments.map((comment) => ({
+        ...comment,
+        type: comment.type === "Line" ? "CommentLine" : "CommentBlock",
+    }));
+    attachSourceLocations(ast, source);
 
     const imports: SourceImport[] = [];
     const environmentAccesses: SourceEnvironmentAccess[] = [];
@@ -313,48 +352,62 @@ export async function parseSourceAnalysis(
     const ambientRuntimeDeclarations: SourceAmbientRuntimeDeclaration[] = [];
     const runtimeIdentifierReferences = new Set<object>();
     const staticStringValues = new Map<object, string>();
-    babel.traverse(result, {
-        Identifier(identifierPath) {
-            const name = identifierPath.node.name;
-            const binding = identifierPath.scope.getBinding(name);
-            const bindingPath = binding?.path;
-            const bindingNode = bindingPath?.node as
-                | { readonly importKind?: unknown }
-                | undefined;
-            const bindingParentNode = bindingPath?.parentPath?.node as
-                | { readonly importKind?: unknown }
-                | undefined;
-            const bindingIsTypeOnly =
-                bindingNode?.importKind === "type" ||
-                bindingParentNode?.importKind === "type";
+    const scopeManager = analyze(
+        result.program as unknown as Parameters<typeof analyze>[0],
+        {
+            jsxPragma: null,
+            sourceType: result.program.sourceType,
+        }
+    );
+    const references = scopeManager.scopes.flatMap((scope) => scope.references);
+    for (const reference of references) {
+        const name = reference.identifier.name;
+        const typeOnlyBinding =
+            reference.resolved !== null &&
+            reference.resolved.defs.length > 0 &&
+            reference.resolved.defs.every(isTypeOnlyImportDefinition);
+        if (
+            runtimeAuthorityIdentifierNames.has(name) &&
+            reference.isRead() &&
+            reference.isValueReference &&
+            (reference.resolved === null ||
+                reference.resolved.defs.length === 0 ||
+                typeOnlyBinding)
+        ) {
+            runtimeIdentifierReferences.add(reference.identifier);
+        }
+    }
+    for (let pass = 0; pass < references.length; pass += 1) {
+        let changed = false;
+        for (const reference of references) {
+            const binding = reference.resolved;
+            const definition = binding?.defs.length === 1 ? binding.defs[0] : undefined;
             if (
-                runtimeAuthorityIdentifierNames.has(name) &&
-                identifierPath.isReferencedIdentifier() &&
-                (bindingPath === undefined || bindingIsTypeOnly)
+                !reference.isRead() ||
+                definition === undefined ||
+                String(definition.type) !== "Variable" ||
+                !isRecord(definition.node) ||
+                !isRecord(definition.parent) ||
+                definition.parent.kind !== "const" ||
+                binding?.references.some(
+                    (candidate) => candidate.isWrite() && candidate.init !== true
+                )
             ) {
-                runtimeIdentifierReferences.add(identifierPath.node);
+                continue;
             }
+            const value = staticStringValue(definition.node.init, staticStringValues);
             if (
-                identifierPath.isReferencedIdentifier() &&
-                binding?.constant === true &&
-                isRecord(bindingPath?.node) &&
-                nodeType(bindingPath.node) === "VariableDeclarator" &&
-                isRecord(bindingPath.parentPath?.node) &&
-                nodeType(bindingPath.parentPath.node) === "VariableDeclaration" &&
-                bindingPath.parentPath.node.kind === "const"
+                value !== undefined &&
+                staticStringValues.get(reference.identifier) !== value
             ) {
-                const value = staticStringValue(
-                    bindingPath.node.init,
-                    staticStringValues
-                );
-                if (value !== undefined) {
-                    staticStringValues.set(identifierPath.node, value);
-                }
+                staticStringValues.set(reference.identifier, value);
+                changed = true;
             }
-        },
-    });
+        }
+        if (!changed) break;
+    }
     visitAst(
-        result,
+        ast,
         new Set(),
         imports,
         environmentAccesses,
@@ -394,14 +447,14 @@ export async function parseSourceAnalysis(
             uniqueEnvironmentAccesses.toSorted((left, right) => left.line - right.line)
         ),
         imports: Object.freeze(imports.toSorted((left, right) => left.line - right.line)),
-        referenceDirectives: Object.freeze(referenceDirectives(result)),
+        referenceDirectives: Object.freeze(referenceDirectives(ast)),
         runtimeAuthorityEscapes: Object.freeze(
             uniqueRuntimeAuthorityEscapes.toSorted(
                 (left, right) => left.line - right.line
             )
         ),
         typeScriptSuppressionDirectives: Object.freeze(
-            typeScriptSuppressionDirectives(result)
+            typeScriptSuppressionDirectives(ast)
         ),
     });
 }

@@ -1,5 +1,5 @@
-import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useInfiniteQuery, useIsMutating } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 
 import type { NotificationRecord } from "../../contracts/monitoring.ts";
 import type {
@@ -15,9 +15,11 @@ import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { Select, type SelectOption } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { NotificationListItem } from "./NotificationListItem.tsx";
 import {
     NotificationBulkProtocolError,
@@ -28,8 +30,7 @@ import {
     useMarkNotificationReadMutation,
 } from "./notificationMutations.ts";
 import {
-    notificationHistoryPageQueryOptions,
-    type NotificationCursor,
+    notificationHistoryQueryOptions,
     uniqueNotificationRows,
 } from "./notificationQueries.ts";
 
@@ -61,19 +62,6 @@ function notificationMatchesFilters(
         (readState === "read" && notification.readAtMs !== undefined) ||
         (readState === "unread" && notification.readAtMs === undefined);
     return matchesReadState && (severity === "all" || notification.severity === severity);
-}
-
-function notificationCursorsMatch(
-    left: NotificationCursor | undefined,
-    right: NotificationCursor | undefined
-): boolean {
-    return (
-        left === right ||
-        (left !== undefined &&
-            right !== undefined &&
-            left.id === right.id &&
-            left.occurredAtMs === right.occurredAtMs)
-    );
 }
 
 function notificationActionFailureMessage(
@@ -115,12 +103,9 @@ export function NotificationPanel({
     const [readFilter, setReadFilter] = useState<NotificationReadFilter>("all");
     const [severityFilter, setSeverityFilter] =
         useState<NotificationSeverityFilter>("all");
-    const [historyCursors, setHistoryCursors] = useState<NotificationCursor[]>([]);
+    const [historyEnabled, setHistoryEnabled] = useState(false);
     const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
-    const listReference = useRef<HTMLUListElement>(null);
     const panelHeadingReference = useRef<HTMLHeadingElement>(null);
-    const historyControlReference = useRef<HTMLButtonElement>(null);
-    const historyBackControlReference = useRef<HTMLButtonElement>(null);
     const markAllReadReference = useRef<HTMLButtonElement>(null);
     const clearReadConfirmReference = useRef<HTMLButtonElement>(null);
     const rowReferences = useRef(new Map<string, HTMLElement>());
@@ -131,46 +116,23 @@ export function NotificationPanel({
     const bulkFilters = {
         filters: severityFilter === "all" ? {} : { severities: [severityFilter] },
     };
-    const historyPathIsCurrent =
-        historyCursors.length === 0 ||
-        notificationCursorsMatch(historyCursors[0], latestResult?.nextCursor);
-    const activeHistoryCursors = historyPathIsCurrent ? historyCursors : [];
-    const historyCursor = activeHistoryCursors.at(-1);
-    const historyRequested = historyCursor !== undefined;
-    const historyNavigationVisible = historyCursors.length > 0;
-    const history = useQuery(
-        notificationHistoryPageQueryOptions(
+    const firstHistoryCursor = latestResult?.nextCursor;
+    const history = useInfiniteQuery(
+        notificationHistoryQueryOptions(
             client,
-            historyCursor,
-            historyFilters,
-            historyRequested
+            historyEnabled ? firstHistoryCursor : undefined,
+            historyFilters
         )
     );
-
-    useEffect(() => {
-        if (historyPathIsCurrent || historyCursors.length === 0) return;
-        const restoreHistoryFocus =
-            document.activeElement === historyBackControlReference.current ||
-            document.activeElement === historyControlReference.current;
-        const latestHasHistory = latestResult?.nextCursor !== undefined;
-        const resetTimer = setTimeout(() => {
-            if (restoreHistoryFocus) {
-                if (latestHasHistory) {
-                    historyControlReference.current?.focus();
-                } else {
-                    panelHeadingReference.current?.focus();
-                }
-            }
-            setHistoryCursors([]);
-        }, 0);
-        return () => clearTimeout(resetTimer);
-    }, [historyCursors.length, historyPathIsCurrent, latestResult?.nextCursor]);
+    const historyPageError = history.isFetchNextPageError ? history.error : null;
+    const historyRefreshError = history.isFetchNextPageError ? null : history.error;
     const markRead = useMarkNotificationReadMutation();
     const deleteNotification = useDeleteNotificationMutation();
     const markAllRead = useMarkAllNotificationsReadMutation();
     const clearRead = useClearReadNotificationsMutation();
     const actionsDisabled = useIsMutating({ mutationKey: notificationMutationKey }) > 0;
-    const historyRows = history.data?.notifications ?? emptyNotifications;
+    const historyRows =
+        history.data?.pages.flatMap((page) => page.notifications) ?? emptyNotifications;
     const notifications = uniqueNotificationRows([...latestRows, ...historyRows])
         .filter((notification) =>
             notificationMatchesFilters(notification, readFilter, severityFilter)
@@ -187,24 +149,6 @@ export function NotificationPanel({
         notificationActionFailureMessage(exactMutationError, false) ??
         notificationActionFailureMessage(bulkMutationError, true);
     const clearReadFailure = notificationActionFailureMessage(clearRead.error, true);
-    const historyTerminal =
-        historyRequested &&
-        history.data !== undefined &&
-        history.data.nextCursor === undefined;
-    let historyControlLabel = "Load older notifications";
-    if (!historyPathIsCurrent && historyNavigationVisible) {
-        historyControlLabel = "Returning to newest notifications…";
-    } else if (historyRequested) {
-        if (history.isFetching) {
-            historyControlLabel = "Loading older notifications…";
-        } else if (history.error !== null) {
-            historyControlLabel = "Try loading this page again";
-        } else if (historyTerminal) {
-            historyControlLabel = "All available notifications loaded";
-        } else {
-            historyControlLabel = "Load next older page";
-        }
-    }
     let successMessage: string | undefined;
     if (clearRead.data !== undefined) {
         successMessage = `Deleted ${clearRead.data.affectedCount} read notifications.`;
@@ -223,7 +167,7 @@ export function NotificationPanel({
             const row = id === undefined ? undefined : rowReferences.current.get(id);
             const target =
                 selector === undefined ? row : row?.querySelector<HTMLElement>(selector);
-            (target ?? listReference.current ?? panelHeadingReference.current)?.focus();
+            (target ?? panelHeadingReference.current)?.focus();
         }, 0);
     };
     const focusPanelHeading = () => {
@@ -275,32 +219,18 @@ export function NotificationPanel({
         clearRead.reset();
     };
     const loadNextHistoryPage = () => {
-        if (!historyPathIsCurrent || history.isFetching || historyTerminal) return;
-        if (!historyRequested) {
-            const firstCursor = latestResult?.nextCursor;
-            if (firstCursor !== undefined) setHistoryCursors([firstCursor]);
+        if (!historyEnabled) {
+            setHistoryEnabled(true);
             return;
         }
-        if (history.error !== null) {
-            void history.refetch();
-            return;
-        }
-        const nextCursor = history.data?.nextCursor;
-        if (nextCursor !== undefined) {
-            setHistoryCursors((cursors) => [...cursors, nextCursor]);
-        }
-    };
-    const loadNewerHistoryPage = () => {
-        if (history.isFetching) return;
-        historyControlReference.current?.focus();
-        setHistoryCursors((cursors) => cursors.slice(0, -1));
+        void history.fetchNextPage();
     };
     const setReadStateFilter = (filter: NotificationReadFilter) => {
-        setHistoryCursors([]);
+        setHistoryEnabled(false);
         setReadFilter(filter);
     };
     const setNotificationSeverityFilter = (filter: NotificationSeverityFilter) => {
-        setHistoryCursors([]);
+        setHistoryEnabled(false);
         setSeverityFilter(filter);
     };
     const retryLatest = () => onRetryLatest();
@@ -371,6 +301,26 @@ export function NotificationPanel({
             <Alert className="mt-3" focusOnError={false} message={actionError} />
             <Alert
                 action={
+                    historyRefreshError === null ? undefined : (
+                        <Button
+                            disabled={actionsDisabled}
+                            onClick={() => void history.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
+                className="mt-3"
+                message={
+                    historyRefreshError === null
+                        ? undefined
+                        : dashboardBrowserFailureMessage(historyRefreshError)
+                }
+            />
+            <Alert
+                action={
                     latestError === null ? undefined : (
                         <Button
                             disabled={actionsDisabled}
@@ -384,9 +334,9 @@ export function NotificationPanel({
                 }
                 className="mt-3"
                 message={
-                    latestError === null && history.error === null
+                    latestError === null
                         ? undefined
-                        : dashboardBrowserFailureMessage(latestError ?? history.error)
+                        : dashboardBrowserFailureMessage(latestError)
                 }
             />
             <Alert className="mt-3" message={successMessage} variant="success" />
@@ -395,20 +345,52 @@ export function NotificationPanel({
                 <LoadingState label="Loading notifications…" size="sm" />
             )}
             {latestReady && notifications.length === 0 && (
-                <EmptyState
-                    className="mt-4 py-7"
-                    description="Try another filter or wait for the next monitoring update."
-                    title="No matching notifications"
-                />
+                <>
+                    <EmptyState
+                        className="mt-4 py-7"
+                        description="Try another filter or wait for the next monitoring update."
+                        title="No matching notifications"
+                    />
+                    {firstHistoryCursor !== undefined && (
+                        <InfiniteScrollTrigger
+                            className="py-2"
+                            {...(historyPageError === null
+                                ? {}
+                                : {
+                                      error: dashboardBrowserFailureMessage(
+                                          historyPageError
+                                      ),
+                                  })}
+                            hasMore={!historyEnabled || history.hasNextPage}
+                            loading={historyEnabled && history.isFetching}
+                            loadingLabel="Loading older notifications…"
+                            onLoadMore={loadNextHistoryPage}
+                        />
+                    )}
+                </>
             )}
             {notifications.length > 0 && (
-                <ul
-                    aria-label="Notifications"
-                    className="mt-4 max-h-[min(34rem,65vh)] space-y-2 overflow-y-auto pr-1 outline-none"
-                    ref={listReference}
-                    tabIndex={-1}
-                >
-                    {notifications.map((notification) => (
+                <VirtualizedList
+                    className="mt-4 max-h-[min(34rem,65vh)] pr-1 outline-none"
+                    estimateSize={() => 176}
+                    getKey={(notification) => notification.id}
+                    itemClassName="pb-2"
+                    items={notifications}
+                    label="Notifications"
+                    pagination={{
+                        ...(historyPageError === null
+                            ? {}
+                            : {
+                                  error: dashboardBrowserFailureMessage(historyPageError),
+                              }),
+                        hasMore:
+                            firstHistoryCursor !== undefined &&
+                            (!historyEnabled || history.hasNextPage),
+                        loading: historyEnabled && history.isFetching,
+                        loadingLabel: "Loading older notifications…",
+                        onLoadMore: loadNextHistoryPage,
+                    }}
+                    renderItem={(notification) => (
                         <NotificationListItem
                             actionsDisabled={actionsDisabled}
                             itemRef={(node) => {
@@ -418,49 +400,12 @@ export function NotificationPanel({
                                     rowReferences.current.set(notification.id, node);
                                 }
                             }}
-                            key={notification.id}
                             notification={notification}
                             onDelete={deleteOne}
                             onMarkRead={markOneRead}
                         />
-                    ))}
-                </ul>
-            )}
-
-            {(latestResult?.nextCursor !== undefined || historyNavigationVisible) && (
-                <Button
-                    aria-busy={history.isFetching || undefined}
-                    aria-disabled={
-                        !historyPathIsCurrent ||
-                        historyTerminal ||
-                        history.isFetching ||
-                        undefined
-                    }
-                    className="mt-3"
-                    disabled={actionsDisabled}
-                    fullWidth
-                    onClick={loadNextHistoryPage}
-                    ref={historyControlReference}
-                    variant="secondary"
-                >
-                    {historyControlLabel}
-                </Button>
-            )}
-            {historyNavigationVisible && (
-                <Button
-                    aria-busy={history.isFetching || undefined}
-                    aria-disabled={history.isFetching || undefined}
-                    className="mt-2"
-                    disabled={actionsDisabled}
-                    fullWidth
-                    onClick={loadNewerHistoryPage}
-                    ref={historyBackControlReference}
-                    variant="ghost"
-                >
-                    {activeHistoryCursors.length === 1
-                        ? "Back to newest notifications"
-                        : "Load newer page"}
-                </Button>
+                    )}
+                />
             )}
 
             <ConfirmModal

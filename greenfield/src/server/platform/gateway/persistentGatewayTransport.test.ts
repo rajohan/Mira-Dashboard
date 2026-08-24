@@ -12,7 +12,7 @@ import {
     persistentGatewayChatOutboundFrameMaximumBytes,
     persistentGatewayOpenClawServiceActionRequestTimeoutMs,
     type PersistentGatewayAdminMethod,
-    type PersistentGatewayReadWriteMethod,
+    type PersistentGatewayWebReadMethod,
 } from "./persistentGatewayProtocol.ts";
 import {
     createPersistentGatewayTransport,
@@ -3453,7 +3453,7 @@ describe("persistent native Gateway transport", () => {
 });
 
 // Compile-time locks: callers cannot widen either generic lane without editing protocol types.
-const _readWriteMethod: PersistentGatewayReadWriteMethod = "sessions.list";
+const _readWriteMethod: PersistentGatewayWebReadMethod = "sessions.list";
 const _adminMethod: PersistentGatewayAdminMethod = "cron.run";
 void _readWriteMethod;
 void _adminMethod;

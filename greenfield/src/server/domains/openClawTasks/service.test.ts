@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import {
@@ -12,28 +11,31 @@ import { createOpenClawTasksService, OpenClawTasksServiceError } from "./service
 
 function provider(overrides: Partial<OpenClawTaskProvider>): OpenClawTaskProvider {
     return {
-        cancel: async () => ({ cancelled: false, found: false }),
-        get: async () => ({
-            task: {
-                createdAtMs: 1000,
-                id: "task-1",
-                startedAtMs: 1100,
-                status: "running",
-                taskId: "task-1",
-                updatedAtMs: 1200,
-            },
-        }),
-        list: async () => ({ tasks: [] }),
-        subscribeTasks: async () => ({
-            close: async () => {},
-            done: Promise.resolve(),
-        }),
+        cancel: () => Promise.resolve({ cancelled: false, found: false }),
+        get: () =>
+            Promise.resolve({
+                task: {
+                    createdAtMs: 1000,
+                    id: "task-1",
+                    startedAtMs: 1100,
+                    status: "running",
+                    taskId: "task-1",
+                    updatedAtMs: 1200,
+                },
+            }),
+        list: () => Promise.resolve({ tasks: [] }),
+        subscribeTasks: () =>
+            Promise.resolve({
+                close: () => Promise.resolve(),
+                done: Promise.resolve(),
+            }),
         ...overrides,
     };
 }
 
 function realtimePublisher(
-    publishSnapshotRequired: OpenClawTasksRealtimePublisher["publishSnapshotRequired"] = async () => {}
+    publishSnapshotRequired: OpenClawTasksRealtimePublisher["publishSnapshotRequired"] = () =>
+        Promise.resolve()
 ): OpenClawTasksRealtimePublisher {
     return { publishSnapshotRequired };
 }
@@ -51,7 +53,7 @@ describe("OpenClaw tasks service", () => {
     test("rejects a contradictory provider cancellation result", async () => {
         const service = createOpenClawTasksService(
             provider({
-                cancel: async () => ({ cancelled: true, found: false }),
+                cancel: () => Promise.resolve({ cancelled: true, found: false }),
             }),
             realtimePublisher()
         );
@@ -64,8 +66,8 @@ describe("OpenClaw tasks service", () => {
     test("rejects malformed task lifecycle data returned by the provider", async () => {
         const service = createOpenClawTasksService(
             provider({
-                list: async () =>
-                    ({
+                list: () =>
+                    Promise.resolve({
                         tasks: [
                             {
                                 createdAtMs: 2000,
@@ -75,7 +77,7 @@ describe("OpenClaw tasks service", () => {
                                 updatedAtMs: 2100,
                             },
                         ],
-                    }) as never,
+                    } as never),
             }),
             realtimePublisher()
         );
@@ -97,14 +99,18 @@ describe("OpenClaw tasks service", () => {
         const publishedArguments: (Date | undefined)[] = [];
         const service = createOpenClawTasksService(
             provider({
-                subscribeTasks: async (listener) => {
+                subscribeTasks: (listener) => {
                     providerListener = listener;
-                    return { close: async () => {}, done: Promise.resolve() };
+                    return Promise.resolve({
+                        close: () => Promise.resolve(),
+                        done: Promise.resolve(),
+                    });
                 },
             }),
-            realtimePublisher(async (at) => {
+            realtimePublisher((at) => {
                 publishedArguments.push(at);
                 order.push("published");
+                return Promise.resolve();
             })
         );
         await service.subscribe(() => {
@@ -132,13 +138,17 @@ describe("OpenClaw tasks service", () => {
         let publishes = 0;
         const service = createOpenClawTasksService(
             provider({
-                subscribeTasks: async (listener) => {
+                subscribeTasks: (listener) => {
                     providerListener = listener;
-                    return { close: async () => {}, done: Promise.resolve() };
+                    return Promise.resolve({
+                        close: () => Promise.resolve(),
+                        done: Promise.resolve(),
+                    });
                 },
             }),
-            realtimePublisher(async () => {
+            realtimePublisher(() => {
                 publishes += 1;
+                return Promise.resolve();
             })
         );
         await service.subscribe(() => {});
@@ -156,21 +166,22 @@ describe("OpenClaw tasks service", () => {
         const failures: unknown[] = [];
         const confirmed = createOpenClawTasksService(
             provider({
-                cancel: async () => ({
-                    cancelled: false,
-                    found: true,
-                    task: {
-                        createdAtMs: 1000,
-                        id: "task-1",
-                        startedAtMs: 1100,
-                        status: "running",
-                        updatedAtMs: 1200,
-                    },
-                }),
+                cancel: () =>
+                    Promise.resolve({
+                        cancelled: false,
+                        found: true,
+                        task: {
+                            createdAtMs: 1000,
+                            id: "task-1",
+                            startedAtMs: 1100,
+                            status: "running",
+                            updatedAtMs: 1200,
+                        },
+                    }),
             }),
-            realtimePublisher(async () => {
+            realtimePublisher(() => {
                 publishes += 1;
-                throw new Error("pump bridge unavailable");
+                return Promise.reject(new Error("pump bridge unavailable"));
             }),
             (error) => failures.push(error)
         );
@@ -184,12 +195,12 @@ describe("OpenClaw tasks service", () => {
 
         const unknown = createOpenClawTasksService(
             provider({
-                cancel: async () => {
-                    throw new OpenClawTaskProviderUnknownOutcomeError();
-                },
+                cancel: () =>
+                    Promise.reject(new OpenClawTaskProviderUnknownOutcomeError()),
             }),
-            realtimePublisher(async () => {
+            realtimePublisher(() => {
                 publishes += 1;
+                return Promise.resolve();
             })
         );
         const error = await failureOf(() => unknown.cancel({ taskId: "task-1" }));
@@ -203,13 +214,14 @@ describe("OpenClaw tasks service", () => {
         let attempts = 0;
         const service = createOpenClawTasksService(
             provider({
-                cancel: async () => {
+                cancel: () => {
                     attempts += 1;
-                    throw new OpenClawTaskProviderUnknownOutcomeError();
+                    return Promise.reject(new OpenClawTaskProviderUnknownOutcomeError());
                 },
             }),
-            realtimePublisher(async () => {
+            realtimePublisher(() => {
                 publishes += 1;
+                return Promise.resolve();
             })
         );
 
@@ -226,12 +238,11 @@ describe("OpenClaw tasks service", () => {
         let publishes = 0;
         const service = createOpenClawTasksService(
             provider({
-                cancel: async () => {
-                    throw new OpenClawTaskProviderUnavailableError();
-                },
+                cancel: () => Promise.reject(new OpenClawTaskProviderUnavailableError()),
             }),
-            realtimePublisher(async () => {
+            realtimePublisher(() => {
                 publishes += 1;
+                return Promise.resolve();
             })
         );
 
@@ -245,12 +256,11 @@ describe("OpenClaw tasks service", () => {
         let publishes = 0;
         const service = createOpenClawTasksService(
             provider({
-                cancel: async () => {
-                    throw new OpenClawTaskProviderNotFoundError();
-                },
+                cancel: () => Promise.reject(new OpenClawTaskProviderNotFoundError()),
             }),
-            realtimePublisher(async () => {
+            realtimePublisher(() => {
                 publishes += 1;
+                return Promise.resolve();
             })
         );
 

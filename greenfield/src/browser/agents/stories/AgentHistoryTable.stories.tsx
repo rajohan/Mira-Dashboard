@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
+import { fn } from "storybook/test";
 import * as v from "valibot";
 
 import type { AgentTaskRun } from "../../../contracts/agentModel.ts";
@@ -91,6 +92,7 @@ export const ResponsiveMobileCards: Story = {
         await expectResponsiveTableCards({
             canvasElement,
             label: "Agent task history",
+            rowDisplay: "grid",
         });
     },
 };
@@ -108,6 +110,7 @@ export const ResponsiveVirtualizedCards: Story = {
         await expectResponsiveTableCards({
             canvasElement,
             label: "Agent task history",
+            rowDisplay: "grid",
         });
         await expectVirtualizedTable({
             canvasElement,
@@ -140,6 +143,18 @@ export const VirtualizedInventory: Story = {
             label: "Agent task history",
             rowCount: virtualizedRuns.length,
         });
+    },
+};
+
+export const InfiniteScrollLoading: Story = {
+    args: {
+        pagination: {
+            hasMore: true,
+            loading: true,
+            loadingLabel: "Loading older tasks…",
+            onLoadMore: fn(),
+        },
+        runs: virtualizedRuns,
     },
 };
 

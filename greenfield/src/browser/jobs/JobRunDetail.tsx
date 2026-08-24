@@ -16,10 +16,10 @@ import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
-
-/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- Safari requires explicit tab stops for keyboard access to bounded scroll regions. */
 
 const browserTruncationSuffix = "\n… [display truncated]";
 
@@ -160,71 +160,64 @@ function JobRunEventItem({ event }: JobRunEventItemProps) {
     const outputEvent = event.kind === "stderr" || event.kind === "stdout";
 
     return (
-        <li>
-            <article
-                aria-label={`Event ${event.sequence}: ${eventLabel}`}
-                className="border-primary-700 bg-primary-900/55 rounded-lg border p-3"
-            >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                            className="capitalize"
-                            variant={jobRunEventBadgeVariant(event.kind)}
-                        >
-                            {eventLabel}
-                        </Badge>
-                        <Text as="span" size="sm" tone="muted">
-                            Event {event.sequence} ·{" "}
-                            {event.attempt === 0
-                                ? "Before first attempt"
-                                : `Attempt ${event.attempt}`}
-                        </Text>
-                    </div>
-                    <time
-                        className="text-primary-400 text-xs"
-                        dateTime={new Date(event.occurredAtMs).toISOString()}
+        <article
+            aria-label={`Event ${event.sequence}: ${eventLabel}`}
+            className="border-primary-700 bg-primary-900/55 rounded-lg border p-3"
+        >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                        className="capitalize"
+                        variant={jobRunEventBadgeVariant(event.kind)}
                     >
-                        {formatDashboardDateTime(event.occurredAtMs)}
-                    </time>
+                        {eventLabel}
+                    </Badge>
+                    <Text as="span" size="sm" tone="muted">
+                        Event {event.sequence} ·{" "}
+                        {event.attempt === 0
+                            ? "Before first attempt"
+                            : `Attempt ${event.attempt}`}
+                    </Text>
                 </div>
+                <time
+                    className="text-primary-400 text-xs"
+                    dateTime={new Date(event.occurredAtMs).toISOString()}
+                >
+                    {formatDashboardDateTime(event.occurredAtMs)}
+                </time>
+            </div>
 
-                {message !== undefined &&
-                    (outputEvent ? (
-                        <section
-                            aria-label={`${eventLabel} output, event ${event.sequence}, ${attemptLabel}`}
-                            className="bg-primary-950 text-primary-200 focus-visible:ring-accent-400/30 mt-3 max-h-72 overflow-auto rounded-md p-3 text-xs wrap-anywhere whitespace-pre-wrap outline-none focus-visible:ring-2"
-                            tabIndex={0}
-                        >
-                            <pre className="wrap-anywhere whitespace-pre-wrap">
-                                {message}
-                            </pre>
-                        </section>
-                    ) : (
-                        <Text className="mt-3 wrap-anywhere whitespace-pre-wrap">
-                            {message}
-                        </Text>
-                    ))}
-                {event.progress !== undefined && (
+            {message !== undefined &&
+                (outputEvent ? (
                     <section
-                        aria-label={`Progress data, event ${event.sequence}, ${attemptLabel}`}
+                        aria-label={`${eventLabel} output, event ${event.sequence}, ${attemptLabel}`}
                         className="bg-primary-950 text-primary-200 focus-visible:ring-accent-400/30 mt-3 max-h-72 overflow-auto rounded-md p-3 text-xs wrap-anywhere whitespace-pre-wrap outline-none focus-visible:ring-2"
                         tabIndex={0}
                     >
-                        <pre className="wrap-anywhere whitespace-pre-wrap">
-                            {boundedJsonText(
-                                event.progress,
-                                jobRunEventProgressMaximumBytes
-                            )}
-                        </pre>
+                        <pre className="wrap-anywhere whitespace-pre-wrap">{message}</pre>
                     </section>
-                )}
-                {event.workerInstanceId !== undefined && (
-                    <Text className="mt-2 wrap-anywhere" size="sm" tone="muted">
-                        Worker <code>{event.workerInstanceId}</code>
+                ) : (
+                    <Text className="mt-3 wrap-anywhere whitespace-pre-wrap">
+                        {message}
                     </Text>
-                )}
-            </article>
-        </li>
+                ))}
+            {event.progress !== undefined && (
+                <section
+                    aria-label={`Progress data, event ${event.sequence}, ${attemptLabel}`}
+                    className="bg-primary-950 text-primary-200 focus-visible:ring-accent-400/30 mt-3 max-h-72 overflow-auto rounded-md p-3 text-xs wrap-anywhere whitespace-pre-wrap outline-none focus-visible:ring-2"
+                    tabIndex={0}
+                >
+                    <pre className="wrap-anywhere whitespace-pre-wrap">
+                        {boundedJsonText(event.progress, jobRunEventProgressMaximumBytes)}
+                    </pre>
+                </section>
+            )}
+            {event.workerInstanceId !== undefined && (
+                <Text className="mt-2 wrap-anywhere" size="sm" tone="muted">
+                    Worker <code>{event.workerInstanceId}</code>
+                </Text>
+            )}
+        </article>
     );
 }
 
@@ -236,6 +229,7 @@ export interface JobRunDetailProps {
     readonly focusRequested?: boolean;
     readonly onCancel: (id: string) => void;
     readonly onFocusHandled?: (id: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
 }
 
 /** @returns Safe, bounded durable run metadata, result, and newest-first event history. */
@@ -247,12 +241,11 @@ export function JobRunDetail({
     focusRequested = false,
     onCancel,
     onFocusHandled,
+    pagination,
 }: JobRunDetailProps) {
     const { run } = detail;
     const cancellation = cancellationPresentation(run);
     const events = detail.events;
-    const additionalEventsAvailable =
-        detail.nextEventCursor !== undefined || run.eventCount > events.length;
     const headingId = `job-run-${run.id}-heading`;
     const cancellationActionable = cancellation?.enabled === true;
     const [cancellationFocus, setCancellationFocus] = useState({
@@ -474,23 +467,18 @@ export function JobRunDetail({
                         </Text>
                     </output>
                 ) : (
-                    <ol aria-label="Job activity" className="mt-3 space-y-3">
-                        {events.map((event) => (
-                            <JobRunEventItem event={event} key={event.sequence} />
-                        ))}
-                    </ol>
-                )}
-                {additionalEventsAvailable && (
-                    <output className="mt-3 block">
-                        <Text as="span" size="sm" tone="muted">
-                            Showing the {events.length} newest events. Use “Load older
-                            events” to see more.
-                        </Text>
-                    </output>
+                    <VirtualizedList
+                        className="mt-3"
+                        estimateSize={() => 132}
+                        getKey={(event) => String(event.sequence)}
+                        itemClassName="pb-3"
+                        items={events}
+                        label="Job activity"
+                        pagination={pagination}
+                        renderItem={(event) => <JobRunEventItem event={event} />}
+                    />
                 )}
             </section>
         </Card>
     );
 }
-
-/* oxlint-enable jsx-a11y/no-noninteractive-tabindex */

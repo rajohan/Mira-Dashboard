@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import Fs from "node:fs";
 
 import type { LinuxRenameNoReplace } from "./linuxRenameExchange.ts";
@@ -81,7 +80,7 @@ function settledIntentName(spoolId: string): string {
 
 function temporaryIntentName(spoolId: string): string {
     intentName(spoolId);
-    return `${spoolId}.replace-intent-${randomUUID()}.tmp`;
+    return `${spoolId}.replace-intent-${crypto.randomUUID()}.tmp`;
 }
 
 function anchoredChild(directoryFd: number, childName: string): string {

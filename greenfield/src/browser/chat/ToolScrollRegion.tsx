@@ -29,7 +29,6 @@ export function ToolScrollRegion({
             className={cn("min-w-0", className)}
             data-virtualizer-scroll-region
             ref={resolvedScrollContainerRef}
-            // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Bounded tool source must remain keyboard-scrollable.
             tabIndex={0}
         >
             {children}

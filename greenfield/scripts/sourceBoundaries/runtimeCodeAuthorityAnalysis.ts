@@ -65,7 +65,9 @@ function isNonRuntimeIdentifierPosition(
         return true;
     }
     if (
-        (parentType === "ObjectProperty" || parentType === "ObjectMethod") &&
+        (parentType === "ObjectProperty" ||
+            parentType === "Property" ||
+            parentType === "ObjectMethod") &&
         parent.key === node &&
         parent.value !== node &&
         parent.computed !== true
@@ -324,7 +326,7 @@ function loaderPrimitiveFromNode(
         }
     }
     if (
-        type === "ObjectProperty" &&
+        (type === "ObjectProperty" || type === "Property") &&
         parent !== undefined &&
         nodeType(parent) === "ObjectPattern"
     ) {
@@ -498,7 +500,7 @@ function dynamicCodePrimitiveFromNode(
         }
     }
     if (
-        type === "ObjectProperty" &&
+        (type === "ObjectProperty" || type === "Property") &&
         parent !== undefined &&
         nodeType(parent) === "ObjectPattern"
     ) {
@@ -523,7 +525,7 @@ function dynamicCodePrimitiveFromNode(
 
 /**
  * Finds loader and dynamic-code authority carried by one AST node.
- * @param node Babel AST record.
+ * @param node ESTree-compatible AST record.
  * @param parent Parent AST record when present.
  * @param runtimeIdentifierReferences Binding-aware global runtime references.
  * @param staticStringValues Bounded computed-key values.

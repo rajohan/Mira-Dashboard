@@ -65,6 +65,8 @@ export interface VirtualizerFollowToEndState {
 }
 
 export interface VirtualizerRenderState<TItemElement extends Element> {
+    /** Ref for the inner size container when direct DOM updates are enabled. */
+    readonly containerRef: (node: HTMLElement | null) => void;
     readonly followToEnd: VirtualizerFollowToEndState | undefined;
     readonly getVirtualItemForOffset: (
         offset: number
@@ -84,6 +86,8 @@ export interface VirtualizerRenderState<TItemElement extends Element> {
 interface VirtualizerBaseProps<TItemElement extends Element> {
     readonly children: (state: VirtualizerRenderState<TItemElement>) => ReactNode;
     readonly count: number;
+    /** Lets TanStack own item positions and container size outside React renders. */
+    readonly directDomUpdates?: boolean;
     readonly estimateSize: (index: number) => number;
     readonly initialRect?: Readonly<{ height: number; width: number }>;
     readonly overscan?: number;
@@ -576,6 +580,7 @@ function useFollowToEndController<TItemElement extends Element>({
 export function Virtualizer<TItemElement extends Element = HTMLElement>({
     children,
     count,
+    directDomUpdates = true,
     estimateSize,
     followToEnd,
     getItemKey,
@@ -620,6 +625,8 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
     const virtualizer = useVirtualizer<HTMLDivElement, TItemElement>({
         anchorTo: tanStackEndFollowEnabled || strictPrepend ? "end" : undefined,
         count,
+        directDomUpdates,
+        directDomUpdatesMode: "transform",
         estimateSize,
         followOnAppend: tanStackEndFollowEnabled ? "auto" : undefined,
         getItemKey,
@@ -627,7 +634,7 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
         initialRect,
         overscan,
         scrollEndThreshold: followToEnd?.scrollEndThreshold,
-        useAnimationFrameWithResizeObserver: followToEnd === undefined ? undefined : true,
+        useAnimationFrameWithResizeObserver: true,
         useFlushSync: false,
     });
     const followController = useFollowToEndController({
@@ -694,6 +701,7 @@ export function Virtualizer<TItemElement extends Element = HTMLElement>({
         };
     }
     return children({
+        containerRef: virtualizer.containerRef,
         followToEnd: followController,
         getVirtualItemForOffset: virtualizer.getVirtualItemForOffset,
         measure: virtualizer.measure,

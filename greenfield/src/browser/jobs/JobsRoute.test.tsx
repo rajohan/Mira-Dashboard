@@ -39,6 +39,7 @@ import {
 } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { installIntersectionObserverHarness } from "../test/intersectionObserverTest.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import {
     ControlledDashboardRealtimeClient,
@@ -617,7 +618,10 @@ describe("Dashboard jobs route", () => {
             readonly rootMargin = "400px 0px";
             readonly scrollMargin = "0px";
             readonly thresholds = [0];
-            constructor(callback: IntersectionObserverCallback) {
+            constructor(
+                callback: IntersectionObserverCallback,
+                _options?: IntersectionObserverInit
+            ) {
                 intersectionCallbacks.push(callback);
             }
             disconnect(): void {}
@@ -754,6 +758,7 @@ describe("Dashboard jobs route", () => {
     });
 
     test("keeps loaded event history stable while realtime shifts the exact-page cursor", async () => {
+        const observer = installIntersectionObserverHarness();
         const transport = new JobsRouteTransport();
         const initialRun = {
             ...queuedRun({
@@ -789,7 +794,6 @@ describe("Dashboard jobs route", () => {
             transport,
             realtimeClient
         );
-        const user = userEvent.setup();
         const detailCalls = () =>
             transport
                 .callsFor("jobs.getRun")
@@ -832,7 +836,7 @@ describe("Dashboard jobs route", () => {
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
         expect(detailCalls()).toHaveLength(1);
 
-        await user.click(screen.getByRole("button", { name: "Load older events" }));
+        act(() => observer.intersectLatest());
         await waitFor(() => expect(historyCalls()).toHaveLength(1));
         expect(historyCalls()[0]?.input).toEqual({
             eventCursor: { sequence: 103 },
@@ -895,6 +899,7 @@ describe("Dashboard jobs route", () => {
         expect(
             screen.getAllByRole("article", { name: "Event 104: queued" })
         ).toHaveLength(1);
+        observer.restore();
     });
 
     test("drops malformed selections without issuing exact-detail calls", async () => {
@@ -1055,7 +1060,10 @@ describe("Dashboard jobs route", () => {
             readonly rootMargin = "400px 0px";
             readonly scrollMargin = "0px";
             readonly thresholds = [0];
-            constructor(callback: IntersectionObserverCallback) {
+            constructor(
+                callback: IntersectionObserverCallback,
+                _options?: IntersectionObserverInit
+            ) {
                 intersectionCallbacks.push(callback);
             }
             disconnect(): void {}

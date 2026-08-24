@@ -1,4 +1,3 @@
-import JSON5 from "json5";
 import * as v from "valibot";
 
 const packageNameSchema = v.string();
@@ -24,7 +23,7 @@ export function resolveDirectPackageVersions(
     packageGroups: readonly Readonly<Record<string, string>>[],
     lockfileText: string
 ): Readonly<Record<string, string>> {
-    const lockfileValue: unknown = JSON5.parse(lockfileText);
+    const lockfileValue: unknown = Bun.JSON5.parse(lockfileText);
     const lockfile = v.parse(bunLockSchema, lockfileValue);
     const packageNames = new Set(packageGroups.flatMap((group) => Object.keys(group)));
     const resolvedVersions: Record<string, string> = {};

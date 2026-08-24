@@ -1,4 +1,3 @@
-/* eslint-disable jsx-a11y/prefer-tag-over-role -- Nested WAI-ARIA tree collections require role=group on their list. */
 import JSON5 from "json5";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
@@ -198,6 +197,7 @@ function JsonTreeItem({ node }: Readonly<{ node: JsonTreeNode }>) {
                 <span className="text-primary-400">{countLabel}</span>
             </Button>
             {expanded && (
+                // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Nested WAI-ARIA tree collections require role=group on their list.
                 <ul className="border-primary-800 ml-4 border-l pl-2" role="group">
                     {node.children.map((child, index) => (
                         <JsonTreeItem

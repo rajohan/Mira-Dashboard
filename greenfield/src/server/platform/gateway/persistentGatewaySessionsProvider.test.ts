@@ -10,7 +10,7 @@ import {
 } from "../../domains/gatewaySessions/provider.ts";
 import type {
     PersistentGatewayAdminMethod,
-    PersistentGatewayReadWriteMethod,
+    PersistentGatewayWebReadMethod,
 } from "./persistentGatewayProtocol.ts";
 import {
     createPersistentGatewaySessionsProvider,
@@ -38,7 +38,7 @@ class TestPersistentGatewaySessionsTransport implements PersistentGatewaySession
     public readonly responses: unknown[] = [];
 
     public request(
-        method: PersistentGatewayReadWriteMethod,
+        method: PersistentGatewayWebReadMethod,
         parameters: Readonly<Record<string, unknown>>,
         options?: PersistentGatewayRequestOptions
     ): Promise<unknown> {

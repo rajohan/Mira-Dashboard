@@ -108,6 +108,18 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+export const InfiniteScrollLoading: Story = {
+    args: {
+        incidents: virtualizedIncidents,
+        pagination: {
+            hasMore: true,
+            loading: true,
+            loadingLabel: "Loading older incidents…",
+            onLoadMore: fn(),
+        },
+    },
+};
+
 export const LifecycleAndSeverity: Story = {
     play: async ({ args, canvasElement }) => {
         const incident = incidents[1];

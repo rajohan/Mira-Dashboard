@@ -4,8 +4,10 @@ import type { JobRunState, ScheduleSummary } from "../../contracts/jobModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { StretchedAction } from "../ui/StretchedAction.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { scheduleConfigurationLabel } from "./schedulePresentation.ts";
 
 function runStateVariant(state: JobRunState) {
@@ -25,26 +27,37 @@ function cardSurface(selected: boolean, hovered: boolean): string {
 
 interface ScheduleTableProps {
     readonly onSelect: (id: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly schedules: readonly ScheduleSummary[];
     readonly selectedId?: string;
 }
 
 /** @returns Compact selectable Dashboard schedule inventory matching the legacy layout. */
-export function ScheduleTable({ onSelect, schedules, selectedId }: ScheduleTableProps) {
+export function ScheduleTable({
+    onSelect,
+    pagination,
+    schedules,
+    selectedId,
+}: ScheduleTableProps) {
     const [hoveredId, setHoveredId] = useState<string>();
 
     return (
-        <ul aria-label="Dashboard schedules" className="grid min-w-0 grid-cols-1 gap-2">
-            {schedules.map((schedule) => {
+        <VirtualizedList
+            estimateSize={() => 112}
+            getKey={(schedule) => schedule.id}
+            itemClassName="pb-2"
+            items={schedules}
+            label="Dashboard schedules"
+            pagination={pagination}
+            renderItem={(schedule) => {
                 const selected = schedule.id === selectedId;
                 const activeState = schedule.activeRun?.state;
                 return (
-                    <li
+                    <div
                         className={cn(
                             "group relative min-w-0 rounded-lg border px-3 py-2 transition-colors",
                             cardSurface(selected, schedule.id === hoveredId)
                         )}
-                        key={schedule.id}
                     >
                         <StretchedAction
                             aria-current={selected ? "true" : undefined}
@@ -94,9 +107,9 @@ export function ScheduleTable({ onSelect, schedules, selectedId }: ScheduleTable
                                 </dd>
                             </div>
                         </dl>
-                    </li>
+                    </div>
                 );
-            })}
-        </ul>
+            }}
+        />
     );
 }

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { fixedHostOperationUnits } from "../../shared/hostOperations.ts";
@@ -9,11 +8,14 @@ const artifacts = path.resolve(
     "../../../scripts/delivery/provisioning/host-operations"
 );
 
+function readTextFile(filePath: string): Promise<string> {
+    return Bun.file(filePath).text();
+}
+
 describe("fixed host operations provisioning", () => {
     test("keeps the helper to three exact operations and fixed commands", async () => {
-        const helper = await readFile(
-            path.join(artifacts, "mira-dashboard-host-operation"),
-            "utf8"
+        const helper = await readTextFile(
+            path.join(artifacts, "mira-dashboard-host-operation")
         );
         expect(helper).toContain("system-restart)");
         expect(helper).toContain("system-update)");
@@ -47,9 +49,8 @@ describe("fixed host operations provisioning", () => {
     });
 
     test("binds the worker OS identity to only fixed host and application units", async () => {
-        const policy = await readFile(
-            path.join(artifacts, "60-mira-dashboard-host-operations.rules"),
-            "utf8"
+        const policy = await readTextFile(
+            path.join(artifacts, "60-mira-dashboard-host-operations.rules")
         );
         expect(policy.match(/mira-dashboard-host-system-/gu)).toHaveLength(3);
         for (const unit of Object.values(fixedHostOperationUnits)) {
@@ -68,34 +69,28 @@ describe("fixed host operations provisioning", () => {
     test("defers reboot and preserves worker NoNewPrivileges", async () => {
         const [restart, update, cleanup, timer, reboot, worker, webRuntime] =
             await Promise.all([
-                readFile(
-                    path.join(artifacts, "mira-dashboard-host-system-restart.service"),
-                    "utf8"
+                readTextFile(
+                    path.join(artifacts, "mira-dashboard-host-system-restart.service")
                 ),
-                readFile(
-                    path.join(artifacts, "mira-dashboard-host-system-update.service"),
-                    "utf8"
+                readTextFile(
+                    path.join(artifacts, "mira-dashboard-host-system-update.service")
                 ),
-                readFile(
-                    path.join(artifacts, "mira-dashboard-host-system-cleanup.service"),
-                    "utf8"
+                readTextFile(
+                    path.join(artifacts, "mira-dashboard-host-system-cleanup.service")
                 ),
-                readFile(
-                    path.join(artifacts, "mira-dashboard-deferred-reboot.timer"),
-                    "utf8"
+                readTextFile(
+                    path.join(artifacts, "mira-dashboard-deferred-reboot.timer")
                 ),
-                readFile(
-                    path.join(artifacts, "mira-dashboard-deferred-reboot.service"),
-                    "utf8"
+                readTextFile(
+                    path.join(artifacts, "mira-dashboard-deferred-reboot.service")
                 ),
-                readFile(
+                readTextFile(
                     path.resolve(
                         import.meta.dir,
                         "../../../systemd/mira-dashboard-worker.service"
-                    ),
-                    "utf8"
+                    )
                 ),
-                readFile(path.join(artifacts, "mira-dashboard-web-runtime"), "utf8"),
+                readTextFile(path.join(artifacts, "mira-dashboard-web-runtime")),
             ]);
         expect(restart).toContain("NoNewPrivileges=true");
         expect(update).not.toContain("NoNewPrivileges=");

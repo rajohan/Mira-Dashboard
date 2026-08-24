@@ -15,8 +15,8 @@ import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Heading } from "../ui/Heading.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { AgentHistoryTable } from "./AgentHistoryTable.tsx";
 import {
     agentHistoryLiveHeadQueryOptions,
@@ -48,11 +48,12 @@ export function AgentsRoute() {
         liveHistoryRowIdentity,
         "agents"
     );
+    const historyPageError = history.isFetchNextPageError ? history.error : null;
     const error =
         collectionQueries.configuration?.error ??
         collectionQueries.statuses?.error ??
         historyLiveHead.error ??
-        history.error;
+        (history.isFetchNextPageError ? null : history.error);
     const historyAvailable =
         history.data !== undefined || historyLiveHead.data !== undefined;
     const pending =
@@ -77,14 +78,10 @@ export function AgentsRoute() {
 
     return (
         <div>
-            <PageHeader
-                description="Reviewed roles, Dashboard-owned tasks, and separate Gateway session availability. Availability is not online status or health. Updates automatically from agent and Gateway events, with 10-second status repair polling."
-                eyebrow="Operations"
-                title="Agents"
-            />
-            {pending && !hasCompleteData && (
-                <LoadingState className="mt-10" label="Loading agents…" />
-            )}
+            <Heading className="sr-only" level={1}>
+                Agents
+            </Heading>
+            {pending && !hasCompleteData && <LoadingState label="Loading agents…" />}
             {error !== null && (
                 <Alert
                     action={
@@ -92,26 +89,33 @@ export function AgentsRoute() {
                             Try again
                         </Button>
                     }
-                    className="mt-6"
                     message={dashboardBrowserFailureMessage(error)}
                 />
             )}
             {hasCompleteData && (
-                <div className="mt-8 space-y-10">
-                    <AgentStatusGrid agents={agents} statuses={agentStatuses} />
+                <div className="space-y-10">
+                    <AgentStatusGrid
+                        agents={agents}
+                        runs={runs}
+                        statuses={agentStatuses}
+                    />
                     <div>
-                        <AgentHistoryTable runs={runs} />
-                        {history.hasNextPage && (
-                            <Button
-                                busy={history.isFetchingNextPage}
-                                busyLabel="Loading…"
-                                className="mt-4"
-                                onClick={() => void history.fetchNextPage()}
-                                variant="secondary"
-                            >
-                                Load older tasks
-                            </Button>
-                        )}
+                        <AgentHistoryTable
+                            pagination={{
+                                ...(historyPageError === null
+                                    ? {}
+                                    : {
+                                          error: dashboardBrowserFailureMessage(
+                                              historyPageError
+                                          ),
+                                      }),
+                                hasMore: history.hasNextPage,
+                                loading: history.isFetchingNextPage,
+                                loadingLabel: "Loading older tasks…",
+                                onLoadMore: () => void history.fetchNextPage(),
+                            }}
+                            runs={runs}
+                        />
                     </div>
                 </div>
             )}

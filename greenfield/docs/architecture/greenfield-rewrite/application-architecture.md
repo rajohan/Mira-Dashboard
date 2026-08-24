@@ -72,14 +72,14 @@ is recreated manually after cutover through the new system.
   SQLite-specific operations.
 - Automatic schema push/synchronization against production.
 - One global frontend store containing server state, form state, route state, and UI state.
-- Custom mirroring or a repository-wide source-revision pin for Bun Canary. CI qualifies the
-  selected channel, while each immutable release records its resolved revision.
+- Custom mirroring or a repository-wide source-revision pin for Bun. CI qualifies stable 1.4.0,
+  while each immutable release records its resolved revision.
 
 ## Decision Record
 
 | Area                     | Greenfield choice                            | Why                                                                                                                   |
 | ------------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Runtime/server           | Bun 1.4 Canary channel + `Bun.serve`         | Keeps the proven Bun-native deployment model and removes framework duplication.                                       |
+| Runtime/server           | Stable Bun 1.4.0 + `Bun.serve`               | Keeps the proven Bun-native deployment model and removes framework duplication.                                       |
 | Application API          | tRPC v11 Fetch adapter + SuperJSON           | Browser and automations are permanently TypeScript; end-to-end contracts and selective rich types provide real value. |
 | Browser realtime         | tRPC SSE with `tracked()` event IDs          | Native Fetch transport, automatic reconnect, resumable events, and no Node WebSocket adapter.                         |
 | Gateway transport        | Bun native outbound `WebSocket`              | OpenClaw Gateway is already a WebSocket protocol and remains an external integration boundary.                        |

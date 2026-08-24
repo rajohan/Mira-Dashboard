@@ -229,7 +229,7 @@ describe("chat transcript", () => {
         ]);
     });
 
-    test("starts a fresh compaction TTL after idle and refreshes it on retry", () => {
+    test("starts a fresh compaction TTL after idle and refreshes it on retry", async () => {
         jest.useFakeTimers();
         let currentTimeMs = 1000;
         const nowSpy = spyOn(Date, "now").mockImplementation(() => currentTimeMs);
@@ -254,10 +254,11 @@ describe("chat transcript", () => {
 
         try {
             currentTimeMs = 1_000_000;
-            act(() => {
+            await act(async () => {
                 rendered.rerender(
                     <ChatTranscript {...properties([compaction(currentTimeMs)])} />
                 );
+                await Promise.resolve();
             });
             expect(screen.queryByText("No messages yet")).toBeNull();
 
@@ -280,10 +281,11 @@ describe("chat transcript", () => {
             });
             expect(screen.queryByText("No messages yet")).toBeNull();
 
-            act(() => {
+            await act(async () => {
                 rendered.rerender(
                     <ChatTranscript {...properties([compaction(currentTimeMs)])} />
                 );
+                await Promise.resolve();
             });
             currentTimeMs += 2000;
             act(() => {
@@ -303,7 +305,7 @@ describe("chat transcript", () => {
         }
     });
 
-    test("filters an expired compaction synchronously when it arrives after idle", () => {
+    test("filters an expired compaction before paint when it arrives after idle", async () => {
         jest.useFakeTimers();
         let currentTimeMs = 1000;
         const nowSpy = spyOn(Date, "now").mockImplementation(() => currentTimeMs);
@@ -327,12 +329,16 @@ describe("chat transcript", () => {
         };
 
         try {
+            await act(async () => {
+                await Promise.resolve();
+            });
             const readsBeforeArrival = nowSpy.mock.calls.length;
             currentTimeMs = 1_000_000;
-            act(() => {
+            await act(async () => {
                 rendered.rerender(
                     <ChatTranscript {...properties([expiredCompaction])} />
                 );
+                await Promise.resolve();
             });
             expect(nowSpy).toHaveBeenCalledTimes(readsBeforeArrival + 1);
             expect(screen.queryByText("Context compacted")).toBeNull();

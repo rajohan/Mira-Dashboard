@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import type { ChatMessage } from "../../../contracts/chatModel.ts";
@@ -24,12 +23,13 @@ function fakeProvider(
 ): ChatProvider {
     let pageIndex = 0;
     return {
-        getMessage: async () => ({ message: hydrated, status: "available" }),
-        history: async () => {
+        getMessage: () => Promise.resolve({ message: hydrated, status: "available" }),
+        history: () => {
             const page = pages[pageIndex];
             pageIndex += 1;
-            if (page === undefined) throw new Error("Unexpected history page");
-            return page;
+            return page === undefined
+                ? Promise.reject(new Error("Unexpected history page"))
+                : Promise.resolve(page);
         },
     } as unknown as ChatProvider;
 }

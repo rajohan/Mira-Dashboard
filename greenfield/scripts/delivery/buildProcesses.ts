@@ -1,6 +1,5 @@
 import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
 
 import { withBunBuildAdmission } from "./buildAdmission.ts";
 import { parseBuildOutputArgument } from "./buildCli.ts";
@@ -65,7 +64,7 @@ async function measurements(
         | "worker"
 ): Promise<Readonly<{ gzipBytes: number; rawBytes: number }>> {
     const contents = await readFile(filePath);
-    const gzipBytes = gzipSync(contents, { level: 9 }).byteLength;
+    const gzipBytes = Bun.gzipSync(contents, { level: 9 }).byteLength;
     if (contents.byteLength === 0 || gzipBytes > maximumGzipBytes) {
         throw new Error(`Dashboard ${role} process bundle exceeds its byte budget`);
     }

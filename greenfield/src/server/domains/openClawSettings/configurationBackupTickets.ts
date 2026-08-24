@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import * as v from "valibot";
 
 import {
@@ -103,7 +101,7 @@ function metadata(record: BackupTicketRecord): OpenClawConfigurationBackupMetada
 export function createOpenClawConfigurationBackupTicketStore(
     options: OpenClawConfigurationBackupTicketStoreOptions = {}
 ): OpenClawConfigurationBackupTicketStore {
-    const generateId = options.generateId ?? randomUUID;
+    const generateId = options.generateId ?? (() => crypto.randomUUID());
     const maximumStoredBytes = positiveLimit(
         options.maximumStoredBytes ?? defaultMaximumStoredBytes,
         "byte capacity"

@@ -1,4 +1,9 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+    infiniteQueryOptions,
+    type InfiniteData,
+    queryOptions,
+    type QueryClient,
+} from "@tanstack/react-query";
 
 import type {
     ListNotificationsInput,
@@ -63,6 +68,44 @@ export function notificationLatestQueryOptions(client: DashboardTrpcClient) {
  * short-lived so paging remains memory-bounded without hiding rows.
  * @returns Query options for the exact selected history page.
  */
+export function notificationHistoryQueryOptions(
+    client: DashboardTrpcClient,
+    firstCursor: NotificationCursor | undefined,
+    filters: ListNotificationsInput["filters"]
+) {
+    return infiniteQueryOptions<
+        ListNotificationsResult,
+        Error,
+        InfiniteData<ListNotificationsResult, NotificationCursor | undefined>,
+        ReturnType<typeof notificationHistoryQueryKey>,
+        NotificationCursor | undefined
+    >({
+        enabled: firstCursor !== undefined,
+        gcTime: notificationHistoryInactiveCacheMs,
+        getNextPageParam: (lastPage) => lastPage.nextCursor,
+        initialPageParam: firstCursor,
+        queryFn: ({ pageParam, signal }): Promise<ListNotificationsResult> => {
+            if (pageParam === undefined) {
+                return Promise.reject(
+                    new TypeError("Notification history requires a continuation cursor")
+                );
+            }
+            return client.query(
+                "notifications.list",
+                {
+                    cursor: pageParam,
+                    ...(filters === undefined ? {} : { filters }),
+                    limit: 100,
+                },
+                { signal }
+            );
+        },
+        queryKey: notificationHistoryQueryKey(firstCursor, filters),
+        staleTime: 10_000,
+    });
+}
+
+/** @returns One exact notification history page for focused contract tests. */
 export function notificationHistoryPageQueryOptions(
     client: DashboardTrpcClient,
     cursor: NotificationCursor | undefined,
@@ -71,7 +114,6 @@ export function notificationHistoryPageQueryOptions(
 ) {
     return queryOptions({
         enabled: enabled && cursor !== undefined,
-        gcTime: notificationHistoryInactiveCacheMs,
         queryFn: ({ signal }): Promise<ListNotificationsResult> => {
             if (cursor === undefined) {
                 return Promise.reject(

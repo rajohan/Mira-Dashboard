@@ -16,7 +16,9 @@ import type {
 } from "../../contracts/files.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 
 export interface WorkspaceFileTreeSnapshot {
     readonly directory: WorkspaceFileDirectory;
@@ -34,6 +36,7 @@ interface WorkspaceFileTreeProps {
     readonly onSelectFile: (entry: WorkspaceFileEntry, parentDirectoryId: string) => void;
     readonly onSelectRoot: (rootId: string) => void;
     readonly onToggleDirectory: (directoryId: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly roots: readonly WorkspaceFileRoot[];
     readonly selectedFileId?: string;
     readonly selectedRootId: string;
@@ -67,49 +70,169 @@ function sortedEntries(entries: readonly WorkspaceFileEntry[]) {
     });
 }
 
-interface TreeDirectoryEntriesProps {
+interface TreeRowsInput {
     readonly depth: number;
     readonly directoryId: string;
     readonly expandedDirectoryIds: ReadonlySet<string>;
     readonly loadingDirectoryId?: string;
-    readonly onOpenDirectory: WorkspaceFileTreeProps["onOpenDirectory"];
-    readonly onSelectFile: WorkspaceFileTreeProps["onSelectFile"];
-    readonly onToggleDirectory: WorkspaceFileTreeProps["onToggleDirectory"];
-    readonly selectedFileId?: string;
     readonly snapshotById: ReadonlyMap<string, WorkspaceFileTreeSnapshot>;
 }
 
-function TreeDirectoryEntries({
+type WorkspaceFileTreeRow =
+    | Readonly<{
+          depth: 1;
+          key: string;
+          kind: "root";
+          root: WorkspaceFileRoot;
+      }>
+    | Readonly<{
+          depth: number;
+          entry: WorkspaceFileEntry;
+          key: string;
+          kind: "entry";
+          parentDirectoryId: string;
+      }>
+    | Readonly<{
+          depth: number;
+          key: string;
+          kind: "status";
+          label: string;
+      }>;
+
+function directoryRows({
     depth,
     directoryId,
     expandedDirectoryIds,
     loadingDirectoryId,
-    onOpenDirectory,
-    onSelectFile,
-    onToggleDirectory,
-    selectedFileId,
     snapshotById,
-}: TreeDirectoryEntriesProps) {
+}: TreeRowsInput): WorkspaceFileTreeRow[] {
     const snapshot = snapshotById.get(directoryId);
     if (snapshot === undefined) {
-        return (
-            <output aria-live="polite">
-                <Text className="px-3 py-2" size="sm" tone="muted">
-                    {loadingDirectoryId === directoryId
+        return [
+            {
+                depth,
+                key: `status:${directoryId}`,
+                kind: "status",
+                label:
+                    loadingDirectoryId === directoryId
                         ? "Loading folder…"
-                        : "Open this folder to load its entries."}
-                </Text>
-            </output>
-        );
+                        : "Open this folder to load its entries.",
+            },
+        ];
     }
+    return sortedEntries(snapshot.entries).flatMap((entry) => {
+        const row: WorkspaceFileTreeRow = {
+            depth,
+            entry,
+            key: `entry:${directoryId}:${entry.resourceId}`,
+            kind: "entry",
+            parentDirectoryId: directoryId,
+        };
+        return entry.kind === "directory" && expandedDirectoryIds.has(entry.resourceId)
+            ? [
+                  row,
+                  ...directoryRows({
+                      depth: depth + 1,
+                      directoryId: entry.resourceId,
+                      expandedDirectoryIds,
+                      loadingDirectoryId,
+                      snapshotById,
+                  }),
+              ]
+            : [row];
+    });
+}
+
+/**
+ * Persistent opaque-reference tree for visited workspace directories.
+ * @returns Accessible expandable workspace file tree.
+ */
+export function WorkspaceFileTree({
+    expandedDirectoryIds,
+    loadingDirectoryId,
+    onOpenDirectory,
+    onSelectFile,
+    onSelectRoot,
+    onToggleDirectory,
+    pagination,
+    roots,
+    selectedFileId,
+    selectedRootId,
+    snapshots,
+}: WorkspaceFileTreeProps) {
+    const snapshotById = new Map(
+        snapshots.map((snapshot) => [snapshot.directory.resourceId, snapshot])
+    );
+    const selectedRoot = roots.find((root) => root.id === selectedRootId);
+    const rows = roots.flatMap((root): WorkspaceFileTreeRow[] => [
+        { depth: 1, key: `root:${root.id}`, kind: "root", root },
+        ...(root.id === selectedRootId
+            ? directoryRows({
+                  depth: 2,
+                  directoryId: root.resourceId,
+                  expandedDirectoryIds,
+                  loadingDirectoryId,
+                  snapshotById,
+              })
+            : []),
+    ]);
     return (
-        <ul aria-label={`${snapshot.directory.name} contents`}>
-            {sortedEntries(snapshot.entries).map((entry) => {
-                const directory = entry.kind === "directory";
-                const expanded = directory && expandedDirectoryIds.has(entry.resourceId);
-                const selected = !directory && selectedFileId === entry.resourceId;
-                return (
-                    <li key={entry.resourceId}>
+        <nav aria-label="Workspace file tree" className="flex min-h-0 flex-1 flex-col">
+            <VirtualizedList
+                className="max-h-none min-h-0 flex-1 p-2"
+                estimateSize={() => 40}
+                getKey={(row) => row.key}
+                getItemAriaLevel={(row) => row.depth}
+                itemRole="treeitem"
+                items={rows}
+                label={`${selectedRoot?.label ?? "Workspace"} contents`}
+                listRole="tree"
+                pagination={pagination}
+                renderItem={(row) => {
+                    if (row.kind === "root") {
+                        const selected = row.root.id === selectedRootId;
+                        return (
+                            <Button
+                                aria-expanded={selected}
+                                className={`min-h-10 w-full min-w-0 justify-start gap-2 rounded-md p-2 text-left font-medium ${
+                                    selected
+                                        ? "bg-primary-700 text-primary-50 data-hover:bg-primary-700 data-hover:text-primary-50"
+                                        : "text-primary-300 hover:bg-primary-700/60 data-hover:bg-primary-700/60"
+                                }`}
+                                onClick={() => onSelectRoot(row.root.id)}
+                                variant="ghost"
+                            >
+                                <Icon
+                                    className="text-accent-300 shrink-0"
+                                    icon={selected ? ChevronDown : ChevronRight}
+                                    size="sm"
+                                />
+                                <Icon icon={HardDrive} size="sm" />
+                                <span className="min-w-0 truncate">{row.root.label}</span>
+                            </Button>
+                        );
+                    }
+                    if (row.kind === "status") {
+                        return (
+                            <Text
+                                aria-live="polite"
+                                className="py-2 pr-3"
+                                size="sm"
+                                style={{
+                                    paddingLeft: `${row.depth * 0.875 + 2.25}rem`,
+                                }}
+                                tone="muted"
+                            >
+                                {row.label}
+                            </Text>
+                        );
+                    }
+                    const directory = row.entry.kind === "directory";
+                    const expanded =
+                        directory && expandedDirectoryIds.has(row.entry.resourceId);
+                    const selected =
+                        !directory && selectedFileId === row.entry.resourceId;
+                    return (
                         <Button
                             aria-current={selected ? "true" : undefined}
                             aria-expanded={directory ? expanded : undefined}
@@ -120,13 +243,13 @@ function TreeDirectoryEntries({
                             }`}
                             onClick={() => {
                                 if (directory) {
-                                    onToggleDirectory(entry.resourceId);
-                                    onOpenDirectory(entry, directoryId);
+                                    onToggleDirectory(row.entry.resourceId);
+                                    onOpenDirectory(row.entry, row.parentDirectoryId);
                                 } else {
-                                    onSelectFile(entry, directoryId);
+                                    onSelectFile(row.entry, row.parentDirectoryId);
                                 }
                             }}
-                            style={{ paddingLeft: `${depth * 0.875 + 0.5}rem` }}
+                            style={{ paddingLeft: `${row.depth * 0.875 + 0.5}rem` }}
                             variant="ghost"
                         >
                             {directory ? (
@@ -144,97 +267,14 @@ function TreeDirectoryEntries({
                                         ? "shrink-0 text-amber-300"
                                         : "text-primary-400 shrink-0"
                                 }
-                                icon={entryIcon(entry)}
+                                icon={entryIcon(row.entry)}
                                 size="sm"
                             />
-                            <span className="min-w-0 truncate">{entry.name}</span>
+                            <span className="min-w-0 truncate">{row.entry.name}</span>
                         </Button>
-                        {directory && expanded && (
-                            <TreeDirectoryEntries
-                                depth={depth + 1}
-                                directoryId={entry.resourceId}
-                                expandedDirectoryIds={expandedDirectoryIds}
-                                loadingDirectoryId={loadingDirectoryId}
-                                onOpenDirectory={onOpenDirectory}
-                                onSelectFile={onSelectFile}
-                                onToggleDirectory={onToggleDirectory}
-                                selectedFileId={selectedFileId}
-                                snapshotById={snapshotById}
-                            />
-                        )}
-                    </li>
-                );
-            })}
-            {snapshot.hasNextPage && (
-                <li className="text-primary-400 px-3 py-2 text-xs">
-                    More entries are available in the open folder.
-                </li>
-            )}
-        </ul>
-    );
-}
-
-/**
- * Persistent opaque-reference tree for visited workspace directories.
- * @returns Accessible expandable workspace file tree.
- */
-export function WorkspaceFileTree({
-    expandedDirectoryIds,
-    loadingDirectoryId,
-    onOpenDirectory,
-    onSelectFile,
-    onSelectRoot,
-    onToggleDirectory,
-    roots,
-    selectedFileId,
-    selectedRootId,
-    snapshots,
-}: WorkspaceFileTreeProps) {
-    const snapshotById = new Map(
-        snapshots.map((snapshot) => [snapshot.directory.resourceId, snapshot])
-    );
-    return (
-        <nav aria-label="Workspace file tree" className="min-h-0 overflow-auto p-2">
-            <ul role="tree">
-                {roots.map((root) => {
-                    const selected = root.id === selectedRootId;
-                    return (
-                        <li key={root.id} role="treeitem">
-                            <Button
-                                aria-expanded={selected}
-                                className={`min-h-10 w-full min-w-0 justify-start gap-2 rounded-md p-2 text-left font-medium ${
-                                    selected
-                                        ? "bg-primary-700 text-primary-50 data-hover:bg-primary-700 data-hover:text-primary-50"
-                                        : "text-primary-300 hover:bg-primary-700/60 data-hover:bg-primary-700/60"
-                                }`}
-                                onClick={() => onSelectRoot(root.id)}
-                                variant="ghost"
-                            >
-                                <Icon
-                                    className="text-accent-300 shrink-0"
-                                    icon={selected ? ChevronDown : ChevronRight}
-                                    size="sm"
-                                />
-                                <Icon icon={HardDrive} size="sm" />
-                                <span className="min-w-0 truncate">{root.label}</span>
-                            </Button>
-                            {selected && (
-                                <TreeDirectoryEntries
-                                    depth={1}
-                                    directoryId={root.resourceId}
-                                    expandedDirectoryIds={expandedDirectoryIds}
-                                    loadingDirectoryId={loadingDirectoryId}
-                                    onOpenDirectory={onOpenDirectory}
-                                    onSelectFile={onSelectFile}
-                                    onToggleDirectory={onToggleDirectory}
-                                    selectedFileId={selectedFileId}
-                                    snapshotById={snapshotById}
-                                />
-                            )}
-                        </li>
                     );
-                })}
-            </ul>
+                }}
+            />
         </nav>
     );
 }

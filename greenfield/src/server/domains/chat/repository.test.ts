@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import { eq } from "drizzle-orm";
@@ -49,6 +48,14 @@ function input(overrides: Partial<ChatSendInput> = {}): ChatSendInput {
         sessionKey: "agent:main:main",
         ...overrides,
     };
+}
+
+function retentionRunId(value: number): string {
+    return `019fe5a1-6cb9-7e51-ad2a-bf1f6986${value.toString(16).padStart(4, "0")}`;
+}
+
+function responseBudgetRunId(index: number): string {
+    return `019fe5a1-6cb9-7e51-ad2a-bf1f6987${index.toString(16).padStart(4, "0")}`;
 }
 
 type ExternalRuntimeSnapshotEntry =
@@ -349,9 +356,9 @@ describe("durable chat repository", () => {
             testImmediateDatabaseWriteAdmission,
             "main",
             () => 1000,
-            async () => {
+            () => {
                 wakes += 1;
-                throw new Error("best-effort wake failed");
+                return Promise.reject(new Error("best-effort wake failed"));
             }
         );
         try {
@@ -1111,9 +1118,9 @@ describe("durable chat repository", () => {
             testImmediateDatabaseWriteAdmission,
             "main",
             () => 1000,
-            async () => {
+            () => {
                 wakes += 1;
-                throw new Error("best-effort wake failed");
+                return Promise.reject(new Error("best-effort wake failed"));
             }
         );
         try {
@@ -1171,20 +1178,17 @@ describe("durable chat repository", () => {
             "main",
             () => clock
         );
-        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture identity is local to this retention case.
-        const id = (value: number): string =>
-            `019fe5a1-6cb9-7e51-ad2a-bf1f6986${value.toString(16).padStart(4, "0")}`;
         try {
             for (let index = 1; index <= 5; index += 1) {
                 clock += 10;
                 await repository.admit(
                     input({
-                        clientRunId: id(index),
+                        clientRunId: retentionRunId(index),
                         idempotencyKey: String.fromCodePoint(64 + index).repeat(32),
                     }),
                     actor
                 );
-                await repository.appendEvents(id(index), [
+                await repository.appendEvents(retentionRunId(index), [
                     {
                         kind: "terminal",
                         occurredAtMs: clock + 1,
@@ -1195,10 +1199,10 @@ describe("durable chat repository", () => {
             const activeIds: string[] = [];
             for (let index = 6; index <= 13; index += 1) {
                 clock += 10;
-                activeIds.push(id(index));
+                activeIds.push(retentionRunId(index));
                 await repository.admit(
                     input({
-                        clientRunId: id(index),
+                        clientRunId: retentionRunId(index),
                         idempotencyKey: `Z${String(index).padStart(2, "0")}`
                             .repeat(11)
                             .slice(0, 32),
@@ -1239,10 +1243,9 @@ describe("durable chat repository", () => {
             "main",
             () => clock
         );
-        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture identity is local to this response-budget case.
-        const runIdFor = (index: number): string =>
-            `019fe5a1-6cb9-7e51-ad2a-bf1f6987${index.toString(16).padStart(4, "0")}`;
-        const runIds = Array.from({ length: 4 }, (_, index) => runIdFor(index + 1));
+        const runIds = Array.from({ length: 4 }, (_, index) =>
+            responseBudgetRunId(index + 1)
+        );
         try {
             for (const [runIndex, runId] of runIds.entries()) {
                 clock += 10;

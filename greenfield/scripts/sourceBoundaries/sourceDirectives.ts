@@ -7,7 +7,7 @@ import { isRecord, nodeType, sourceLine, type AstRecord } from "./sourceAst.ts";
 
 /**
  * Finds runtime-shaped ambient declarations that can restore forbidden globals.
- * @param node Babel AST record.
+ * @param node ESTree-compatible AST record.
  * @returns Ambient runtime declaration finding when present.
  */
 export function ambientRuntimeDeclarationFromNode(
@@ -30,7 +30,7 @@ export function ambientRuntimeDeclarationFromNode(
 
 /**
  * Finds TypeScript triple-slash references that alter per-file ambient authority.
- * @param ast Parsed Babel file AST.
+ * @param ast Parsed Oxc file AST.
  * @returns Triple-slash reference findings.
  */
 export function referenceDirectives(ast: unknown): readonly SourceReferenceDirective[] {
@@ -50,7 +50,7 @@ export function referenceDirectives(ast: unknown): readonly SourceReferenceDirec
 
 /**
  * Finds TypeScript suppression comments that can hide erased runtime references.
- * @param ast Parsed Babel file AST.
+ * @param ast Parsed Oxc file AST.
  * @returns TypeScript suppression findings.
  */
 export function typeScriptSuppressionDirectives(

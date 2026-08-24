@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { discoverSourceFiles } from "./sourceBoundaries/sourceDiscovery.ts";
@@ -175,7 +174,7 @@ export async function readTestTimingsInventory(
     projectRoot: string
 ): Promise<TestTimingsInventory> {
     const resolvedTimingsPath = path.resolve(projectRoot, timingsPath);
-    const rawInventory: unknown = JSON.parse(await readFile(resolvedTimingsPath, "utf8"));
+    const rawInventory: unknown = await Bun.file(resolvedTimingsPath).json();
     return parseTestTimingsInventory(rawInventory);
 }
 

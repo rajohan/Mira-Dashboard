@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import {
     workspaceFileLimits,
     workspaceFileRawHttpContracts,
@@ -418,7 +416,7 @@ export function createWorkspaceFileRawHttpHandler(
         workLimits.maximumConcurrentUploads,
         workLimits.maximumUploadBytes
     );
-    const generateRequestId = options.generateRequestId ?? randomUUID;
+    const generateRequestId = options.generateRequestId ?? (() => crypto.randomUUID());
 
     return async (request, requestUrl) => {
         const content = contentPathPattern.exec(requestUrl.pathname);

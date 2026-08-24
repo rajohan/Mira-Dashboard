@@ -193,10 +193,12 @@ describe("Storybook test runner", () => {
 
     test("uses three file-parallel workers and optional official JSON output", () => {
         expect(createStorybookTestCommand("/tmp/dashboard", ["a.stories.tsx"])).toEqual([
-            "/tmp/dashboard/node_modules/.bin/vitest",
+            process.execPath,
+            "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
             "--config",
             ".storybook/vitest.config.ts",
+            "--bail=1",
             "--project=storybook-exclusive-001",
             "--project=storybook",
             "--maxWorkers=3",
@@ -208,10 +210,12 @@ describe("Storybook test runner", () => {
                 timingReportPath: "/tmp/report.json",
             })
         ).toEqual([
-            "/tmp/dashboard/node_modules/.bin/vitest",
+            process.execPath,
+            "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
             "--config",
             ".storybook/vitest.config.ts",
+            "--bail=1",
             "--project=storybook-exclusive-001",
             "--project=storybook",
             "--maxWorkers=3",
@@ -227,11 +231,13 @@ describe("Storybook test runner", () => {
             ["a.stories.tsx"],
             { coverageDirectory: "/tmp/coverage/storybook-001" }
         );
-        expect(coverageCommand.slice(0, 9)).toEqual([
-            "/tmp/dashboard/node_modules/.bin/vitest",
+        expect(coverageCommand.slice(0, 11)).toEqual([
+            process.execPath,
+            "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
             "--config",
             ".storybook/vitest.config.ts",
+            "--bail=1",
             "--project=storybook-exclusive-001",
             "--project=storybook",
             "--maxWorkers=3",
@@ -463,6 +469,7 @@ describe("Storybook test runner", () => {
         expect(
             commands.every((command) => command.includes("--maxWorkers=3"))
         ).toBeTrue();
+        expect(commands.every((command) => command.includes("--bail=1"))).toBeTrue();
         expect(commands.every((command) => command.includes("--no-isolate"))).toBeTrue();
         expect(
             commands.every((command) =>
@@ -482,7 +489,7 @@ describe("Storybook test runner", () => {
                     .map((command) => storyFilesFromCommand(command))
                     .map((files) => files.length)
             )
-        ).toBe(29);
+        ).toBe(30);
         expect(executed.toSorted()).toEqual([...discovered].toSorted());
         expect(new Set(executed).size).toBe(executed.length);
     });

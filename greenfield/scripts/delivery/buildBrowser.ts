@@ -11,7 +11,6 @@ import {
     writeFrontendHtmlAppEntrypoint,
     writePrecompressedFrontendAssets,
 } from "../frontendBuildArtifacts.ts";
-import reactCompilerPlugin from "../reactCompilerPlugin.ts";
 import { withBunBuildAdmission } from "./buildAdmission.ts";
 import { parseBuildOutputArgument } from "./buildCli.ts";
 import { resolveRepositoryBuildPath } from "./buildPaths.ts";
@@ -66,8 +65,9 @@ export async function buildBrowserArtifact(
                 chunk: "assets/[name]-[hash].[ext]",
             },
             outdir: output,
-            plugins: [reactCompilerPlugin, tailwindPlugin],
+            plugins: [tailwindPlugin],
             publicPath: "/",
+            reactCompiler: true,
             sourcemap: "none",
             splitting: true,
             target: "browser",

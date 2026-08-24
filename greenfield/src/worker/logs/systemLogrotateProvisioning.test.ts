@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const artifacts = path.resolve(
@@ -9,10 +8,9 @@ const artifacts = path.resolve(
 
 describe("fixed Ubuntu logrotate provisioning", () => {
     test("checks policy link count, owner, mode, and exact host allowlist", async () => {
-        const broker = await readFile(
-            path.join(artifacts, "mira-dashboard-log-maintenance"),
-            "utf8"
-        );
+        const broker = await Bun.file(
+            path.join(artifacts, "mira-dashboard-log-maintenance")
+        ).text();
         expect(broker).toContain("stat -c '%h'");
         expect(broker).toContain("stat -c '%u'");
         expect(broker).toContain("/usr/sbin/logrotate --state /var/lib/logrotate/status");
@@ -25,10 +23,9 @@ describe("fixed Ubuntu logrotate provisioning", () => {
     });
 
     test("grants polkit access to the same four units only", async () => {
-        const policy = await readFile(
-            path.join(artifacts, "60-mira-dashboard-log-maintenance.rules"),
-            "utf8"
-        );
+        const policy = await Bun.file(
+            path.join(artifacts, "60-mira-dashboard-log-maintenance.rules")
+        ).text();
         expect(policy.match(/mira-dashboard-log-maintenance@host-/gu)).toHaveLength(4);
         expect(policy).not.toContain("docker-managed");
     });

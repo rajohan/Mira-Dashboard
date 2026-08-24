@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import {
     chmod,
     cp,
@@ -101,7 +100,7 @@ function catalogDigest(catalog: string): string {
             ownerOid,
         })
     );
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update("mira-dashboard-database-catalog-v1\0", "utf8")
         .update(JSON.stringify(normalized), "utf8")
         .digest("hex");
@@ -483,7 +482,7 @@ describe("database observability provisioning", () => {
             ?.groups?.body;
         expect(body).toBeDefined();
         if (body === undefined) throw new Error("Reconciler body is absent");
-        const digest = createHash("sha256").update(body).digest("hex");
+        const digest = new Bun.CryptoHasher("sha256").update(body).digest("hex");
 
         expect(verify).toContain(digest);
         expect(apply.indexOf("$administrator_boundary$")).toBeLessThan(

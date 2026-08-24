@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/number-literal-case -- File signatures retain wire-format readability. */
 import Fs from "node:fs";
 import Path from "node:path";
 
@@ -144,8 +143,8 @@ function isVisibleName(name: string): boolean {
 function isValidRootConfiguration(
     configuration: WorkspaceFileRootConfiguration
 ): boolean {
-    // oxlint-disable-next-line typescript/no-misused-spread -- Contract budgets Unicode code points.
-    const labelLength = [...configuration.label].length;
+    let labelLength = 0;
+    for (const _codePoint of configuration.label) labelLength += 1;
     return (
         typeof configuration.id === "string" &&
         rootIdPattern.test(configuration.id) &&

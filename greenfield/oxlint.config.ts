@@ -104,12 +104,21 @@ export default defineConfig({
                 interfaceExemptsParamsCheck: true,
             },
         ],
+        "jsx-a11y/no-noninteractive-tabindex": [
+            "error",
+            {
+                roles: ["log", "region", "tabpanel"],
+                tags: ["section"],
+            },
+        ],
         "jsdoc/require-throws-description": "error",
         "jsdoc/require-yields-description": "error",
-        "react/react-compiler": "error",
+        "react/unsupported-syntax": "error",
         "require-await": "off",
         "typescript/require-await": "error",
         "unicorn/no-null": "off",
+        // Oxfmt owns numeric-literal casing and canonicalizes hexadecimal digits to lowercase.
+        "unicorn/number-literal-case": "off",
         "unicorn/no-useless-undefined": [
             "error",
             {
@@ -543,6 +552,13 @@ export default defineConfig({
             ],
             rules: {
                 "no-console": "error",
+            },
+        },
+        {
+            files: ["src/browser/ui/Virtualizer.tsx"],
+            rules: {
+                // directDomUpdates is TanStack's compiler-compatible path, but Oxlint cannot infer the runtime option.
+                "react/incompatible-library": "off",
             },
         },
         ...pluginOverrides(storybookConfigs.recommended),

@@ -1,6 +1,5 @@
 import { rename } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
     Data,
@@ -30,7 +29,7 @@ const operationDeadline = "10 seconds";
 const applicationListenerGracefulStopDeadline = "250 millis";
 const applicationListenerForcedStopDeadline = "2 seconds";
 const grandchildModulePath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
+    path.dirname(Bun.fileURLToPath(import.meta.url)),
     "shutdownGrandchild.ts"
 );
 

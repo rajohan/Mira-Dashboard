@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
@@ -1025,7 +1024,7 @@ async function calculateProvisioningPolicyDigest(
         fileCount: 0,
         sourceBytes: 0,
     };
-    const hash = createHash("sha256");
+    const hash = new Bun.CryptoHasher("sha256");
     hash.update("mira-dashboard-database-observability-policy-v1\0", "utf8");
     for (const fileName of provisioningPolicyArtifactNames) {
         const source = await readContainedProvisioningArtifact(
@@ -1194,7 +1193,7 @@ function observedDatabaseNames(
 function databaseCatalogDigest(
     catalog: readonly ProvisioningDatabaseCatalogEntry[]
 ): string {
-    return createHash("sha256")
+    return new Bun.CryptoHasher("sha256")
         .update("mira-dashboard-database-catalog-v1\0", "utf8")
         .update(JSON.stringify(catalog), "utf8")
         .digest("hex");
@@ -1751,7 +1750,7 @@ export async function runDatabaseObservabilityProvisioning(
                 fail();
             }
             const collectionLeaseToken = (
-                dependencies.collectionLeaseTokenFactory ?? randomUUID
+                dependencies.collectionLeaseTokenFactory ?? (() => crypto.randomUUID())
             )();
             if (!collectionLeaseTokenPattern.test(collectionLeaseToken)) fail();
             await prepareApprovedCollection(

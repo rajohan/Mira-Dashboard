@@ -98,7 +98,7 @@ describe("CacheStatusTable", () => {
         expect(screen.queryAllByText("Unavailable")).toHaveLength(0);
     });
 
-    test("virtualizes a large bounded snapshot without removing table semantics", () => {
+    test("keeps a large bounded snapshot accessible before viewport measurement", () => {
         render(
             <CacheStatusTable
                 entries={Array.from({ length: 50 }, (_, index) =>
@@ -109,10 +109,11 @@ describe("CacheStatusTable", () => {
         );
         const table = screen.getByRole("table", { name: "Saved data sources" });
         expect(table.getAttribute("aria-rowcount")).toBe("51");
-        expect(table.querySelector("td[height]")).toBeTruthy();
+        expect(table.querySelector("tbody")?.style.height).not.toBe("");
+        expect(table.querySelector("td[height]")).toBeNull();
         expect(screen.getByRole("region", { name: "Saved data sources" }).tabIndex).toBe(
             0
         );
-        expect(screen.queryAllByRole("button").length).toBeLessThan(50);
+        expect(screen.getAllByRole("button", { name: /^provider\./u })).toHaveLength(50);
     });
 });

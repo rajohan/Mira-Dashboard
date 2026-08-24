@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-
 import * as v from "valibot";
 
 import {
@@ -18,7 +16,7 @@ export async function readLinuxBootIdentity(): Promise<LinuxBootIdentity> {
         throw new Error("Linux boot identity is unavailable");
     }
     try {
-        const contents = await readFile(linuxBootIdentityPath, "utf8");
+        const contents = await Bun.file(linuxBootIdentityPath).text();
         if (contents.length > 64) throw new Error("invalid boot identity");
         return v.parse(linuxBootIdentitySchema, contents.trim());
     } catch {

@@ -20,6 +20,7 @@ import {
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
+import { installIntersectionObserverHarness } from "../test/intersectionObserverTest.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import {
     agentConfigurationQueryKey,
@@ -73,6 +74,7 @@ class AgentTransport implements DashboardTrpcTransport {
         state: "working",
     };
     historyQueryCount = 0;
+    historyQueryResponse: Promise<unknown> | undefined;
     statusQueryCount = 0;
     statusQueryResponse: Promise<unknown> | undefined;
 
@@ -93,16 +95,16 @@ class AgentTransport implements DashboardTrpcTransport {
                 return Promise.resolve({
                     agents: [
                         {
-                            description: "Owns the operator conversation.",
-                            displayName: "Mira",
-                            id: "main",
-                            role: "primary",
-                        },
-                        {
                             description: "Researches verified sources.",
                             displayName: "Researcher",
                             id: "researcher",
                             role: "specialist",
+                        },
+                        {
+                            description: "Owns the operator conversation.",
+                            displayName: "Mira",
+                            id: "main",
+                            role: "primary",
                         },
                     ],
                 });
@@ -119,6 +121,7 @@ class AgentTransport implements DashboardTrpcTransport {
                             agentId: "researcher",
                             freshness: "unavailable",
                             gatewayAvailability: "disconnected",
+                            lastActivityAtMs: timestampMs - 60_000,
                             state: "idle",
                         },
                     ],
@@ -126,6 +129,9 @@ class AgentTransport implements DashboardTrpcTransport {
             }
             case "agents.listTaskHistory": {
                 this.historyQueryCount += 1;
+                if (this.historyQueryResponse !== undefined) {
+                    return this.historyQueryResponse;
+                }
                 return Promise.resolve({
                     runs: [
                         {
@@ -376,27 +382,43 @@ describe("Dashboard agents route", () => {
         ).toBeTruthy();
         await expectAgentShellReady();
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
-        expect(screen.getByLabelText("Dashboard task state: working")).toBeTruthy();
-        expect(
-            screen.getByLabelText("Gateway session availability: active")
-        ).toBeTruthy();
+        const activeAgentBadge = screen.getByLabelText("Agent activity: active");
+        expect(activeAgentBadge.querySelector("svg")?.classList).toContain(
+            "animate-spin"
+        );
+        const activeGatewayBadge = screen.getByLabelText(
+            "Gateway session availability: active"
+        );
+        expect(activeGatewayBadge.querySelector("svg")?.classList).toContain(
+            "animate-spin"
+        );
         expect(
             screen.getByLabelText("Gateway session availability: disconnected")
         ).toBeTruthy();
         expect(screen.getByText("agent:main:main")).toBeTruthy();
         expect(screen.getByText("openai/gpt-5.6-sol")).toBeTruthy();
-        expect(screen.getAllByText(/not online status or health/u)).toHaveLength(2);
+        expect(screen.queryByText(/not online status or health/u)).toBeNull();
         expect(
-            screen.getByText(/Updates automatically from agent and Gateway events/u)
-        ).toBeTruthy();
+            screen.queryByText(/Updates automatically from agent and Gateway events/u)
+        ).toBeNull();
+        expect(screen.queryByText("No recorded task activity")).toBeNull();
+        expect(screen.getByText(/^Last active /u)).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Current status" })).toBeNull();
+        expect(
+            screen
+                .getAllByRole("heading", { level: 3 })
+                .map((heading) => heading.textContent)
+        ).toEqual(["Mira", "Researcher"]);
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-        expect(screen.getByRole("table", { name: "Agent task history" })).toBeTruthy();
+        expect(
+            screen.getByRole("table", { name: "Agent task history" }).className
+        ).toContain("grid-cols-2");
         expect(screen.getByRole("link", { name: /Agents/u })).toBeTruthy();
 
         transport.mainStatus = {
             agentId: "main",
-            freshness: "stale",
-            gatewayAvailability: "stale",
+            freshness: "fresh",
+            gatewayAvailability: "active",
             hasActiveRun: true,
             lastActivityAtMs: timestampMs + 1000,
             lastSeenAtMs: timestampMs,
@@ -407,11 +429,19 @@ describe("Dashboard agents route", () => {
         await act(async () => {
             await collections.agents.statuses.utils.refetch();
         });
-        expect(screen.getAllByLabelText("Dashboard task state: idle")).toHaveLength(2);
-        expect(screen.getByLabelText("Gateway session availability: stale")).toBeTruthy();
+        expect(screen.getAllByLabelText("Agent activity: idle")).toHaveLength(2);
+        expect(
+            screen.getByLabelText("Gateway session availability: active")
+        ).toBeTruthy();
+        expect(
+            screen
+                .getAllByRole("heading", { level: 3 })
+                .map((heading) => heading.textContent)
+        ).toEqual(["Mira", "Researcher"]);
     });
 
     test("loads an older keyset page without replacing the newest history", async () => {
+        const observer = installIntersectionObserverHarness();
         const queryClient = createDashboardQueryClient();
         queryClients.push(queryClient);
         const router = createDashboardRouter(
@@ -432,16 +462,15 @@ describe("Dashboard agents route", () => {
                 />
             )
         );
-        const user = userEvent.setup();
-
         await expectAgentShellReady();
         expect(await screen.findByText("Newest agent task")).toBeTruthy();
         expect(
             screen.getByRole("columnheader", { name: "Started" }).querySelector("button")
         ).toBeNull();
-        await user.click(screen.getByRole("button", { name: "Load older tasks" }));
+        act(() => observer.intersectLatest());
         expect(await screen.findByText("Older agent task")).toBeTruthy();
         expect(screen.getByText("Newest agent task")).toBeTruthy();
+        observer.restore();
     });
 
     test("recreates agent collections after the authenticated cache is reset", async () => {
@@ -559,5 +588,31 @@ describe("Dashboard agents route", () => {
         } finally {
             consoleErrors.restore();
         }
+    });
+
+    test("retries a failed background history refresh instead of loading older runs", async () => {
+        const transport = new AgentTransport();
+        const queryClient = createDashboardQueryClient();
+        const archiveKey = liveHistoryArchiveQueryKey([...agentQueryKey, "history"]);
+        queryClient.setQueryDefaults(archiveKey, { retry: false });
+        renderAgentRoute(transport, queryClient);
+
+        await expectAgentShellReady();
+        const callsBeforeRefresh = transport.historyQueryCount;
+        transport.historyQueryResponse = Promise.reject(
+            new TypeError("redacted background archive failure")
+        );
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: archiveKey });
+        });
+
+        const retry = await screen.findByRole("button", { name: "Try again" });
+        expect(screen.queryByText(/redacted background archive failure/u)).toBeNull();
+        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
+        transport.historyQueryResponse = undefined;
+        await userEvent.setup().click(retry);
+        await waitFor(() =>
+            expect(transport.historyQueryCount).toBeGreaterThan(callsBeforeRefresh + 1)
+        );
     });
 });

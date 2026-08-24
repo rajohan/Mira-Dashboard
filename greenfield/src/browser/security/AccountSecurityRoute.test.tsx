@@ -38,6 +38,10 @@ import { createDashboardRouter } from "../router.tsx";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import {
+    automationCredentialsQueryKey,
+    automationPrincipalsQueryKey,
+} from "./securityQueries.ts";
+import {
     createSecurityVerificationCoordinator,
     type SecurityVerificationCoordinator,
 } from "./securityVerificationCoordinator.ts";
@@ -212,6 +216,7 @@ class SecurityTransport implements DashboardTrpcTransport {
     authStatusQueryHandler: (() => Promise<AuthStatus>) | undefined;
     readonly calls: TransportCall[] = [];
     credentials = new Map<string, AutomationCredentialSummary[]>();
+    credentialListQueryHandler: ((input: unknown) => Promise<unknown>) | undefined;
     mutationHandler: (
         path: string,
         input: unknown,
@@ -219,6 +224,7 @@ class SecurityTransport implements DashboardTrpcTransport {
     ) => Promise<unknown> = (path) =>
         Promise.reject(new TypeError(`Unexpected mutation: ${path}`));
     principals: AutomationPrincipalSummary[] = [];
+    principalListError: Error | undefined;
     sessions: AuthSessionSummary[] = [currentSession, otherSession];
     summary: AccountSecuritySummary;
 
@@ -253,6 +259,9 @@ class SecurityTransport implements DashboardTrpcTransport {
                 return Promise.resolve(emptyNotificationListResult);
             }
             case "automationSecurity.listCredentials": {
+                if (this.credentialListQueryHandler !== undefined) {
+                    return this.credentialListQueryHandler(input);
+                }
                 if (
                     typeof input !== "object" ||
                     input === null ||
@@ -270,6 +279,9 @@ class SecurityTransport implements DashboardTrpcTransport {
                 });
             }
             case "automationSecurity.listPrincipals": {
+                if (this.principalListError !== undefined) {
+                    return Promise.reject(this.principalListError);
+                }
                 return Promise.resolve({
                     activePrincipalCount: this.principals.filter(
                         (principal) => !principal.disabled
@@ -457,6 +469,42 @@ afterEach(async () => {
 });
 
 describe("Dashboard account security route", () => {
+    test("retries a failed principal refetch while retaining cached accounts", async () => {
+        const transport = new SecurityTransport();
+        transport.principals = [automationPrincipal];
+        const queryClient = renderAccountSecurity(transport);
+
+        expect(await screen.findByText("OpenClaw heartbeat")).toBeVisible();
+        transport.principalListError = new TypeError("private principal failure");
+        await act(async () => {
+            await queryClient.invalidateQueries({
+                queryKey: automationPrincipalsQueryKey,
+            });
+        });
+
+        expect(screen.getByText("OpenClaw heartbeat")).toBeVisible();
+        const automationSection = screen
+            .getByRole("heading", { level: 2, name: "Automation access" })
+            .closest("section")!;
+        await waitFor(() =>
+            expect(within(automationSection).getByRole("alert")).toBeVisible()
+        );
+        const callsBeforeRetry = transport.calls.filter(
+            ({ path }) => path === "automationSecurity.listPrincipals"
+        ).length;
+        transport.principalListError = undefined;
+        await userEvent
+            .setup()
+            .click(within(automationSection).getByRole("button", { name: "Try again" }));
+        await waitFor(() =>
+            expect(
+                transport.calls.filter(
+                    ({ path }) => path === "automationSecurity.listPrincipals"
+                )
+            ).toHaveLength(callsBeforeRetry + 1)
+        );
+    });
+
     test("renders protected security inventories and redacted audit history", async () => {
         const transport = new SecurityTransport();
         transport.auditEvents = [
@@ -474,9 +522,16 @@ describe("Dashboard account security route", () => {
                 target: { id: user.id, type: "user" },
             },
         ];
+        const actEnvironment: unknown = Reflect.get(
+            globalThis,
+            "IS_REACT_ACT_ENVIRONMENT"
+        );
+        Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
         renderAccountSecurity(transport);
 
         await screen.findByRole("heading", { level: 1, name: "Account security" });
+        await screen.findByText("auth.login");
+        Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnvironment);
         for (const name of [
             "Verification and password",
             "Multi-factor authentication",
@@ -486,7 +541,7 @@ describe("Dashboard account security route", () => {
         ]) {
             expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
         }
-        expect(await screen.findByText("auth.login")).toBeTruthy();
+        expect(screen.getByText("auth.login")).toBeTruthy();
         expect(screen.getByText("succeeded")).toBeTruthy();
         expect(screen.getByText(/method=password/u)).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Time" })).toBeNull();
@@ -1614,6 +1669,35 @@ describe("Dashboard account security route", () => {
                 (call) => call.path === "automationSecurity.disablePrincipal"
             )
         ).toHaveLength(1);
+    });
+
+    test("keeps cached credentials visible and retries a failed refresh", async () => {
+        const transport = new SecurityTransport();
+        transport.principals = [automationPrincipal];
+        transport.credentials.set(automationPrincipal.id, [automationCredential]);
+        const queryClient = renderAccountSecurity(transport);
+        const userActions = userEvent.setup();
+
+        await screen.findByText(automationPrincipal.label);
+        await userActions.click(
+            screen.getByRole("button", { name: /Manage access tokens/u })
+        );
+        await screen.findByText(automationCredential.label);
+        const credentialKey = automationCredentialsQueryKey(automationPrincipal.id);
+        queryClient.setQueryDefaults(credentialKey, { retry: false });
+        transport.credentialListQueryHandler = () =>
+            Promise.reject(new TypeError("redacted credential refresh failure"));
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: credentialKey });
+        });
+
+        expect(screen.getByText(automationCredential.label)).toBeTruthy();
+        expect(screen.queryByText(/redacted credential refresh failure/u)).toBeNull();
+        const retry = await screen.findByRole("button", { name: "Try again" });
+        transport.credentialListQueryHandler = undefined;
+        await userActions.click(retry);
+        await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+        expect(screen.getByText(automationCredential.label)).toBeTruthy();
     });
 
     test("marks expired automation credentials unusable", async () => {

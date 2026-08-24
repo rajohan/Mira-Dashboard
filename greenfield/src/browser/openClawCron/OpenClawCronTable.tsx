@@ -4,8 +4,10 @@ import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { StretchedAction } from "../ui/StretchedAction.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import {
     openClawCronRunStatusBadgeVariant,
     openClawCronRunStatusLabel,
@@ -14,6 +16,7 @@ import {
 interface OpenClawCronTableProps {
     readonly jobs: readonly OpenClawCronJob[];
     readonly onSelect: (id: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly selectedId?: string;
 }
 
@@ -38,25 +41,28 @@ function inventoryCardSurface(selected: boolean, hovered: boolean): string {
 export function OpenClawCronTable({
     jobs,
     onSelect,
+    pagination,
     selectedId,
 }: OpenClawCronTableProps) {
     const [hoveredId, setHoveredId] = useState<string>();
 
     return (
-        <ul
-            aria-label="OpenClaw scheduled jobs"
-            className="grid max-w-full min-w-0 grid-cols-1 gap-2"
-        >
-            {jobs.map((job) => {
+        <VirtualizedList
+            estimateSize={() => 112}
+            getKey={(job) => job.id}
+            itemClassName="pb-2"
+            items={jobs}
+            label="OpenClaw scheduled jobs"
+            pagination={pagination}
+            renderItem={(job) => {
                 const selected = job.id === selectedId;
                 const hovered = job.id === hoveredId;
                 return (
-                    <li
+                    <div
                         className={cn(
                             "group relative max-w-full min-w-0 rounded-lg border px-3 py-2 transition-colors",
                             inventoryCardSurface(selected, hovered)
                         )}
-                        key={job.id}
                     >
                         <StretchedAction
                             aria-current={selected ? "true" : undefined}
@@ -117,9 +123,9 @@ export function OpenClawCronTable({
                                 </dd>
                             </div>
                         </dl>
-                    </li>
+                    </div>
                 );
-            })}
-        </ul>
+            }}
+        />
     );
 }

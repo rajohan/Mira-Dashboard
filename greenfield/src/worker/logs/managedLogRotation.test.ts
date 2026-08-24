@@ -14,7 +14,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
 
 import { createLogRotationEpochProbe } from "../../server/platform/logs/logRotationEpochProbe.ts";
 import { createSafeLogReader } from "../../server/platform/logs/safeLogReader.ts";
@@ -200,9 +199,9 @@ describe("managed log rotation engine", () => {
         const archives = directoryEntries.filter((name) => name.endsWith(".gz"));
         expect(archives).toHaveLength(1);
         expect(
-            gunzipSync(
-                await readFile(path.join(base.logDirectory, archives[0]!))
-            ).toString()
+            new TextDecoder().decode(
+                Bun.gunzipSync(await readFile(path.join(base.logDirectory, archives[0]!)))
+            )
         ).toBe(contents);
         const stateText = await readFile(manifest.statePath, "utf8");
         expect(JSON.parse(stateText)).toMatchObject({
@@ -452,9 +451,9 @@ describe("managed log rotation engine", () => {
             archiveNames
                 .filter((name) => name.endsWith(".gz"))
                 .map(async (name) =>
-                    gunzipSync(
-                        await readFile(path.join(base.logDirectory, name))
-                    ).toString()
+                    new TextDecoder().decode(
+                        Bun.gunzipSync(await readFile(path.join(base.logDirectory, name)))
+                    )
                 )
         );
         expect(archivedContents).toContain(contents);
@@ -621,9 +620,11 @@ describe("managed log rotation engine", () => {
                     archiveNames
                         .filter((name) => name.endsWith(".gz"))
                         .map(async (name) =>
-                            gunzipSync(
-                                await readFile(path.join(base.logDirectory, name))
-                            ).toString()
+                            new TextDecoder().decode(
+                                Bun.gunzipSync(
+                                    await readFile(path.join(base.logDirectory, name))
+                                )
+                            )
                         )
                 );
                 expect(archivedContents).toContain(regrowth);

@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
-import { act } from "react";
+import { act as reactAct } from "react";
 import * as v from "valibot";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
@@ -34,7 +34,27 @@ import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
+import { TaskBoard } from "./TaskBoard.tsx";
 import { taskQueryKey } from "./taskQueries.ts";
+
+const originalActEnvironment: unknown = Reflect.get(
+    globalThis,
+    "IS_REACT_ACT_ENVIRONMENT"
+);
+
+beforeAll(() => Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false));
+afterAll(() =>
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", originalActEnvironment)
+);
+
+async function act(callback: () => Promise<void> | void): Promise<void> {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    try {
+        await reactAct(callback);
+    } finally {
+        Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
+    }
+}
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -332,6 +352,50 @@ afterEach(async () => {
 });
 
 describe("Dashboard task route", () => {
+    test("owns the global continuation in only the most populated column", () => {
+        const task = (index: number, status: TaskSummary["status"]): TaskSummary => ({
+            createdAtMs: timestampMs - index,
+            id: `019fd984-63e8-7404-a7da-80c6f24379${index.toString().padStart(2, "0")}`,
+            labels: [],
+            number: index + 1,
+            priority: "medium",
+            status,
+            title: `Task ${index + 1}`,
+            updatedAtMs: timestampMs - index,
+            version: 1,
+        });
+        const view = render(
+            <TaskBoard
+                cronJobsById={new Map()}
+                disabled={false}
+                onMoveTask={() => {}}
+                onSelectTask={() => {}}
+                pagination={{
+                    hasMore: true,
+                    loading: false,
+                    loadingLabel: "Loading more tasks…",
+                    onLoadMore: () => {},
+                }}
+                tasks={[task(0, "todo"), task(1, "in-progress"), task(2, "in-progress")]}
+            />
+        );
+
+        expect(
+            view.container.querySelectorAll("[data-infinite-scroll-trigger]")
+        ).toHaveLength(1);
+        const activeColumn = screen
+            .getByRole("heading", { name: "In progress" })
+            .closest("section");
+        expect(activeColumn).not.toBeNull();
+        expect(
+            within(activeColumn!).getByRole("region", {
+                name: "In progress tasks scroll area",
+            })
+        ).toContainElement(
+            view.container.querySelector("[data-infinite-scroll-trigger]")
+        );
+    });
+
     test("renders the authenticated four-column board", async () => {
         const transport = new TaskTransport();
         renderTaskRoute(transport);
@@ -405,6 +469,35 @@ describe("Dashboard task route", () => {
         transport.taskListQueryResponse = undefined;
         await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
         expect(await screen.findByText("Build task domain")).toBeTruthy();
+    });
+
+    test("retries a failed background task refresh instead of loading older tasks", async () => {
+        const transport = new TaskTransport();
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(taskQueryKey, { retry: false });
+        renderTaskRoute(transport, queryClient);
+
+        await screen.findByText("Build task domain");
+        const callsBeforeRefresh = transport.calls.filter(
+            (call) => call.path === "tasks.list"
+        ).length;
+        transport.taskListQueryResponse = Promise.reject(
+            new TypeError("private background task refresh failure")
+        );
+        await act(async () => {
+            await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+        });
+
+        const retry = await screen.findByRole("button", { name: "Try again" });
+        expect(screen.queryByText(/private background task refresh failure/u)).toBeNull();
+        transport.taskListQueryResponse = undefined;
+        await userEvent.setup().click(retry);
+        await waitFor(() =>
+            expect(
+                transport.calls.filter((call) => call.path === "tasks.list").length
+            ).toBeGreaterThan(callsBeforeRefresh + 1)
+        );
+        expect(screen.getByText("Build task domain")).toBeTruthy();
     });
 
     test("opens and edits the task creation form", async () => {

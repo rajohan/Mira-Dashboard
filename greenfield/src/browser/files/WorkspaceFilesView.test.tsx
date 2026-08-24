@@ -116,6 +116,7 @@ describe("WorkspaceFilesView", () => {
         const fileTree = screen.getByRole("navigation", {
             name: "Workspace file tree",
         });
+        expect(fileTree).toHaveClass("flex", "min-h-0", "flex-1", "flex-col");
         expect(fileTree.closest("aside")?.parentElement).toHaveClass(
             "lg:min-h-0",
             "lg:flex-1"
@@ -130,16 +131,24 @@ describe("WorkspaceFilesView", () => {
         expect(props.onNavigate).toHaveBeenCalledWith(0);
 
         const tree = screen.getByRole("navigation", { name: "Workspace file tree" });
+        const rootButton = within(tree).getByRole("button", { name: "Workspace" });
+        expect(rootButton.closest('[role="treeitem"]')).toHaveAttribute(
+            "aria-level",
+            "1"
+        );
         const directoryButton = within(tree).getByRole("button", { name: "guides" });
+        expect(directoryButton.closest('[role="treeitem"]')).toHaveAttribute(
+            "aria-level",
+            "2"
+        );
         expect(directoryButton).toHaveAttribute("type", "button");
         await user.click(directoryButton);
         expect(props.onOpenDirectory).toHaveBeenCalledWith(entries[0], root.resourceId);
         expect(within(tree).getByText(/Open this folder to load/u)).toBeTruthy();
 
-        await user.click(
-            screen.getByRole("button", { name: "Load more in current folder" })
-        );
-        expect(props.onLoadMore).toHaveBeenCalledTimes(1);
+        expect(
+            screen.queryByRole("button", { name: "Load more in current folder" })
+        ).toBeNull();
     });
 
     test("renders text in the persistent pane with raw and rendered modes", async () => {

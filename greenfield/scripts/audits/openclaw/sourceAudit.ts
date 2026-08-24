@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -830,7 +829,7 @@ function sortedUnique(values: readonly string[]): string[] {
 }
 
 function sha256(contents: Uint8Array): string {
-    return createHash("sha256").update(contents).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(contents).digest("hex");
 }
 
 function assertContainedPath(root: string, target: string): void {

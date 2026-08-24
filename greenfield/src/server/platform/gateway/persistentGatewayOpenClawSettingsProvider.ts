@@ -1,6 +1,3 @@
-/* oxlint-disable unicorn/max-nested-calls -- Valibot boundary schemas are declarative compositions. */
-import { isDeepStrictEqual } from "node:util";
-
 import * as v from "valibot";
 
 import {
@@ -80,6 +77,10 @@ const upstreamControlSafeTextSchema = (maximum: number) =>
     v.pipe(upstreamTextSchema(maximum), v.check(hasNoUnicodeControlOrFormat));
 const upstreamUnknownArraySchema = v.pipe(v.array(v.unknown()), v.maxLength(4096));
 const upstreamRecordSchema = v.record(v.string(), v.unknown());
+
+function isDeepStrictEqual(left: unknown, right: unknown): boolean {
+    return Bun.deepEquals(left, right, true);
+}
 const upstreamAgentToolPolicyMaximum = 512;
 const upstreamConfiguredSkillMaximum = 4096;
 const upstreamConfiguredSkillEntriesSchema = v.pipe(
@@ -125,100 +126,91 @@ const upstreamModelSchema = v.union([
         primary: v.optional(upstreamControlSafeTextSchema(16 * 1024)),
     }),
 ]);
+const upstreamAgentDefaultsSchema = v.object({
+    heartbeat: v.optional(upstreamHeartbeatSchema),
+    imageModel: v.optional(upstreamModelSchema),
+    mediaModels: v.optional(v.object({ image: v.optional(upstreamModelSchema) })),
+    model: v.optional(upstreamModelSchema),
+});
+const upstreamAgentsSchema = v.object({
+    defaults: v.optional(upstreamAgentDefaultsSchema),
+    entries: v.optional(upstreamAgentEntriesSchema),
+});
+const upstreamChannelsSchema = v.record(
+    upstreamControlSafeTextSchema(256),
+    v.object({ enabled: v.optional(v.boolean()) })
+);
+const upstreamCommandsSchema = v.object({
+    ownerAllowFrom: v.optional(upstreamUnknownArraySchema),
+    restart: v.optional(v.boolean()),
+});
+const upstreamLoggingSchema = v.object({
+    redactSensitive: v.optional(upstreamControlSafeTextSchema(256)),
+});
+const upstreamMetaSchema = v.object({
+    lastTouchedAt: v.optional(upstreamControlSafeTextSchema(1024)),
+    lastTouchedVersion: v.optional(upstreamControlSafeTextSchema(1024)),
+});
+const upstreamResetAtHourSchema = v.pipe(
+    v.number(),
+    v.safeInteger(),
+    v.minValue(0),
+    v.maxValue(23)
+);
+const upstreamResetIdleMinutesSchema = v.pipe(v.number(), v.safeInteger(), v.minValue(1));
+const upstreamSessionSchema = v.object({
+    reset: v.optional(
+        v.object({
+            atHour: v.optional(upstreamResetAtHourSchema),
+            idleMinutes: v.optional(upstreamResetIdleMinutesSchema),
+            mode: v.optional(v.picklist(["daily", "idle", "none"])),
+        })
+    ),
+});
+const upstreamSkillsSchema = v.object({
+    entries: v.optional(upstreamConfiguredSkillEntriesSchema),
+});
+const upstreamToolExecSchema = v.object({
+    ask: v.optional(v.picklist(["off", "on-miss", "always"])),
+    mode: v.optional(v.picklist(["deny", "allowlist", "ask", "auto", "full"])),
+    security: v.optional(v.picklist(["allowlist", "deny", "full"])),
+});
+const upstreamToolWebSchema = v.object({
+    fetch: v.optional(v.object({ enabled: v.optional(v.boolean()) })),
+    search: v.optional(
+        v.object({
+            enabled: v.optional(v.boolean()),
+            provider: v.optional(upstreamControlSafeTextSchema(256)),
+        })
+    ),
+});
+const upstreamToolsSchema = v.object({
+    agentToAgent: v.optional(v.object({ enabled: v.optional(v.boolean()) })),
+    elevated: v.optional(v.object({ enabled: v.optional(v.boolean()) })),
+    exec: v.optional(upstreamToolExecSchema),
+    profile: v.optional(upstreamControlSafeTextSchema(256)),
+    sessions: v.optional(
+        v.object({
+            visibility: v.optional(v.picklist(["all", "self", "tree", "agent"])),
+        })
+    ),
+    web: v.optional(upstreamToolWebSchema),
+});
+const upstreamWizardSchema = v.object({
+    lastRunAt: v.optional(upstreamControlSafeTextSchema(1024)),
+    lastRunVersion: v.optional(upstreamControlSafeTextSchema(1024)),
+});
 const upstreamConfigurationSchema = v.object({
-    agents: v.optional(
-        v.object({
-            defaults: v.optional(
-                v.object({
-                    heartbeat: v.optional(upstreamHeartbeatSchema),
-                    imageModel: v.optional(upstreamModelSchema),
-                    mediaModels: v.optional(
-                        v.object({ image: v.optional(upstreamModelSchema) })
-                    ),
-                    model: v.optional(upstreamModelSchema),
-                })
-            ),
-            entries: v.optional(upstreamAgentEntriesSchema),
-        })
-    ),
+    agents: v.optional(upstreamAgentsSchema),
     auth: v.optional(v.object({ profiles: v.optional(upstreamRecordSchema) })),
-    channels: v.optional(
-        v.record(
-            upstreamControlSafeTextSchema(256),
-            v.object({ enabled: v.optional(v.boolean()) })
-        )
-    ),
-    commands: v.optional(
-        v.object({
-            ownerAllowFrom: v.optional(upstreamUnknownArraySchema),
-            restart: v.optional(v.boolean()),
-        })
-    ),
-    logging: v.optional(
-        v.object({ redactSensitive: v.optional(upstreamControlSafeTextSchema(256)) })
-    ),
-    meta: v.optional(
-        v.object({
-            lastTouchedAt: v.optional(upstreamControlSafeTextSchema(1024)),
-            lastTouchedVersion: v.optional(upstreamControlSafeTextSchema(1024)),
-        })
-    ),
-    session: v.optional(
-        v.object({
-            reset: v.optional(
-                v.object({
-                    atHour: v.optional(
-                        v.pipe(v.number(), v.safeInteger(), v.minValue(0), v.maxValue(23))
-                    ),
-                    idleMinutes: v.optional(
-                        v.pipe(v.number(), v.safeInteger(), v.minValue(1))
-                    ),
-                    mode: v.optional(v.picklist(["daily", "idle", "none"])),
-                })
-            ),
-        })
-    ),
-    skills: v.optional(
-        v.object({ entries: v.optional(upstreamConfiguredSkillEntriesSchema) })
-    ),
-    tools: v.optional(
-        v.object({
-            agentToAgent: v.optional(v.object({ enabled: v.optional(v.boolean()) })),
-            elevated: v.optional(v.object({ enabled: v.optional(v.boolean()) })),
-            exec: v.optional(
-                v.object({
-                    ask: v.optional(v.picklist(["off", "on-miss", "always"])),
-                    mode: v.optional(
-                        v.picklist(["deny", "allowlist", "ask", "auto", "full"])
-                    ),
-                    security: v.optional(v.picklist(["allowlist", "deny", "full"])),
-                })
-            ),
-            profile: v.optional(upstreamControlSafeTextSchema(256)),
-            sessions: v.optional(
-                v.object({
-                    visibility: v.optional(v.picklist(["all", "self", "tree", "agent"])),
-                })
-            ),
-            web: v.optional(
-                v.object({
-                    fetch: v.optional(v.object({ enabled: v.optional(v.boolean()) })),
-                    search: v.optional(
-                        v.object({
-                            enabled: v.optional(v.boolean()),
-                            provider: v.optional(upstreamControlSafeTextSchema(256)),
-                        })
-                    ),
-                })
-            ),
-        })
-    ),
-    wizard: v.optional(
-        v.object({
-            lastRunAt: v.optional(upstreamControlSafeTextSchema(1024)),
-            lastRunVersion: v.optional(upstreamControlSafeTextSchema(1024)),
-        })
-    ),
+    channels: v.optional(upstreamChannelsSchema),
+    commands: v.optional(upstreamCommandsSchema),
+    logging: v.optional(upstreamLoggingSchema),
+    meta: v.optional(upstreamMetaSchema),
+    session: v.optional(upstreamSessionSchema),
+    skills: v.optional(upstreamSkillsSchema),
+    tools: v.optional(upstreamToolsSchema),
+    wizard: v.optional(upstreamWizardSchema),
 });
 
 const upstreamConfigGetResponseSchema = v.object({

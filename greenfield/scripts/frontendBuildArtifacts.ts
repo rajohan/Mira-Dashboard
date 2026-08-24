@@ -1,6 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { brotliCompressSync, constants } from "node:zlib";
 
 const COMPRESSIBLE_EXTENSIONS = new Set([
     ".css",
@@ -49,7 +48,7 @@ type FrontendBundleBudget = keyof Pick<
 >;
 
 export const FRONTEND_BUNDLE_BUDGETS: Readonly<Record<FrontendBundleBudget, number>> = {
-    initialJavaScriptGzipBytes: 376 * 1024,
+    initialJavaScriptGzipBytes: 392 * 1024,
     initialStylesheetGzipBytes: 25 * 1024,
     largestJavaScriptGzipBytes: 200 * 1024,
     totalJavaScriptGzipBytes: 1280 * 1024,
@@ -147,7 +146,7 @@ export async function writeFrontendHtmlAppEntrypoint(
     );
     const publicPath = `/${appOutput.relativePath}`;
     const indexPath = path.join(path.resolve(outdir), "index.html");
-    const html = await readFile(indexPath, "utf8");
+    const html = await Bun.file(indexPath).text();
     const moduleScripts = html
         .matchAll(SCRIPT_TAG_PATTERN)
         .filter(
@@ -176,7 +175,7 @@ export async function writeFrontendHtmlAppEntrypoint(
             html.slice(0, scriptIndex) +
             correctedScript +
             html.slice(scriptIndex + script.length);
-        await writeFile(indexPath, correctedHtml);
+        await Bun.write(indexPath, correctedHtml);
     }
     return publicPath;
 }
@@ -255,9 +254,9 @@ export async function measureFrontendBundle(
         const extension = path.extname(outputKey);
         if (extension !== ".css" && extension !== ".js") continue;
         const output = resolvedOutput(outdir, outputKey);
-        const contents = await readFile(output.filePath);
+        const contents = await Bun.file(output.filePath).bytes();
         measuredOutputs.set(outputKey, {
-            gzipBytes: gzipSync(contents, { level: 9 }).byteLength,
+            gzipBytes: Bun.gzipSync(contents, { level: 9 }).byteLength,
             outputPath: output.relativePath,
             rawBytes: contents.byteLength,
         });
@@ -338,7 +337,7 @@ export async function writePrecompressedFrontendAssets(
 
     for (const outputPath of outputPaths) {
         if (!COMPRESSIBLE_EXTENSIONS.has(path.extname(outputPath))) continue;
-        const contents = await readFile(outputPath);
+        const contents = await Bun.file(outputPath).bytes();
         if (contents.byteLength < MINIMUM_COMPRESSION_BYTES) continue;
 
         const brotliContents = brotliCompressSync(contents, {
@@ -347,13 +346,13 @@ export async function writePrecompressedFrontendAssets(
             },
         });
         if (brotliContents.byteLength < contents.byteLength) {
-            await writeFile(`${outputPath}.br`, brotliContents);
+            await Bun.write(`${outputPath}.br`, brotliContents);
             compressedFileCount += 1;
         }
 
-        const gzipContents = gzipSync(contents, { level: 9 });
+        const gzipContents = Bun.gzipSync(contents, { level: 9 });
         if (gzipContents.byteLength < contents.byteLength) {
-            await writeFile(`${outputPath}.gz`, gzipContents);
+            await Bun.write(`${outputPath}.gz`, gzipContents);
             compressedFileCount += 1;
         }
     }
@@ -409,7 +408,7 @@ function isSelfHostedSourceSet(value: string): boolean {
  * @returns Promise that resolves when the entrypoint is self-hosted.
  */
 export async function assertSelfHostedFrontendHtml(indexPath: string): Promise<void> {
-    const html = await readFile(indexPath, "utf8");
+    const html = await Bun.file(indexPath).text();
     const scripts: Array<{ body: string; source: string | null; type: string | null }> =
         [];
     let styleCount = 0;

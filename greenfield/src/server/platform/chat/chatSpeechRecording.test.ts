@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/number-literal-case -- Binary fixtures retain their wire-format notation. */
 import { describe, expect, test } from "bun:test";
 
 import {

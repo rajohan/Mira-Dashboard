@@ -30,6 +30,7 @@ import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { useAutomationTokenPresenter } from "./automationTokenPresentationContextValue.ts";
 import { revealIssuedAutomationToken } from "./issuedAutomationToken.ts";
 import {
@@ -93,6 +94,9 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
             staleTime: 0,
         })
     );
+    const credentialPageError = credentials.isFetchNextPageError
+        ? credentials.error
+        : null;
 
     async function complete(operation: () => Promise<unknown>): Promise<void> {
         await action.run(async () => {
@@ -189,7 +193,7 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
             {credentials.isPending && (
                 <LoadingState label="Loading access tokens…" size="sm" />
             )}
-            {credentials.isError && (
+            {credentials.error !== null && !credentials.isFetchNextPageError && (
                 <Alert
                     action={
                         <Button
@@ -211,7 +215,7 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
             >
                 {([canSubmit, isSubmitting, credentialLabel]) => (
                     <>
-                        {credentials.isSuccess &&
+                        {credentials.data !== undefined &&
                             credentials.data.pages.every(
                                 (page) => page.credentials.length === 0
                             ) && (
@@ -221,101 +225,101 @@ export function AutomationCredentialPanel({ principal }: AutomationCredentialPan
                                     title="No access tokens"
                                 />
                             )}
-                        {credentials.isSuccess && (
-                            <ul className="space-y-3">
-                                {credentials.data.pages.flatMap((page) =>
-                                    page.credentials.map((credential) => {
-                                        const usable = isCredentialUsable(
-                                            credential,
-                                            credentials.dataUpdatedAt
-                                        );
-                                        return (
-                                            <li
-                                                className="border-primary-700 rounded-lg border p-3 text-sm"
-                                                key={credential.id}
-                                            >
-                                                <p className="text-primary-100 font-medium">
-                                                    {credential.label}
-                                                </p>
-                                                <p className="text-primary-400 mt-1">
-                                                    Created{" "}
-                                                    {formatDashboardDateTime(
-                                                        credential.createdAtMs
-                                                    )}{" "}
-                                                    ·{" "}
-                                                    {credentialStatus(
-                                                        credential,
-                                                        credentials.dataUpdatedAt
-                                                    )}
-                                                </p>
-                                                {!principal.disabled && usable && (
-                                                    <div className="mt-3 flex flex-wrap gap-2">
-                                                        <Button
-                                                            aria-label={`Create replacement access token for ${credential.label}`}
-                                                            busy={action.busy}
-                                                            busyLabel="Creating…"
-                                                            disabled={
-                                                                credentialLabel.length ===
-                                                                0
-                                                            }
-                                                            onClick={() =>
-                                                                void rotateCredential(
-                                                                    credential.id,
-                                                                    credentialLabel
-                                                                )
-                                                            }
-                                                            size="sm"
-                                                            variant="secondary"
-                                                        >
-                                                            <Icon
-                                                                icon={RefreshCw}
-                                                                size="sm"
-                                                                tone="inherit"
-                                                            />
-                                                            Create replacement
-                                                        </Button>
-                                                        <Button
-                                                            aria-label={`Revoke access token ${credential.label}`}
-                                                            busy={action.busy}
-                                                            busyLabel="Revoking…"
-                                                            onClick={() =>
-                                                                setCredentialConfirmation(
-                                                                    {
-                                                                        credentialId:
-                                                                            credential.id,
-                                                                        label: credential.label,
-                                                                    }
-                                                                )
-                                                            }
-                                                            size="sm"
-                                                            variant="danger"
-                                                        >
-                                                            <Icon
-                                                                icon={Trash2}
-                                                                size="sm"
-                                                                tone="inherit"
-                                                            />
-                                                            Revoke
-                                                        </Button>
-                                                    </div>
-                                                )}
-                                            </li>
-                                        );
-                                    })
+                        {credentials.data !== undefined && (
+                            <VirtualizedList
+                                estimateSize={() => 176}
+                                getKey={(credential) => credential.id}
+                                itemClassName="pb-3"
+                                items={credentials.data.pages.flatMap(
+                                    (page) => page.credentials
                                 )}
-                            </ul>
-                        )}
-                        {credentials.hasNextPage && (
-                            <Button
-                                busy={credentials.isFetchingNextPage}
-                                busyLabel="Loading…"
-                                className="mt-3"
-                                onClick={() => void credentials.fetchNextPage()}
-                                size="sm"
-                                variant="secondary"
-                            >
-                                Load older tokens
-                            </Button>
+                                label={`Access tokens for ${principal.label}`}
+                                pagination={{
+                                    ...(credentialPageError === null
+                                        ? {}
+                                        : {
+                                              error: dashboardBrowserFailureMessage(
+                                                  credentialPageError
+                                              ),
+                                          }),
+                                    hasMore: credentials.hasNextPage,
+                                    loading: credentials.isFetchingNextPage,
+                                    loadingLabel: "Loading older access tokens…",
+                                    onLoadMore: () => void credentials.fetchNextPage(),
+                                }}
+                                renderItem={(credential) => {
+                                    const usable = isCredentialUsable(
+                                        credential,
+                                        credentials.dataUpdatedAt
+                                    );
+                                    return (
+                                        <div className="border-primary-700 rounded-lg border p-3 text-sm">
+                                            <p className="text-primary-100 font-medium">
+                                                {credential.label}
+                                            </p>
+                                            <p className="text-primary-400 mt-1">
+                                                Created{" "}
+                                                {formatDashboardDateTime(
+                                                    credential.createdAtMs
+                                                )}{" "}
+                                                ·{" "}
+                                                {credentialStatus(
+                                                    credential,
+                                                    credentials.dataUpdatedAt
+                                                )}
+                                            </p>
+                                            {!principal.disabled && usable && (
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    <Button
+                                                        aria-label={`Create replacement access token for ${credential.label}`}
+                                                        busy={action.busy}
+                                                        busyLabel="Creating…"
+                                                        disabled={
+                                                            credentialLabel.length === 0
+                                                        }
+                                                        onClick={() =>
+                                                            void rotateCredential(
+                                                                credential.id,
+                                                                credentialLabel
+                                                            )
+                                                        }
+                                                        size="sm"
+                                                        variant="secondary"
+                                                    >
+                                                        <Icon
+                                                            icon={RefreshCw}
+                                                            size="sm"
+                                                            tone="inherit"
+                                                        />
+                                                        Create replacement
+                                                    </Button>
+                                                    <Button
+                                                        aria-label={`Revoke access token ${credential.label}`}
+                                                        busy={action.busy}
+                                                        busyLabel="Revoking…"
+                                                        onClick={() =>
+                                                            setCredentialConfirmation({
+                                                                credentialId:
+                                                                    credential.id,
+                                                                label: credential.label,
+                                                            })
+                                                        }
+                                                        size="sm"
+                                                        variant="danger"
+                                                    >
+                                                        <Icon
+                                                            icon={Trash2}
+                                                            size="sm"
+                                                            tone="inherit"
+                                                        />
+                                                        Revoke
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                }}
+                            />
                         )}
                         {!principal.disabled && (
                             <Form

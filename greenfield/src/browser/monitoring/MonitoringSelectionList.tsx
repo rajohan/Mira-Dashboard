@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 
 import { cn } from "../lib/classNames.ts";
+import {
+    type InfiniteScrollContinuation,
+    InfiniteScrollTrigger,
+} from "../ui/InfiniteScrollTrigger.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
 
 const minimumVirtualizedItems = 50;
@@ -10,6 +14,7 @@ interface MonitoringSelectionListProps<TItem> {
     readonly getKey: (item: TItem) => string;
     readonly items: readonly TItem[];
     readonly label: string;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly renderItem: (item: TItem) => ReactNode;
 }
 
@@ -22,16 +27,22 @@ export function MonitoringSelectionList<TItem>({
     getKey,
     items,
     label,
+    pagination,
     renderItem,
 }: MonitoringSelectionListProps<TItem>) {
-    const listClassName = cn("max-h-128 space-y-2 overflow-auto p-2", className);
+    const scrollClassName = cn("max-h-128 overflow-auto p-2", className);
     if (items.length < minimumVirtualizedItems) {
         return (
-            <ul aria-label={label} className={listClassName}>
-                {items.map((item) => (
-                    <li key={getKey(item)}>{renderItem(item)}</li>
-                ))}
-            </ul>
+            <div className={scrollClassName}>
+                <ul aria-label={label} className="space-y-2">
+                    {items.map((item) => (
+                        <li key={getKey(item)}>{renderItem(item)}</li>
+                    ))}
+                </ul>
+                {pagination !== undefined && (
+                    <InfiniteScrollTrigger className="py-2" {...pagination} />
+                )}
+            </div>
         );
     }
 
@@ -45,16 +56,9 @@ export function MonitoringSelectionList<TItem>({
             }}
             initialRect={{ height: 512, width: 384 }}
         >
-            {({ measureElement, scrollContainerRef, totalSize, virtualItems }) => (
-                <div
-                    className={cn("max-h-128 overflow-auto p-2", className)}
-                    ref={scrollContainerRef}
-                >
-                    <ul
-                        aria-label={label}
-                        className="relative w-full"
-                        style={{ height: totalSize }}
-                    >
+            {({ containerRef, measureElement, scrollContainerRef, virtualItems }) => (
+                <div className={scrollClassName} ref={scrollContainerRef}>
+                    <ul aria-label={label} className="relative w-full" ref={containerRef}>
                         {virtualItems.map((virtualItem) => {
                             const item = items[virtualItem.index];
                             if (item === undefined) return null;
@@ -64,15 +68,19 @@ export function MonitoringSelectionList<TItem>({
                                     data-index={virtualItem.index}
                                     key={virtualItem.key}
                                     ref={measureElement}
-                                    style={{
-                                        transform: `translateY(${virtualItem.start}px)`,
-                                    }}
                                 >
                                     {renderItem(item)}
                                 </li>
                             );
                         })}
                     </ul>
+                    {pagination !== undefined && (
+                        <InfiniteScrollTrigger
+                            className="py-2"
+                            rootRef={scrollContainerRef}
+                            {...pagination}
+                        />
+                    )}
                 </div>
             )}
         </Virtualizer>

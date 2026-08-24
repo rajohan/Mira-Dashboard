@@ -8,6 +8,7 @@ import {
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskStatus, TaskSummary } from "../../contracts/taskModel.ts";
 import type { MoveTaskInput } from "../../contracts/tasks.ts";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { taskMoveInputForDrop } from "./taskBoardDrop.ts";
 import { TaskCardContent } from "./TaskCard.tsx";
 import { TaskColumn } from "./TaskColumn.tsx";
@@ -50,6 +51,7 @@ interface TaskBoardProps {
     readonly disabled: boolean;
     readonly onMoveTask: (input: MoveTaskInput) => void;
     readonly onSelectTask: (taskId: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly tasks: readonly TaskSummary[];
 }
 
@@ -59,6 +61,7 @@ export function TaskBoard({
     disabled,
     onMoveTask,
     onSelectTask,
+    pagination,
     tasks,
 }: TaskBoardProps) {
     const tasksByStatus = Object.fromEntries(
@@ -67,6 +70,15 @@ export function TaskBoard({
             tasks.filter((task) => task.status === status).toSorted(compareTasks),
         ])
     ) as Record<TaskStatus, TaskSummary[]>;
+    let continuationStatus: TaskStatus | undefined;
+    for (const { status } of taskStatusDefinitions) {
+        if (
+            continuationStatus === undefined ||
+            tasksByStatus[status].length > tasksByStatus[continuationStatus].length
+        ) {
+            continuationStatus = status;
+        }
+    }
 
     return (
         <DragDropProvider
@@ -88,6 +100,9 @@ export function TaskBoard({
                         disabled={disabled}
                         key={status}
                         onSelectTask={onSelectTask}
+                        pagination={
+                            status === continuationStatus ? pagination : undefined
+                        }
                         status={status}
                         tasks={tasksByStatus[status]}
                     />

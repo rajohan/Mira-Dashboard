@@ -158,7 +158,7 @@ function PolicyRunHistory({
                 </Text>
             ) : (
                 <div aria-label={`Last maintenance run for ${policy.label}`}>
-                    <p className="text-primary-200 mb-1 text-xs font-medium">Last run</p>
+                    <p className="text-primary-200 mb-2 text-xs font-medium">Last run</p>
                     <RunLifecycle run={policy.lastRun.run} />
                     {policy.lastRun.run.terminalMessage === undefined ? null : (
                         <Text className="mt-2 wrap-anywhere" size="sm" tone="danger">
@@ -465,7 +465,7 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                 </div>
                                 <PolicyRunHistory policy={policy} />
                                 <Fieldset
-                                    className="mt-4 flex flex-wrap gap-2"
+                                    className="mt-4 flex flex-wrap justify-end gap-2"
                                     legend={
                                         <span className="sr-only">
                                             Actions for {policy.label}

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import type { ReportDetail, ReportSummary } from "../../../contracts/monitoring.ts";
 import { liveHistoryArchiveQueryKey } from "../../api/liveHistory.ts";
@@ -89,6 +89,55 @@ export const Loading: Story = {
 
 export const List: Story = {
     args: { fixtures: reportFixtures(), route: "/reports" },
+};
+
+export const InfiniteScroll: Story = {
+    args: {
+        fixtures: reportFixtures({
+            list: dashboardStoryResolver((input) => {
+                const hasCursor =
+                    typeof input === "object" && input !== null && "cursor" in input;
+                if (hasCursor) {
+                    return {
+                        reports: [
+                            {
+                                ...report,
+                                id: "019fe900-0000-7000-8000-000000000099",
+                                occurredAtMs: observedAtMs - 100_000,
+                                title: "Older operations heartbeat",
+                            },
+                        ],
+                    };
+                }
+                const reports = Array.from({ length: 50 }, (_, index) => ({
+                    ...report,
+                    id: `019fe900-0000-7000-8000-${index.toString().padStart(12, "0")}`,
+                    occurredAtMs: observedAtMs - index * 1000,
+                    title: `Operations heartbeat ${index.toString().padStart(2, "0")}`,
+                }));
+                const last = reports.at(-1);
+                return {
+                    reports,
+                    nextCursor:
+                        last === undefined
+                            ? undefined
+                            : { id: last.id, occurredAtMs: last.occurredAtMs },
+                };
+            }),
+        }),
+        route: "/reports",
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        const list = await canvas.findByRole("list", { name: "Reports" });
+        const scrollOwner = list.parentElement;
+        if (scrollOwner === null) throw new TypeError("Reports scroll owner is missing");
+        scrollOwner.scrollTop = scrollOwner.scrollHeight;
+        scrollOwner.dispatchEvent(new Event("scroll", { bubbles: true }));
+        await waitFor(async () => {
+            await expect(canvas.getByText("Older operations heartbeat")).toBeVisible();
+        });
+    },
 };
 
 export const Empty: Story = {

@@ -10,7 +10,6 @@ import {
     formatChatAttachmentSize,
 } from "./chatAttachmentPresentation.ts";
 import type { ChatDraftAttachment, ChatMessageAttachment } from "./chatTypes.ts";
-/* eslint-disable jsx-a11y/media-has-caption -- Local user-selected audio has no authored caption track. */
 
 const maximumTextPreviewBytes = 128 * 1024;
 const maximumRemoteTextPreviewBytes = 1024 * 1024;
@@ -289,6 +288,7 @@ export function ChatAttachmentPreview({
                         />
                     )}
                     {audioPreviewAllowed && (
+                        // oxlint-disable-next-line jsx-a11y/media-has-caption -- Local user-selected audio has no authored caption track.
                         <audio
                             aria-label={`Preview of ${attachment.name}`}
                             className="w-full"

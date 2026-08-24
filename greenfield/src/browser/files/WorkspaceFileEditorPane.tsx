@@ -1,4 +1,3 @@
-/* eslint-disable jsx-a11y/media-has-caption -- Workspace audio has no authored caption track. */
 import JSON5 from "json5";
 import { Download, Eye, FilePenLine, RefreshCw, Save, Upload } from "lucide-react";
 import { useState } from "react";
@@ -150,6 +149,7 @@ function MediaPresentation({
         case "audio": {
             return (
                 <div className="flex h-full items-center p-6">
+                    {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- Workspace audio has no authored caption track. */}
                     <audio
                         aria-label={`Audio preview of ${entry.name}`}
                         className="w-full"

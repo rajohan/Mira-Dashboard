@@ -157,7 +157,9 @@ export function IncidentBrowser() {
         undefined,
         archiveFirstPageResetKey
     );
-    const catalogError = liveHead.error ?? query.error;
+    const archivePageError = query.isFetchNextPageError ? query.error : null;
+    const catalogError =
+        liveHead.error ?? (query.isFetchNextPageError ? null : query.error);
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
     const retryCatalog = () =>
         void Promise.allSettled([liveHead.refetch(), query.refetch()]);
@@ -216,6 +218,17 @@ export function IncidentBrowser() {
             <IncidentTable
                 incidents={incidents}
                 onSelect={selectIncident}
+                pagination={{
+                    ...(archivePageError === null
+                        ? {}
+                        : {
+                              error: dashboardBrowserFailureMessage(archivePageError),
+                          }),
+                    hasMore: query.hasNextPage,
+                    loading: query.isFetchingNextPage,
+                    loadingLabel: "Loading older incidents…",
+                    onLoadMore: () => void query.fetchNextPage(),
+                }}
                 selectedId={selectedId}
             />
         );
@@ -300,20 +313,6 @@ export function IncidentBrowser() {
                         </div>
                     </div>
                     {catalogContent}
-                    {query.hasNextPage && (
-                        <div className="border-primary-700 border-t p-3">
-                            <Button
-                                busy={query.isFetchingNextPage}
-                                busyLabel="Loading…"
-                                fullWidth
-                                onClick={() => void query.fetchNextPage()}
-                                size="sm"
-                                variant="secondary"
-                            >
-                                Load older incidents
-                            </Button>
-                        </div>
-                    )}
                 </Card>
                 {selectedId === undefined ? (
                     <PageState

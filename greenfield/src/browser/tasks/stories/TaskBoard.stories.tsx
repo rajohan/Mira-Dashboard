@@ -123,6 +123,17 @@ export const DeliveryStates: Story = {
     },
 };
 
+export const InfiniteColumnsLoading: Story = {
+    args: {
+        pagination: {
+            hasMore: true,
+            loading: true,
+            loadingLabel: "Loading more tasks…",
+            onLoadMore: fn(),
+        },
+    },
+};
+
 export const KeyboardMove: Story = {
     play: async ({ args, canvasElement }) => {
         const task = tasks[0];

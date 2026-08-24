@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -501,7 +500,7 @@ export function validateDashboardWebAuthnBrowserOrigin(
 export function resolveDashboardGatewayScope(gatewayUrl: string): string {
     const origin = new URL(gatewayUrl).origin;
     if (origin === "null") throw new TypeError("Gateway URL has no canonical origin");
-    return createHash("sha256").update(origin).digest("hex");
+    return new Bun.CryptoHasher("sha256").update(origin).digest("hex");
 }
 
 const unavailableOpenClawCronProvider: OpenClawCronProvider = Object.freeze({

@@ -1,4 +1,4 @@
-/** Minimal Babel AST record used by the source-boundary analyzers. */
+/** Minimal ESTree-compatible AST record used by the source-boundary analyzers. */
 export type AstRecord = Record<string, unknown>;
 
 /** Binding-aware references to runtime-owned global identifiers. */
@@ -17,8 +17,8 @@ export function isRecord(value: unknown): value is AstRecord {
 }
 
 /**
- * Returns the Babel node discriminator when present.
- * @param node Babel AST record.
+ * Returns the ESTree node discriminator when present.
+ * @param node ESTree-compatible AST record.
  * @returns Node type string when present.
  */
 export function nodeType(node: AstRecord): string | undefined {
@@ -27,17 +27,22 @@ export function nodeType(node: AstRecord): string | undefined {
 
 /**
  * Returns only a syntactic string-literal value.
- * @param node Candidate Babel node.
+ * @param node Candidate ESTree-compatible node.
  * @returns Literal string value when the node is a string literal.
  */
 export function stringLiteralValue(node: unknown): string | undefined {
-    if (!isRecord(node) || nodeType(node) !== "StringLiteral") return undefined;
+    if (
+        !isRecord(node) ||
+        (nodeType(node) !== "StringLiteral" && nodeType(node) !== "Literal")
+    ) {
+        return undefined;
+    }
     return typeof node.value === "string" ? node.value : undefined;
 }
 
 /**
  * Returns an identifier name without treating arbitrary AST nodes as identifiers.
- * @param node Candidate Babel node.
+ * @param node Candidate ESTree-compatible node.
  * @returns Identifier name when the node is an identifier.
  */
 export function identifierName(node: unknown): string | undefined {
@@ -47,6 +52,7 @@ export function identifierName(node: unknown): string | undefined {
 
 const transparentExpressionTypes: ReadonlySet<string> = new Set([
     "ParenthesizedExpression",
+    "ChainExpression",
     "TSAsExpression",
     "TSInstantiationExpression",
     "TSNonNullExpression",
@@ -98,7 +104,7 @@ export function staticStringValue(
 
 /**
  * Returns a stable one-based source line for a node.
- * @param node Babel AST record.
+ * @param node ESTree-compatible AST record.
  * @returns One-based source line, defaulting to one.
  */
 export function sourceLine(node: AstRecord): number {
@@ -110,7 +116,7 @@ export function sourceLine(node: AstRecord): number {
 
 /**
  * Returns call arguments without trusting an unknown AST shape.
- * @param node Babel AST record.
+ * @param node ESTree-compatible AST record.
  * @returns Call arguments or an empty array.
  */
 export function callArguments(node: AstRecord): readonly unknown[] {

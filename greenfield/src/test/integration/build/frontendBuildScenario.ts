@@ -12,7 +12,6 @@ import {
     writeFrontendHtmlAppEntrypoint,
     writePrecompressedFrontendAssets,
 } from "../../../../scripts/frontendBuildArtifacts.ts";
-import reactCompilerPlugin from "../../../../scripts/reactCompilerPlugin.ts";
 
 export type FrontendBuildScenarioMode = "development" | "production";
 
@@ -31,10 +30,10 @@ const frontendBuildFixtureEntrypoint = path.resolve(
 const frontendBuildFixtureAppInput =
     "src/browser/test/fixtures/frontendBuild/src/main.tsx";
 
-export const frontendBuildPluginOrder = [
-    reactCompilerPlugin.name,
-    tailwindPlugin.name,
-] as const;
+export const frontendBuildConfiguration = Object.freeze({
+    pluginNames: [tailwindPlugin.name],
+    reactCompiler: true,
+});
 
 /**
  * Builds a minimal HTML-entry frontend with the target compiler-first pipeline.
@@ -65,8 +64,9 @@ export async function buildFrontendScenario(
             chunk: "assets/[name]-[hash].[ext]",
         },
         outdir: resolvedOutdir,
-        plugins: [reactCompilerPlugin, tailwindPlugin],
+        plugins: [tailwindPlugin],
         publicPath: "/",
+        reactCompiler: true,
         sourcemap: isProduction ? "none" : "linked",
         splitting: true,
         target: "browser",

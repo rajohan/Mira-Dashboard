@@ -17,7 +17,7 @@ import {
     assertPersistentGatewayOpenClawSettingsReadParameters,
     assertPersistentGatewayOpenClawSettingsWriteParameters,
     assertPersistentGatewayOpenClawServiceActionParameters,
-    assertPersistentGatewayReadWriteParameters,
+    assertPersistentGatewayWebReadParameters,
     assertPersistentGatewayTaskReadParameters,
     assertPersistentGatewayTaskWriteParameters,
     createPersistentGatewayConnectFrame,
@@ -28,7 +28,7 @@ import {
     isPersistentGatewayOpenClawSettingsReadMethod,
     isPersistentGatewayOpenClawSettingsWriteMethod,
     isPersistentGatewayOpenClawServiceActionMethod,
-    isPersistentGatewayReadWriteMethod,
+    isPersistentGatewayWebReadMethod,
     isPersistentGatewayTaskReadMethod,
     isPersistentGatewayTaskWriteMethod,
     parsePersistentGatewayChatSendAcknowledgement,
@@ -52,7 +52,7 @@ import {
     type PersistentGatewayOpenClawServiceActionResponse,
     persistentGatewayOpenClawServiceActionRequestTimeoutMs,
     persistentGatewayOutboundFrameMaximumBytes,
-    type PersistentGatewayReadWriteMethod,
+    type PersistentGatewayWebReadMethod,
     type PersistentGatewayTaskReadMethod,
     type PersistentGatewayTaskWriteMethod,
     persistentGatewayTaskNotificationMethod,
@@ -1573,7 +1573,7 @@ interface PersistentGatewayTransportLifecycle {
 export interface PersistentGatewayTransport extends PersistentGatewayTransportLifecycle {
     readonly snapshot: PersistentGatewayConnectionSnapshot;
     request(
-        method: PersistentGatewayReadWriteMethod,
+        method: PersistentGatewayWebReadMethod,
         parameters: Readonly<Record<string, unknown>>,
         options?: PersistentGatewayRequestOptions
     ): Promise<unknown>;
@@ -1677,18 +1677,18 @@ class PersistentGatewayTransportImplementation
     }
 
     request(
-        method: PersistentGatewayReadWriteMethod,
+        method: PersistentGatewayWebReadMethod,
         parameters: Readonly<Record<string, unknown>>,
         options?: PersistentGatewayRequestOptions
     ): Promise<unknown> {
         if (
             this.#resolved.profile !== "web-read" ||
-            !isPersistentGatewayReadWriteMethod(method)
+            !isPersistentGatewayWebReadMethod(method)
         ) {
             return Promise.reject(new PersistentGatewayUnavailableError());
         }
         try {
-            assertPersistentGatewayReadWriteParameters(method, parameters);
+            assertPersistentGatewayWebReadParameters(method, parameters);
         } catch {
             return Promise.reject(new PersistentGatewayUnavailableError());
         }

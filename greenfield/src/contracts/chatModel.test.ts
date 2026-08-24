@@ -20,6 +20,79 @@ import {
 
 const runId = "019fe5a1-6cb9-7e51-ad2a-bf1f69861218";
 
+function attachmentFixture(
+    url: string,
+    renderPolicy: "bounded-text" | "download-only" | "inline-image" = "inline-image",
+    downloadUrl?: string
+) {
+    return {
+        content: {
+            kind: "complete",
+            parts: [
+                {
+                    ...(downloadUrl === undefined ? {} : { downloadUrl }),
+                    fileName: "diagram.png",
+                    id: "part-1",
+                    kind: "attachment",
+                    mediaType: "image/png",
+                    renderPolicy,
+                    url,
+                },
+            ],
+        },
+        id: "message-1",
+        role: "assistant",
+        source: "gateway-history",
+    };
+}
+
+function externalPlanFixture(steps: unknown[]) {
+    return {
+        continuity: "complete",
+        hasUnprojectedActivity: false,
+        plan: { phase: "update", steps },
+        providerRunId: "provider-run",
+        sessionKey: "agent:main:main",
+        source: "provider-runtime",
+        text: "working",
+        updatedAtMs: 1000,
+    };
+}
+
+function externalStreamResetFixture(streamResets: unknown[]) {
+    return {
+        continuity: "complete",
+        hasUnprojectedActivity: false,
+        providerRunId: "provider-run",
+        sessionKey: "agent:main:main",
+        source: "provider-runtime",
+        streamResets,
+        text: "working",
+        updatedAtMs: 1000,
+    };
+}
+
+function externalAbortFixture(attemptId: string) {
+    return {
+        abortBoundary: {
+            attemptId,
+            attemptedAtMs: 1000,
+            baselineObservationEpoch: 1,
+            baselineUpdatedAtMs: 1000,
+            settlement: "unknown",
+        },
+        continuity: "complete",
+        hasUnprojectedActivity: false,
+        observationEpoch: 1,
+        observedAtMs: 1000,
+        providerRunId: "provider-run",
+        sessionKey: "agent:main:main",
+        source: "provider-runtime",
+        text: "working",
+        updatedAtMs: 1000,
+    };
+}
+
 describe("chat model contract", () => {
     test("rejects provider sequence zero on points and ranges", () => {
         expect(
@@ -48,43 +121,18 @@ describe("chat model contract", () => {
     });
 
     test("accepts only the exact local managed-media UUIDv4 route", () => {
-        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture is scoped to this policy case.
-        const attachment = (
-            url: string,
-            renderPolicy:
-                | "bounded-text"
-                | "download-only"
-                | "inline-image" = "inline-image",
-            downloadUrl?: string
-        ) => ({
-            content: {
-                kind: "complete",
-                parts: [
-                    {
-                        ...(downloadUrl === undefined ? {} : { downloadUrl }),
-                        fileName: "diagram.png",
-                        id: "part-1",
-                        kind: "attachment",
-                        mediaType: "image/png",
-                        renderPolicy,
-                        url,
-                    },
-                ],
-            },
-            id: "message-1",
-            role: "assistant",
-            source: "gateway-history",
-        });
         const base = "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb40";
 
         expect(
-            v.safeParse(chatMessageSchema, attachment(`${base}?disposition=preview`))
-                .success
+            v.safeParse(
+                chatMessageSchema,
+                attachmentFixture(`${base}?disposition=preview`)
+            ).success
         ).toBeTrue();
         expect(
             v.safeParse(
                 chatMessageSchema,
-                attachment(
+                attachmentFixture(
                     `${base}?disposition=preview`,
                     "bounded-text",
                     `${base}?disposition=download`
@@ -94,7 +142,7 @@ describe("chat model contract", () => {
         expect(
             v.safeParse(
                 chatMessageSchema,
-                attachment(`${base}?disposition=download`, "download-only")
+                attachmentFixture(`${base}?disposition=download`, "download-only")
             ).success
         ).toBeTrue();
         for (const invalid of [
@@ -106,25 +154,25 @@ describe("chat model contract", () => {
             "/api/chat/media/019FE633-9133-4BA0-8B80-809DD80DFB40?disposition=preview",
         ]) {
             expect(
-                v.safeParse(chatMessageSchema, attachment(invalid)).success
+                v.safeParse(chatMessageSchema, attachmentFixture(invalid)).success
             ).toBeFalse();
         }
         expect(
             v.safeParse(
                 chatMessageSchema,
-                attachment(`${base}?disposition=download`, "inline-image")
+                attachmentFixture(`${base}?disposition=download`, "inline-image")
             ).success
         ).toBeFalse();
         expect(
             v.safeParse(
                 chatMessageSchema,
-                attachment(`${base}?disposition=preview`, "download-only")
+                attachmentFixture(`${base}?disposition=preview`, "download-only")
             ).success
         ).toBeFalse();
         expect(
             v.safeParse(
                 chatMessageSchema,
-                attachment(
+                attachmentFixture(
                     `${base}?disposition=preview`,
                     "bounded-text",
                     "/api/chat/media/019fe633-9133-4ba0-8b80-809dd80dfb41?disposition=download"
@@ -179,28 +227,19 @@ describe("chat model contract", () => {
     });
 
     test("requires a non-empty bounded external plan with one active step", () => {
-        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture is scoped to this policy case.
-        const external = (steps: unknown[]) => ({
-            continuity: "complete",
-            hasUnprojectedActivity: false,
-            plan: { phase: "update", steps },
-            providerRunId: "provider-run",
-            sessionKey: "agent:main:main",
-            source: "provider-runtime",
-            text: "working",
-            updatedAtMs: 1000,
-        });
-        expect(v.safeParse(chatExternalRunSchema, external([])).success).toBeFalse();
+        expect(
+            v.safeParse(chatExternalRunSchema, externalPlanFixture([])).success
+        ).toBeFalse();
         expect(
             v.safeParse(
                 chatExternalRunSchema,
-                external([{ status: "in_progress", text: "Work" }])
+                externalPlanFixture([{ status: "in_progress", text: "Work" }])
             ).success
         ).toBeTrue();
         expect(
             v.safeParse(
                 chatExternalRunSchema,
-                external([
+                externalPlanFixture([
                     { status: "in_progress", text: "First" },
                     { status: "in_progress", text: "Second" },
                 ])
@@ -208,7 +247,7 @@ describe("chat model contract", () => {
         ).toBeFalse();
         expect(
             v.safeParse(chatExternalRunSchema, {
-                ...external([{ status: "pending", text: "Work" }]),
+                ...externalPlanFixture([{ status: "pending", text: "Work" }]),
                 plan: {
                     explanation: "界".repeat(chatPlanExplanationMaximumCodeUnits),
                     phase: "update",
@@ -218,7 +257,7 @@ describe("chat model contract", () => {
         ).toBeTrue();
         expect(
             v.safeParse(chatExternalRunSchema, {
-                ...external([{ status: "pending", text: "Work" }]),
+                ...externalPlanFixture([{ status: "pending", text: "Work" }]),
                 plan: {
                     explanation: "x".repeat(chatPlanExplanationMaximumCodeUnits + 1),
                     phase: "update",
@@ -229,54 +268,32 @@ describe("chat model contract", () => {
     });
 
     test("bounds external stream reset watermarks", () => {
-        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture is scoped to this policy case.
-        const external = (streamResets: unknown[]) => ({
-            continuity: "complete",
-            hasUnprojectedActivity: false,
-            providerRunId: "provider-run",
-            sessionKey: "agent:main:main",
-            source: "provider-runtime",
-            streamResets,
-            text: "working",
-            updatedAtMs: 1000,
-        });
         const maximum = Array.from(
             { length: chatExternalStreamResetMaximum },
             (_, index) => ({ resetId: `reset-${index}`, streamId: `stream-${index}` })
         );
 
-        expect(v.safeParse(chatExternalRunSchema, external(maximum)).success).toBeTrue();
         expect(
-            v.safeParse(chatExternalRunSchema, external([...maximum, maximum[0]])).success
+            v.safeParse(chatExternalRunSchema, externalStreamResetFixture(maximum))
+                .success
+        ).toBeTrue();
+        expect(
+            v.safeParse(
+                chatExternalRunSchema,
+                externalStreamResetFixture([...maximum, maximum[0]])
+            ).success
         ).toBeFalse();
         expect(
             v.safeParse(
                 chatExternalRunSchema,
-                external([{ resetId: "reset\nleak", streamId: "stream-1" }])
+                externalStreamResetFixture([
+                    { resetId: "reset\nleak", streamId: "stream-1" },
+                ])
             ).success
         ).toBeFalse();
     });
 
     test("bounds external abort attempts and their projected server baseline", () => {
-        // oxlint-disable-next-line unicorn/consistent-function-scoping -- Fixture is scoped to this policy case.
-        const external = (attemptId: string) => ({
-            abortBoundary: {
-                attemptId,
-                attemptedAtMs: 1000,
-                baselineObservationEpoch: 1,
-                baselineUpdatedAtMs: 1000,
-                settlement: "unknown",
-            },
-            continuity: "complete",
-            hasUnprojectedActivity: false,
-            observationEpoch: 1,
-            observedAtMs: 1000,
-            providerRunId: "provider-run",
-            sessionKey: "agent:main:main",
-            source: "provider-runtime",
-            text: "working",
-            updatedAtMs: 1000,
-        });
         expect(
             v.safeParse(chatAbortInputSchema, {
                 abortAttemptId: "a".repeat(64),
@@ -292,10 +309,12 @@ describe("chat model contract", () => {
             }).success
         ).toBeFalse();
         expect(
-            v.safeParse(chatExternalRunSchema, external("attempt\nleak")).success
+            v.safeParse(chatExternalRunSchema, externalAbortFixture("attempt\nleak"))
+                .success
         ).toBeFalse();
         expect(
-            v.safeParse(chatExternalRunSchema, external("a".repeat(64))).success
+            v.safeParse(chatExternalRunSchema, externalAbortFixture("a".repeat(64)))
+                .success
         ).toBeTrue();
     });
 

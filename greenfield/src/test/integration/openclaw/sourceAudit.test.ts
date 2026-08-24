@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
     assertOpenClawAuditMatchesReviewed,
@@ -3686,7 +3685,9 @@ describe("reviewed OpenClaw protocol fixtures", () => {
 
     test("rejects unknown fixture fields before policy use", async () => {
         const fixtureRoot = path.dirname(
-            fileURLToPath(new URL("manifest.json", defaultReviewedOpenClawFixtureRoot))
+            Bun.fileURLToPath(
+                new URL("manifest.json", defaultReviewedOpenClawFixtureRoot)
+            )
         );
         const serialized = await readFile(path.join(fixtureRoot, "chat.json"), "utf8");
         const value = JSON.parse(serialized) as Record<string, unknown>;
@@ -3704,7 +3705,7 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             const fixtureRoot = path.join(temporaryRoot, sourceVersion);
             await mkdir(fixtureRoot);
             const reviewedRoot = path.dirname(
-                fileURLToPath(
+                Bun.fileURLToPath(
                     new URL("manifest.json", defaultReviewedOpenClawFixtureRoot)
                 )
             );

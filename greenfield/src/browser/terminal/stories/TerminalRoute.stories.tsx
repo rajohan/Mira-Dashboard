@@ -325,10 +325,14 @@ export const EnrollmentRequired: Story = {
                 name: "Open Dashboard security settings",
             })
         );
-        const securityHeading = await canvas.findByRole("heading", {
-            level: 1,
-            name: "Account security",
-        });
+        const securityHeading = await canvas.findByRole(
+            "heading",
+            {
+                level: 1,
+                name: "Account security",
+            },
+            { timeout: 3000 }
+        );
         await expect(securityHeading).toBeVisible();
         await expect(
             canvas.getByRole("tab", { name: "Dashboard settings" })

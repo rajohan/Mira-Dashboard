@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import { eq } from "drizzle-orm";
@@ -51,6 +50,18 @@ const actor = {
     kind: "user" as const,
 };
 
+function promisePort<T>(operation: () => T): Promise<Awaited<T>> {
+    try {
+        return Promise.resolve(operation());
+    } catch (error) {
+        return Promise.reject(
+            error instanceof Error
+                ? error
+                : new Error("Promise-port test double failed", { cause: error })
+        );
+    }
+}
+
 function sendInput(overrides: Partial<ChatSendInput> = {}): ChatSendInput {
     return {
         clientRunId: runId,
@@ -99,33 +110,37 @@ function providerHarness(overrides: Partial<ChatProvider> = {}): ProviderHarness
     const requests: ChatEventSubscriptionRequest[] = [];
     let closes = 0;
     const provider: ChatProvider = {
-        abort: async () => ({ aborted: false, ok: true, runIds: [] }),
-        companionAsk: async () => ({ answer: "answer", timestampMs: 1000 }),
-        companionReset: async () => ({ reset: true }),
-        companionState: async () => ({ exchanges: [] }),
-        getMessage: async () => ({ reason: "not-found", status: "unavailable" }),
-        history: async () => ({ hasMore: false, messages: [] }),
-        listModels: async () => ({ models: [] }),
-        send: async () => ({
-            runId: "provider-run",
-            status: "started",
-        }),
-        subscribeChat: async (request) => {
-            requests.push(request);
-            return {
-                close: async () => {
-                    closes += 1;
-                },
-            };
-        },
-        updateSessionSettings: async (input) => ({
-            ...(input.fastMode === undefined ? {} : { fastMode: input.fastMode }),
-            ...(input.model === undefined ? {} : { model: input.model }),
-            sessionKey: input.sessionKey,
-            ...(input.thinkingLevel === undefined
-                ? {}
-                : { thinkingLevel: input.thinkingLevel }),
-        }),
+        abort: () => Promise.resolve({ aborted: false, ok: true, runIds: [] }),
+        companionAsk: () => Promise.resolve({ answer: "answer", timestampMs: 1000 }),
+        companionReset: () => Promise.resolve({ reset: true }),
+        companionState: () => Promise.resolve({ exchanges: [] }),
+        getMessage: () => Promise.resolve({ reason: "not-found", status: "unavailable" }),
+        history: () => Promise.resolve({ hasMore: false, messages: [] }),
+        listModels: () => Promise.resolve({ models: [] }),
+        send: () =>
+            Promise.resolve({
+                runId: "provider-run",
+                status: "started",
+            }),
+        subscribeChat: (request) =>
+            promisePort(() => {
+                requests.push(request);
+                return {
+                    close: () =>
+                        promisePort(() => {
+                            closes += 1;
+                        }),
+                };
+            }),
+        updateSessionSettings: (input) =>
+            Promise.resolve({
+                ...(input.fastMode === undefined ? {} : { fastMode: input.fastMode }),
+                ...(input.model === undefined ? {} : { model: input.model }),
+                sessionKey: input.sessionKey,
+                ...(input.thinkingLevel === undefined
+                    ? {}
+                    : { thinkingLevel: input.thinkingLevel }),
+            }),
         ...overrides,
     };
     return { closeCount: () => closes, provider, requests };
@@ -159,9 +174,10 @@ function deferred<T>() {
 
 function inertAttachmentPreparer() {
     return {
-        prepare: async () => {
-            throw new Error("Attachment preparation is not used by this test");
-        },
+        prepare: () =>
+            promisePort(() => {
+                throw new Error("Attachment preparation is not used by this test");
+            }),
     };
 }
 
@@ -244,10 +260,11 @@ describe("ChatService", () => {
             () => 1000
         );
         const provider = providerHarness({
-            send: async () => {
-                expect(repository.readIntent(runId)?.dispatchAttempted).toBeTrue();
-                return { runId: "provider-run", status: "started" };
-            },
+            send: () =>
+                promisePort(() => {
+                    expect(repository.readIntent(runId)?.dispatchAttempted).toBeTrue();
+                    return { runId: "provider-run", status: "started" };
+                }),
         });
         const calls: string[] = [];
         const reservation: ChatAttachmentTicketReservation = {
@@ -259,21 +276,24 @@ describe("ChatService", () => {
                     type: "file",
                 },
             ],
-            commit: async () => {
-                calls.push("commit");
-            },
-            release: async () => {
-                calls.push("release");
-            },
+            commit: () =>
+                promisePort(() => {
+                    calls.push("commit");
+                }),
+            release: () =>
+                promisePort(() => {
+                    calls.push("release");
+                }),
         };
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    const intent = repository.readIntent(runId);
-                    expect(intent?.dispatchAttempted).toBeFalse();
-                    calls.push("reserve");
-                    return reservation;
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        const intent = repository.readIntent(runId);
+                        expect(intent?.dispatchAttempted).toBeFalse();
+                        calls.push("reserve");
+                        return reservation;
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -306,96 +326,105 @@ describe("ChatService", () => {
         );
         const input = sendInput();
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                messages: [
-                    {
-                        ...unscopedHistoryUser("history-user", input.message, 1000, 1),
-                        idempotencyKey: input.idempotencyKey,
-                    },
-                    {
-                        content: {
-                            kind: "complete",
-                            parts: [
-                                {
-                                    id: "history-thinking-part",
-                                    kind: "thinking",
-                                    text: "Inspecting",
-                                },
-                            ],
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    messages: [
+                        {
+                            ...unscopedHistoryUser(
+                                "history-user",
+                                input.message,
+                                1000,
+                                1
+                            ),
+                            idempotencyKey: input.idempotencyKey,
                         },
-                        createdAtMs: 1100,
-                        id: "history-thinking",
-                        role: "assistant",
-                        sequence: 2,
-                        source: "gateway-history",
-                    },
-                    {
-                        content: {
-                            kind: "complete",
-                            parts: [
-                                {
-                                    callId: "history-tool-call",
-                                    id: "history-tool-part",
-                                    isError: false,
-                                    kind: "tool",
-                                    name: "status",
-                                    phase: "succeeded",
-                                },
-                            ],
+                        {
+                            content: {
+                                kind: "complete",
+                                parts: [
+                                    {
+                                        id: "history-thinking-part",
+                                        kind: "thinking",
+                                        text: "Inspecting",
+                                    },
+                                ],
+                            },
+                            createdAtMs: 1100,
+                            id: "history-thinking",
+                            role: "assistant",
+                            sequence: 2,
+                            source: "gateway-history",
                         },
-                        createdAtMs: 1200,
-                        id: "history-tool",
-                        role: "assistant",
-                        sequence: 3,
-                        source: "gateway-history",
-                    },
-                    {
-                        content: {
-                            kind: "complete",
-                            parts: [
-                                {
-                                    fileName: "result.png",
-                                    id: "history-final-part",
-                                    kind: "attachment",
-                                    mediaType: "image/png",
-                                    renderPolicy: "download-only",
-                                    url: "/api/chat/media/history-final-part?disposition=download",
-                                },
-                            ],
+                        {
+                            content: {
+                                kind: "complete",
+                                parts: [
+                                    {
+                                        callId: "history-tool-call",
+                                        id: "history-tool-part",
+                                        isError: false,
+                                        kind: "tool",
+                                        name: "status",
+                                        phase: "succeeded",
+                                    },
+                                ],
+                            },
+                            createdAtMs: 1200,
+                            id: "history-tool",
+                            role: "assistant",
+                            sequence: 3,
+                            source: "gateway-history",
                         },
-                        createdAtMs: 1300,
-                        id: "history-final",
-                        role: "assistant",
-                        sequence: 4,
-                        source: "gateway-history",
-                    },
-                    unscopedHistoryUser("next-user", "Next turn", 1400, 5),
-                    {
-                        content: {
-                            kind: "complete",
-                            parts: [
-                                {
-                                    id: "next-final-part",
-                                    kind: "text",
-                                    text: "Must not reconcile the first run",
-                                },
-                            ],
+                        {
+                            content: {
+                                kind: "complete",
+                                parts: [
+                                    {
+                                        fileName: "result.png",
+                                        id: "history-final-part",
+                                        kind: "attachment",
+                                        mediaType: "image/png",
+                                        renderPolicy: "download-only",
+                                        url: "/api/chat/media/history-final-part?disposition=download",
+                                    },
+                                ],
+                            },
+                            createdAtMs: 1300,
+                            id: "history-final",
+                            role: "assistant",
+                            sequence: 4,
+                            source: "gateway-history",
                         },
-                        createdAtMs: 1500,
-                        id: "next-final",
-                        role: "assistant",
-                        sequence: 6,
-                        source: "gateway-history",
-                    },
-                ],
-            }),
+                        unscopedHistoryUser("next-user", "Next turn", 1400, 5),
+                        {
+                            content: {
+                                kind: "complete",
+                                parts: [
+                                    {
+                                        id: "next-final-part",
+                                        kind: "text",
+                                        text: "Must not reconcile the first run",
+                                    },
+                                ],
+                            },
+                            createdAtMs: 1500,
+                            id: "next-final",
+                            role: "assistant",
+                            sequence: 6,
+                            source: "gateway-history",
+                        },
+                    ],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 2000,
@@ -441,16 +470,20 @@ describe("ChatService", () => {
         );
         const sends: Parameters<ChatProvider["send"]>[0][] = [];
         const provider = providerHarness({
-            send: async (request) => {
-                sends.push(request);
-                return { runId: request.idempotencyKey, status: "started" };
-            },
+            send: (request) =>
+                promisePort(() => {
+                    sends.push(request);
+                    return { runId: request.idempotencyKey, status: "started" };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -491,31 +524,36 @@ describe("ChatService", () => {
             let releases = 0;
             const scheduler = schedulerHarness();
             const provider = providerHarness({
-                history: async () => ({
-                    hasMore: false,
-                    inFlightRun: {
-                        runId: "A".repeat(32),
-                        text: "working",
-                    },
-                    messages: [],
-                }),
-                send: async () => {
-                    throw outcome === "unknown"
-                        ? new ChatProviderUnknownOutcomeError()
-                        : new ChatProviderUnavailableError();
-                },
+                history: () =>
+                    Promise.resolve({
+                        hasMore: false,
+                        inFlightRun: {
+                            runId: "A".repeat(32),
+                            text: "working",
+                        },
+                        messages: [],
+                    }),
+                send: () =>
+                    promisePort(() => {
+                        throw outcome === "unknown"
+                            ? new ChatProviderUnknownOutcomeError()
+                            : new ChatProviderUnavailableError();
+                    }),
             });
             const service = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => ({
-                        attachments: [],
-                        commit: async () => {
-                            commits += 1;
-                        },
-                        release: async () => {
-                            releases += 1;
-                        },
-                    }),
+                    reserve: () =>
+                        Promise.resolve({
+                            attachments: [],
+                            commit: () =>
+                                promisePort(() => {
+                                    commits += 1;
+                                }),
+                            release: () =>
+                                promisePort(() => {
+                                    releases += 1;
+                                }),
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => 1000,
@@ -558,33 +596,38 @@ describe("ChatService", () => {
                 outcome === "begin-dispatch"
                     ? {
                           ...durable,
-                          beginDispatch: async () => {
-                              controller.abort();
-                              throw new Error("begin dispatch failed");
-                          },
+                          beginDispatch: () =>
+                              promisePort(() => {
+                                  controller.abort();
+                                  throw new Error("begin dispatch failed");
+                              }),
                       }
                     : durable;
             const provider = providerHarness({
-                history: async () => ({ hasMore: false, messages: [] }),
-                send: async () => {
-                    sendCalls += 1;
-                    controller.abort();
-                    throw outcome === "unknown"
-                        ? new ChatProviderUnknownOutcomeError()
-                        : new ChatProviderUnavailableError();
-                },
+                history: () => Promise.resolve({ hasMore: false, messages: [] }),
+                send: () =>
+                    promisePort(() => {
+                        sendCalls += 1;
+                        controller.abort();
+                        throw outcome === "unknown"
+                            ? new ChatProviderUnknownOutcomeError()
+                            : new ChatProviderUnavailableError();
+                    }),
             });
             const service = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => ({
-                        attachments: [],
-                        commit: async (signal) => {
-                            cleanupSignals.push(signal);
-                        },
-                        release: async (signal) => {
-                            cleanupSignals.push(signal);
-                        },
-                    }),
+                    reserve: () =>
+                        Promise.resolve({
+                            attachments: [],
+                            commit: (signal) =>
+                                promisePort(() => {
+                                    cleanupSignals.push(signal);
+                                }),
+                            release: (signal) =>
+                                promisePort(() => {
+                                    cleanupSignals.push(signal);
+                                }),
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => 1000,
@@ -637,16 +680,20 @@ describe("ChatService", () => {
         }>();
         let abortCalls = 0;
         const provider = providerHarness({
-            abort: async () => {
-                abortCalls += 1;
-                return abortGate.promise;
-            },
+            abort: () =>
+                promisePort(() => {
+                    abortCalls += 1;
+                    return abortGate.promise;
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -684,21 +731,26 @@ describe("ChatService", () => {
         let historyCalls = 0;
         const scheduler = schedulerHarness();
         const provider = providerHarness({
-            abort: async () => {
-                abortCalls += 1;
-                if (abortCalls === 1) throw new ChatProviderUnavailableError();
-                return { aborted: false, ok: true, runIds: [] };
-            },
-            history: async () => {
-                historyCalls += 1;
-                return { hasMore: false, messages: [] };
-            },
+            abort: () =>
+                promisePort(() => {
+                    abortCalls += 1;
+                    if (abortCalls === 1) throw new ChatProviderUnavailableError();
+                    return { aborted: false, ok: true, runIds: [] };
+                }),
+            history: () =>
+                promisePort(() => {
+                    historyCalls += 1;
+                    return { hasMore: false, messages: [] };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1000,
@@ -751,9 +803,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1000,
@@ -803,13 +858,16 @@ describe("ChatService", () => {
             () => 1004
         );
         const provider = providerHarness({
-            history: async () => ({ hasMore: false, messages }),
+            history: () => Promise.resolve({ hasMore: false, messages }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1004,
@@ -919,9 +977,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             coalescerScheduler: coalescerScheduler.scheduler,
@@ -1132,21 +1193,25 @@ describe("ChatService", () => {
         );
         const abortRequests: unknown[] = [];
         const provider = providerHarness({
-            abort: async (request) => {
-                abortRequests.push(request);
-                const aborted = request.providerRunId !== "external-not-aborted";
-                return {
-                    aborted,
-                    ok: true,
-                    runIds: aborted ? [request.providerRunId!] : [],
-                };
-            },
+            abort: (request) =>
+                promisePort(() => {
+                    abortRequests.push(request);
+                    const aborted = request.providerRunId !== "external-not-aborted";
+                    return {
+                        aborted,
+                        ok: true,
+                        runIds: aborted ? [request.providerRunId!] : [],
+                    };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1000,
@@ -1265,19 +1330,23 @@ describe("ChatService", () => {
         const firstAbortDispatched = deferred<void>();
         let abortCalls = 0;
         const provider = providerHarness({
-            abort: async () => {
-                abortCalls += 1;
-                if (abortCalls === 1) firstAbortDispatched.resolve();
-                if (abortCalls === 1) return firstAbort.promise;
-                if (abortCalls === 3) throw new ChatProviderUnavailableError();
-                return { aborted: false, ok: true, runIds: [] };
-            },
+            abort: () =>
+                promisePort(() => {
+                    abortCalls += 1;
+                    if (abortCalls === 1) firstAbortDispatched.resolve();
+                    if (abortCalls === 1) return firstAbort.promise;
+                    if (abortCalls === 3) throw new ChatProviderUnavailableError();
+                    return { aborted: false, ok: true, runIds: [] };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1000,
@@ -1494,33 +1563,37 @@ describe("ChatService", () => {
         let includeSnapshotPlan = true;
         let snapshotText = "Snapshot answer";
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                inFlightRun: {
-                    ...(includeSnapshotPlan
-                        ? {
-                              plan: {
-                                  explanation: "Snapshot rationale",
-                                  steps: [
-                                      {
-                                          status: "in_progress" as const,
-                                          text: "Snapshot plan",
-                                      },
-                                  ],
-                              },
-                          }
-                        : {}),
-                    runId: "external-refresh",
-                    text: snapshotText,
-                },
-                messages: [],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    inFlightRun: {
+                        ...(includeSnapshotPlan
+                            ? {
+                                  plan: {
+                                      explanation: "Snapshot rationale",
+                                      steps: [
+                                          {
+                                              status: "in_progress" as const,
+                                              text: "Snapshot plan",
+                                          },
+                                      ],
+                                  },
+                              }
+                            : {}),
+                        runId: "external-refresh",
+                        text: snapshotText,
+                    },
+                    messages: [],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -1768,20 +1841,24 @@ describe("ChatService", () => {
             () => 1000
         );
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                inFlightRun: {
-                    runId: "external-baseline",
-                    text: "Baseline answer.",
-                },
-                messages: [],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    inFlightRun: {
+                        runId: "external-baseline",
+                        text: "Baseline answer.",
+                    },
+                    messages: [],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1000,
@@ -1845,38 +1922,40 @@ describe("ChatService", () => {
                 () => 1000
             );
             const provider = providerHarness({
-                history: async () => ({
-                    hasMore: false,
-                    inFlightRun: { runId: "admission-run", text: "" },
-                    messages: [
-                        unscopedHistoryUser("active-user", "Start", 999, 1),
-                        {
-                            content: {
-                                kind: "complete" as const,
-                                parts: [
-                                    {
-                                        id: "partial-assistant-part",
-                                        kind: "text" as const,
-                                        text: "Partial",
-                                    },
-                                ],
+                history: () =>
+                    Promise.resolve({
+                        hasMore: false,
+                        inFlightRun: { runId: "admission-run", text: "" },
+                        messages: [
+                            unscopedHistoryUser("active-user", "Start", 999, 1),
+                            {
+                                content: {
+                                    kind: "complete" as const,
+                                    parts: [
+                                        {
+                                            id: "partial-assistant-part",
+                                            kind: "text" as const,
+                                            text: "Partial",
+                                        },
+                                    ],
+                                },
+                                createdAtMs: 1000,
+                                id: "partial-assistant",
+                                role: "assistant" as const,
+                                sequence: 2,
+                                source: "gateway-history" as const,
                             },
-                            createdAtMs: 1000,
-                            id: "partial-assistant",
-                            role: "assistant" as const,
-                            sequence: 2,
-                            source: "gateway-history" as const,
-                        },
-                    ],
-                }),
+                        ],
+                    }),
             });
             const service = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => 1000,
@@ -1952,31 +2031,35 @@ describe("ChatService", () => {
         }>();
         let historyCalls = 0;
         const provider = providerHarness({
-            history: async () => {
-                historyCalls += 1;
-                if (historyCalls === 1) {
-                    historyStarted.resolve();
-                    return staleHistory.promise;
-                }
-                return {
-                    hasMore: false,
-                    inFlightRun: {
-                        plan: {
-                            explanation: "Later history explanation",
-                            steps: [{ status: "pending" as const, text: "Later" }],
+            history: () =>
+                promisePort(() => {
+                    historyCalls += 1;
+                    if (historyCalls === 1) {
+                        historyStarted.resolve();
+                        return staleHistory.promise;
+                    }
+                    return {
+                        hasMore: false,
+                        inFlightRun: {
+                            plan: {
+                                explanation: "Later history explanation",
+                                steps: [{ status: "pending" as const, text: "Later" }],
+                            },
+                            runId: "external-history-race",
+                            text: "Later history",
                         },
-                        runId: "external-history-race",
-                        text: "Later history",
-                    },
-                    messages: [],
-                };
-            },
+                        messages: [],
+                    };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -2065,20 +2148,24 @@ describe("ChatService", () => {
         let historyRunId = "external-equal-time";
         let historyText = "ABC";
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                inFlightRun: {
-                    runId: historyRunId,
-                    text: historyText,
-                },
-                messages: [],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    inFlightRun: {
+                        runId: historyRunId,
+                        text: historyText,
+                    },
+                    messages: [],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -2315,20 +2402,24 @@ describe("ChatService", () => {
             () => 1000
         );
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                inFlightRun: {
-                    runId: "provider-multibyte-in-flight",
-                    text: "界".repeat(256 * 1024),
-                },
-                messages: [],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    inFlightRun: {
+                        runId: "provider-multibyte-in-flight",
+                        text: "界".repeat(256 * 1024),
+                    },
+                    messages: [],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -2368,9 +2459,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -2451,9 +2545,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -2495,36 +2592,40 @@ describe("ChatService", () => {
             () => clock
         );
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                messages:
-                    finalRunId === undefined
-                        ? []
-                        : [
-                              {
-                                  content: {
-                                      kind: "complete" as const,
-                                      parts: [
-                                          {
-                                              id: `part-${finalRunId}`,
-                                              kind: "text" as const,
-                                              text: "done",
-                                          },
-                                      ],
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    messages:
+                        finalRunId === undefined
+                            ? []
+                            : [
+                                  {
+                                      content: {
+                                          kind: "complete" as const,
+                                          parts: [
+                                              {
+                                                  id: `part-${finalRunId}`,
+                                                  kind: "text" as const,
+                                                  text: "done",
+                                              },
+                                          ],
+                                      },
+                                      id: `message-${finalRunId}`,
+                                      role: "assistant" as const,
+                                      runId: finalRunId,
+                                      source: "gateway-history" as const,
                                   },
-                                  id: `message-${finalRunId}`,
-                                  role: "assistant" as const,
-                                  runId: finalRunId,
-                                  source: "gateway-history" as const,
-                              },
-                          ],
-            }),
+                              ],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -2628,33 +2729,37 @@ describe("ChatService", () => {
             () => clock
         );
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                messages: [
-                    {
-                        content: {
-                            kind: "complete" as const,
-                            parts: [
-                                {
-                                    id: "canonical-final-part",
-                                    kind: "text" as const,
-                                    text: "Canonical final",
-                                },
-                            ],
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    messages: [
+                        {
+                            content: {
+                                kind: "complete" as const,
+                                parts: [
+                                    {
+                                        id: "canonical-final-part",
+                                        kind: "text" as const,
+                                        text: "Canonical final",
+                                    },
+                                ],
+                            },
+                            createdAtMs: 9990,
+                            id: "canonical-final",
+                            role: "assistant" as const,
+                            source: "gateway-history" as const,
                         },
-                        createdAtMs: 9990,
-                        id: "canonical-final",
-                        role: "assistant" as const,
-                        source: "gateway-history" as const,
-                    },
-                ],
-            }),
+                    ],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -2705,9 +2810,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             coalescerScheduler: scheduler.scheduler,
@@ -2867,35 +2975,39 @@ describe("ChatService", () => {
         );
         let terminalInHistory = false;
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                messages: terminalInHistory
-                    ? [
-                          {
-                              content: {
-                                  kind: "complete" as const,
-                                  parts: [
-                                      {
-                                          id: "external-live-final-part",
-                                          kind: "text" as const,
-                                          text: "done",
-                                      },
-                                  ],
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    messages: terminalInHistory
+                        ? [
+                              {
+                                  content: {
+                                      kind: "complete" as const,
+                                      parts: [
+                                          {
+                                              id: "external-live-final-part",
+                                              kind: "text" as const,
+                                              text: "done",
+                                          },
+                                      ],
+                                  },
+                                  id: "external-live-final",
+                                  role: "assistant" as const,
+                                  runId: "external-live-run",
+                                  source: "gateway-history" as const,
                               },
-                              id: "external-live-final",
-                              role: "assistant" as const,
-                              runId: "external-live-run",
-                              source: "gateway-history" as const,
-                          },
-                      ]
-                    : [],
-            }),
+                          ]
+                        : [],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -2965,24 +3077,28 @@ describe("ChatService", () => {
             () => clock
         );
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                ...(active
-                    ? {
-                          inFlightRun: {
-                              runId: "external-before-restart",
-                              text: "",
-                          },
-                      }
-                    : {}),
-                messages: [],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    ...(active
+                        ? {
+                              inFlightRun: {
+                                  runId: "external-before-restart",
+                                  text: "",
+                              },
+                          }
+                        : {}),
+                    messages: [],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3057,48 +3173,49 @@ describe("ChatService", () => {
             sequence: 2,
             source: "gateway-history" as const,
         };
-        const historyPage = async (request: ChatProviderHistoryRequest) => {
-            if (historyPhase === "active") {
-                return request.offset === 0
-                    ? {
-                          hasMore: true,
-                          inFlightRun: {
-                              runId: "external-restart-run",
-                              text: "",
-                          },
-                          messages: [historyUser],
-                          nextOffset: 1,
-                      }
-                    : {
-                          hasMore: false,
-                          messages: [activeAssistantEcho],
-                      };
-            }
-            return {
-                hasMore: false,
-                messages: [
-                    historyUser,
-                    {
-                        content: {
-                            kind: "complete" as const,
-                            parts: [
-                                {
-                                    id: "external-restart-final-text",
-                                    kind: "text" as const,
-                                    text: "Finished",
-                                },
-                            ],
+        const historyPage = (request: ChatProviderHistoryRequest) =>
+            promisePort(() => {
+                if (historyPhase === "active") {
+                    return request.offset === 0
+                        ? {
+                              hasMore: true,
+                              inFlightRun: {
+                                  runId: "external-restart-run",
+                                  text: "",
+                              },
+                              messages: [historyUser],
+                              nextOffset: 1,
+                          }
+                        : {
+                              hasMore: false,
+                              messages: [activeAssistantEcho],
+                          };
+                }
+                return {
+                    hasMore: false,
+                    messages: [
+                        historyUser,
+                        {
+                            content: {
+                                kind: "complete" as const,
+                                parts: [
+                                    {
+                                        id: "external-restart-final-text",
+                                        kind: "text" as const,
+                                        text: "Finished",
+                                    },
+                                ],
+                            },
+                            createdAtMs: 1006,
+                            id: "external-restart-final",
+                            role: "assistant" as const,
+                            runId: "external-restart-run",
+                            sequence: 2,
+                            source: "gateway-history" as const,
                         },
-                        createdAtMs: 1006,
-                        id: "external-restart-final",
-                        role: "assistant" as const,
-                        runId: "external-restart-run",
-                        sequence: 2,
-                        source: "gateway-history" as const,
-                    },
-                ],
-            };
-        };
+                    ],
+                };
+            });
         const firstRepository = createChatRepository(
             database.orm,
             testImmediateDatabaseWriteAdmission,
@@ -3108,9 +3225,12 @@ describe("ChatService", () => {
         const firstProvider = providerHarness({ history: historyPage });
         const firstService = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3183,11 +3303,12 @@ describe("ChatService", () => {
             const restartedProvider = providerHarness({ history: historyPage });
             const restartedService = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => clock,
@@ -3266,9 +3387,12 @@ describe("ChatService", () => {
         const firstProvider = providerHarness();
         const firstService = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3300,22 +3424,24 @@ describe("ChatService", () => {
 
             clock = 1003;
             const restartedProvider = providerHarness({
-                history: async () => ({
-                    hasMore: false,
-                    inFlightRun: {
-                        runId: "external-terminal-restart",
-                        text: "",
-                    },
-                    messages: [],
-                }),
+                history: () =>
+                    Promise.resolve({
+                        hasMore: false,
+                        inFlightRun: {
+                            runId: "external-terminal-restart",
+                            text: "",
+                        },
+                        messages: [],
+                    }),
             });
             const restartedService = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => clock,
@@ -3356,9 +3482,12 @@ describe("ChatService", () => {
         const firstProvider = providerHarness();
         const firstService = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3387,39 +3516,41 @@ describe("ChatService", () => {
 
             clock += 1;
             const restartedProvider = providerHarness({
-                history: async () => ({
-                    hasMore: false,
-                    inFlightRun: { runId: "current-provider-run", text: "" },
-                    messages: [
-                        {
-                            content: {
-                                kind: "complete" as const,
-                                parts: [
-                                    {
-                                        id: "stale-final-text",
-                                        kind: "text" as const,
-                                        text: "Finished",
-                                    },
-                                ],
+                history: () =>
+                    Promise.resolve({
+                        hasMore: false,
+                        inFlightRun: { runId: "current-provider-run", text: "" },
+                        messages: [
+                            {
+                                content: {
+                                    kind: "complete" as const,
+                                    parts: [
+                                        {
+                                            id: "stale-final-text",
+                                            kind: "text" as const,
+                                            text: "Finished",
+                                        },
+                                    ],
+                                },
+                                createdAtMs: clock,
+                                id: "stale-final",
+                                role: "assistant" as const,
+                                runId: "stale-provider-run",
+                                sequence: 1,
+                                source: "gateway-history" as const,
                             },
-                            createdAtMs: clock,
-                            id: "stale-final",
-                            role: "assistant" as const,
-                            runId: "stale-provider-run",
-                            sequence: 1,
-                            source: "gateway-history" as const,
-                        },
-                    ],
-                }),
+                        ],
+                    }),
             });
             const restartedService = createChatService({
-                activeProviderRunIds: async () => ["current-provider-run"],
+                activeProviderRunIds: () => Promise.resolve(["current-provider-run"]),
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => clock,
@@ -3449,7 +3580,7 @@ describe("ChatService", () => {
         let clock = 1000;
         let activeProviderRunIds: readonly string[] = ["inventory-terminal-run"];
         const provider = providerHarness({
-            history: async () => ({ hasMore: false, messages: [] }),
+            history: () => Promise.resolve({ hasMore: false, messages: [] }),
         });
         const repository = createChatRepository(
             database.orm,
@@ -3458,11 +3589,14 @@ describe("ChatService", () => {
             () => clock
         );
         const service = createChatService({
-            activeProviderRunIds: async () => activeProviderRunIds,
+            activeProviderRunIds: () => Promise.resolve(activeProviderRunIds),
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3503,7 +3637,7 @@ describe("ChatService", () => {
         let clock = 1000;
         let activeProviderRunIds: readonly string[] = ["inventory-active-run"];
         const provider = providerHarness({
-            history: async () => ({ hasMore: false, messages: [] }),
+            history: () => Promise.resolve({ hasMore: false, messages: [] }),
         });
         const repository = createChatRepository(
             database.orm,
@@ -3512,11 +3646,14 @@ describe("ChatService", () => {
             () => clock
         );
         const service = createChatService({
-            activeProviderRunIds: async () => activeProviderRunIds,
+            activeProviderRunIds: () => Promise.resolve(activeProviderRunIds),
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3562,16 +3699,27 @@ describe("ChatService", () => {
         const database = await openFreshMigratedDatabase();
         let clock = 1_000_000;
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                inFlightRun: { runId: "external-unscoped-users", text: "" },
-                messages: [
-                    unscopedHistoryUser("unrelated-old", "Old turn", 600_000, 1),
-                    unscopedHistoryUser("current-prompt", "Start this run", 999_999, 2),
-                    unscopedHistoryUser("current-steer", "Adjust it", 1_000_002, 3),
-                    unscopedHistoryUser("unrelated-future", "Later turn", 1_005_000, 4),
-                ],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    inFlightRun: { runId: "external-unscoped-users", text: "" },
+                    messages: [
+                        unscopedHistoryUser("unrelated-old", "Old turn", 600_000, 1),
+                        unscopedHistoryUser(
+                            "current-prompt",
+                            "Start this run",
+                            999_999,
+                            2
+                        ),
+                        unscopedHistoryUser("current-steer", "Adjust it", 1_000_002, 3),
+                        unscopedHistoryUser(
+                            "unrelated-future",
+                            "Later turn",
+                            1_005_000,
+                            4
+                        ),
+                    ],
+                }),
         });
         const repository = createChatRepository(
             database.orm,
@@ -3581,9 +3729,12 @@ describe("ChatService", () => {
         );
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3635,18 +3786,19 @@ describe("ChatService", () => {
         const database = await openFreshMigratedDatabase();
         let clock = 1_000_000;
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                inFlightRun: { runId: "current-active-run", text: "" },
-                messages: [
-                    unscopedHistoryUser(
-                        "current-external-user",
-                        "Show this immediately",
-                        999_999,
-                        1
-                    ),
-                ],
-            }),
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    inFlightRun: { runId: "current-active-run", text: "" },
+                    messages: [
+                        unscopedHistoryUser(
+                            "current-external-user",
+                            "Show this immediately",
+                            999_999,
+                            1
+                        ),
+                    ],
+                }),
         });
         const repository = createChatRepository(
             database.orm,
@@ -3656,9 +3808,12 @@ describe("ChatService", () => {
         );
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3790,45 +3945,50 @@ describe("ChatService", () => {
         let tombstoneAttempts = 0;
         const faultedRepository: ChatRepository = {
             ...repository,
-            replaceExternalRuntimeSnapshot: async (input) => {
-                if (input.payload.entries.length === 0) {
-                    tombstoneAttempts += 1;
-                    if (failFirstTombstone) {
-                        failFirstTombstone = false;
-                        return false;
+            replaceExternalRuntimeSnapshot: (input) =>
+                promisePort(() => {
+                    if (input.payload.entries.length === 0) {
+                        tombstoneAttempts += 1;
+                        if (failFirstTombstone) {
+                            failFirstTombstone = false;
+                            return false;
+                        }
                     }
-                }
-                return repository.replaceExternalRuntimeSnapshot(input);
-            },
+                    return repository.replaceExternalRuntimeSnapshot(input);
+                }),
         };
         const provider = providerHarness({
-            history: async () => ({
-                hasMore: false,
-                messages: [
-                    {
-                        content: {
-                            kind: "complete" as const,
-                            parts: [
-                                {
-                                    id: "dispose-retry-final-part",
-                                    kind: "text" as const,
-                                    text: "Done",
-                                },
-                            ],
+            history: () =>
+                Promise.resolve({
+                    hasMore: false,
+                    messages: [
+                        {
+                            content: {
+                                kind: "complete" as const,
+                                parts: [
+                                    {
+                                        id: "dispose-retry-final-part",
+                                        kind: "text" as const,
+                                        text: "Done",
+                                    },
+                                ],
+                            },
+                            id: "dispose-retry-final",
+                            role: "assistant" as const,
+                            runId: "dispose-retry-run",
+                            source: "gateway-history" as const,
                         },
-                        id: "dispose-retry-final",
-                        role: "assistant" as const,
-                        runId: "dispose-retry-run",
-                        source: "gateway-history" as const,
-                    },
-                ],
-            }),
+                    ],
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             onAsyncFailure: () => {},
@@ -3886,9 +4046,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3950,9 +4113,12 @@ describe("ChatService", () => {
         const firstProvider = providerHarness();
         const firstService = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -3967,18 +4133,20 @@ describe("ChatService", () => {
 
             let historyCalls = 0;
             const restartedProvider = providerHarness({
-                history: async () => {
-                    historyCalls += 1;
-                    return { hasMore: false, messages: [] };
-                },
+                history: () =>
+                    promisePort(() => {
+                        historyCalls += 1;
+                        return { hasMore: false, messages: [] };
+                    }),
             });
             const restartedService = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => clock,
@@ -4017,9 +4185,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -4086,9 +4257,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -4475,9 +4649,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             coalescerScheduler: scheduler.scheduler,
@@ -4587,22 +4764,26 @@ describe("ChatService", () => {
         let commits = 0;
         let releases = 0;
         const provider = providerHarness({
-            history: async () => ({ hasMore: false, messages: [] }),
-            send: async () => {
-                throw new ChatProviderUnknownOutcomeError();
-            },
+            history: () => Promise.resolve({ hasMore: false, messages: [] }),
+            send: () =>
+                promisePort(() => {
+                    throw new ChatProviderUnknownOutcomeError();
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => ({
-                    attachments: [],
-                    commit: async () => {
-                        commits += 1;
-                    },
-                    release: async () => {
-                        releases += 1;
-                    },
-                }),
+                reserve: () =>
+                    Promise.resolve({
+                        attachments: [],
+                        commit: () =>
+                            promisePort(() => {
+                                commits += 1;
+                            }),
+                        release: () =>
+                            promisePort(() => {
+                                releases += 1;
+                            }),
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
@@ -4666,16 +4847,20 @@ describe("ChatService", () => {
         await repository.markOutcomeUnknown(runId, new Date(1000));
         let historyCalls = 0;
         const provider = providerHarness({
-            history: async () => {
-                historyCalls += 1;
-                return { hasMore: false, messages: [] };
-            },
+            history: () =>
+                promisePort(() => {
+                    historyCalls += 1;
+                    return { hasMore: false, messages: [] };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => 1000 + 24 * 60 * 60 * 1000,
@@ -4708,27 +4893,29 @@ describe("ChatService", () => {
             const lifecycle = createChatTranscriptLifecycleCoordinator(repository);
             const scheduler = schedulerHarness();
             const provider = providerHarness({
-                history: async () => ({
-                    hasMore: false,
-                    ...(represented
-                        ? {
-                              inFlightRun: {
-                                  runId: "A".repeat(32),
-                                  text: "still running",
-                              },
-                          }
-                        : {}),
-                    messages: [],
-                    sessionId: "provider-session",
-                }),
+                history: () =>
+                    Promise.resolve({
+                        hasMore: false,
+                        ...(represented
+                            ? {
+                                  inFlightRun: {
+                                      runId: "A".repeat(32),
+                                      text: "still running",
+                                  },
+                              }
+                            : {}),
+                        messages: [],
+                        sessionId: "provider-session",
+                    }),
             });
             const service = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: inertAttachmentPreparer(),
                 nowMs: () => 1200,
@@ -4761,18 +4948,22 @@ describe("ChatService", () => {
         let calls = 0;
         const repository: ChatRepository = {
             ...durable,
-            pruneExpired: async (_at, limit) => {
-                calls += 1;
-                expect(limit).toBe(100);
-                return 100;
-            },
+            pruneExpired: (_at, limit) =>
+                promisePort(() => {
+                    calls += 1;
+                    expect(limit).toBe(100);
+                    return 100;
+                }),
         };
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -4798,38 +4989,45 @@ describe("ChatService", () => {
             ReturnType<typeof deferred<{ answer: string; timestampMs: number }>>
         >();
         const provider = providerHarness({
-            companionAsk: async (input, signal) => {
-                switch (input.question) {
-                    case "definitive": {
-                        throw new ChatProviderUnavailableError();
-                    }
-                    case "busy": {
-                        throw new ChatProviderCapacityError();
-                    }
-                    case "unknown": {
-                        throw new ChatProviderUnknownOutcomeError();
-                    }
-                    case "aborted": {
-                        if (signal?.aborted === true) {
-                            throw new DOMException("private abort detail", "AbortError");
+            companionAsk: (input, signal) =>
+                promisePort(() => {
+                    switch (input.question) {
+                        case "definitive": {
+                            throw new ChatProviderUnavailableError();
                         }
-                        break;
+                        case "busy": {
+                            throw new ChatProviderCapacityError();
+                        }
+                        case "unknown": {
+                            throw new ChatProviderUnknownOutcomeError();
+                        }
+                        case "aborted": {
+                            if (signal?.aborted === true) {
+                                throw new DOMException(
+                                    "private abort detail",
+                                    "AbortError"
+                                );
+                            }
+                            break;
+                        }
+                        case "timeout": {
+                            throw new Error("private timeout detail");
+                        }
                     }
-                    case "timeout": {
-                        throw new Error("private timeout detail");
-                    }
-                }
-                const gate = gates.get(input.sessionKey);
-                return gate === undefined
-                    ? { answer: "answer", timestampMs: 1000 }
-                    : gate.promise;
-            },
+                    const gate = gates.get(input.sessionKey);
+                    return gate === undefined
+                        ? { answer: "answer", timestampMs: 1000 }
+                        : gate.promise;
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -4932,17 +5130,21 @@ describe("ChatService", () => {
         let dispatches = 0;
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             nowMs: () => clock,
             provider: providerHarness({
-                companionAsk: async () => {
-                    dispatches += 1;
-                    return { answer: "answer", timestampMs: clock };
-                },
+                companionAsk: () =>
+                    promisePort(() => {
+                        dispatches += 1;
+                        return { answer: "answer", timestampMs: clock };
+                    }),
             }).provider,
             repository,
         });
@@ -5004,20 +5206,25 @@ describe("ChatService", () => {
         let askCalls = 0;
         let resetCalls = 0;
         const provider = providerHarness({
-            companionAsk: async () => {
-                askCalls += 1;
-                return askCalls === 1 ? firstAsk.promise : secondAsk.promise;
-            },
-            companionReset: async () => {
-                resetCalls += 1;
-                return reset.promise;
-            },
+            companionAsk: () =>
+                promisePort(() => {
+                    askCalls += 1;
+                    return askCalls === 1 ? firstAsk.promise : secondAsk.promise;
+                }),
+            companionReset: () =>
+                promisePort(() => {
+                    resetCalls += 1;
+                    return reset.promise;
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -5091,18 +5298,22 @@ describe("ChatService", () => {
         const ask = deferred<{ answer: string; timestampMs: number }>();
         let resetAttempt = 0;
         const provider = providerHarness({
-            companionAsk: async () => ask.promise,
-            companionReset: async () => {
-                resetAttempt += 1;
-                if (resetAttempt === 1) throw new ChatProviderUnavailableError();
-                throw new ChatProviderUnknownOutcomeError();
-            },
+            companionAsk: () => Promise.resolve(ask.promise),
+            companionReset: () =>
+                promisePort(() => {
+                    resetAttempt += 1;
+                    if (resetAttempt === 1) throw new ChatProviderUnavailableError();
+                    throw new ChatProviderUnknownOutcomeError();
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -5142,9 +5353,12 @@ describe("ChatService", () => {
         const provider = providerHarness();
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -5208,17 +5422,19 @@ describe("ChatService", () => {
             let prepareCalls = 0;
             const service = createChatService({
                 attachmentConsumer: {
-                    reserve: async () => {
-                        throw new Error(
-                            "Attachment reservation is not used by this test"
-                        );
-                    },
+                    reserve: () =>
+                        promisePort(() => {
+                            throw new Error(
+                                "Attachment reservation is not used by this test"
+                            );
+                        }),
                 },
                 attachmentPreparer: {
-                    prepare: async () => {
-                        prepareCalls += 1;
-                        throw new ChatAttachmentTicketError(portReason);
-                    },
+                    prepare: () =>
+                        promisePort(() => {
+                            prepareCalls += 1;
+                            throw new ChatAttachmentTicketError(portReason);
+                        }),
                 },
                 provider: providerHarness().provider,
                 repository,
@@ -5255,30 +5471,35 @@ describe("ChatService", () => {
         );
         let page = 0;
         const provider = providerHarness({
-            companionReset: async () => {
-                throw new ChatProviderConflictError();
-            },
-            history: async () => {
-                page += 1;
-                return page === 1
-                    ? {
-                          hasMore: true,
-                          messages: [],
-                          nextOffset: 1,
-                          sessionId: runId,
-                      }
-                    : {
-                          hasMore: false,
-                          messages: [],
-                          sessionId: ticketId,
-                      };
-            },
+            companionReset: () =>
+                promisePort(() => {
+                    throw new ChatProviderConflictError();
+                }),
+            history: () =>
+                promisePort(() => {
+                    page += 1;
+                    return page === 1
+                        ? {
+                              hasMore: true,
+                              messages: [],
+                              nextOffset: 1,
+                              sessionId: runId,
+                          }
+                        : {
+                              hasMore: false,
+                              messages: [],
+                              sessionId: ticketId,
+                          };
+                }),
         });
         const service = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: provider.provider,
@@ -5322,15 +5543,19 @@ describe("ChatService", () => {
 
         const unavailable = createChatService({
             attachmentConsumer: {
-                reserve: async () => {
-                    throw new Error("Attachment reservation is not used by this test");
-                },
+                reserve: () =>
+                    promisePort(() => {
+                        throw new Error(
+                            "Attachment reservation is not used by this test"
+                        );
+                    }),
             },
             attachmentPreparer: inertAttachmentPreparer(),
             provider: providerHarness({
-                subscribeChat: async () => {
-                    throw new Error("private subscription detail");
-                },
+                subscribeChat: () =>
+                    promisePort(() => {
+                        throw new Error("private subscription detail");
+                    }),
             }).provider,
             repository,
         });

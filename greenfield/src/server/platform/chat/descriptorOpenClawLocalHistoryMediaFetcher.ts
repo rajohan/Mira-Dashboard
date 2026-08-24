@@ -1,6 +1,5 @@
 import * as Fs from "node:fs";
 import Path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import type { WorkspaceFileRootConfiguration } from "../../domains/files/ports.ts";
 import { assertReviewedOpenClawFileRoot } from "../files/openClawFileRootConfiguration.ts";
@@ -180,7 +179,7 @@ function localFilePath(candidate: string): string | undefined {
         ) {
             return undefined;
         }
-        return fileURLToPath(url);
+        return Bun.fileURLToPath(url);
     } catch {
         return undefined;
     }

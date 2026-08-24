@@ -90,12 +90,20 @@ describe("SystemMetricsCards", () => {
         const cacheMetrics = screen.getByRole("list", {
             name: "Cache snapshot metrics",
         });
-        expect(cacheMetrics.getAttribute("tabindex")).toBe("0");
+        expect(
+            screen
+                .getByRole("region", { name: "Cache snapshot metrics scroll area" })
+                .getAttribute("tabindex")
+        ).toBe("0");
         expect(within(cacheMetrics).getByText("system.host")).toBeTruthy();
         const procedureMetrics = screen.getByRole("list", {
             name: "HTTP procedure metrics",
         });
-        expect(procedureMetrics.getAttribute("tabindex")).toBe("0");
+        expect(
+            screen
+                .getByRole("region", { name: "HTTP procedure metrics scroll area" })
+                .getAttribute("tabindex")
+        ).toBe("0");
         expect(within(procedureMetrics).getByText("system.metrics")).toBeTruthy();
         expect(
             within(procedureMetrics).getByText(/25 requests · 0 errors/u)

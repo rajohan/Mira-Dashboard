@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -85,7 +84,7 @@ describe("ElevenLabs speech provider", () => {
             voice_settings: { similarity_boost: 0.75, stability: 0.5 },
         });
         expect(JSON.stringify(provider)).not.toContain(secret);
-        expect(inspect(provider)).not.toContain(secret);
+        expect(Bun.inspect(provider)).not.toContain(secret);
     });
 
     test("rejects redirects, provider diagnostics, malformed text, MIME, and oversized audio", async () => {
@@ -130,7 +129,7 @@ describe("ElevenLabs speech provider", () => {
             }
             expect(failure).toBeInstanceOf(ChatSpeechProviderFailure);
             expect(String(failure)).not.toContain(sentinel);
-            expect(inspect(failure)).not.toContain(sentinel);
+            expect(Bun.inspect(failure)).not.toContain(sentinel);
         }
     });
 

@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 
+import { dashboardVersion } from "../src/shared/dashboardVersion.ts";
 import { resolveDirectPackageVersions } from "./packageIdentity.ts";
 
 describe("direct package identity", () => {
+    test("keeps the browser version aligned with package metadata", async () => {
+        const packageMetadata: unknown = await Bun.file(
+            path.resolve(import.meta.dir, "../package.json")
+        ).json();
+
+        expect(packageMetadata).toMatchObject({ version: dashboardVersion });
+    });
+
     test("separates declared constraints from exact direct resolutions", () => {
         const lockfile = `{
             "packages": {

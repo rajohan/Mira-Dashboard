@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -203,7 +202,7 @@ describe("web application configuration", () => {
             expect(caught).toMatchObject({ field, reason });
             expect(String(caught)).not.toContain(sentinel);
             expect((caught as Error).stack ?? "").not.toContain(sentinel);
-            expect(inspect(caught)).not.toContain(sentinel);
+            expect(Bun.inspect(caught)).not.toContain(sentinel);
             expect(JSON.stringify(caught)).not.toContain(sentinel);
             expect("cause" in (caught as object)).toBe(false);
         }
@@ -477,7 +476,7 @@ describe("web application configuration", () => {
         for (const rendering of [
             String(error),
             error.stack ?? "",
-            inspect(error),
+            Bun.inspect(error),
             JSON.stringify(error),
         ]) {
             expect(rendering).not.toContain(sentinel);

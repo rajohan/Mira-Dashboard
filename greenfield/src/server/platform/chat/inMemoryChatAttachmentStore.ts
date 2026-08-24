@@ -1,5 +1,3 @@
-/* Binary signatures remain formatter-canonical hexadecimal values. */
-/* oxlint-disable unicorn/number-literal-case, unicorn/numeric-separators-style */
 import * as v from "valibot";
 
 import {
@@ -165,9 +163,9 @@ function isOleMimeType(mimeType: string): boolean {
 export const chatAttachmentZipMaximumEntries = 4096;
 export const chatAttachmentZipMaximumNameBytes = 256 * 1024;
 
-const zipEndOfCentralDirectorySignature = 0x0605_4b50;
-const zipCentralDirectorySignature = 0x0201_4b50;
-const zipLocalFileSignature = 0x0403_4b50;
+const zipEndOfCentralDirectorySignature = 0x06_05_4b_50;
+const zipCentralDirectorySignature = 0x02_01_4b_50;
+const zipLocalFileSignature = 0x04_03_4b_50;
 const zipEndOfCentralDirectoryBytes = 22;
 const zipCentralDirectoryHeaderBytes = 46;
 const zipLocalFileHeaderBytes = 30;
@@ -472,134 +470,138 @@ class InMemoryChatAttachmentStoreImplementation implements InMemoryChatAttachmen
         this.#tickets.clear();
         this.#idempotencyTickets.clear();
     }
-
-    // oxlint-disable-next-line typescript/require-await -- The domain port intentionally preserves one asynchronous boundary.
-    async prepare(
+    prepare(
         input: ChatAttachmentTicketPrepareInput,
         actorId: string,
         signal?: AbortSignal
     ): Promise<ChatAttachmentTicketPrepareOutput> {
-        this.#assertAvailable(signal);
-        const actor = boundedActorId(actorId);
-        const parsed = v.safeParse(chatAttachmentTicketPrepareInputSchema, input, {
-            abortEarly: true,
-        });
-        if (!parsed.success) throw new ChatAttachmentStoreError("invalid");
-        const now = checkedNow(this.#nowMs);
-        this.#sweep(now);
-        const replayKey = JSON.stringify([
-            actor,
-            parsed.output.sessionKey,
-            parsed.output.idempotencyKey,
-        ]);
-        const filesFingerprint = JSON.stringify(parsed.output.files);
-        const replay = this.#idempotencyTickets.get(replayKey);
-        if (replay !== undefined) {
-            if (
-                replay.filesFingerprint !== filesFingerprint ||
-                replay.state === "committed"
-            ) {
+        return synchronousPromise(() => {
+            this.#assertAvailable(signal);
+            const actor = boundedActorId(actorId);
+            const parsed = v.safeParse(chatAttachmentTicketPrepareInputSchema, input, {
+                abortEarly: true,
+            });
+            if (!parsed.success) throw new ChatAttachmentStoreError("invalid");
+            const now = checkedNow(this.#nowMs);
+            this.#sweep(now);
+            const replayKey = JSON.stringify([
+                actor,
+                parsed.output.sessionKey,
+                parsed.output.idempotencyKey,
+            ]);
+            const filesFingerprint = JSON.stringify(parsed.output.files);
+            const replay = this.#idempotencyTickets.get(replayKey);
+            if (replay !== undefined) {
+                if (
+                    replay.filesFingerprint !== filesFingerprint ||
+                    replay.state === "committed"
+                ) {
+                    throw new ChatAttachmentStoreError("conflict");
+                }
+                return replay.output;
+            }
+            if (this.#tickets.size >= this.#maximumTickets) {
+                throw new ChatAttachmentStoreError("capacity");
+            }
+            const ticketId = this.#validatedId(
+                this.#createId(),
+                chatAttachmentTicketIdSchema
+            );
+            if (this.#tickets.has(ticketId)) {
                 throw new ChatAttachmentStoreError("conflict");
             }
-            return replay.output;
-        }
-        if (this.#tickets.size >= this.#maximumTickets) {
-            throw new ChatAttachmentStoreError("capacity");
-        }
-        const ticketId = this.#validatedId(
-            this.#createId(),
-            chatAttachmentTicketIdSchema
-        );
-        if (this.#tickets.has(ticketId)) {
-            throw new ChatAttachmentStoreError("conflict");
-        }
-        const slots = new Map<string, AttachmentSlot>();
-        const uploads = parsed.output.files.map((file) => {
+            const slots = new Map<string, AttachmentSlot>();
+            const uploads = parsed.output.files.map((file) => {
+                const attachmentId = this.#validatedId(
+                    this.#createId(),
+                    chatAttachmentIdSchema
+                );
+                if (slots.has(attachmentId)) {
+                    throw new ChatAttachmentStoreError("conflict");
+                }
+                slots.set(attachmentId, {
+                    attachmentId,
+                    fileName: file.fileName,
+                    mimeType: file.mimeType,
+                    sizeBytes: file.sizeBytes,
+                });
+                return {
+                    attachmentId,
+                    uploadUrl: `/api/chat/attachments/${ticketId}/${attachmentId}`,
+                };
+            });
+            const output = v.parse(chatAttachmentTicketPrepareOutputSchema, {
+                expiresAtMs: now + chatAttachmentLimits.ticketTtlMs,
+                ticketId,
+                uploads,
+            });
+            for (const upload of output.uploads) Object.freeze(upload);
+            Object.freeze(output.uploads);
+            Object.freeze(output);
+            const ticket: AttachmentTicket = {
+                actorId: actor,
+                expiresAtMs: output.expiresAtMs,
+                filesFingerprint,
+                idempotencyKey: parsed.output.idempotencyKey,
+                output,
+                sessionKey: parsed.output.sessionKey,
+                slots,
+                state: "open",
+                ticketId,
+            };
+            this.#tickets.set(ticketId, ticket);
+            this.#idempotencyTickets.set(replayKey, ticket);
+            return ticket.output;
+        });
+    }
+
+    upload(input: ChatAttachmentRawUploadInput): Promise<void> {
+        return synchronousPromise(() => {
+            this.#assertAvailable();
+            const actorId = boundedActorId(input.actorId);
+            const ticketId = this.#validatedId(
+                input.ticketId,
+                chatAttachmentTicketIdSchema
+            );
             const attachmentId = this.#validatedId(
-                this.#createId(),
+                input.attachmentId,
                 chatAttachmentIdSchema
             );
-            if (slots.has(attachmentId)) {
-                throw new ChatAttachmentStoreError("conflict");
+            const now = checkedNow(this.#nowMs);
+            this.#sweep(now);
+            const ticket = this.#tickets.get(ticketId);
+            if (ticket === undefined) throw new ChatAttachmentStoreError("not-found");
+            if (ticket.expiresAtMs <= now) throw new ChatAttachmentStoreError("expired");
+            if (ticket.actorId !== actorId)
+                throw new ChatAttachmentStoreError("forbidden");
+            if (ticket.state !== "open") throw new ChatAttachmentStoreError("conflict");
+            const slot = ticket.slots.get(attachmentId);
+            if (slot === undefined) throw new ChatAttachmentStoreError("not-found");
+            const declaredMimeType = normalizeChatAttachmentDeclaredMimeType(
+                input.contentType
+            );
+            if (
+                input.bytes.byteLength !== slot.sizeBytes ||
+                declaredMimeType !== slot.mimeType ||
+                !chatAttachmentBytesMatchMimeType(input.bytes, slot.mimeType)
+            ) {
+                throw new ChatAttachmentStoreError("invalid");
             }
-            slots.set(attachmentId, {
-                attachmentId,
-                fileName: file.fileName,
-                mimeType: file.mimeType,
-                sizeBytes: file.sizeBytes,
-            });
-            return {
-                attachmentId,
-                uploadUrl: `/api/chat/attachments/${ticketId}/${attachmentId}`,
-            };
+            if (slot.bytes !== undefined) {
+                if (!bytesEqual(slot.bytes, input.bytes)) {
+                    throw new ChatAttachmentStoreError("conflict");
+                }
+                return;
+            }
+            if (this.#spooledBytes > this.#maximumSpoolBytes - input.bytes.byteLength) {
+                throw new ChatAttachmentStoreError("capacity");
+            }
+            slot.bytes = Uint8Array.from(input.bytes);
+            this.#spooledBytes += slot.bytes.byteLength;
         });
-        const output = v.parse(chatAttachmentTicketPrepareOutputSchema, {
-            expiresAtMs: now + chatAttachmentLimits.ticketTtlMs,
-            ticketId,
-            uploads,
-        });
-        for (const upload of output.uploads) Object.freeze(upload);
-        Object.freeze(output.uploads);
-        Object.freeze(output);
-        const ticket: AttachmentTicket = {
-            actorId: actor,
-            expiresAtMs: output.expiresAtMs,
-            filesFingerprint,
-            idempotencyKey: parsed.output.idempotencyKey,
-            output,
-            sessionKey: parsed.output.sessionKey,
-            slots,
-            state: "open",
-            ticketId,
-        };
-        this.#tickets.set(ticketId, ticket);
-        this.#idempotencyTickets.set(replayKey, ticket);
-        return ticket.output;
     }
 
-    // oxlint-disable-next-line typescript/require-await -- The raw-store port is asynchronous even for its memory-backed implementation.
-    async upload(input: ChatAttachmentRawUploadInput): Promise<void> {
-        this.#assertAvailable();
-        const actorId = boundedActorId(input.actorId);
-        const ticketId = this.#validatedId(input.ticketId, chatAttachmentTicketIdSchema);
-        const attachmentId = this.#validatedId(
-            input.attachmentId,
-            chatAttachmentIdSchema
-        );
-        const now = checkedNow(this.#nowMs);
-        this.#sweep(now);
-        const ticket = this.#tickets.get(ticketId);
-        if (ticket === undefined) throw new ChatAttachmentStoreError("not-found");
-        if (ticket.expiresAtMs <= now) throw new ChatAttachmentStoreError("expired");
-        if (ticket.actorId !== actorId) throw new ChatAttachmentStoreError("forbidden");
-        if (ticket.state !== "open") throw new ChatAttachmentStoreError("conflict");
-        const slot = ticket.slots.get(attachmentId);
-        if (slot === undefined) throw new ChatAttachmentStoreError("not-found");
-        const declaredMimeType = normalizeChatAttachmentDeclaredMimeType(
-            input.contentType
-        );
-        if (
-            input.bytes.byteLength !== slot.sizeBytes ||
-            declaredMimeType !== slot.mimeType ||
-            !chatAttachmentBytesMatchMimeType(input.bytes, slot.mimeType)
-        ) {
-            throw new ChatAttachmentStoreError("invalid");
-        }
-        if (slot.bytes !== undefined) {
-            if (!bytesEqual(slot.bytes, input.bytes)) {
-                throw new ChatAttachmentStoreError("conflict");
-            }
-            return;
-        }
-        if (this.#spooledBytes > this.#maximumSpoolBytes - input.bytes.byteLength) {
-            throw new ChatAttachmentStoreError("capacity");
-        }
-        slot.bytes = Uint8Array.from(input.bytes);
-        this.#spooledBytes += slot.bytes.byteLength;
-    }
-
-    // oxlint-disable-next-line typescript/require-await -- The domain port intentionally preserves one asynchronous boundary.
-    async reserve(
+    reserve(
         request: Readonly<{
             actorId: string;
             idempotencyKey: string;
@@ -608,79 +610,81 @@ class InMemoryChatAttachmentStoreImplementation implements InMemoryChatAttachmen
         }>,
         signal?: AbortSignal
     ): Promise<ChatAttachmentTicketReservation> {
-        this.#assertAvailable(signal);
-        const now = checkedNow(this.#nowMs);
-        this.#sweep(now);
-        const ticketId = this.#validatedId(
-            request.ticketId,
-            chatAttachmentTicketIdSchema
-        );
-        const ticket = this.#tickets.get(ticketId);
-        if (ticket === undefined) throw new ChatAttachmentStoreError("not-found");
-        if (ticket.expiresAtMs <= now && ticket.state !== "reserved") {
-            throw new ChatAttachmentStoreError("expired");
-        }
-        if (
-            ticket.actorId !== boundedActorId(request.actorId) ||
-            ticket.sessionKey !== request.sessionKey ||
-            ticket.idempotencyKey !== request.idempotencyKey
-        ) {
-            throw new ChatAttachmentStoreError("forbidden");
-        }
-        if (ticket.state === "committed") {
-            throw new ChatAttachmentStoreError("conflict");
-        }
-        if (ticket.reservation !== undefined) return ticket.reservation.port;
-        if ([...ticket.slots.values()].some(({ bytes }) => bytes === undefined)) {
-            throw new ChatAttachmentStoreError("not-ready");
-        }
-        const identity = {};
-        const attachments = Object.freeze(
-            [...ticket.slots.values()].map((slot): ChatProviderAttachment =>
-                Object.freeze({
-                    content: Buffer.from(
-                        slot.bytes!.buffer,
-                        slot.bytes!.byteOffset,
-                        slot.bytes!.byteLength
-                    ).toString("base64"),
-                    fileName: slot.fileName,
-                    mimeType: slot.mimeType,
-                    sizeBytes: slot.sizeBytes,
-                    type: "file",
-                })
-            )
-        );
-        let committed = false;
-        let released = false;
-        const port: ChatAttachmentTicketReservation = Object.freeze({
-            attachments,
-            // oxlint-disable-next-line typescript/require-await -- Reservation implementations retain the asynchronous port contract.
-            commit: async (commitSignal?: AbortSignal) => {
-                if (committed) return;
-                if (released) throw new ChatAttachmentStoreError("conflict");
-                this.#assertAvailable(commitSignal);
-                if (ticket.reservation?.identity !== identity) {
-                    throw new ChatAttachmentStoreError("conflict");
-                }
-                committed = true;
-                ticket.state = "committed";
-                ticket.reservation = undefined;
-                this.#removeTicket(ticket);
-            },
-            // oxlint-disable-next-line typescript/require-await -- Reservation implementations retain the asynchronous port contract.
-            release: async (releaseSignal?: AbortSignal) => {
-                if (released || committed) return;
-                this.#assertAvailable(releaseSignal);
-                if (ticket.reservation?.identity !== identity) return;
-                released = true;
-                ticket.reservation = undefined;
-                ticket.state = "open";
-                this.#sweep(checkedNow(this.#nowMs));
-            },
+        return synchronousPromise(() => {
+            this.#assertAvailable(signal);
+            const now = checkedNow(this.#nowMs);
+            this.#sweep(now);
+            const ticketId = this.#validatedId(
+                request.ticketId,
+                chatAttachmentTicketIdSchema
+            );
+            const ticket = this.#tickets.get(ticketId);
+            if (ticket === undefined) throw new ChatAttachmentStoreError("not-found");
+            if (ticket.expiresAtMs <= now && ticket.state !== "reserved") {
+                throw new ChatAttachmentStoreError("expired");
+            }
+            if (
+                ticket.actorId !== boundedActorId(request.actorId) ||
+                ticket.sessionKey !== request.sessionKey ||
+                ticket.idempotencyKey !== request.idempotencyKey
+            ) {
+                throw new ChatAttachmentStoreError("forbidden");
+            }
+            if (ticket.state === "committed") {
+                throw new ChatAttachmentStoreError("conflict");
+            }
+            if (ticket.reservation !== undefined) return ticket.reservation.port;
+            if ([...ticket.slots.values()].some(({ bytes }) => bytes === undefined)) {
+                throw new ChatAttachmentStoreError("not-ready");
+            }
+            const identity = {};
+            const attachments = Object.freeze(
+                [...ticket.slots.values()].map((slot): ChatProviderAttachment =>
+                    Object.freeze({
+                        content: Buffer.from(
+                            slot.bytes!.buffer,
+                            slot.bytes!.byteOffset,
+                            slot.bytes!.byteLength
+                        ).toString("base64"),
+                        fileName: slot.fileName,
+                        mimeType: slot.mimeType,
+                        sizeBytes: slot.sizeBytes,
+                        type: "file",
+                    })
+                )
+            );
+            let committed = false;
+            let released = false;
+            const port: ChatAttachmentTicketReservation = Object.freeze({
+                attachments,
+                commit: (commitSignal?: AbortSignal) =>
+                    synchronousPromise(() => {
+                        if (committed) return;
+                        if (released) throw new ChatAttachmentStoreError("conflict");
+                        this.#assertAvailable(commitSignal);
+                        if (ticket.reservation?.identity !== identity) {
+                            throw new ChatAttachmentStoreError("conflict");
+                        }
+                        committed = true;
+                        ticket.state = "committed";
+                        ticket.reservation = undefined;
+                        this.#removeTicket(ticket);
+                    }),
+                release: (releaseSignal?: AbortSignal) =>
+                    synchronousPromise(() => {
+                        if (released || committed) return;
+                        this.#assertAvailable(releaseSignal);
+                        if (ticket.reservation?.identity !== identity) return;
+                        released = true;
+                        ticket.reservation = undefined;
+                        ticket.state = "open";
+                        this.#sweep(checkedNow(this.#nowMs));
+                    }),
+            });
+            ticket.reservation = { identity, port };
+            ticket.state = "reserved";
+            return port;
         });
-        ticket.reservation = { identity, port };
-        ticket.state = "reserved";
-        return port;
     }
 
     #assertAvailable(signal?: AbortSignal): void {
@@ -726,4 +730,16 @@ export function createInMemoryChatAttachmentStore(
     options: InMemoryChatAttachmentStoreOptions = {}
 ): InMemoryChatAttachmentStore {
     return new InMemoryChatAttachmentStoreImplementation(options);
+}
+
+function synchronousPromise<T>(operation: () => T): Promise<T> {
+    try {
+        return Promise.resolve(operation());
+    } catch (error) {
+        return Promise.reject(
+            error instanceof Error
+                ? error
+                : new Error("Synchronous attachment operation failed", { cause: error })
+        );
+    }
 }

@@ -226,7 +226,7 @@ async function expectResponsiveLayout(canvasElement: HTMLElement) {
     const selectedTarget = inventoryCanvas.getByRole("button", {
         name: responsiveJob.name,
     });
-    const selectedCard = selectedTarget.closest("li");
+    const selectedCard = selectedTarget.closest(".group");
     if (selectedCard === null) throw new TypeError("Expected a selected inventory card");
     await expect(section).toBeVisible();
     await expect(inventoryList).toBeVisible();
@@ -292,8 +292,8 @@ export const ActiveInventory: Story = {
         const canvas = within(canvasElement);
         const cardTarget = canvas.getByRole("button", { name: activeJob.name });
         const idleTarget = canvas.getByRole("button", { name: conflictedJob.name });
-        const card = cardTarget.closest("li");
-        const idleCard = idleTarget.closest("li");
+        const card = cardTarget.closest(".group");
+        const idleCard = idleTarget.closest(".group");
         if (card === null) throw new TypeError("Expected an inventory card");
         if (idleCard === null) throw new TypeError("Expected an idle inventory card");
         const selectedBackground = getComputedStyle(card).backgroundColor;
@@ -343,6 +343,21 @@ export const ActiveInventory: Story = {
         });
         await userEvent.click(within(dialog).getByRole("button", { name: "Run now" }));
         await expect(args.onRun).toHaveBeenCalledWith(activeJob);
+    },
+};
+
+export const InfiniteInventoryLoading: Story = {
+    args: {
+        jobsLoadingMore: true,
+        onLoadMoreJobs: fn(),
+        state: {
+            result: {
+                ...inventory([activeJob, conflictedJob]),
+                hasMore: true,
+                total: 100,
+            },
+            status: "ready",
+        },
     },
 };
 

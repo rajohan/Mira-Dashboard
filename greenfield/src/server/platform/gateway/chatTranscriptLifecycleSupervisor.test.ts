@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async doubles mirror durable lifecycle ports. */
 import { describe, expect, test } from "bun:test";
 
 import { createChatTranscriptLifecycleCoordinator } from "../../domains/chat/transcriptLifecycle.ts";
@@ -16,18 +15,18 @@ describe("chat transcript lifecycle supervisor", () => {
             beginTranscriptControl: async () => {},
             failTranscriptControl: async () => {},
             listReconcilingTranscripts: () => [],
-            markTranscriptTransportBoundary: async (occurredAtMs) => {
+            markTranscriptTransportBoundary: (occurredAtMs) => {
                 boundaries.push(occurredAtMs ?? -1);
-                return [];
+                return Promise.resolve([]);
             },
-            observeTranscriptLifecycleEvent: async () => [],
-            observeTranscriptSnapshot: async () => [],
+            observeTranscriptLifecycleEvent: () => Promise.resolve([]),
+            observeTranscriptSnapshot: () => Promise.resolve([]),
             readTranscriptState: (sessionKey) => ({
                 currentGeneration: 1,
                 sessionKey,
                 status: "ready",
             }),
-            reconcileTranscript: async () => [],
+            reconcileTranscript: () => Promise.resolve([]),
             settleUnchangedTranscriptControl: async () => {},
         });
         let listener: PersistentGatewayListener | undefined;
@@ -61,21 +60,21 @@ describe("chat transcript lifecycle supervisor", () => {
             beginTranscriptControl: async () => {},
             failTranscriptControl: async () => {},
             listReconcilingTranscripts: () => [],
-            markTranscriptTransportBoundary: async (occurredAtMs) => {
+            markTranscriptTransportBoundary: (occurredAtMs) => {
                 boundaries.push(occurredAtMs ?? -1);
-                return [];
+                return Promise.resolve([]);
             },
-            observeTranscriptLifecycleEvent: async (event) => {
+            observeTranscriptLifecycleEvent: (event) => {
                 lifecycleEvents.push(`${event.reason}:${event.sessionKey ?? "all"}`);
-                return [];
+                return Promise.resolve([]);
             },
-            observeTranscriptSnapshot: async () => [],
+            observeTranscriptSnapshot: () => Promise.resolve([]),
             readTranscriptState: (sessionKey) => ({
                 currentGeneration: 1,
                 sessionKey,
                 status: "ready",
             }),
-            reconcileTranscript: async () => [],
+            reconcileTranscript: () => Promise.resolve([]),
             settleUnchangedTranscriptControl: async () => {},
         });
         let listener: PersistentGatewayListener | undefined;
@@ -177,14 +176,14 @@ describe("chat transcript lifecycle supervisor", () => {
                 if (occurredAtMs === 200) await firstLossWrite.promise;
                 return [];
             },
-            observeTranscriptLifecycleEvent: async () => [],
-            observeTranscriptSnapshot: async () => [],
+            observeTranscriptLifecycleEvent: () => Promise.resolve([]),
+            observeTranscriptSnapshot: () => Promise.resolve([]),
             readTranscriptState: (sessionKey) => ({
                 currentGeneration: 1,
                 sessionKey,
                 status: "ready",
             }),
-            reconcileTranscript: async () => [],
+            reconcileTranscript: () => Promise.resolve([]),
             settleUnchangedTranscriptControl: async () => {},
         });
         let listener: PersistentGatewayListener | undefined;
@@ -255,21 +254,21 @@ describe("chat transcript lifecycle supervisor", () => {
             beginTranscriptControl: async () => {},
             failTranscriptControl: async () => {},
             listReconcilingTranscripts: () => [],
-            markTranscriptTransportBoundary: async (occurredAtMs) => {
+            markTranscriptTransportBoundary: (occurredAtMs) => {
                 boundaries.push(occurredAtMs ?? -1);
-                return [];
+                return Promise.resolve([]);
             },
             observeTranscriptLifecycleEvent: async () => {
                 await lifecycleWrite.promise;
                 return [];
             },
-            observeTranscriptSnapshot: async () => [],
+            observeTranscriptSnapshot: () => Promise.resolve([]),
             readTranscriptState: (sessionKey) => ({
                 currentGeneration: 1,
                 sessionKey,
                 status: "ready",
             }),
-            reconcileTranscript: async () => [],
+            reconcileTranscript: () => Promise.resolve([]),
             settleUnchangedTranscriptControl: async () => {},
         });
         let listener: PersistentGatewayListener | undefined;
@@ -350,17 +349,15 @@ describe("chat transcript lifecycle supervisor", () => {
             beginTranscriptControl: async () => {},
             failTranscriptControl: async () => {},
             listReconcilingTranscripts: () => [],
-            markTranscriptTransportBoundary: async () => {
-                throw failure;
-            },
-            observeTranscriptLifecycleEvent: async () => [],
-            observeTranscriptSnapshot: async () => [],
+            markTranscriptTransportBoundary: () => Promise.reject(failure),
+            observeTranscriptLifecycleEvent: () => Promise.resolve([]),
+            observeTranscriptSnapshot: () => Promise.resolve([]),
             readTranscriptState: (sessionKey) => ({
                 currentGeneration: 1,
                 sessionKey,
                 status: "ready",
             }),
-            reconcileTranscript: async () => [],
+            reconcileTranscript: () => Promise.resolve([]),
             settleUnchangedTranscriptControl: async () => {},
         });
         const supervisor = createChatTranscriptLifecycleSupervisor({
@@ -408,21 +405,21 @@ describe("chat transcript lifecycle supervisor", () => {
             beginTranscriptControl: async () => {},
             failTranscriptControl: async () => {},
             listReconcilingTranscripts: () => [],
-            markTranscriptTransportBoundary: async () => {
+            markTranscriptTransportBoundary: () => {
                 boundaryCount += 1;
-                return [];
+                return Promise.resolve([]);
             },
-            observeTranscriptLifecycleEvent: async () => {
+            observeTranscriptLifecycleEvent: () => {
                 lifecycleCount += 1;
-                throw failure;
+                return Promise.reject(failure);
             },
-            observeTranscriptSnapshot: async () => [],
+            observeTranscriptSnapshot: () => Promise.resolve([]),
             readTranscriptState: (sessionKey) => ({
                 currentGeneration: 1,
                 sessionKey,
                 status: "ready",
             }),
-            reconcileTranscript: async () => [],
+            reconcileTranscript: () => Promise.resolve([]),
             settleUnchangedTranscriptControl: async () => {},
         });
         let listener: PersistentGatewayListener | undefined;

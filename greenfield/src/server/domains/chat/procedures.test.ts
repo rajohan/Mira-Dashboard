@@ -1,4 +1,3 @@
-/* oxlint-disable typescript/require-await -- Async test doubles mirror production promise ports. */
 import { describe, expect, test } from "bun:test";
 
 import { TRPCError } from "@trpc/server";
@@ -20,9 +19,8 @@ const runId = "019fe5a1-6cb9-7e51-ad2a-bf1f69861218";
 const sentinel = "private provider detail /home/ubuntu/secret";
 
 function failingService(reason: ChatServiceError["reason"]): ChatService {
-    const fail = async (): Promise<never> => {
-        throw new ChatServiceError(reason, { cause: new Error(sentinel) });
-    };
+    const fail = (): Promise<never> =>
+        Promise.reject(new ChatServiceError(reason, { cause: new Error(sentinel) }));
     return new Proxy(
         {},
         {
@@ -139,13 +137,15 @@ describe("chat procedures", () => {
             {
                 get: (_target, property) =>
                     property === "companionAsk"
-                        ? async (_input: unknown, actor: unknown) => {
+                        ? (_input: unknown, actor: unknown) => {
                               observedActor = actor;
-                              return { answer: "answer", timestampMs: 1000 };
+                              return Promise.resolve({
+                                  answer: "answer",
+                                  timestampMs: 1000,
+                              });
                           }
-                        : async () => {
-                              throw new Error("Unexpected chat service method");
-                          },
+                        : () =>
+                              Promise.reject(new Error("Unexpected chat service method")),
             }
         ) as ChatService;
         const context = await createTestRequestContext(

@@ -35,7 +35,6 @@ import type {
     ChatBackgroundTaskView,
     ChatCompanionView,
 } from "./chatTypes.ts";
-/* eslint-disable jsx-a11y/no-noninteractive-element-interactions -- The responsive aside traps Tab and Escape only while styled as the mobile modal drawer. */
 
 function planStatusIcon(status: ChatActivePlanView["items"][number]["status"]) {
     if (status === "completed") return CircleCheck;
@@ -286,7 +285,7 @@ function VirtualizedTaskList({
             taskCount: tasks.length,
         });
     }
-    function loadMoreNearEnd(element: HTMLDivElement): void {
+    function loadMoreNearEnd(element: HTMLElement): void {
         if (
             !tasksHasNextPage ||
             tasksLoadingMore ||
@@ -312,7 +311,7 @@ function VirtualizedTaskList({
             initialRect={{ height: 480, width: 352 }}
             overscan={4}
         >
-            {({ measureElement, scrollContainerRef, totalSize, virtualItems }) => {
+            {({ containerRef, measureElement, scrollContainerRef, virtualItems }) => {
                 const visibleTasks =
                     virtualItems.length > 0
                         ? virtualItems
@@ -321,23 +320,29 @@ function VirtualizedTaskList({
                               key: `initial:${task.id}`,
                               start: estimatedTaskStart(index, tasks, selectedTaskId),
                           }));
-                const sourceHeight =
-                    virtualItems.length > 0
-                        ? totalSize
-                        : estimatedTaskStart(tasks.length, tasks, selectedTaskId);
+                const sourceHeight = estimatedTaskStart(
+                    tasks.length,
+                    tasks,
+                    selectedTaskId
+                );
                 return (
                     <div className="relative mt-2 min-h-0 flex-1">
-                        <div
+                        <section
+                            aria-label="Background tasks scroll area"
                             className="h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain"
                             onScroll={(event) => loadMoreNearEnd(event.currentTarget)}
                             ref={scrollContainerRef}
-                            // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual task list must remain keyboard-scrollable.
                             tabIndex={0}
                         >
                             <ul
                                 aria-label="Background tasks"
                                 className="relative min-w-0"
-                                style={{ height: `${sourceHeight}px` }}
+                                ref={containerRef}
+                                style={
+                                    virtualItems.length > 0
+                                        ? undefined
+                                        : { height: sourceHeight }
+                                }
                             >
                                 {visibleTasks.map((virtualItem) => {
                                     const task = tasks[virtualItem.index];
@@ -350,9 +355,13 @@ function VirtualizedTaskList({
                                             data-index={virtualItem.index}
                                             key={virtualItem.key}
                                             ref={measureElement}
-                                            style={{
-                                                transform: `translateY(${virtualItem.start}px)`,
-                                            }}
+                                            style={
+                                                virtualItems.length > 0
+                                                    ? undefined
+                                                    : {
+                                                          transform: `translateY(${virtualItem.start}px)`,
+                                                      }
+                                            }
                                         >
                                             <ExpandableCard
                                                 compact
@@ -396,7 +405,7 @@ function VirtualizedTaskList({
                                     );
                                 })}
                             </ul>
-                        </div>
+                        </section>
                         {tasksLoadingMore && (
                             <div className="bg-primary-900/90 pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center py-1 backdrop-blur-sm">
                                 <LoadingState label="Loading more tasks…" size="sm" />
@@ -492,6 +501,7 @@ export function ChatSidePanel({
     }
 
     return (
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- The responsive aside traps Tab and Escape only while styled as the mobile modal drawer.
         <aside
             aria-label="Chat activity"
             className={cn(

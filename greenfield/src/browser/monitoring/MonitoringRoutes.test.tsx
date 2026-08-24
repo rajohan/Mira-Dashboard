@@ -19,6 +19,7 @@ import { createDashboardBrowserCollections } from "../data/dashboardCollections.
 import type { DashboardBrowserCollections } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { installIntersectionObserverHarness } from "../test/intersectionObserverTest.ts";
 import { emptyNotificationListResult } from "../test/notifications.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 
@@ -497,20 +498,20 @@ describe("monitoring browser routes", () => {
     });
 
     test("loads an overlapping report page without rendering duplicate identities", async () => {
+        const observer = installIntersectionObserverHarness();
         const transport = new MonitoringRouteTransport();
         const first = reportSummary(transport.reports[0]!);
         const second = reportSummary(transport.reports[1]!);
         transport.reportPages = [[first], [first, second]];
         await renderMonitoringRoute("/reports", transport);
-        const user = userEvent.setup();
-
         await screen.findByText("Primary heartbeat");
-        await user.click(screen.getByRole("button", { name: "Load older reports" }));
+        act(() => observer.intersectLatest());
         expect(await screen.findByText("Secondary heartbeat")).toBeTruthy();
         expect(screen.getAllByText("Primary heartbeat")).toHaveLength(1);
         expect(
             transport.calls.filter(({ path }) => path === "reports.list")
         ).toHaveLength(3);
+        observer.restore();
     });
 
     test("removes a deleted report from cached lists when the refresh fails", async () => {

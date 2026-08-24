@@ -10,7 +10,7 @@ import {
     assertPersistentGatewayOpenClawSettingsReadParameters,
     assertPersistentGatewayOpenClawSettingsWriteParameters,
     assertPersistentGatewayOpenClawServiceActionParameters,
-    assertPersistentGatewayReadWriteParameters,
+    assertPersistentGatewayWebReadParameters,
     assertPersistentGatewayTaskReadParameters,
     assertPersistentGatewayTaskWriteParameters,
     createPersistentGatewayConnectFrame,
@@ -18,7 +18,7 @@ import {
     isPersistentGatewayOpenClawSettingsReadMethod,
     isPersistentGatewayOpenClawSettingsWriteMethod,
     isPersistentGatewayOpenClawServiceActionMethod,
-    isPersistentGatewayReadWriteMethod,
+    isPersistentGatewayWebReadMethod,
     parsePersistentGatewayChallenge,
     parsePersistentGatewayChatSendAcknowledgement,
     parsePersistentGatewayEvent,
@@ -35,7 +35,7 @@ import {
     persistentGatewayBufferedAmountPolicyMaximumBytes,
     persistentGatewayChatHistoryMaximumChars,
     persistentGatewayChatOutboundFrameMaximumBytes,
-    persistentGatewayReadWriteMethods,
+    persistentGatewayWebReadMethods,
     persistentGatewayChatReadMethods,
     persistentGatewayChatReadMutationMethods,
     persistentGatewayChatWriteMethods,
@@ -165,18 +165,18 @@ describe("persistent Gateway protocol-v4 boundary", () => {
     });
 
     test("locks generic and single-use method allowlists to least privilege", () => {
-        expect(persistentGatewayReadWriteMethods).toEqual([
+        expect(persistentGatewayWebReadMethods).toEqual([
             "cron.get",
             "cron.list",
             "cron.runs",
             "sessions.list",
             "system.info",
         ]);
-        expect(persistentGatewayReadWriteMethods).not.toContain(
+        expect(persistentGatewayWebReadMethods).not.toContain(
             persistentGatewayTaskNotificationMethod
         );
-        expect(persistentGatewayReadWriteMethods).not.toContain("sessions.dispatch");
-        expect(persistentGatewayReadWriteMethods).not.toContain("sessions.reclaim");
+        expect(persistentGatewayWebReadMethods).not.toContain("sessions.dispatch");
+        expect(persistentGatewayWebReadMethods).not.toContain("sessions.reclaim");
         expect(persistentGatewayAdminMethods).toEqual([
             "cron.remove",
             "cron.run",
@@ -216,9 +216,9 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             "sessions.cleanup",
             "update.run",
         ]);
-        expect(isPersistentGatewayReadWriteMethod("sessions.list")).toBe(true);
-        expect(isPersistentGatewayReadWriteMethod("chat.send")).toBe(false);
-        expect(isPersistentGatewayReadWriteMethod("config.patch")).toBe(false);
+        expect(isPersistentGatewayWebReadMethod("sessions.list")).toBe(true);
+        expect(isPersistentGatewayWebReadMethod("chat.send")).toBe(false);
+        expect(isPersistentGatewayWebReadMethod("config.patch")).toBe(false);
         expect(isPersistentGatewayAdminMethod("cron.run")).toBe(true);
         expect(isPersistentGatewayAdminMethod("config.patch")).toBe(false);
         expect(isPersistentGatewayOpenClawSettingsReadMethod("config.get")).toBe(true);
@@ -237,10 +237,10 @@ describe("persistent Gateway protocol-v4 boundary", () => {
 
     test("keeps persistent web reads object-bound and all controls admin-only", () => {
         expect(() =>
-            assertPersistentGatewayReadWriteParameters("sessions.list", { limit: 20 })
+            assertPersistentGatewayWebReadParameters("sessions.list", { limit: 20 })
         ).not.toThrow();
         expect(() =>
-            assertPersistentGatewayReadWriteParameters("sessions.list", null)
+            assertPersistentGatewayWebReadParameters("sessions.list", null)
         ).toThrow(TypeError);
         expect(() => assertPersistentGatewayAdminParameters("cron.run", null)).toThrow(
             TypeError

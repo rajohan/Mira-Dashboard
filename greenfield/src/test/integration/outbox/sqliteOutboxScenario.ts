@@ -1,7 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { Data, Effect, Schedule, Scope } from "effect";
 
@@ -21,7 +20,7 @@ import {
 } from "./sqliteOutboxStore.ts";
 
 const childModulePath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
+    path.dirname(Bun.fileURLToPath(import.meta.url)),
     "sqliteOutboxChild.ts"
 );
 const childStatusMaximumBytes = 16 * 1024;

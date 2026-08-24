@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "@tanstack/react-router";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 
+import { dashboardVersion } from "../../shared/dashboardVersion.ts";
 import { cn } from "../lib/classNames.ts";
 import type { DashboardAuthenticatedPath } from "../lib/dashboardRoutes.ts";
 import { MonitoringRouteLayout } from "../monitoring/MonitoringRouteLayout.tsx";
@@ -91,7 +92,7 @@ function SidebarContent({ currentPath, onClose, onNavigate }: SidebarContentProp
             </div>
             <Navigation currentPath={currentPath} onNavigate={onNavigate} />
             <div className="border-primary-700 text-primary-400 shrink-0 border-t p-4 text-xs">
-                Secure operator workspace
+                Mira Dashboard · v{dashboardVersion}
             </div>
         </>
     );

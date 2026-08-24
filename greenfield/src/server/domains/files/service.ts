@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import * as v from "valibot";
 
 import {
@@ -317,7 +315,7 @@ function entryOutput(
 export function createWorkspaceFilesService(
     dependencies: WorkspaceFilesServiceDependencies
 ): WorkspaceFilesService {
-    const generateId = dependencies.generateId ?? randomUUID;
+    const generateId = dependencies.generateId ?? (() => crypto.randomUUID());
     const maximumReferences =
         dependencies.maximumReferences ?? workspaceFileLimits.maximumReferenceCount;
     const nowMs = dependencies.nowMs ?? Date.now;

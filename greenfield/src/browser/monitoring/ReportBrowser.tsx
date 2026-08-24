@@ -26,6 +26,7 @@ import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { Input } from "../ui/Input.tsx";
 import { Markdown } from "../ui/Markdown.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -240,7 +241,9 @@ export function ReportBrowser() {
         JSON.stringify(filters ?? null),
         deletedReportIds
     );
-    const catalogError = liveHead.error ?? query.error;
+    const archivePageError = query.isFetchNextPageError ? query.error : null;
+    const catalogError =
+        liveHead.error ?? (query.isFetchNextPageError ? null : query.error);
     const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
     const retryCatalog = () =>
         void Promise.allSettled([liveHead.refetch(), query.refetch()]);
@@ -292,6 +295,20 @@ export function ReportBrowser() {
                     status="empty"
                     title="No reports"
                 />
+                {query.hasNextPage && (
+                    <InfiniteScrollTrigger
+                        className="py-2"
+                        {...(archivePageError === null
+                            ? {}
+                            : {
+                                  error: dashboardBrowserFailureMessage(archivePageError),
+                              })}
+                        hasMore
+                        loading={query.isFetchingNextPage}
+                        loadingLabel="Loading older reports…"
+                        onLoadMore={() => void query.fetchNextPage()}
+                    />
+                )}
             </div>
         );
     } else {
@@ -300,6 +317,17 @@ export function ReportBrowser() {
                 getKey={(report) => report.id}
                 items={reports}
                 label="Reports"
+                pagination={{
+                    ...(archivePageError === null
+                        ? {}
+                        : {
+                              error: dashboardBrowserFailureMessage(archivePageError),
+                          }),
+                    hasMore: query.hasNextPage,
+                    loading: query.isFetchingNextPage,
+                    loadingLabel: "Loading older reports…",
+                    onLoadMore: () => void query.fetchNextPage(),
+                }}
                 renderItem={(report) => (
                     <ReportListItem
                         onSelect={selectReport}
@@ -382,20 +410,6 @@ export function ReportBrowser() {
                         </div>
                     </div>
                     {catalogContent}
-                    {query.hasNextPage && (
-                        <div className="border-primary-700 border-t p-3">
-                            <Button
-                                busy={query.isFetchingNextPage}
-                                busyLabel="Loading…"
-                                fullWidth
-                                onClick={() => void query.fetchNextPage()}
-                                size="sm"
-                                variant="secondary"
-                            >
-                                Load older reports
-                            </Button>
-                        </div>
-                    )}
                 </Card>
                 {selectedId === undefined ? (
                     <PageState

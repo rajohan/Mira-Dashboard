@@ -133,10 +133,9 @@ function FollowFixture({
                             </button>
                         )}
                         <div
-                            style={{
-                                height: virtualization.totalSize,
-                                position: "relative",
-                            }}
+                            data-testid="virtual-container"
+                            ref={virtualization.containerRef}
+                            style={{ position: "relative" }}
                         >
                             {virtualization.virtualItems.map((item) => (
                                 <div
@@ -148,7 +147,6 @@ function FollowFixture({
                                         height:
                                             rowHeights?.[items[item.index] ?? ""] ?? 100,
                                         position: "absolute",
-                                        transform: `translateY(${item.start}px)`,
                                     }}
                                 >
                                     {items[item.index]}
@@ -185,6 +183,7 @@ function SvgFollowFixture() {
     return (
         <Virtualizer<SVGSVGElement>
             count={1}
+            directDomUpdates={false}
             estimateSize={() => 100}
             followToEnd={{ layoutRevision: 1, scopeKey: "svg" }}
             getItemKey={() => "svg-row"}
@@ -889,10 +888,9 @@ describe("shared virtualizer follow-to-end controller", () => {
             });
             await flushAnimationFrames();
 
-            expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
-                "data-total-size",
-                "1050"
-            );
+            expect(screen.getByTestId("virtual-container")).toHaveStyle({
+                height: "1050px",
+            });
             expect(log.scrollTop).toBe(780);
             expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
                 "data-following",
@@ -957,15 +955,9 @@ describe("shared virtualizer follow-to-end controller", () => {
 
         const precedingRow = screen.getByText("item-8");
         const changedRow = screen.getByText("item-9");
-        expect(precedingRow.dataset.start).toBe("1100");
-        expect(changedRow.dataset.start).toBe("1200");
-        expect(Number(changedRow.dataset.start)).toBe(
-            Number(precedingRow.dataset.start) + precedingRow.offsetHeight
-        );
-        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
-            "data-total-size",
-            "1350"
-        );
+        expect(precedingRow.style.transform).toBe("translate3d(0, 1100px, 0)");
+        expect(changedRow.style.transform).toBe("translate3d(0, 1200px, 0)");
+        expect(screen.getByTestId("virtual-container").style.height).toBe("1350px");
         expect(log.scrollTop).toBe(900);
         expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
             "data-following",
@@ -983,12 +975,13 @@ describe("shared virtualizer follow-to-end controller", () => {
         fireEvent.click(screen.getByRole("button", { name: "Remeasure content" }));
         await flushAnimationFrames();
 
-        expect(screen.getByText("item-8").dataset.start).toBe("1100");
-        expect(screen.getByText("item-9").dataset.start).toBe("1200");
-        expect(screen.getByTestId("follow-fixture")).toHaveAttribute(
-            "data-total-size",
-            "1375"
+        expect(screen.getByText("item-8").style.transform).toBe(
+            "translate3d(0, 1100px, 0)"
         );
+        expect(screen.getByText("item-9").style.transform).toBe(
+            "translate3d(0, 1200px, 0)"
+        );
+        expect(screen.getByTestId("virtual-container").style.height).toBe("1375px");
         expect(log.scrollTop).toBe(900);
         act(() => rendered.unmount());
     });

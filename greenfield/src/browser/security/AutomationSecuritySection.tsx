@@ -27,6 +27,7 @@ import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { AutomationCapabilityPicker } from "./AutomationCapabilityPicker.tsx";
 import { AutomationPrincipalCard } from "./AutomationPrincipalCard.tsx";
 import { useAutomationTokenPresenter } from "./automationTokenPresentationContextValue.ts";
@@ -63,6 +64,7 @@ export function AutomationSecuritySection() {
             staleTime: 0,
         })
     );
+    const principalPageError = principals.isFetchNextPageError ? principals.error : null;
     const principalForm = useForm({
         defaultValues: {
             capabilities: [] as ApplicationCapability[],
@@ -213,7 +215,7 @@ export function AutomationSecuritySection() {
                     size="sm"
                 />
             )}
-            {principals.isError && (
+            {principals.error !== null && !principals.isFetchNextPageError && (
                 <Alert
                     action={
                         <Button
@@ -229,7 +231,7 @@ export function AutomationSecuritySection() {
                     message={dashboardBrowserFailureMessage(principals.error)}
                 />
             )}
-            {principals.isSuccess &&
+            {principals.data !== undefined &&
                 principals.data.pages.every((page) => page.principals.length === 0) && (
                     <EmptyState
                         className="mt-5"
@@ -238,28 +240,32 @@ export function AutomationSecuritySection() {
                         title="No automation accounts"
                     />
                 )}
-            {principals.isSuccess && (
-                <ul className="mt-5 space-y-4">
-                    {principals.data.pages.flatMap((page) =>
-                        page.principals.map((principal) => (
-                            <AutomationPrincipalCard
-                                key={principal.id}
-                                principal={principal}
-                            />
-                        ))
+            {principals.data !== undefined && (
+                <VirtualizedList
+                    className="mt-5"
+                    estimateSize={() => 320}
+                    getKey={(principal) => principal.id}
+                    itemClassName="pb-4"
+                    items={principals.data.pages.flatMap((page) => page.principals)}
+                    label="Automation accounts"
+                    preserveItemState
+                    pagination={{
+                        ...(principalPageError === null
+                            ? {}
+                            : {
+                                  error: dashboardBrowserFailureMessage(
+                                      principalPageError
+                                  ),
+                              }),
+                        hasMore: principals.hasNextPage,
+                        loading: principals.isFetchingNextPage,
+                        loadingLabel: "Loading older automation accounts…",
+                        onLoadMore: () => void principals.fetchNextPage(),
+                    }}
+                    renderItem={(principal) => (
+                        <AutomationPrincipalCard principal={principal} />
                     )}
-                </ul>
-            )}
-            {principals.hasNextPage && (
-                <Button
-                    busy={principals.isFetchingNextPage}
-                    busyLabel="Loading…"
-                    className="mt-4"
-                    onClick={() => void principals.fetchNextPage()}
-                    variant="secondary"
-                >
-                    Load older accounts
-                </Button>
+                />
             )}
         </SecuritySection>
     );

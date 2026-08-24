@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { inspect } from "node:util";
 
 import { Redacted } from "effect";
 
@@ -68,8 +67,12 @@ describe("worker application configuration", () => {
         expect(JSON.stringify(configuration)).not.toContain(
             "worker-moltbook-key-test-value"
         );
-        expect(inspect(configuration)).not.toContain("worker-gateway-token-test-value");
-        expect(inspect(configuration)).not.toContain("worker-moltbook-key-test-value");
+        expect(Bun.inspect(configuration)).not.toContain(
+            "worker-gateway-token-test-value"
+        );
+        expect(Bun.inspect(configuration)).not.toContain(
+            "worker-moltbook-key-test-value"
+        );
         expect(Object.isFrozen(configuration)).toBe(true);
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
         expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
@@ -87,7 +90,7 @@ describe("worker application configuration", () => {
             "private-password"
         );
         expect(JSON.stringify(configuration)).not.toContain("private-password");
-        expect(inspect(configuration)).not.toContain("private-password");
+        expect(Bun.inspect(configuration)).not.toContain("private-password");
         expect(JSON.stringify(configuration.databaseObservabilityPassword)).toBe(
             '"<redacted:database-observability-password>"'
         );
@@ -149,7 +152,7 @@ describe("worker application configuration", () => {
             "reviewer-token-sentinel",
         ]) {
             expect(JSON.stringify(configuration)).not.toContain(secret);
-            expect(inspect(configuration)).not.toContain(secret);
+            expect(Bun.inspect(configuration)).not.toContain(secret);
         }
         expect(Object.isFrozen(credentials)).toBe(true);
         expect(Object.isFrozen(credentials.dockerHub)).toBe(true);
@@ -179,7 +182,7 @@ describe("worker application configuration", () => {
             expect(failure).toBeInstanceOf(ApplicationConfigurationError);
             expect(failure).toMatchObject({ field: missingField, reason: "missing" });
             expect(String(failure)).not.toContain("private-sentinel");
-            expect(inspect(failure)).not.toContain("private-sentinel");
+            expect(Bun.inspect(failure)).not.toContain("private-sentinel");
             expect(JSON.stringify(failure)).not.toContain("private-sentinel");
         }
     });
@@ -210,7 +213,7 @@ describe("worker application configuration", () => {
             expect(failure).toMatchObject({ field, reason: "invalid" });
             expect(String(failure)).not.toContain("sentinel");
             expect((failure as Error).stack ?? "").not.toContain("sentinel");
-            expect(inspect(failure)).not.toContain("sentinel");
+            expect(Bun.inspect(failure)).not.toContain("sentinel");
             expect(JSON.stringify(failure)).not.toContain("sentinel");
             expect("cause" in (failure as object)).toBe(false);
         }
@@ -289,7 +292,7 @@ describe("worker application configuration", () => {
             expect(failure).toMatchObject({ field, reason });
             expect(String(failure)).not.toContain(secret);
             expect((failure as Error).stack ?? "").not.toContain(secret);
-            expect(inspect(failure)).not.toContain(secret);
+            expect(Bun.inspect(failure)).not.toContain(secret);
             expect(JSON.stringify(failure)).not.toContain(secret);
             expect("cause" in (failure as object)).toBe(false);
         }

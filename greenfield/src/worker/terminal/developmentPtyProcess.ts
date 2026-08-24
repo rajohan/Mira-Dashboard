@@ -1,5 +1,3 @@
-import { TextDecoder, TextEncoder } from "node:util";
-
 import type {
     WorkerPtyFactory,
     WorkerPtyHandle,

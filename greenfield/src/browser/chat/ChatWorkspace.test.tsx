@@ -165,7 +165,7 @@ describe("chat workspace", () => {
         });
     });
 
-    test("labels selected-session token use as current, out of date, or unknown", () => {
+    test("labels selected-session token use as current, out of date, or unknown", async () => {
         const props = properties();
         const session = props.view.sessions[0]!;
         const rendered = render(
@@ -184,6 +184,7 @@ describe("chat workspace", () => {
                 }}
             />
         );
+        await act(async () => {});
         expect(
             screen.getByLabelText("Session token use: 1,200 of 200,000, current")
         ).toBeVisible();
@@ -285,7 +286,7 @@ describe("chat workspace", () => {
         expect(props.onResetTranscript).toHaveBeenCalledWith(sessionKey);
     });
 
-    test("shows background refresh failure without replacing last-known rows", () => {
+    test("shows background refresh failure without replacing last-known rows", async () => {
         const props = properties();
         const rendered = render(
             <ChatWorkspace
@@ -294,6 +295,7 @@ describe("chat workspace", () => {
                 view={{ ...props.view, connection: "stale" }}
             />
         );
+        await act(async () => {});
         expect(screen.getByRole("log", { name: "Messages" })).toBeVisible();
         expect(screen.getByRole("button", { name: "Session" })).toBeVisible();
         const status = screen.getByRole("alert");
@@ -334,7 +336,7 @@ describe("chat workspace", () => {
         expect(composer).toHaveFocus();
     });
 
-    test("distinguishes initial session, history, and task loading from true empty states", () => {
+    test("distinguishes initial session, history, and task loading from true empty states", async () => {
         const props = properties();
         const sessions = render(
             <ChatWorkspace
@@ -362,13 +364,14 @@ describe("chat workspace", () => {
                 }}
             />
         );
+        await act(async () => {});
         expect(screen.getByLabelText("Loading chat history…")).toBeVisible();
         expect(screen.queryByText("No messages yet")).toBeNull();
         expect(screen.getByLabelText("Loading background tasks…")).toBeVisible();
         expect(screen.queryByText(/No background tasks/iu)).toBeNull();
     });
 
-    test("loads the next bounded background-task page near the panel bottom", () => {
+    test("loads the next bounded background-task page near the panel bottom", async () => {
         const props = properties();
         render(
             <ChatWorkspace
@@ -386,6 +389,7 @@ describe("chat workspace", () => {
                 }}
             />
         );
+        await act(async () => {});
         const taskScroller = screen.getByRole("list", {
             name: "Background tasks",
         }).parentElement!;
@@ -402,7 +406,7 @@ describe("chat workspace", () => {
         expect(screen.queryByRole("button", { name: "Load more tasks" })).toBeNull();
     });
 
-    test("retries background-task pagination after a failed page keeps the same rows", () => {
+    test("retries background-task pagination after a failed page keeps the same rows", async () => {
         const props = properties();
         const task = { id: "task-1", label: "First task", status: "running" as const };
         const { rerender } = render(
@@ -415,6 +419,7 @@ describe("chat workspace", () => {
                 }}
             />
         );
+        await act(async () => {});
         const taskScroller = screen.getByRole("list", {
             name: "Background tasks",
         }).parentElement!;
@@ -519,7 +524,7 @@ describe("chat workspace", () => {
         expect(props.view.messages[0]).toBeDefined();
     });
 
-    test("retains validated optional-panel rows during background failures", () => {
+    test("retains validated optional-panel rows during background failures", async () => {
         const props = properties();
         render(
             <ChatWorkspace
@@ -541,6 +546,7 @@ describe("chat workspace", () => {
                 }}
             />
         );
+        await act(async () => {});
         expect(screen.getAllByText("Known task")).not.toHaveLength(0);
         expect(screen.getByText("Last-known answer")).toBeVisible();
         expect(screen.getByText("Task refresh failed.")).toBeVisible();

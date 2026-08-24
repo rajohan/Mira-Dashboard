@@ -3,6 +3,7 @@ import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { incidentSeverityVariant } from "./incidentPresentation.ts";
 import { MonitoringSelectionList } from "./MonitoringSelectionList.tsx";
 
@@ -51,16 +52,23 @@ function IncidentListItem({ incident, onSelect, selected }: IncidentListItemProp
 interface IncidentTableProps {
     readonly incidents: readonly IncidentSummary[];
     readonly onSelect: (id: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly selectedId: string | undefined;
 }
 
 /** @returns Compact incident selection list with bounded virtual rendering. */
-export function IncidentTable({ incidents, onSelect, selectedId }: IncidentTableProps) {
+export function IncidentTable({
+    incidents,
+    onSelect,
+    pagination,
+    selectedId,
+}: IncidentTableProps) {
     return (
         <MonitoringSelectionList
             getKey={(incident) => incident.id}
             items={incidents}
             label="Incidents"
+            pagination={pagination}
             renderItem={(incident) => (
                 <IncidentListItem
                     incident={incident}

@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import type { JobRunEvent } from "../../contracts/jobModel.ts";
 import type { JobRunDetail as JobRunDetailData } from "../../contracts/jobs.ts";
@@ -12,6 +12,7 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
+import { InfiniteScrollTrigger } from "../ui/InfiniteScrollTrigger.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
 import {
@@ -238,6 +239,17 @@ export function SelectedJobRun({
         ? (historyPages.at(-1)?.nextEventCursor ??
           (history.data === undefined ? firstEventCursor : undefined))
         : detail.data.nextEventCursor;
+    const loadOlderEvents = () => {
+        if (!historyEnabled) {
+            setHistoryEnabled(true);
+            return;
+        }
+        if (history.data === undefined) {
+            void history.refetch();
+            return;
+        }
+        void history.fetchNextPage();
+    };
     return (
         <div>
             <Alert
@@ -253,6 +265,13 @@ export function SelectedJobRun({
                 focusRequested={focusRequested}
                 onCancel={() => setConfirmingCancel(true)}
                 onFocusHandled={onFocusHandled}
+                pagination={{
+                    hasMore: nextEventCursor !== undefined && history.error === null,
+                    loading:
+                        historyEnabled && (eventGap.isFetching || history.isFetching),
+                    loadingLabel: "Loading older events…",
+                    onLoadMore: loadOlderEvents,
+                }}
             />
             <Alert
                 action={eventHistorySharesPrimaryMessage ? undefined : eventHistoryRetry}
@@ -264,27 +283,6 @@ export function SelectedJobRun({
                         : eventHistoryErrorMessage
                 }
             />
-            {nextEventCursor !== undefined && (
-                <Button
-                    busy={historyEnabled && (eventGap.isFetching || history.isFetching)}
-                    busyLabel="Loading older events…"
-                    className="mt-4"
-                    onClick={() => {
-                        if (!historyEnabled) {
-                            setHistoryEnabled(true);
-                            return;
-                        }
-                        if (history.data === undefined) {
-                            void history.refetch();
-                            return;
-                        }
-                        void history.fetchNextPage();
-                    }}
-                    variant="secondary"
-                >
-                    Load older events
-                </Button>
-            )}
             <ConfirmModal
                 busy={cancellation.isPending}
                 confirmLabel="Cancel run"
@@ -321,7 +319,6 @@ export function JobRunBrowser({
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
     const query = useInfiniteQuery(jobRunListQueryOptions(client, undefined));
     const liveHead = useQuery(jobRunLiveHeadQueryOptions(client, undefined));
-    const historySentinelRef = useRef<HTMLDivElement>(null);
     const summaryQuery = useQuery(jobQueueSummaryQueryOptions(client));
     const runs = useAccumulatedLiveHistoryRows(
         liveHead.data?.runs ?? [],
@@ -332,7 +329,7 @@ export function JobRunBrowser({
     const summary =
         summaryQuery.data ?? liveHead.data?.summary ?? query.data?.pages[0]?.summary;
     const claiming = useSetJobClaimingPausedMutation();
-    const historyPageFailed = query.error !== null;
+    const historyPageFailed = query.isFetchNextPageError;
     const fetchNextHistoryPage = query.fetchNextPage;
     const hasNextHistoryPage = query.hasNextPage;
     const historyPageLoading = query.isFetchingNextPage;
@@ -349,28 +346,6 @@ export function JobRunBrowser({
         loadedCompletedRunCount,
         reportedActiveRunCount
     );
-    useEffect(() => {
-        const sentinel = historySentinelRef.current;
-        if (
-            sentinel === null ||
-            !hasNextHistoryPage ||
-            historyPageFailed ||
-            historyPageLoading ||
-            globalThis.IntersectionObserver === undefined
-        ) {
-            return;
-        }
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries.some(({ isIntersecting }) => isIntersecting)) {
-                    void fetchNextHistoryPage();
-                }
-            },
-            { rootMargin: "400px 0px" }
-        );
-        observer.observe(sentinel);
-        return () => observer.disconnect();
-    }, [fetchNextHistoryPage, hasNextHistoryPage, historyPageFailed, historyPageLoading]);
     const selectRun = (runId: string | undefined) => {
         if (runId !== undefined) onRequestRunFocus(runId);
         const selectedRun = runs.find(({ id }) => id === runId);
@@ -451,11 +426,16 @@ export function JobRunBrowser({
                         onFocusHandled={onRunFocusHandled}
                     />
                 )}
-            {query.hasNextPage &&
-            summary !== undefined &&
-            !historyPageFailed &&
-            historyNeedsInitialFill ? (
-                <div aria-hidden="true" className="h-px" ref={historySentinelRef} />
+            {summary !== undefined && historyNeedsInitialFill ? (
+                <InfiniteScrollTrigger
+                    {...(historyPageFailed
+                        ? { error: jobBrowserFailureMessage(query.error) }
+                        : {})}
+                    hasMore={hasNextHistoryPage}
+                    loading={historyPageLoading}
+                    loadingLabel="Loading more job runs…"
+                    onLoadMore={() => void fetchNextHistoryPage()}
+                />
             ) : null}
             {query.data === undefined && liveHead.data === undefined && (
                 <div className="mt-4">

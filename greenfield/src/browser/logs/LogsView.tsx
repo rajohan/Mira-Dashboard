@@ -1,6 +1,5 @@
 import { ArrowDown, Download, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable log must be keyboard-focusable. */
 
 import type { JobRunDetail } from "../../contracts/jobs.ts";
 import {
@@ -212,7 +211,7 @@ function LogSnapshot({
                         )}
                         <ol
                             className="relative font-mono text-xs"
-                            style={{ height: virtualization.totalSize }}
+                            ref={virtualization.containerRef}
                         >
                             {virtualization.virtualItems.map((virtualRow) => {
                                 const row = visibleLines[virtualRow.index];
@@ -228,7 +227,6 @@ function LogSnapshot({
                                             left: 0,
                                             position: "absolute",
                                             top: 0,
-                                            transform: `translateY(${virtualRow.start}px)`,
                                             width: "100%",
                                         }}
                                     />
@@ -243,7 +241,7 @@ function LogSnapshot({
     return (
         <>
             <div className="mt-4 grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:items-center">
-                <div
+                <section
                     aria-label="Log snapshot summary"
                     className="text-primary-400 flex min-w-0 flex-nowrap items-center gap-3 overflow-x-auto text-xs whitespace-nowrap"
                     tabIndex={0}
@@ -251,7 +249,7 @@ function LogSnapshot({
                     <span>{formatDashboardDateTime(snapshot.observedAtMs)}</span>
                     <span>{formatByteCount(snapshot.scannedBytes)} read</span>
                     <span>{lineCountLabel}</span>
-                </div>
+                </section>
                 <div className="min-w-0">
                     <LogLevelFilter
                         activeLevels={activeLevels}

@@ -656,8 +656,9 @@ describe("chat message bubble", () => {
         const tool = screen.getByRole("region", { name: "Bash, completed" });
         const summary = within(tool).getByText(/^bun test safe/iu);
         expect(summary.textContent).not.toContain("\n");
-        // oxlint-disable-next-line unicorn/prefer-spread -- The summary contract is explicitly bounded in Unicode code points.
-        expect(Array.from(summary.textContent ?? "")).toHaveLength(120);
+        let summaryCodePointCount = 0;
+        for (const _codePoint of summary.textContent ?? "") summaryCodePointCount += 1;
+        expect(summaryCodePointCount).toBe(120);
         expect(within(tool).queryByText("input-secret")).toBeNull();
         expect(within(tool).queryByText("output-secret")).toBeNull();
         expect(tool.getAttribute("aria-label")).toBe("Bash, completed");

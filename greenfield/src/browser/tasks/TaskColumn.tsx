@@ -4,7 +4,9 @@ import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskStatus, TaskSummary } from "../../contracts/taskModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { Heading } from "../ui/Heading.tsx";
+import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
 import { Text } from "../ui/Text.tsx";
+import { VirtualizedList } from "../ui/VirtualizedList.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import { taskStatusDefinitions } from "./taskPresentation.ts";
 
@@ -12,6 +14,7 @@ interface TaskColumnProps {
     readonly cronJobsById: ReadonlyMap<string, OpenClawCronJob>;
     readonly disabled: boolean;
     readonly onSelectTask: (taskId: string) => void;
+    readonly pagination?: InfiniteScrollContinuation;
     readonly status: TaskStatus;
     readonly tasks: readonly TaskSummary[];
 }
@@ -21,6 +24,7 @@ export function TaskColumn({
     cronJobsById,
     disabled,
     onSelectTask,
+    pagination,
     status,
     tasks,
 }: TaskColumnProps) {
@@ -48,33 +52,49 @@ export function TaskColumn({
                     {tasks.length}
                 </span>
             </header>
-            <div
-                className={cn(
-                    "border-primary-700/60 bg-primary-800/30 flex min-h-32 flex-col gap-2 rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-y-contain",
-                    isDropTarget && "border-accent-400 bg-accent-500/5"
-                )}
-                ref={ref}
-            >
-                {tasks.length === 0 ? (
+            {tasks.length === 0 ? (
+                <div
+                    className={cn(
+                        "border-primary-700/60 bg-primary-800/30 flex min-h-32 flex-col rounded-lg border-2 border-dashed p-2 transition-colors lg:min-h-0 lg:flex-1",
+                        isDropTarget && "border-accent-400 bg-accent-500/5"
+                    )}
+                    ref={ref}
+                >
                     <Text className="m-auto py-8 text-center" size="sm" tone="muted">
                         {definition.emptyLabel}
                     </Text>
-                ) : (
-                    tasks.map((task) => (
-                        <TaskCard
-                            automationJob={
-                                task.automation === undefined
-                                    ? undefined
-                                    : cronJobsById.get(task.automation.cronJobId)
-                            }
-                            disabled={disabled}
-                            key={task.id}
-                            onSelect={onSelectTask}
-                            task={task}
-                        />
-                    ))
-                )}
-            </div>
+                </div>
+            ) : (
+                <div
+                    className={cn(
+                        "border-primary-700/60 bg-primary-800/30 relative min-h-32 overflow-hidden rounded-lg border-2 border-dashed transition-colors lg:min-h-0 lg:flex-1",
+                        isDropTarget && "border-accent-400 bg-accent-500/5"
+                    )}
+                    ref={ref}
+                >
+                    <VirtualizedList
+                        className="h-full max-h-none overscroll-y-contain p-2"
+                        estimateSize={() => 148}
+                        getKey={(task) => task.id}
+                        itemClassName="pb-2"
+                        items={tasks}
+                        label={`${definition.title} tasks`}
+                        pagination={pagination}
+                        renderItem={(task) => (
+                            <TaskCard
+                                automationJob={
+                                    task.automation === undefined
+                                        ? undefined
+                                        : cronJobsById.get(task.automation.cronJobId)
+                                }
+                                disabled={disabled}
+                                onSelect={onSelectTask}
+                                task={task}
+                            />
+                        )}
+                    />
+                </div>
+            )}
         </section>
     );
 }

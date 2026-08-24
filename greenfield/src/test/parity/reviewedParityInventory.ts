@@ -1,5 +1,4 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { readBoundedUtf8RegularFile } from "../../../scripts/files/boundedFile.ts";
 import {
@@ -17,7 +16,7 @@ import {
 } from "./parityInventorySchemas.ts";
 
 const fixtureDirectory = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
+    path.dirname(Bun.fileURLToPath(import.meta.url)),
     "fixtures"
 );
 const maximumFixtureBytes = 256 * 1024;

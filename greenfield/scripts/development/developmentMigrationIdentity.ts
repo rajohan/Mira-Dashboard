@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -235,7 +234,7 @@ export async function readDevelopmentMigrationIdentity(
                 throw migrationIdentityFailure();
             }
         }
-        const fingerprint = createHash("sha256");
+        const fingerprint = new Bun.CryptoHasher("sha256");
         fingerprint.update("mira-dashboard-development-migration-graph:v2\0");
         for (const migration of manifest) {
             fingerprint.update(migration.id);

@@ -12,7 +12,6 @@ import { Button } from "../ui/Button.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Text } from "../ui/Text.tsx";
 import { OpenClawCronConfirmationDialog } from "./OpenClawCronConfirmationDialog.tsx";
 import { OpenClawCronDefinitionDialog } from "./OpenClawCronDefinitionDialog.tsx";
 import { OpenClawCronDetail } from "./OpenClawCronDetail.tsx";
@@ -39,6 +38,7 @@ export type OpenClawCronSectionState =
 export interface OpenClawCronSectionProps {
     readonly backgroundError?: string;
     readonly jobsLoadingMore?: boolean;
+    readonly jobsPaginationError?: string;
     readonly heartbeatSession?: GatewaySession;
     readonly heartbeatSessionStatus?: "loading" | "ready" | "unavailable";
     readonly onDelete: (job: OpenClawCronJob) => Promise<void>;
@@ -102,6 +102,7 @@ function confirmationTitle(confirmation: Confirmation): string {
 export function OpenClawCronSectionView({
     backgroundError,
     jobsLoadingMore = false,
+    jobsPaginationError,
     heartbeatSession,
     heartbeatSessionStatus,
     onDelete,
@@ -329,7 +330,7 @@ export function OpenClawCronSectionView({
                                 Schedules
                             </Heading>
                         </div>
-                        <div className="min-h-0 flex-1 pt-2 xl:overflow-y-auto">
+                        <div className="min-h-0 flex-1 pt-2">
                             <OpenClawCronTable
                                 jobs={orderedJobs}
                                 onSelect={(id) => {
@@ -338,25 +339,22 @@ export function OpenClawCronSectionView({
                                     const next = orderedJobs.find((job) => job.id === id);
                                     if (next !== undefined) onSelectJob?.(next);
                                 }}
+                                pagination={
+                                    onLoadMoreJobs === undefined
+                                        ? undefined
+                                        : {
+                                              ...(jobsPaginationError === undefined
+                                                  ? {}
+                                                  : { error: jobsPaginationError }),
+                                              hasMore: result.hasMore,
+                                              loading: jobsLoadingMore,
+                                              loadingLabel: "Loading more OpenClaw jobs…",
+                                              onLoadMore: onLoadMoreJobs,
+                                          }
+                                }
                                 selectedId={selected?.id}
                             />
                         </div>
-                        {result.hasMore && onLoadMoreJobs !== undefined && (
-                            <Button
-                                busy={jobsLoadingMore}
-                                busyLabel="Loading…"
-                                className="mt-4"
-                                onClick={onLoadMoreJobs}
-                                variant="secondary"
-                            >
-                                Load more OpenClaw jobs
-                            </Button>
-                        )}
-                        {result.hasMore && onLoadMoreJobs === undefined && (
-                            <Text className="mt-3" size="sm" tone="muted">
-                                More OpenClaw jobs are available.
-                            </Text>
-                        )}
                     </div>
                     {selected !== undefined && (
                         <OpenClawCronDetail
