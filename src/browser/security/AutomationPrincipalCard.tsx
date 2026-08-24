@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, ShieldOff } from "lucide-react";
+import { Bot, KeyRound, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
 import type { AutomationPrincipalSummary } from "../../contracts/automationSecurity.ts";
@@ -10,7 +10,6 @@ import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
-import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { AutomationCapabilityPicker } from "./AutomationCapabilityPicker.tsx";
 import { AutomationCredentialPanel } from "./AutomationCredentialPanel.tsx";
@@ -100,18 +99,20 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
     }
 
     return (
-        <div className="border-primary-700 rounded-xl border p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                    <Heading level={3}>{principal.label}</Heading>
-                    <p className="text-primary-400 mt-1 font-mono text-sm">
-                        {principal.id}
-                    </p>
-                    <p className="text-primary-400 mt-1 text-sm">
+        <ExpandableCard
+            description={
+                <>
+                    <span className="block font-mono">{principal.id}</span>
+                    <span className="mt-1 block">
                         {principal.disabled ? "Disabled" : "Active"} ·{" "}
                         {principal.activeCredentialCount} active access token(s)
-                    </p>
-                </div>
+                    </span>
+                </>
+            }
+            icon={Bot}
+            title={principal.label}
+        >
+            <div className="flex justify-end">
                 {!principal.disabled && (
                     <Button
                         aria-label={`Disable automation account ${principal.label}`}
@@ -152,6 +153,6 @@ export function AutomationPrincipalCard({ principal }: AutomationPrincipalCardPr
                 open={disableConfirmationOpen}
                 title="Disable automation account?"
             />
-        </div>
+        </ExpandableCard>
     );
 }

@@ -67,6 +67,9 @@ export function DockerUpdaterPanel({
     const unavailableCount = services.filter(
         ({ status }) => status.state === "unavailable"
     ).length;
+    const notCheckedCount = services.filter(
+        ({ status }) => status.state === "not-checked"
+    ).length;
     const inventoryOnlyCount = services.filter(
         ({ policy }) => policy.state === "inventory-only"
     ).length;
@@ -155,6 +158,12 @@ export function DockerUpdaterPanel({
                     <dt className="text-primary-400 text-sm">Registry unavailable</dt>
                     <dd className="text-primary-50 mt-1 text-2xl font-semibold tabular-nums">
                         {unavailableCount}
+                    </dd>
+                </div>
+                <div className="border-primary-700 bg-primary-900/35 rounded-lg border p-3">
+                    <dt className="text-primary-400 text-sm">Not checked</dt>
+                    <dd className="text-primary-50 mt-1 text-2xl font-semibold tabular-nums">
+                        {notCheckedCount}
                     </dd>
                 </div>
                 <div className="border-primary-700 bg-primary-900/35 rounded-lg border p-3">

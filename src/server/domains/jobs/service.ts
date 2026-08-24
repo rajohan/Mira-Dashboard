@@ -40,6 +40,9 @@ import {
     type JobActionDefinition,
     findJobActionDefinition,
     isRegisteredJobSchedule,
+    jobScheduleAllowsAutomationManualRun,
+    jobScheduleManualRunCapability,
+    jobScheduleIsOperatorVisible,
     jobActionDefinitions,
 } from "./actionRegistry.ts";
 import {
@@ -266,7 +269,12 @@ function listSchedules(
     input: ListSchedulesInput
 ): ListSchedulesResult {
     const { hasNextPage, page } = pageResult(
-        repository.listSchedules(input),
+        repository.listSchedules({
+            ...input,
+            excludeIds: jobActionDefinitions
+                .map(({ scheduleId }) => scheduleId)
+                .filter((scheduleId) => !jobScheduleIsOperatorVisible(scheduleId)),
+        }),
         input.limit,
         ({ activeDisableIntent, activeRun, latestRun, schedule }) =>
             toScheduleSummary(schedule, {
@@ -513,7 +521,20 @@ export function createJobService(
                         resource: "schedule",
                     });
                 }
-                if (registration?.manualExposure !== "jobs-write") {
+                if (
+                    registration === undefined ||
+                    (principal.kind !== "session" &&
+                        !jobScheduleAllowsAutomationManualRun(
+                            schedule.id,
+                            schedule.actionKey
+                        )) ||
+                    (principal.kind === "session" &&
+                        !principal.capabilities.includes(
+                            jobScheduleManualRunCapability(schedule.actionKey)
+                        )) ||
+                    (registration.manualExposure !== "jobs-write" &&
+                        !jobScheduleIsOperatorVisible(schedule.id))
+                ) {
                     throw new JobConflictError({
                         id: input.id,
                         reason: "action-not-manually-exposed",

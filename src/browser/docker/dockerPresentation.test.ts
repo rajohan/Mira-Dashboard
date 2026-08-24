@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import type { DockerContainer } from "../../contracts/docker.ts";
-import { formatDockerContainerRuntime } from "./dockerPresentation.ts";
+import {
+    dockerContainerHealthLabel,
+    dockerUpdaterStatusLabel,
+    formatDockerContainerRuntime,
+} from "./dockerPresentation.ts";
 
 function container(overrides: Partial<DockerContainer>): DockerContainer {
     return {
@@ -15,6 +19,11 @@ function container(overrides: Partial<DockerContainer>): DockerContainer {
 }
 
 describe("Docker presentation", () => {
+    test("uses compact honest copy for absent health and unscanned registries", () => {
+        expect(dockerContainerHealthLabel("none")).toBe("Unknown");
+        expect(dockerUpdaterStatusLabel({ state: "not-checked" })).toBe("Not checked");
+    });
+
     test("does not invent a finish time for an inactive container", () => {
         expect(
             formatDockerContainerRuntime(container({ startedAtMs: 1000 }), 10_000)

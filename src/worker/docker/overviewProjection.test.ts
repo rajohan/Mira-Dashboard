@@ -209,7 +209,7 @@ describe("Docker overview projection", () => {
                 policy: { automatic: true, state: "managed", track: "tag" },
                 project: "media",
                 service: "app",
-                status: { state: "unavailable" },
+                status: { state: "not-checked" },
             },
         ]);
         expect(payload.sourceRevision).toMatch(/^[0-9a-f]{64}$/u);
@@ -411,7 +411,7 @@ describe("Docker overview projection", () => {
             observedAtMs: Date.parse("2026-08-13T04:03:00Z"),
             previous,
         });
-        expect(changed.updaterServices[0]?.status).toEqual({ state: "unavailable" });
+        expect(changed.updaterServices[0]?.status).toEqual({ state: "not-checked" });
 
         const changedPolicy = projectDockerOverview({
             compose: {
@@ -436,7 +436,7 @@ describe("Docker overview projection", () => {
         });
         expect(changedPolicy.updaterServices[0]?.currentImage).toBe("example/app:1.0.0");
         expect(changedPolicy.updaterServices[0]?.status).toEqual({
-            state: "unavailable",
+            state: "not-checked",
         });
     });
 

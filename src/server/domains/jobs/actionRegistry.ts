@@ -35,6 +35,7 @@ import {
     scheduleIdSchema,
 } from "../../../contracts/jobModel.ts";
 import { quotaCacheKey } from "../../../contracts/quota.ts";
+import type { ApplicationCapability } from "../../../contracts/security.ts";
 import { weatherCacheKey } from "../../../contracts/weather.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import type { JsonObject } from "../../../shared/json.ts";
@@ -448,6 +449,46 @@ const workerSmokeDefinition = validateJobActionDefinition({
     scheduleId: "system.worker-smoke",
     timeoutMs: 30_000,
 });
+
+/**
+ * @param scheduleId Fixed schedule identity.
+ * @returns Whether the schedule belongs in the production operator inventory.
+ */
+export function jobScheduleIsOperatorVisible(scheduleId: string): boolean {
+    return scheduleId !== workerSmokeDefinition.scheduleId;
+}
+
+/**
+ * @param scheduleId Fixed schedule identity.
+ * @param actionKey Fixed action identity.
+ * @returns Whether the exact internal release-smoke pair admits automation dispatch.
+ */
+export function jobScheduleAllowsAutomationManualRun(
+    scheduleId: string,
+    actionKey: string
+): boolean {
+    return (
+        scheduleId === workerSmokeDefinition.scheduleId &&
+        actionKey === workerSmokeDefinition.actionKey
+    );
+}
+
+/**
+ * Returns the domain grant required for one operator-triggered fixed schedule.
+ * @param actionKey Registered fixed action identity.
+ * @returns Exact application capability required for manual admission.
+ */
+export function jobScheduleManualRunCapability(actionKey: string): ApplicationCapability {
+    if (
+        actionKey === backupKopiaRunJobActionKey ||
+        actionKey === backupWalgRunJobActionKey
+    ) {
+        return "backups:write";
+    }
+    if (actionKey === dockerUpdaterJobActionKey) return "docker:write";
+    if (actionKey === logMaintenanceJobActionKey) return "logs:write";
+    return "jobs:write";
+}
 
 /**
  * Complete authority surface for an untrusted managed PR preview.

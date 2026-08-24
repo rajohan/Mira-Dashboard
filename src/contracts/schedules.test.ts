@@ -63,7 +63,7 @@ function queuedRun(id: string, queuedAtMs: number) {
 }
 
 describe("schedule procedure contracts", () => {
-    test("locks reads, session writes, and dual-principal manual runs", () => {
+    test("locks reads, session edits, and exact-policy manual runs", () => {
         expect(
             scheduleProcedureContracts.map(({ access, kind, name, transport }) => ({
                 access,

@@ -20,10 +20,10 @@ import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardActio
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Form } from "../ui/Form.tsx";
 import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
-import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
@@ -109,105 +109,109 @@ export function AutomationSecuritySection() {
             title="Automation access"
         >
             <Alert className="mb-4" message={action.error} />
-            <Form
-                className="border-primary-700 rounded-xl border p-4"
-                onSubmit={() => void principalForm.handleSubmit()}
+            <ExpandableCard
+                description="Create a least-privilege account and its first one-time token."
+                icon={Plus}
+                title="Create automation account"
             >
-                <Heading level={3}>Create automation account</Heading>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <principalForm.Field name="id">
+                <Form onSubmit={() => void principalForm.handleSubmit()}>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <principalForm.Field name="id">
+                            {(field) => (
+                                <FormField
+                                    disabled={action.busy}
+                                    error={touchedFormFieldError(field.state.meta)}
+                                    description="A stable ID used by scripts and configuration."
+                                    label="Account ID"
+                                >
+                                    <Input
+                                        autoCapitalize="none"
+                                        className="mt-2"
+                                        name={field.name}
+                                        onBlur={field.handleBlur}
+                                        onChange={(event) =>
+                                            field.handleChange(event.currentTarget.value)
+                                        }
+                                        placeholder="openclaw-heartbeat"
+                                        required
+                                        spellCheck={false}
+                                        value={field.state.value}
+                                    />
+                                </FormField>
+                            )}
+                        </principalForm.Field>
+                        <principalForm.Field name="label">
+                            {(field) => (
+                                <FormField
+                                    disabled={action.busy}
+                                    error={touchedFormFieldError(field.state.meta)}
+                                    label="Account name"
+                                >
+                                    <Input
+                                        className="mt-2"
+                                        name={field.name}
+                                        onBlur={field.handleBlur}
+                                        onChange={(event) =>
+                                            field.handleChange(event.currentTarget.value)
+                                        }
+                                        placeholder="OpenClaw heartbeat"
+                                        required
+                                        value={field.state.value}
+                                    />
+                                </FormField>
+                            )}
+                        </principalForm.Field>
+                        <principalForm.Field name="initialCredential.label">
+                            {(field) => (
+                                <FormField
+                                    disabled={action.busy}
+                                    error={touchedFormFieldError(field.state.meta)}
+                                    label="First token name"
+                                >
+                                    <Input
+                                        className="mt-2"
+                                        name={field.name}
+                                        onBlur={field.handleBlur}
+                                        onChange={(event) =>
+                                            field.handleChange(event.currentTarget.value)
+                                        }
+                                        placeholder="Daily heartbeat"
+                                        required
+                                        value={field.state.value}
+                                    />
+                                </FormField>
+                            )}
+                        </principalForm.Field>
+                    </div>
+                    <principalForm.Field name="capabilities">
                         {(field) => (
-                            <FormField
+                            <AutomationCapabilityPicker
                                 disabled={action.busy}
-                                error={touchedFormFieldError(field.state.meta)}
-                                description="A stable ID used by scripts and configuration."
-                                label="Account ID"
-                            >
-                                <Input
-                                    autoCapitalize="none"
-                                    className="mt-2"
-                                    name={field.name}
-                                    onBlur={field.handleBlur}
-                                    onChange={(event) =>
-                                        field.handleChange(event.currentTarget.value)
-                                    }
-                                    placeholder="openclaw-heartbeat"
-                                    required
-                                    spellCheck={false}
-                                    value={field.state.value}
-                                />
-                            </FormField>
+                                onChange={field.handleChange}
+                                value={field.state.value}
+                            />
                         )}
                     </principalForm.Field>
-                    <principalForm.Field name="label">
-                        {(field) => (
-                            <FormField
-                                disabled={action.busy}
-                                error={touchedFormFieldError(field.state.meta)}
-                                label="Account name"
+                    <principalForm.Subscribe
+                        selector={(state) =>
+                            [state.canSubmit, state.isSubmitting] as const
+                        }
+                    >
+                        {([canSubmit, isSubmitting]) => (
+                            <Button
+                                busy={action.busy || isSubmitting}
+                                busyLabel="Creating…"
+                                className="mt-4 w-full sm:w-auto"
+                                disabled={!canSubmit}
+                                type="submit"
                             >
-                                <Input
-                                    className="mt-2"
-                                    name={field.name}
-                                    onBlur={field.handleBlur}
-                                    onChange={(event) =>
-                                        field.handleChange(event.currentTarget.value)
-                                    }
-                                    placeholder="OpenClaw heartbeat"
-                                    required
-                                    value={field.state.value}
-                                />
-                            </FormField>
+                                <Icon icon={Plus} size="sm" tone="inherit" />
+                                Create account and token
+                            </Button>
                         )}
-                    </principalForm.Field>
-                    <principalForm.Field name="initialCredential.label">
-                        {(field) => (
-                            <FormField
-                                disabled={action.busy}
-                                error={touchedFormFieldError(field.state.meta)}
-                                label="First token name"
-                            >
-                                <Input
-                                    className="mt-2"
-                                    name={field.name}
-                                    onBlur={field.handleBlur}
-                                    onChange={(event) =>
-                                        field.handleChange(event.currentTarget.value)
-                                    }
-                                    placeholder="Daily heartbeat"
-                                    required
-                                    value={field.state.value}
-                                />
-                            </FormField>
-                        )}
-                    </principalForm.Field>
-                </div>
-                <principalForm.Field name="capabilities">
-                    {(field) => (
-                        <AutomationCapabilityPicker
-                            disabled={action.busy}
-                            onChange={field.handleChange}
-                            value={field.state.value}
-                        />
-                    )}
-                </principalForm.Field>
-                <principalForm.Subscribe
-                    selector={(state) => [state.canSubmit, state.isSubmitting] as const}
-                >
-                    {([canSubmit, isSubmitting]) => (
-                        <Button
-                            busy={action.busy || isSubmitting}
-                            busyLabel="Creating…"
-                            className="mt-4 w-full sm:w-auto"
-                            disabled={!canSubmit}
-                            type="submit"
-                        >
-                            <Icon icon={Plus} size="sm" tone="inherit" />
-                            Create account and token
-                        </Button>
-                    )}
-                </principalForm.Subscribe>
-            </Form>
+                    </principalForm.Subscribe>
+                </Form>
+            </ExpandableCard>
             {principals.isPending && (
                 <LoadingState
                     className="mt-5"

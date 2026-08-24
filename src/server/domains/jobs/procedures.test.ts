@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     createTestApplicationRuntime,
+    createTestAuthenticationLifecycleService,
     createTestAutomationAuthentication,
     createTestRequestContext,
     createTestSessionAuthentication,
@@ -40,6 +41,47 @@ const queuedRun = Object.freeze({
     updatedAtMs: 1000,
 });
 
+const kopiaSchedule = Object.freeze({
+    actionKey: "backup.kopia.run",
+    attemptLimit: 1,
+    cancellationPolicy: "never" as const,
+    createdAtMs: 500,
+    description: "Runs one fixed Kopia provider backup.",
+    enabled: true,
+    id: "backup.kopia.run",
+    manualRunAvailable: true,
+    name: "Kopia backup",
+    nextRunAtMs: 60_000,
+    priority: 10,
+    resourceClass: "exclusive" as const,
+    resourceKeys: ["backup.heavy-io", "docker.engine"],
+    retrySafe: false,
+    schedule: {
+        kind: "daily" as const,
+        timeOfDay: "03:50",
+        timeZone: "Europe/Oslo",
+    },
+    timeoutMs: 6 * 60 * 60_000,
+    updatedAtMs: 1000,
+    version: 1,
+});
+
+const workerSmokeSchedule = Object.freeze({
+    ...kopiaSchedule,
+    actionKey: "system.worker-smoke",
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative" as const,
+    description: "Verifies the release worker without host mutation.",
+    id: scheduleId,
+    name: "Worker smoke",
+    priority: 0,
+    resourceClass: "light" as const,
+    resourceKeys: ["database"],
+    retrySafe: true,
+    schedule: { intervalMs: 86_400_000, kind: "interval" as const },
+    timeoutMs: 30_000,
+});
+
 async function expectTrpcCode(
     operation: () => Promise<unknown>,
     code: TRPCError["code"]
@@ -68,6 +110,7 @@ describe("durable jobs procedures", () => {
         );
 
         const automationService = createTestJobService({
+            getSchedule: () => Effect.succeed(workerSmokeSchedule),
             runSchedule: () => Effect.succeed(queuedRun),
         });
         const automation = appRouter.createCaller(
@@ -148,5 +191,78 @@ describe("durable jobs procedures", () => {
                 }),
             "BAD_REQUEST"
         );
+    });
+
+    test("requires the schedule domain grant and recent MFA before manual enqueue", async () => {
+        const service = createTestJobService({
+            getSchedule: () => Effect.succeed(kopiaSchedule),
+            runSchedule: () => Effect.succeed(queuedRun),
+        });
+        const jobsOnly = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestSessionAuthentication(["jobs:write"]),
+                createTestApplicationRuntime(),
+                { jobService: service }
+            )
+        );
+        await expectTrpcCode(
+            () =>
+                jobsOnly.schedules.run({
+                    id: kopiaSchedule.id,
+                    idempotencyKey: "B".repeat(32),
+                }),
+            "FORBIDDEN"
+        );
+
+        const automation = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestAutomationAuthentication(["jobs:write"]),
+                createTestApplicationRuntime(),
+                { jobService: service }
+            )
+        );
+        await expectTrpcCode(
+            () =>
+                automation.schedules.run({
+                    id: kopiaSchedule.id,
+                    idempotencyKey: "E".repeat(32),
+                }),
+            "FORBIDDEN"
+        );
+
+        const staleMfa = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestSessionAuthentication(["backups:write", "jobs:write"]),
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService({
+                        authorizeRecentMfa: () => "step-up-required",
+                    }),
+                    jobService: service,
+                }
+            )
+        );
+        await expectTrpcCode(
+            () =>
+                staleMfa.schedules.run({
+                    id: kopiaSchedule.id,
+                    idempotencyKey: "C".repeat(32),
+                }),
+            "FORBIDDEN"
+        );
+
+        const authorized = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestSessionAuthentication(["backups:write", "jobs:write"]),
+                createTestApplicationRuntime(),
+                { jobService: service }
+            )
+        );
+        expect(
+            await authorized.schedules.run({
+                id: kopiaSchedule.id,
+                idempotencyKey: "D".repeat(32),
+            })
+        ).toEqual(queuedRun);
     });
 });

@@ -103,6 +103,9 @@ export function dockerUpdaterStatusVariant(
     status: DockerUpdaterService["status"]
 ): BadgeVariant {
     switch (status.state) {
+        case "not-checked": {
+            return "default";
+        }
         case "current": {
             return "success";
         }
@@ -117,6 +120,9 @@ export function dockerUpdaterStatusVariant(
 
 export function dockerUpdaterStatusLabel(status: DockerUpdaterService["status"]): string {
     switch (status.state) {
+        case "not-checked": {
+            return "Not checked";
+        }
         case "current": {
             return "Current";
         }
@@ -127,6 +133,14 @@ export function dockerUpdaterStatusLabel(status: DockerUpdaterService["status"])
             return "Registry unavailable";
         }
     }
+}
+
+/**
+ * @param health Exact Engine health state.
+ * @returns Compact health copy that fits the fixed table badge.
+ */
+export function dockerContainerHealthLabel(health: DockerContainer["health"]): string {
+    return health === "none" ? "Unknown" : health;
 }
 
 const inventoryOnlyReasonLabels: Readonly<

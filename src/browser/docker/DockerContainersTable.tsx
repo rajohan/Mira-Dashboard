@@ -19,6 +19,7 @@ import {
     type DockerContainerSort,
     type DockerContainerSortField,
     dockerContainerHealthVariant,
+    dockerContainerHealthLabel,
     dockerContainerIsActive,
     dockerContainerMatchesSearch,
     dockerContainerStateVariant,
@@ -225,13 +226,21 @@ function StackActionMenu({
 }
 
 function ContainerIdentity({ container }: { readonly container: DockerContainer }) {
+    const digestIndex = container.image.indexOf("@sha256:");
+    const imageName =
+        digestIndex === -1 ? container.image : container.image.slice(0, digestIndex);
+    const imageDigest =
+        digestIndex === -1 ? undefined : container.image.slice(digestIndex);
     return (
         <div className="min-w-0">
             <div className="text-primary-50 font-medium wrap-anywhere">
                 {container.name}
             </div>
-            <div className="text-primary-400 mt-1 text-xs wrap-anywhere">
-                {container.image}
+            <div className="text-primary-400 mt-1 min-w-0 font-mono text-xs wrap-anywhere">
+                <span className="block">{imageName}</span>
+                {imageDigest !== undefined && (
+                    <span className="mt-0.5 block">{imageDigest}</span>
+                )}
             </div>
             {(container.project !== undefined || container.service !== undefined) && (
                 <div className="text-primary-400 mt-1 flex flex-wrap gap-2 text-xs">
@@ -306,9 +315,7 @@ function DockerContainerMobileCard({
                             <Badge
                                 variant={dockerContainerHealthVariant(container.health)}
                             >
-                                {container.health === "none"
-                                    ? "No health check"
-                                    : container.health}
+                                {dockerContainerHealthLabel(container.health)}
                             </Badge>
                             <span className="mt-1 block tabular-nums">
                                 {container.restartCount} restarts
@@ -472,9 +479,19 @@ export function DockerContainersTable({
                             aria-label="Docker containers"
                             className={cn(
                                 dashboardDataTableClassNames.table,
-                                "min-w-288"
+                                "min-w-288 table-fixed"
                             )}
                         >
+                            <colgroup>
+                                <col className="w-[22%]" />
+                                <col className="w-[10%]" />
+                                <col className="w-[10%]" />
+                                <col className="w-[9%]" />
+                                <col className="w-[11%]" />
+                                <col className="w-[15%]" />
+                                <col className="w-[16%]" />
+                                <col className="w-[7%]" />
+                            </colgroup>
                             <thead className={dashboardDataTableClassNames.head}>
                                 <tr>
                                     <SortHeader
@@ -605,9 +622,9 @@ export function DockerContainersTable({
                                                         container.health
                                                     )}
                                                 >
-                                                    {container.health === "none"
-                                                        ? "No health check"
-                                                        : container.health}
+                                                    {dockerContainerHealthLabel(
+                                                        container.health
+                                                    )}
                                                 </Badge>
                                                 <span className="text-primary-400 mt-2 block text-xs tabular-nums">
                                                     restarts: {container.restartCount}

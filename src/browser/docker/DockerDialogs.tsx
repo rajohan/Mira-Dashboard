@@ -98,7 +98,7 @@ export function DockerContainerDetailsDialog({
                                 )}
                             >
                                 {resolvedContainer.health === "none"
-                                    ? "No health check"
+                                    ? "Unknown"
                                     : resolvedContainer.health}
                             </Badge>
                         </div>

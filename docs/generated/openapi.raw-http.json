@@ -22740,6 +22740,18 @@
                           "type": "object",
                           "properties": {
                             "state": {
+                              "const": "not-checked"
+                            }
+                          },
+                          "required": [
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "state": {
                               "const": "current"
                             }
                           },
@@ -23475,6 +23487,18 @@
                     },
                     "status": {
                       "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "state": {
+                              "const": "not-checked"
+                            }
+                          },
+                          "required": [
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
                         {
                           "type": "object",
                           "properties": {

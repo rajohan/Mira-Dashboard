@@ -101,10 +101,10 @@ function AuthenticatedDashboardHeaderControls() {
     const status = projectDashboardSystemStatus(
         health.data,
         dashboardHealthSnapshotIsStale({
+            dataUpdatedAtMs: health.dataUpdatedAt,
             fetchStatus: health.fetchStatus,
             hasData: health.data !== undefined,
             isError: health.isError,
-            isStale: health.isStale,
         })
     );
     const overallLabel = overallLabels[status.overall];

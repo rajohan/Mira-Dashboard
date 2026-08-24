@@ -120,7 +120,7 @@ describe("Docker overview collector", () => {
         });
 
         const payload = await collector.collect({ updaterServices: "untrusted" });
-        expect(payload.updaterServices[0]?.status).toEqual({ state: "unavailable" });
+        expect(payload.updaterServices[0]?.status).toEqual({ state: "not-checked" });
     });
 
     test("propagates cancellation without publishing a partial empty snapshot", async () => {

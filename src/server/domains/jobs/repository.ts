@@ -14,6 +14,7 @@ import {
     lte,
     min,
     ne,
+    notInArray,
     or,
     sql,
     type SQL,
@@ -595,7 +596,9 @@ export interface JobRepositoryReader {
     listRuns(input: ListJobRunsInput): JobRunRecord[];
     listRunsWithQueueState(input: ListJobRunsWithQueueStateInput): JobRunPageSnapshot;
     listScheduleRuns(input: ListScheduleRunsInput): JobRunRecord[];
-    listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[];
+    listSchedules(
+        input: ListSchedulesInput & { readonly excludeIds?: readonly string[] }
+    ): ScheduleRecordWithRelations[];
     readClaimCancellation(input: ClaimFenceInput): JobClaimCancellation;
     readActionPayloadRunSnapshots(
         input: ReadActionPayloadRunSnapshotsInput
@@ -1269,7 +1272,9 @@ class DrizzleJobReader implements JobRepositoryReader {
             .map((row) => parseRun(row));
     }
 
-    public listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[] {
+    public listSchedules(
+        input: ListSchedulesInput & { readonly excludeIds?: readonly string[] }
+    ): ScheduleRecordWithRelations[] {
         assertLimit(input.limit, schedulePageMaximum, "schedule page");
         const records = this.database
             .select()
@@ -1281,7 +1286,10 @@ class DrizzleJobReader implements JobRepositoryReader {
                         : gt(scheduledJobs.id, input.cursor.id),
                     input.enabled === "all"
                         ? undefined
-                        : eq(scheduledJobs.enabled, input.enabled === "enabled")
+                        : eq(scheduledJobs.enabled, input.enabled === "enabled"),
+                    input.excludeIds === undefined || input.excludeIds.length === 0
+                        ? undefined
+                        : notInArray(scheduledJobs.id, [...input.excludeIds])
                 )
             )
             .orderBy(asc(scheduledJobs.id))

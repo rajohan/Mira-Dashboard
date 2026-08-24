@@ -416,6 +416,10 @@ async function waitForDialogExit(): Promise<void> {
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
 }
 
+async function openAutomationPrincipal(userActions: ReturnType<typeof userEvent.setup>) {
+    await userActions.click(screen.getByRole("button", { name: /OpenClaw heartbeat/u }));
+}
+
 async function submitGlobalProofAndWaitForRefresh(
     queryClient: ReturnType<typeof createDashboardQueryClient>,
     operationReplayed: Promise<void>,
@@ -1615,6 +1619,7 @@ describe("Dashboard account security route", () => {
         const userActions = userEvent.setup();
         await screen.findByText(automationPrincipal.label, {}, { timeout: 4000 });
 
+        await openAutomationPrincipal(userActions);
         await userActions.click(
             screen.getByRole("button", { name: /Manage access tokens/u })
         );
@@ -1675,6 +1680,7 @@ describe("Dashboard account security route", () => {
         const userActions = userEvent.setup();
 
         await screen.findByText(automationPrincipal.label, {}, { timeout: 4000 });
+        await openAutomationPrincipal(userActions);
         await userActions.click(
             screen.getByRole("button", { name: /Manage access tokens/u })
         );
@@ -1714,6 +1720,7 @@ describe("Dashboard account security route", () => {
         const userActions = userEvent.setup();
         await screen.findByText(automationPrincipal.label);
 
+        await openAutomationPrincipal(userActions);
         await userActions.click(
             screen.getByRole("button", { name: /Manage access tokens/u })
         );
@@ -1896,10 +1903,9 @@ describe("Dashboard account security route", () => {
             true
         );
         const userActions = userEvent.setup();
-        await screen.findByRole("heading", {
-            level: 3,
-            name: "Create automation account",
-        });
+        await userActions.click(
+            await screen.findByRole("button", { name: /Create automation account/u })
+        );
 
         await userActions.type(
             screen.getByLabelText("Account ID"),
@@ -2050,6 +2056,7 @@ describe("Dashboard account security route", () => {
         const userActions = userEvent.setup();
         await screen.findByText(automationPrincipal.label);
 
+        await openAutomationPrincipal(userActions);
         await userActions.click(
             screen.getByRole("button", { name: /Manage access tokens/u })
         );

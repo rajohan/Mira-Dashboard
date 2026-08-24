@@ -11,6 +11,8 @@ import {
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
     isRegisteredJobSchedule,
+    jobScheduleIsOperatorVisible,
+    jobActionDefinitions,
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawInstallationUpdateJobResultSchema,
@@ -24,6 +26,16 @@ import {
 } from "./actionRegistry.ts";
 
 describe("durable job action registry", () => {
+    test("exposes every Dashboard schedule through the fixed Jobs run surface", () => {
+        expect(jobActionDefinitions).not.toHaveLength(0);
+        expect(
+            jobActionDefinitions
+                .filter(({ scheduleId }) => jobScheduleIsOperatorVisible(scheduleId))
+                .every(({ scheduleId }) => scheduleId !== "system.worker-smoke")
+        ).toBe(true);
+        expect(jobScheduleIsOperatorVisible("system.worker-smoke")).toBe(false);
+    });
+
     test("exposes pure smoke, cache, and fixed log definitions without worker authority", () => {
         const registration = findJobActionDefinition("system.worker-smoke");
 
