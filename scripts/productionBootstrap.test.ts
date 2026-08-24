@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
+import { assertProductionReleaseArchiveListing } from "./delivery/productionReleaseArchive.ts";
 import {
     admitProductionBootstrapRelease,
-    assertProductionReleaseArchiveListing,
     bootstrapProduction,
     deployProduction,
     downloadProductionBootstrapRelease,
@@ -83,7 +83,7 @@ describe("production bootstrap admission", () => {
         ]) {
             expect(() =>
                 assertProductionReleaseArchiveListing(listing, releaseId)
-            ).toThrow("Production bootstrap failed");
+            ).toThrow("Production release archive is invalid");
         }
     });
 
@@ -141,7 +141,7 @@ describe("production bootstrap admission", () => {
                 "/tmp/artifact",
                 dependencies
             )
-        ).toBe("/tmp/artifact");
+        ).toEqual({ artifactRoot: "/tmp/artifact", tagName: "v0.2.0" });
         expect(commands.some((command) => command.includes(" fetch --force "))).toBe(
             true
         );
@@ -758,8 +758,9 @@ describe("production bootstrap admission", () => {
         );
         expect(
             commands.some((command) => command.includes("systemctl daemon-reload"))
-        ).toBe(true);
+        ).toBe(false);
         expect(commands.at(-1)).toContain("delivery activate");
+        expect(commands.at(-1)).toContain("--release-authority-json=");
         expect(commands.at(-1)).not.toContain("--activation-mode=greenfield");
     });
 });

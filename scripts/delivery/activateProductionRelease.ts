@@ -5,6 +5,10 @@ import * as v from "valibot";
 
 import { healthReadinessPath } from "../../src/contracts/system.ts";
 import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
+import {
+    publishedReleaseAuthoritySchema,
+    type PublishedReleaseAuthority,
+} from "../../src/shared/publishedReleaseAuthority.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { fullCommitShaSchema } from "../../src/shared/validation.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
@@ -34,7 +38,7 @@ import { createSystemdProductionServiceController } from "./systemdProductionSer
 
 const activationCliFailureMessage = "Production release activation failed";
 const activationCliUsage =
-    "Usage: bun run delivery activate --project-root=/absolute/project --release-root=/absolute/release --readiness-url=http://127.0.0.1:PORT/api/health/ready [--runtime-source=/absolute/bun] [--activation-mode=greenfield]";
+    "Usage: bun run delivery activate --project-root=/absolute/project --release-root=/absolute/release --readiness-url=http://127.0.0.1:PORT/api/health/ready [--runtime-source=/absolute/bun] [--release-authority-json=JSON] [--activation-mode=greenfield]";
 const absolutePathSchema = v.pipe(
     v.string(),
     v.maxLength(4096),
@@ -71,6 +75,7 @@ const activateProductionReleaseArgumentsSchema = v.strictObject({
     activationMode: v.optional(v.literal("greenfield")),
     projectRoot: absolutePathSchema,
     readinessUrl: readinessUrlSchema,
+    releaseAuthorityJson: v.optional(v.pipe(v.string(), v.maxLength(4096))),
     releaseRoot: absolutePathSchema,
     runtimeSource: v.optional(absolutePathSchema),
 });
@@ -83,14 +88,20 @@ const activationArgumentNames = new Set([
     "activation-mode",
     "project-root",
     "readiness-url",
+    "release-authority-json",
     "release-root",
     "runtime-source",
 ]);
 
 /** Explicit immutable-release activation command. */
-export type ActivateProductionReleaseArguments = Readonly<
-    v.InferOutput<typeof activateProductionReleaseArgumentsSchema>
->;
+export interface ActivateProductionReleaseArguments {
+    readonly activationMode?: "greenfield";
+    readonly projectRoot: string;
+    readonly readinessUrl: string;
+    readonly releaseAuthority?: PublishedReleaseAuthority;
+    readonly releaseRoot: string;
+    readonly runtimeSource?: string;
+}
 
 /** Safe machine-readable result from production activation. */
 export type ActivateProductionReleaseResult = Readonly<
@@ -138,7 +149,7 @@ function readNamedArguments(arguments_: readonly string[]): Record<string, strin
 export function parseActivateProductionReleaseArguments(
     arguments_: readonly string[]
 ): ActivateProductionReleaseArguments {
-    if (arguments_.length < 3 || arguments_.length > 5) {
+    if (arguments_.length < 3 || arguments_.length > 6) {
         throw new TypeError(activationCliUsage);
     }
     const named = readNamedArguments(arguments_);
@@ -149,6 +160,7 @@ export function parseActivateProductionReleaseArguments(
         activationMode: named["activation-mode"],
         projectRoot: named["project-root"],
         readinessUrl: named["readiness-url"],
+        releaseAuthorityJson: named["release-authority-json"],
         releaseRoot: named["release-root"],
         runtimeSource: named["runtime-source"],
     };
@@ -156,7 +168,29 @@ export function parseActivateProductionReleaseArguments(
         abortEarly: true,
     });
     if (!parsed.success) throw new TypeError(activationCliUsage);
-    return Object.freeze(parsed.output);
+    let releaseAuthority: PublishedReleaseAuthority | undefined;
+    if (parsed.output.releaseAuthorityJson !== undefined) {
+        try {
+            releaseAuthority = v.parse(
+                publishedReleaseAuthoritySchema,
+                JSON.parse(parsed.output.releaseAuthorityJson) as unknown
+            );
+        } catch {
+            throw new TypeError(activationCliUsage);
+        }
+    }
+    return Object.freeze({
+        ...(parsed.output.activationMode === undefined
+            ? {}
+            : { activationMode: parsed.output.activationMode }),
+        projectRoot: parsed.output.projectRoot,
+        readinessUrl: parsed.output.readinessUrl,
+        ...(releaseAuthority === undefined ? {} : { releaseAuthority }),
+        releaseRoot: parsed.output.releaseRoot,
+        ...(parsed.output.runtimeSource === undefined
+            ? {}
+            : { runtimeSource: parsed.output.runtimeSource }),
+    });
 }
 
 /**
@@ -228,6 +262,7 @@ async function activateProductionRelease(
         const services = createSystemdProductionServiceController(lease, paths, {
             allowEmptyOperatorSmoke: options.activationMode === "greenfield",
             readinessUrl: options.readinessUrl,
+            releaseAuthority: options.releaseAuthority,
         });
         return deliverProductionReleaseUnderLease(
             lease,

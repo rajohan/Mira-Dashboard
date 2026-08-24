@@ -19,6 +19,11 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
         mode: 0o755,
     }),
     Object.freeze({
+        artifactPath: "server/productionProvisioning.js",
+        destinationPath: "/usr/local/libexec/mira-dashboard-production-provisioning.js",
+        mode: 0o555,
+    }),
+    Object.freeze({
         artifactPath:
             "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
         destinationPath: "/usr/local/libexec/mira-dashboard-web-runtime",
@@ -80,6 +85,13 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
         artifactPath:
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-host-system-update.service",
+        mode: 0o644,
+    }),
+    Object.freeze({
+        artifactPath:
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning@.service",
+        destinationPath:
+            "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
         mode: 0o644,
     }),
     Object.freeze({

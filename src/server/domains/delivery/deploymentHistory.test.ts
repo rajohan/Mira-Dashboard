@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import { createDeliveryDeploymentHistoryReader } from "./deploymentHistory.ts";
 
 const sha = "a".repeat(40);
@@ -22,6 +23,7 @@ describe("Delivery deployment history", () => {
                                 checkoutRevision: revision,
                                 expectedMainHeadSha: sha,
                                 operation: "deploy",
+                                release: publishedReleaseAuthority(sha),
                                 sourceRevision: revision,
                             }),
                             queuedAt: new Date(1000),

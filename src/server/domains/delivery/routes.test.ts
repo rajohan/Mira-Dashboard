@@ -6,6 +6,7 @@ import type {
     DeliveryRequestOperationInput,
     DeliveryRequestOperationResult,
 } from "../../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     createTestApplicationRuntime,
@@ -71,6 +72,7 @@ const deployInput = Object.freeze({
     expectedMainHeadSha: headSha,
     idempotencyKey,
     operation: "deploy" as const,
+    release: publishedReleaseAuthority(headSha, "v1.2.3", runtimeRevision),
     sourceRevision,
 });
 const rejectPullRequestInput = Object.freeze({

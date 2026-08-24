@@ -7,6 +7,7 @@ import type {
     DeliveryGitHubPullRequestMutationPort,
     DeliveryGitHubPullRequestReadPort,
 } from "../../contracts/deliveryGithub.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import type { DeliveryOverviewCollector } from "./overviewCollector.ts";
 import { projectDeliveryOperationAuthority } from "./overviewProjection.ts";
 import {
@@ -73,9 +74,10 @@ function pullRequest(
     };
 }
 
-function releases(): DeliveryReleases {
+function releases(candidateReleaseId = mainHead): DeliveryReleases {
     return {
         activationRevision: "a".repeat(64),
+        candidate: publishedReleaseAuthority(candidateReleaseId),
         current: {
             builtAtMs: nowMs - 10_000,
             commitTitle: "Current",
@@ -113,7 +115,7 @@ function overview(
         mainHeadSha: remoteHead,
         observedAtMs: nowMs,
         previewStatus: { status: "stopped", updatedAtMs: nowMs },
-        production: { actionActive: false, releases: releases() },
+        production: { actionActive: false, releases: releases(remoteHead) },
         pullRequests,
         reviewer: { state: "available" },
         supportsNativeStacks: true,
@@ -399,6 +401,7 @@ describe("Delivery worker runtime", () => {
                 checkoutRevision: current.checkout.revision,
                 expectedMainHeadSha: current.checkout.remoteHeadSha,
                 operation: "deploy",
+                release: current.releases.candidate!,
                 sourceRevision: current.sourceRevision,
             })
             .then(
@@ -433,6 +436,7 @@ describe("Delivery worker runtime", () => {
             activationRevision: current.releases.activationRevision,
             checkoutRevision: current.checkout.revision,
             operation: "deploy" as const,
+            release: current.releases.candidate!,
             sourceRevision: current.sourceRevision,
         };
 

@@ -100,6 +100,10 @@ async function releaseFixture(): Promise<{
             path.join(releaseRoot, "server/productionDelivery.js"),
             "production-delivery"
         ),
+        writeFile(
+            path.join(releaseRoot, "server/productionProvisioning.js"),
+            "production-provisioning"
+        ),
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
         writeFile(
@@ -260,6 +264,7 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-production-authority.conf",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning@.service",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
             "scripts/delivery/provisioning/host-operations/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/60-mira-dashboard-log-maintenance.rules",

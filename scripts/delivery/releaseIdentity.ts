@@ -247,6 +247,7 @@ function assertArtifactShape(
         "server/databaseMaintenance.js",
         "server/openClawHeartbeat.js",
         "server/productionDelivery.js",
+        "server/productionProvisioning.js",
         "server/web.js",
         "server/worker.js",
     ]) {

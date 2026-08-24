@@ -67,6 +67,10 @@ export class ProductionReleaseActivationError extends TaggedErrorClass<Productio
 
 /** Idempotent process-control port implemented by the project-local systemd adapter. */
 export interface ProductionServiceController {
+    readonly provision: (
+        release: PublishedProductionRelease,
+        runtime: InstalledProductionRuntime
+    ) => Promise<void>;
     readonly prepare: (
         release: PublishedProductionRelease,
         runtime: InstalledProductionRuntime
@@ -131,8 +135,17 @@ async function prepareAndStartServices(
     services: ProductionServiceController,
     artifacts: ActiveArtifacts
 ): Promise<void> {
+    await services.provision(artifacts.release, artifacts.runtime);
     await services.prepare(artifacts.release, artifacts.runtime);
     await services.start(artifacts.release, artifacts.runtime);
+}
+
+async function provisionAndPrepareServices(
+    services: ProductionServiceController,
+    artifacts: ActiveArtifacts
+): Promise<void> {
+    await services.provision(artifacts.release, artifacts.runtime);
+    await services.prepare(artifacts.release, artifacts.runtime);
 }
 
 function sameRecord(
@@ -491,7 +504,7 @@ async function rollbackTransition(
                   dependencies
               )
             : previous;
-    await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
+    await provisionAndPrepareServices(dependencies.services, stopOwner);
     await dependencies.services.stop();
     if (journal.phase === "service-stop-requested") {
         await discardOrphanDatabaseTransitionWorkspace(
@@ -635,7 +648,7 @@ async function activateRelease(
     let promoted: PromotedDatabaseState | undefined;
     try {
         const stopOwner = previous ?? candidate;
-        await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
+        await provisionAndPrepareServices(dependencies.services, stopOwner);
         journal = await createProductionActivationJournal(
             lease,
             paths,

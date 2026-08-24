@@ -22,6 +22,7 @@ import {
     type DeliveryGitHubStack,
 } from "../../contracts/deliveryGithub.ts";
 import { utf8ByteLength } from "../../shared/encoding.ts";
+import { productionReleaseArtifactReceiptSchema } from "../../shared/productionReleaseArtifactReceipt.ts";
 import {
     DeliveryGitHubError,
     type DeliveryGitHubHttpTransport,
@@ -160,6 +161,7 @@ const rawLatestReleaseSchema = v.object({
     assets: v.array(
         v.object({
             digest: v.string(),
+            id: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
             name: v.string(),
             size: v.number(),
         })
@@ -169,6 +171,7 @@ const rawLatestReleaseSchema = v.object({
     tag_name: v.string(),
     target_commitish: v.string(),
 });
+const rawReleaseCommitSchema = v.object({ sha: v.string() });
 const rawMergeSchema = v.object({
     merged: v.boolean(),
     message: v.string(),
@@ -562,13 +565,40 @@ export function createDeliveryGitHubPullRequestPort(
                 await options.transport.requestJson({ kind: "latest-release" }, signal)
             );
             if (raw.draft || raw.prerelease) fail("conflict");
+            const receiptAsset = raw.assets.find(({ name }) => name === "receipt.json");
+            const archiveAsset = raw.assets.find(({ name }) => name === "release.tar");
+            if (receiptAsset === undefined || archiveAsset === undefined)
+                fail("conflict");
+            const releaseCommit = v.parse(
+                rawReleaseCommitSchema,
+                await options.transport.requestJson(
+                    { kind: "release-tag-commit", tagName: raw.tag_name },
+                    signal
+                )
+            );
+            const receipt = v.parse(
+                productionReleaseArtifactReceiptSchema,
+                await options.transport.requestJson(
+                    { assetId: receiptAsset.id, kind: "release-asset" },
+                    signal
+                )
+            );
+            if (
+                receipt.releaseId !== releaseCommit.sha ||
+                receipt.archive.bytes !== archiveAsset.size ||
+                `sha256:${receipt.archive.sha256}` !== archiveAsset.digest
+            ) {
+                fail("conflict");
+            }
             return v.parse(deliveryGitHubPublishedReleaseSchema, {
                 assets: raw.assets.map(({ digest, name, size }) => ({
                     digest,
                     name,
                     size,
                 })),
-                releaseId: raw.target_commitish,
+                releaseId: releaseCommit.sha,
+                releaseManifestSha256: receipt.releaseManifestSha256,
+                runtime: receipt.runtime,
                 tagName: raw.tag_name,
             });
         } catch (error) {

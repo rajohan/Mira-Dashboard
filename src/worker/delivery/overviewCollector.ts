@@ -155,8 +155,7 @@ function withPublishedCandidate(
                 ? {}
                 : {
                       candidate: {
-                          releaseId: release.releaseId,
-                          tagName: release.tagName,
+                          ...release,
                       },
                   }),
         },

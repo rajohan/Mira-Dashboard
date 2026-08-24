@@ -118,6 +118,10 @@ async function materializeCommandOutput(
                 "production-delivery"
             ),
             writeFile(
+                path.join(repositoryRoot, "dist/processes/productionProvisioning.js"),
+                "production-provisioning"
+            ),
+            writeFile(
                 path.join(repositoryRoot, "dist/processes/openClawHeartbeat.js"),
                 "openclaw-heartbeat"
             ),

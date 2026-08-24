@@ -21,6 +21,7 @@ import {
     releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../src/shared/releaseManifest.ts";
+import { publishedReleaseAuthority } from "../../src/testSupport/publishedReleaseAuthority.ts";
 import { reconcileDeliveryProductionCutoverBeforeValidation } from "../../src/worker/delivery/productionRecovery.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
@@ -67,6 +68,11 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
         checkoutRevision: "2".repeat(64),
         expectedMainHeadSha: targetReleaseId,
         operation: "deploy" as const,
+        release: publishedReleaseAuthority(
+            targetReleaseId,
+            "v1.2.3",
+            targetRuntimeRevision
+        ),
         sourceRevision: "f".repeat(64),
     };
     return {
@@ -406,6 +412,7 @@ describe("production Delivery executor", () => {
                         }),
                     createServices: () => ({
                         prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
                         start: () => Promise.resolve(),
                         stop: () => Promise.resolve(),
                         verifyReady: async () => {
@@ -537,6 +544,7 @@ describe("production Delivery executor", () => {
                 }),
             createServices: () => ({
                 prepare: () => Promise.resolve(),
+                provision: () => Promise.resolve(),
                 start: () => Promise.resolve(),
                 stop: () => Promise.resolve(),
                 verifyReady: () => Promise.resolve(),
@@ -634,6 +642,7 @@ describe("production Delivery executor", () => {
                         }),
                     createServices: () => ({
                         prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
                         start: () => {
                             starts += 1;
                             return Promise.reject(new Error("restart failed"));
@@ -743,6 +752,11 @@ describe("production Delivery executor", () => {
                         expect(checkoutRoot).toEndWith("/production/checkout");
                         calls.push("published-assets-and-root-provisioning");
                         return Promise.resolve({
+                            authority: publishedReleaseAuthority(
+                                releaseId,
+                                "v1.2.3",
+                                targetRuntimeRevision
+                            ),
                             releaseId,
                             releaseRoot: `${checkoutRoot}/dist/releases/${releaseId}`,
                         });

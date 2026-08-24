@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
+import { publishedReleaseAuthority } from "../testSupport/publishedReleaseAuthority.ts";
 import {
     deliveryGitHubActionKey,
     deliveryJobActionKeyForPayload,
@@ -33,6 +34,7 @@ describe("Delivery worker contract", () => {
             checkoutRevision: revision,
             expectedMainHeadSha: sha,
             operation: "deploy",
+            release: publishedReleaseAuthority(sha),
             sourceRevision: revision,
         });
         expect(deliveryJobActionKeyForPayload(github)).toBe(deliveryGitHubActionKey);
@@ -79,6 +81,7 @@ describe("Delivery worker contract", () => {
                     checkoutRevision: revision,
                     expectedMainHeadSha: sha,
                     operation: "deploy",
+                    release: publishedReleaseAuthority(sha),
                     sourceRevision: revision,
                     ...extra,
                 })

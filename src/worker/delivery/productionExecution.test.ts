@@ -8,6 +8,7 @@ import {
     parseDeliveryProductionOperationRecord,
     type DeliveryProductionOperationRecord,
 } from "../../shared/deliveryProductionOperation.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { projectDeliveryOperationAuthority } from "./overviewProjection.ts";
 import { createDeliveryProductionExecutionPort } from "./productionExecution.ts";
 
@@ -114,7 +115,11 @@ function currentAuthority() {
             actionActive: false,
             releases: {
                 activationRevision,
-                candidate: { releaseId: mergedMainHead, tagName: "v1.2.3" },
+                candidate: publishedReleaseAuthority(
+                    mergedMainHead,
+                    "v1.2.3",
+                    currentRuntimeRevision
+                ),
                 current: {
                     builtAtMs: nowMs - 1000,
                     commitTitle: "Current",
@@ -203,6 +208,11 @@ describe("Delivery production execution", () => {
             checkoutRevision,
             expectedMainHeadSha: mergedMainHead,
             operation: "deploy",
+            release: publishedReleaseAuthority(
+                mergedMainHead,
+                "v1.2.3",
+                currentRuntimeRevision
+            ),
             sourceRevision,
         };
         const runIdentity = identity(input);
@@ -285,6 +295,11 @@ describe("Delivery production execution", () => {
             checkoutRevision,
             expectedMainHeadSha: mergedMainHead,
             operation: "deploy",
+            release: publishedReleaseAuthority(
+                mergedMainHead,
+                "v1.2.3",
+                currentRuntimeRevision
+            ),
             sourceRevision,
         };
         const runIdentity = identity(input);

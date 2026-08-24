@@ -329,6 +329,7 @@ function payloadFor(input: DeliveryRequestOperationInput): DeliveryOperationJobP
                 checkoutRevision: input.checkoutRevision,
                 expectedMainHeadSha: input.expectedMainHeadSha,
                 operation: input.operation,
+                release: input.release,
                 sourceRevision: input.sourceRevision,
             };
         }
@@ -443,6 +444,12 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 !checkout.checkout.safeForDeploy ||
                 checkout.checkout.revision !== input.checkoutRevision ||
                 checkout.checkout.remoteHeadSha !== input.expectedMainHeadSha ||
+                releases.releases.candidate === undefined ||
+                releases.releases.current === undefined ||
+                JSON.stringify(releases.releases.candidate) !==
+                    JSON.stringify(input.release) ||
+                input.release.runtime.revision !==
+                    releases.releases.current.runtimeRevision ||
                 releases.releases.activationRevision !== input.activationRevision
             ) {
                 throw new DeliveryServiceError("conflict");

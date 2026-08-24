@@ -363,7 +363,11 @@ export function createDeliveryProductionExecutionPort(
             if (
                 payload.operation === "deploy" &&
                 (current.releases.candidate === undefined ||
-                    current.releases.candidate.releaseId !== payload.expectedMainHeadSha)
+                    current.releases.current === undefined ||
+                    JSON.stringify(current.releases.candidate) !==
+                        JSON.stringify(payload.release) ||
+                    payload.release.runtime.revision !==
+                        current.releases.current.runtimeRevision)
             ) {
                 throw failure();
             }
@@ -502,6 +506,27 @@ export function createDeliveryProductionExecutionPort(
                 throw failure();
             }
 
+            let target: Readonly<{
+                databaseSnapshotTransitionId: string | null;
+                releaseId: string;
+                runtimeRevision: string;
+            }>;
+            if (payload.operation === "rollback-release") {
+                target = {
+                    databaseSnapshotTransitionId:
+                        payload.target.databaseSnapshotTransitionId,
+                    releaseId: payload.target.releaseId,
+                    runtimeRevision: payload.target.runtimeRevision,
+                };
+            } else if (payload.operation === "deploy") {
+                target = {
+                    databaseSnapshotTransitionId: null,
+                    releaseId: targetReleaseId,
+                    runtimeRevision: payload.release.runtime.revision,
+                };
+            } else {
+                throw failure();
+            }
             const capsule: DeliveryProductionOperationCapsule =
                 parseDeliveryProductionOperationCapsule({
                     cas: {
@@ -511,19 +536,7 @@ export function createDeliveryProductionExecutionPort(
                             rollbackSnapshotTransitionId: identity.runId,
                             runtimeRevision: activation.current.runtimeRevision,
                         },
-                        target:
-                            payload.operation === "rollback-release"
-                                ? {
-                                      databaseSnapshotTransitionId:
-                                          payload.target.databaseSnapshotTransitionId,
-                                      releaseId: payload.target.releaseId,
-                                      runtimeRevision: payload.target.runtimeRevision,
-                                  }
-                                : {
-                                      databaseSnapshotTransitionId: null,
-                                      releaseId: targetReleaseId,
-                                      runtimeRevision: activation.current.runtimeRevision,
-                                  },
+                        target,
                     },
                     enqueue: {
                         actionKey: deliveryProductionActionKey,

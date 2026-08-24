@@ -12,6 +12,7 @@ import {
 import path from "node:path";
 
 import { configurationEnvironmentNamesForRole } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
+import type { PublishedReleaseAuthority } from "../../src/shared/publishedReleaseAuthority.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import {
     createProductionTargetFixture,
@@ -41,6 +42,19 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     version: "1.4.0",
 });
 const temporaryDirectories: string[] = [];
+
+function publishedAuthority(releaseId: string): PublishedReleaseAuthority {
+    return {
+        assets: [
+            { digest: `sha256:${"d".repeat(64)}`, name: "receipt.json", size: 1 },
+            { digest: `sha256:${"e".repeat(64)}`, name: "release.tar", size: 1 },
+        ],
+        releaseId,
+        releaseManifestSha256: "f".repeat(64),
+        runtime: runtimeIdentity,
+        tagName: "v1.2.3",
+    };
+}
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
@@ -131,6 +145,7 @@ describe("production root-systemd service control", () => {
                     return Promise.resolve();
                 },
                 readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                releaseAuthority: publishedAuthority(firstReleaseId),
                 smoke: (observedPaths, release, runtime, readinessUrl, transitionId) => {
                     expect(observedPaths).toBe(paths);
                     expect(release).toBe(fixtures.first);
@@ -141,6 +156,7 @@ describe("production root-systemd service control", () => {
                 },
             });
 
+            await controller.provision(fixtures.first, fixtures.runtime);
             await controller.prepare(fixtures.first, fixtures.runtime);
             await controller.start(fixtures.first, fixtures.runtime);
             await controller.verifyReady(fixtures.first, fixtures.runtime);
@@ -158,6 +174,10 @@ describe("production root-systemd service control", () => {
                 await readlink(path.join(paths.runtimesDirectory, "bun", "current"))
             ).toBe(runtimeIdentity.revision);
             expect(commands).toEqual([
+                [
+                    "start",
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--v1.2.3.service`,
+                ],
                 ["restart", "mira-dashboard-worker.service"],
                 ["restart", "mira-dashboard-web.service"],
                 ["is-active", "--quiet", "mira-dashboard-worker.service"],
@@ -254,6 +274,32 @@ describe("production root-systemd service control", () => {
             expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
                 secondReleaseId
             );
+        });
+    });
+
+    test("provisions retained rollback authority from the root-staged release", async () => {
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await createRuntimePointerFixture(paths);
+            const commands: string[][] = [];
+            const controller = createSystemdProductionServiceController(lease, paths, {
+                execute: (_executable, arguments_) => {
+                    commands.push([...arguments_]);
+                    return Promise.resolve(successfulProcessResult());
+                },
+                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+            });
+
+            await controller.provision(fixtures.first, fixtures.runtime);
+
+            expect(commands).toEqual([
+                [
+                    "start",
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--local.service`,
+                ],
+            ]);
         });
     });
 

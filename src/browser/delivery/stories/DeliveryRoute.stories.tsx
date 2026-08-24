@@ -10,6 +10,7 @@ import type {
     DeliveryReleasesResult,
     DeliveryRequestOperationResult,
 } from "../../../contracts/delivery.ts";
+import type { PublishedReleaseAuthority } from "../../../shared/publishedReleaseAuthority.ts";
 import {
     DashboardPageStory,
     type DashboardPageStoryQuerySeed,
@@ -40,6 +41,32 @@ const activationRevision = "1".repeat(64);
 const jobRunId = "019fdf70-0000-7000-8000-000000000040";
 const headGuardUnavailableReason =
     "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads.";
+
+function publishedReleaseAuthority(
+    releaseId: string,
+    tagName = "v1.2.3",
+    runtimeRevision = "b".repeat(40)
+): PublishedReleaseAuthority {
+    const assets: PublishedReleaseAuthority["assets"] = [
+        {
+            digest: `sha256:${"c".repeat(64)}`,
+            name: "receipt.json",
+            size: 512,
+        },
+        {
+            digest: `sha256:${"d".repeat(64)}`,
+            name: "release.tar",
+            size: 4096,
+        },
+    ];
+    return Object.freeze({
+        assets,
+        releaseId,
+        releaseManifestSha256: "e".repeat(64),
+        runtime: { revision: runtimeRevision, version: "1.4.0" },
+        tagName,
+    });
+}
 
 const nativeStackActions: DeliveryPullRequest["actions"] = [
     {
@@ -255,7 +282,7 @@ const releasesResult = {
     observedAtMs,
     releases: {
         activationRevision,
-        candidate: { releaseId: candidateSha, tagName: "v1.2.3" },
+        candidate: publishedReleaseAuthority(candidateSha),
         current: {
             builtAtMs: observedAtMs - 1000,
             commitTitle: "Current release",

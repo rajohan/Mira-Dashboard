@@ -122,16 +122,36 @@ describe("Delivery GitHub pull-request port", () => {
     test("admits only the permanent asset pair for the latest stable release", () => {
         const port = createDeliveryGitHubPullRequestPort({
             transport: transport("mira-2026", (operation) => {
+                if (operation.kind === "release-tag-commit") {
+                    expect(operation.tagName).toBe("v1.2.3");
+                    return { sha: head };
+                }
+                if (operation.kind === "release-asset") {
+                    expect(operation.assetId).toBe(1);
+                    return {
+                        archive: {
+                            bytes: 4096,
+                            name: "release.tar",
+                            sha256: "c".repeat(64),
+                        },
+                        formatVersion: 1,
+                        releaseId: head,
+                        releaseManifestSha256: "d".repeat(64),
+                        runtime: { revision: "e".repeat(40), version: "1.4.0" },
+                    };
+                }
                 if (operation.kind !== "latest-release") throw new Error("unexpected");
                 return {
                     assets: [
                         {
                             digest: `sha256:${"b".repeat(64)}`,
+                            id: 1,
                             name: "receipt.json",
                             size: 512,
                         },
                         {
                             digest: `sha256:${"c".repeat(64)}`,
+                            id: 2,
                             name: "release.tar",
                             size: 4096,
                         },
@@ -139,7 +159,7 @@ describe("Delivery GitHub pull-request port", () => {
                     draft: false,
                     prerelease: false,
                     tag_name: "v1.2.3",
-                    target_commitish: head,
+                    target_commitish: "main",
                 };
             }),
         });
@@ -158,6 +178,8 @@ describe("Delivery GitHub pull-request port", () => {
                 },
             ],
             releaseId: head,
+            releaseManifestSha256: "d".repeat(64),
+            runtime: { revision: "e".repeat(40), version: "1.4.0" },
             tagName: "v1.2.3",
         });
     });
@@ -167,6 +189,7 @@ describe("Delivery GitHub pull-request port", () => {
             assets: [
                 {
                     digest: `sha256:${"b".repeat(64)}`,
+                    id: 1,
                     name: "receipt.json",
                     size: 512,
                 },
@@ -180,11 +203,13 @@ describe("Delivery GitHub pull-request port", () => {
             assets: [
                 {
                     digest: `sha256:${"b".repeat(64)}`,
+                    id: 1,
                     name: "receipt.json",
                     size: 512,
                 },
                 {
                     digest: `sha256:${"c".repeat(64)}`,
+                    id: 2,
                     name: "release.tar",
                     size: 4096,
                 },

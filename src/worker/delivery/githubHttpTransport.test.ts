@@ -90,6 +90,32 @@ describe("Delivery GitHub HTTPS transport", () => {
         );
     });
 
+    test("resolves one release tag through the fixed commit endpoint", () => {
+        const calls: string[] = [];
+        const transport = createDeliveryGitHubHttpTransport({
+            expectedLogin: "mira-2026",
+            fetch: (input) => {
+                calls.push(input);
+                return Promise.resolve(
+                    calls.length === 1
+                        ? Response.json({ id: 42, login: "mira-2026", type: "User" })
+                        : Response.json({ sha: "a".repeat(40) })
+                );
+            },
+            token: token(),
+        });
+
+        expect(
+            transport.requestJson({
+                kind: "release-tag-commit",
+                tagName: "v1.2.3",
+            })
+        ).resolves.toEqual({ sha: "a".repeat(40) });
+        expect(calls.at(-1)).toBe(
+            "https://api.github.com/repos/rajohan/Mira-Dashboard/commits/v1.2.3"
+        );
+    });
+
     test("rejects identity mismatch without calling the requested endpoint", async () => {
         const calls: string[] = [];
         const transport = createDeliveryGitHubHttpTransport({

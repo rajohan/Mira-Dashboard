@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { publishedReleaseAuthority } from "../testSupport/publishedReleaseAuthority.ts";
 import {
     deliveryProductionOperationPhases,
     parseDeliveryProductionOperationCapsule,
@@ -49,6 +50,11 @@ function operationPayload(
                 checkoutRevision: "2".repeat(64),
                 expectedMainHeadSha: targetReleaseId,
                 operation,
+                release: publishedReleaseAuthority(
+                    targetReleaseId,
+                    "v1.2.3",
+                    "d".repeat(40)
+                ),
                 sourceRevision: "f".repeat(64),
             };
         }

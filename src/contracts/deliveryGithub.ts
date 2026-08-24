@@ -1,5 +1,6 @@
 import * as v from "valibot";
 
+import { publishedReleaseAuthoritySchema } from "../shared/publishedReleaseAuthority.ts";
 import { fullCommitShaSchema } from "../shared/validation.ts";
 
 export const deliveryGitHubRepositoryOwner = "rajohan" as const;
@@ -141,25 +142,7 @@ export const deliveryGitHubStackSchema = v.strictObject({
     ),
 });
 
-const deliveryGitHubReleaseAssetSchema = v.strictObject({
-    digest: v.pipe(v.string(), v.regex(/^sha256:[a-f\d]{64}$/u)),
-    name: v.picklist(["receipt.json", "release.tar"]),
-    size: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
-});
-export const deliveryGitHubPublishedReleaseSchema = v.pipe(
-    v.strictObject({
-        assets: v.pipe(v.array(deliveryGitHubReleaseAssetSchema), v.length(2)),
-        releaseId: deliveryGitHubCommitShaSchema,
-        tagName: v.pipe(v.string(), v.regex(/^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u)),
-    }),
-    v.check(
-        ({ assets }) =>
-            new Set(assets.map(({ name }) => name)).size === 2 &&
-            assets.some(({ name }) => name === "receipt.json") &&
-            assets.some(({ name }) => name === "release.tar"),
-        "Delivery GitHub release assets are invalid"
-    )
-);
+export const deliveryGitHubPublishedReleaseSchema = publishedReleaseAuthoritySchema;
 
 export const deliveryGitHubAsyncMergeSchema = v.strictObject({
     details: v.strictObject({

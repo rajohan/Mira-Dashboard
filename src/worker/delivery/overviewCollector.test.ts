@@ -6,6 +6,7 @@ import type {
     DeliveryGitHubPullRequest,
     DeliveryGitHubPullRequestReadPort,
 } from "../../contracts/deliveryGithub.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import {
     createDeliveryOverviewCollector,
     type DeliveryOverviewCollector,
@@ -60,22 +61,7 @@ function github(
         getPullRequest: () => Promise.reject(new Error("unused")),
         listOpenPullRequests: list,
         readLatestPublishedRelease: () =>
-            Promise.resolve({
-                assets: [
-                    {
-                        digest: `sha256:${"b".repeat(64)}`,
-                        name: "receipt.json",
-                        size: 512,
-                    },
-                    {
-                        digest: `sha256:${"c".repeat(64)}`,
-                        name: "release.tar",
-                        size: 4096,
-                    },
-                ],
-                releaseId: mainHead,
-                tagName: "v1.2.3",
-            }),
+            Promise.resolve(publishedReleaseAuthority(mainHead)),
         readMainRef: () => Promise.resolve(mainHead),
         supportsNativeStacks: () => Promise.resolve(true),
     };
@@ -154,13 +140,11 @@ describe("Delivery overview collector", () => {
             checkoutRevision: "b".repeat(64),
             expectedMainHeadSha: mainHead,
             operation: "deploy",
+            release: publishedReleaseAuthority(mainHead),
             sourceRevision,
         });
         expect(deploy.checkout.remoteHeadSha).toBe(mainHead);
-        expect(deploy.releases.candidate).toEqual({
-            releaseId: mainHead,
-            tagName: "v1.2.3",
-        });
+        expect(deploy.releases.candidate).toEqual(publishedReleaseAuthority(mainHead));
 
         const rollback = await collector.collectForOperation(
             {

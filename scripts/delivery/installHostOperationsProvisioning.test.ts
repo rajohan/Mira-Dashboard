@@ -104,6 +104,12 @@ async function releaseFixture(
     await cp(path.join(sourceProjectRoot, "systemd"), path.join(releaseRoot, "systemd"), {
         recursive: true,
     });
+    await mkdir(path.join(releaseRoot, "server"), { mode: 0o700 });
+    await writeFile(
+        path.join(releaseRoot, "server/productionProvisioning.js"),
+        "production-provisioning-bundle",
+        { mode: 0o400 }
+    );
     const artifacts = [];
     for (const artifactPath of hostOperationsProvisioningSourceArtifactPaths) {
         const bytes = await readFile(path.join(releaseRoot, artifactPath));
@@ -128,6 +134,7 @@ async function releaseFixture(
         "scripts/delivery/provisioning",
         "scripts/delivery",
         "scripts",
+        "server",
         "systemd",
         "",
     ]) {

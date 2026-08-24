@@ -7,6 +7,7 @@ import {
     type DeliveryOperationAuthoritySnapshot,
     type DeliveryOverviewSectionId,
 } from "../../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import { createDeliveryService, DeliveryServiceError } from "./service.ts";
 
 const headSha = "a".repeat(40);
@@ -78,6 +79,14 @@ function payload(
         ],
         releases: {
             activationRevision: sourceRevision,
+            current: {
+                builtAtMs: 1000,
+                commitTitle: "Current",
+                commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${headSha}`,
+                releaseId: headSha,
+                runtimeRevision: "b".repeat(40),
+                schemaTarget: 1,
+            },
             rollback: {
                 actor: "mira",
                 available: false,
@@ -341,6 +350,10 @@ describe("Delivery service", () => {
             ...value.checkout,
             remoteHeadSha,
         };
+        value.releases = {
+            ...value.releases,
+            candidate: publishedReleaseAuthority(remoteHeadSha),
+        };
         const next = fixture(value);
 
         expect(
@@ -352,6 +365,7 @@ describe("Delivery service", () => {
                     expectedMainHeadSha: remoteHeadSha,
                     idempotencyKey: "A".repeat(43),
                     operation: "deploy",
+                    release: publishedReleaseAuthority(remoteHeadSha),
                     sourceRevision,
                 },
                 context
@@ -363,6 +377,7 @@ describe("Delivery service", () => {
                 checkoutRevision: sourceRevision,
                 expectedMainHeadSha: remoteHeadSha,
                 operation: "deploy",
+                release: publishedReleaseAuthority(remoteHeadSha),
                 sourceRevision,
             },
         ]);

@@ -4,6 +4,7 @@ import { timestampMillisecondsSchema } from "./dateTime.ts";
 import { deliveryOperationWarningsSchema } from "./deliveryOperationWarnings.ts";
 import { utf8ByteLength } from "./encoding.ts";
 import { productionActivationRecordSchema } from "./productionActivationRecord.ts";
+import { publishedReleaseAuthoritySchema } from "./publishedReleaseAuthority.ts";
 import {
     boundedControlSafeTextSchema,
     fullCommitShaSchema,
@@ -87,6 +88,7 @@ const deployJobPayloadSchema = v.strictObject({
     checkoutRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
     expectedMainHeadSha: fullCommitShaSchema(invalidDeliveryProductionOperation),
     operation: v.literal("deploy", invalidDeliveryProductionOperation),
+    release: publishedReleaseAuthoritySchema,
     sourceRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
 });
 const mergeDeployJobPayloadSchema = v.strictObject({
@@ -319,7 +321,9 @@ function capsuleIsConsistent(capsule: DeliveryProductionOperationCapsule): boole
     return (
         cas.target.databaseSnapshotTransitionId === null &&
         (payload.operation !== "deploy" ||
-            payload.expectedMainHeadSha === cas.target.releaseId)
+            (payload.expectedMainHeadSha === cas.target.releaseId &&
+                payload.release.releaseId === cas.target.releaseId &&
+                payload.release.runtime.revision === cas.target.runtimeRevision))
     );
 }
 

@@ -17,6 +17,7 @@ import type {
     DeliveryReleasesResult,
     DeliveryRequestOperationResult,
 } from "../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -146,7 +147,7 @@ const releasesResult = {
     observedAtMs,
     releases: {
         activationRevision,
-        candidate: { releaseId: candidateSha, tagName: "v1.2.3" },
+        candidate: publishedReleaseAuthority(candidateSha),
         current: {
             builtAtMs: observedAtMs - 1000,
             commitTitle: "Current release",

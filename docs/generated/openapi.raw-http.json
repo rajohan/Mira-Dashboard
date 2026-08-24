@@ -20740,9 +20740,140 @@
                   "candidate": {
                     "type": "object",
                     "properties": {
+                      "assets": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          },
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          }
+                        ]
+                      },
                       "releaseId": {
                         "type": "string",
                         "pattern": "^[0-9a-f]{40}$"
+                      },
+                      "releaseManifestSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f\\d]{64}$"
+                      },
+                      "runtime": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "version"
+                        ],
+                        "additionalProperties": false
                       },
                       "tagName": {
                         "type": "string",
@@ -20750,7 +20881,10 @@
                       }
                     },
                     "required": [
+                      "assets",
                       "releaseId",
+                      "releaseManifestSha256",
+                      "runtime",
                       "tagName"
                     ],
                     "additionalProperties": false
@@ -21004,9 +21138,140 @@
                   "candidate": {
                     "type": "object",
                     "properties": {
+                      "assets": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          },
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "size",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          }
+                        ]
+                      },
                       "releaseId": {
                         "type": "string",
                         "pattern": "^[0-9a-f]{40}$"
+                      },
+                      "releaseManifestSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f\\d]{64}$"
+                      },
+                      "runtime": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "version"
+                        ],
+                        "additionalProperties": false
                       },
                       "tagName": {
                         "type": "string",
@@ -21014,7 +21279,10 @@
                       }
                     },
                     "required": [
+                      "assets",
                       "releaseId",
+                      "releaseManifestSha256",
+                      "runtime",
                       "tagName"
                     ],
                     "additionalProperties": false
@@ -21819,6 +22087,158 @@
           "operation": {
             "const": "deploy"
           },
+          "release": {
+            "type": "object",
+            "properties": {
+              "assets": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "name": {
+                            "const": "receipt.json"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "size",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "name": {
+                            "const": "release.tar"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "size",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ],
+                    "minItems": 2
+                  },
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "name": {
+                            "const": "release.tar"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "size",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "name": {
+                            "const": "receipt.json"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "size",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ],
+                    "minItems": 2
+                  }
+                ]
+              },
+              "releaseId": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "releaseManifestSha256": {
+                "type": "string",
+                "pattern": "^[a-f\\d]{64}$"
+              },
+              "runtime": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "revision",
+                  "version"
+                ],
+                "additionalProperties": false
+              },
+              "tagName": {
+                "type": "string",
+                "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+              }
+            },
+            "required": [
+              "assets",
+              "releaseId",
+              "releaseManifestSha256",
+              "runtime",
+              "tagName"
+            ],
+            "additionalProperties": false
+          },
           "idempotencyKey": {
             "type": "string",
             "minLength": 32,
@@ -21836,6 +22256,7 @@
           "confirmation",
           "expectedMainHeadSha",
           "operation",
+          "release",
           "idempotencyKey",
           "sourceRevision"
         ],

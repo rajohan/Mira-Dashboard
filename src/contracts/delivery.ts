@@ -3,6 +3,7 @@ import * as v from "valibot";
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
 import { deliveryOperationWarningsSchema } from "../shared/deliveryOperationWarnings.ts";
 import { utf8ByteLength } from "../shared/encoding.ts";
+import { publishedReleaseAuthoritySchema } from "../shared/publishedReleaseAuthority.ts";
 import {
     boundedControlSafeTextSchema,
     compareStrings,
@@ -447,16 +448,7 @@ export const deliveryReleaseSchema = v.strictObject({
 });
 export type DeliveryRelease = v.InferOutput<typeof deliveryReleaseSchema>;
 
-export const deliveryReleaseCandidateSchema = v.strictObject({
-    releaseId: deliveryCommitShaSchema,
-    tagName: v.pipe(
-        v.string("Delivery release tag is invalid"),
-        v.regex(
-            /^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u,
-            "Delivery release tag is invalid"
-        )
-    ),
-});
+export const deliveryReleaseCandidateSchema = publishedReleaseAuthoritySchema;
 export type DeliveryReleaseCandidate = v.InferOutput<
     typeof deliveryReleaseCandidateSchema
 >;
@@ -904,6 +896,7 @@ const deployInputObjectSchema = v.strictObject({
     confirmation: v.literal("deploy-delivery-main"),
     expectedMainHeadSha: deliveryCommitShaSchema,
     operation: v.literal("deploy"),
+    release: deliveryReleaseCandidateSchema,
     ...deliveryOperationBase,
 });
 const rejectPullRequestInputObjectSchema = v.strictObject({

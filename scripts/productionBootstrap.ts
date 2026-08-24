@@ -5,7 +5,15 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
-import { productionReleaseArtifactReceiptSchema } from "./delivery/packageProductionReleaseArtifact.ts";
+import {
+    productionReleaseArtifactReceiptSchema,
+    type ProductionReleaseArtifactReceipt,
+} from "../src/shared/productionReleaseArtifactReceipt.ts";
+import {
+    publishedReleaseAuthoritySchema,
+    type PublishedReleaseAuthority,
+} from "../src/shared/publishedReleaseAuthority.ts";
+import { assertProductionReleaseArchiveListing } from "./delivery/productionReleaseArchive.ts";
 import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
 import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
 
@@ -58,8 +66,14 @@ export interface ProductionBootstrapOptions {
 }
 
 export interface PreparedPublishedProductionRelease {
+    readonly authority: PublishedReleaseAuthority;
     readonly releaseId: string;
     readonly releaseRoot: string;
+}
+
+interface DownloadedProductionBootstrapRelease {
+    readonly artifactRoot: string;
+    readonly tagName: string;
 }
 
 interface ProductionBootstrapPathStatus {
@@ -230,36 +244,20 @@ export function parseProductionBootstrapRelease(
  * @param listing Newline-delimited `tar -tf` output.
  * @param releaseId Exact clean checkout commit.
  */
-export function assertProductionReleaseArchiveListing(
-    listing: string,
-    releaseId: string
-): void {
-    const entries = listing.split("\n").filter(Boolean);
-    if (
-        entries.length === 0 ||
-        entries.length > 4096 ||
-        entries.some(
-            (entry) =>
-                !(entry === `${releaseId}/` || entry.startsWith(`${releaseId}/`)) ||
-                entry.split("/").includes("..")
-        )
-    ) {
-        throw new Error(failureMessage);
-    }
-}
-
 /**
  * Downloads the permanent release assets whose Git tag resolves to the checkout commit.
  * @param releaseId Exact clean checkout commit.
  * @param temporaryRoot Private destination directory.
  * @param dependencies Fixed process boundary.
+ * @param repositoryRoot Checkout used to resolve the release tag.
  * @returns The supplied artifact directory after a successful download.
  */
 export async function downloadProductionBootstrapRelease(
     releaseId: string,
     temporaryRoot: string,
-    dependencies: ProductionBootstrapDependencies
-): Promise<string> {
+    dependencies: ProductionBootstrapDependencies,
+    repositoryRoot = projectRoot
+): Promise<DownloadedProductionBootstrapRelease> {
     const releaseText = await requireSuccess(dependencies, [
         "/usr/bin/gh",
         "release",
@@ -271,21 +269,23 @@ export async function downloadProductionBootstrapRelease(
         githubReleaseSchema,
         JSON.parse(releaseText) as unknown
     );
-    await requireSuccess(dependencies, [
-        "/usr/bin/git",
-        "fetch",
-        "--force",
-        "--no-tags",
-        "origin",
-        `refs/tags/${unverifiedRelease.tagName}:refs/tags/${unverifiedRelease.tagName}`,
-    ]);
-    const tagCommit = await requireSuccess(dependencies, [
-        "/usr/bin/git",
-        "rev-list",
-        "-n",
-        "1",
-        `${unverifiedRelease.tagName}^{commit}`,
-    ]);
+    await requireSuccess(
+        dependencies,
+        [
+            "/usr/bin/git",
+            "fetch",
+            "--force",
+            "--no-tags",
+            "origin",
+            `refs/tags/${unverifiedRelease.tagName}:refs/tags/${unverifiedRelease.tagName}`,
+        ],
+        repositoryRoot
+    );
+    const tagCommit = await requireSuccess(
+        dependencies,
+        ["/usr/bin/git", "rev-list", "-n", "1", `${unverifiedRelease.tagName}^{commit}`],
+        repositoryRoot
+    );
     const tagName = parseProductionBootstrapRelease(
         unverifiedRelease,
         tagCommit,
@@ -301,7 +301,7 @@ export async function downloadProductionBootstrapRelease(
         "--pattern=receipt.json",
         `--dir=${temporaryRoot}`,
     ]);
-    return temporaryRoot;
+    return Object.freeze({ artifactRoot: temporaryRoot, tagName });
 }
 
 /**
@@ -310,15 +310,25 @@ export async function downloadProductionBootstrapRelease(
  * @param releaseId Exact release commit.
  * @param dependencies Fixed process boundary.
  * @param repositoryRoot Checkout root owning the private extraction directory.
+ * @param expectedAuthority Optional exact public GitHub release authority.
  * @returns Verified extracted release root and manifest digest.
  */
 export async function admitProductionBootstrapRelease(
     artifactRoot: string,
     releaseId: string,
     dependencies: ProductionBootstrapDependencies,
-    repositoryRoot = projectRoot
+    repositoryRoot = projectRoot,
+    expectedAuthority?: PublishedReleaseAuthority
 ): Promise<
-    Readonly<{ archiveSha256: string; manifestSha256: string; releaseRoot: string }>
+    Readonly<{
+        archiveBytes: number;
+        archiveSha256: string;
+        manifestSha256: string;
+        receiptBytes: number;
+        receiptSha256: string;
+        releaseRoot: string;
+        runtime: ProductionReleaseArtifactReceipt["runtime"];
+    }>
 > {
     const [receiptBytes, archiveBytes, selectedVersion] = await Promise.all([
         readFile(path.join(artifactRoot, "receipt.json")),
@@ -329,11 +339,29 @@ export async function admitProductionBootstrapRelease(
         productionReleaseArtifactReceiptSchema,
         JSON.parse(receiptBytes.toString("utf8")) as unknown
     );
+    const receiptSha256 = sha256(receiptBytes);
+    const archiveSha256 = sha256(archiveBytes);
+    const expectedReceiptAsset = expectedAuthority?.assets.find(
+        ({ name }) => name === "receipt.json"
+    );
+    const expectedArchiveAsset = expectedAuthority?.assets.find(
+        ({ name }) => name === "release.tar"
+    );
     if (
         receipt.releaseId !== releaseId ||
         receipt.runtime.version !== selectedVersion.trim() ||
         receipt.archive.bytes !== archiveBytes.byteLength ||
-        receipt.archive.sha256 !== sha256(archiveBytes)
+        receipt.archive.sha256 !== archiveSha256 ||
+        (expectedAuthority !== undefined &&
+            (expectedAuthority.releaseId !== releaseId ||
+                expectedAuthority.releaseManifestSha256 !==
+                    receipt.releaseManifestSha256 ||
+                expectedAuthority.runtime.revision !== receipt.runtime.revision ||
+                expectedAuthority.runtime.version !== receipt.runtime.version ||
+                expectedReceiptAsset?.size !== receiptBytes.byteLength ||
+                expectedReceiptAsset.digest !== `sha256:${receiptSha256}` ||
+                expectedArchiveAsset?.size !== archiveBytes.byteLength ||
+                expectedArchiveAsset.digest !== `sha256:${archiveSha256}`))
     ) {
         throw new Error(failureMessage);
     }
@@ -365,9 +393,13 @@ export async function admitProductionBootstrapRelease(
         throw new Error(failureMessage);
     }
     return Object.freeze({
+        archiveBytes: archiveBytes.byteLength,
         archiveSha256: receipt.archive.sha256,
         manifestSha256: receipt.releaseManifestSha256,
+        receiptBytes: receiptBytes.byteLength,
+        receiptSha256,
         releaseRoot,
+        runtime: receipt.runtime,
     });
 }
 
@@ -691,6 +723,8 @@ export async function verifyProductionBootstrapPrerequisites(
  * @param dependencies Fixed process boundary.
  * @param userId Effective managed-user identity.
  * @param createTemporaryRoot Optional private temporary-root factory.
+ * @param expectedAuthority Optional authority supplied by Delivery.
+ * @param options Root-staging policy for bootstrap versus normal deploy.
  * @returns Exact admitted release root.
  */
 export async function preparePublishedProductionRelease(
@@ -699,7 +733,9 @@ export async function preparePublishedProductionRelease(
     dependencies: ProductionBootstrapDependencies = productionBootstrapDependencies,
     userId = typeof process.getuid === "function" ? process.getuid() : 0,
     createTemporaryRoot: () => Promise<string> = () =>
-        mkdtemp(path.join(os.tmpdir(), "mira-dashboard-release-"))
+        mkdtemp(path.join(os.tmpdir(), "mira-dashboard-release-")),
+    expectedAuthority?: PublishedReleaseAuthority,
+    options: Readonly<{ readonly stageRootAuthority?: boolean }> = {}
 ): Promise<PreparedPublishedProductionRelease> {
     const prerequisites = dependencies.inspectPrerequisites
         ? await dependencies.inspectPrerequisites()
@@ -710,17 +746,37 @@ export async function preparePublishedProductionRelease(
           );
     const temporaryRoot = await createTemporaryRoot();
     try {
-        const artifactRoot = await downloadProductionBootstrapRelease(
+        const downloaded = await downloadProductionBootstrapRelease(
             releaseId,
             temporaryRoot,
-            dependencies
-        );
-        const admitted = await admitProductionBootstrapRelease(
-            artifactRoot,
-            releaseId,
             dependencies,
             repositoryRoot
         );
+        const admitted = await admitProductionBootstrapRelease(
+            downloaded.artifactRoot,
+            releaseId,
+            dependencies,
+            repositoryRoot,
+            expectedAuthority
+        );
+        const authority = v.parse(publishedReleaseAuthoritySchema, {
+            assets: [
+                {
+                    digest: `sha256:${admitted.receiptSha256}`,
+                    name: "receipt.json",
+                    size: admitted.receiptBytes,
+                },
+                {
+                    digest: `sha256:${admitted.archiveSha256}`,
+                    name: "release.tar",
+                    size: admitted.archiveBytes,
+                },
+            ],
+            releaseId,
+            releaseManifestSha256: admitted.manifestSha256,
+            runtime: admitted.runtime,
+            tagName: downloaded.tagName,
+        });
         await requireSuccess(dependencies, [
             process.execPath,
             "run",
@@ -728,16 +784,18 @@ export async function preparePublishedProductionRelease(
             "prepare-state",
             `--project-root=${projectHome}`,
         ]);
-        await stageProductionBootstrapRootAuthority(
-            artifactRoot,
-            releaseId,
-            admitted.manifestSha256,
-            admitted.archiveSha256,
-            prerequisites.runtimeSha256,
-            userId,
-            dependencies
-        );
-        return Object.freeze({ releaseId, releaseRoot: admitted.releaseRoot });
+        if (options.stageRootAuthority !== false) {
+            await stageProductionBootstrapRootAuthority(
+                downloaded.artifactRoot,
+                releaseId,
+                admitted.manifestSha256,
+                admitted.archiveSha256,
+                prerequisites.runtimeSha256,
+                userId,
+                dependencies
+            );
+        }
+        return Object.freeze({ authority, releaseId, releaseRoot: admitted.releaseRoot });
     } finally {
         await rm(temporaryRoot, { force: true, recursive: true });
     }
@@ -819,15 +877,10 @@ export async function deployProduction(
         repositoryRoot,
         dependencies,
         userId,
-        options.createTemporaryRoot
+        options.createTemporaryRoot,
+        undefined,
+        { stageRootAuthority: false }
     );
-    await requireSuccess(dependencies, [
-        process.execPath,
-        "run",
-        "delivery",
-        "prepare-state",
-        `--project-root=${projectHome}`,
-    ]);
     await requireSuccess(dependencies, [
         process.execPath,
         "run",
@@ -836,6 +889,7 @@ export async function deployProduction(
         `--project-root=${projectHome}`,
         `--release-root=${admitted.releaseRoot}`,
         `--runtime-source=${process.execPath}`,
+        `--release-authority-json=${JSON.stringify(admitted.authority)}`,
         "--readiness-url=http://127.0.0.1:3100/api/health/ready",
     ]);
 }

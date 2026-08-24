@@ -471,6 +471,10 @@ export async function prepareProductionDeliveryTargetUnderLease(
     Readonly<{ release: PublishedProductionRelease; runtime: InstalledProductionRuntime }>
 > {
     const target = record.capsule.cas.target;
+    const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
+    if ((await pathState(publishedRoot)) === "present") {
+        return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
+    }
     const checkoutRoot = path.join(projectRoot, "production/checkout");
     const source = await (
         dependencies.resolveSourceIdentity ?? resolveBuildSourceIdentity
@@ -487,12 +491,17 @@ export async function prepareProductionDeliveryTargetUnderLease(
         ? undefined
         : await (
               dependencies.preparePublishedRelease ?? preparePublishedProductionRelease
-          )(target.releaseId, checkoutRoot, productionBootstrapDependencies);
-
-    const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
-    if ((await pathState(publishedRoot)) === "present") {
-        return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
-    }
+          )(
+              target.releaseId,
+              checkoutRoot,
+              productionBootstrapDependencies,
+              undefined,
+              undefined,
+              record.capsule.enqueue.payload.operation === "deploy"
+                  ? record.capsule.enqueue.payload.release
+                  : undefined,
+              { stageRootAuthority: false }
+          );
 
     const localReleaseRoot = path.join(checkoutRoot, "dist/releases", target.releaseId);
     let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
@@ -649,6 +658,7 @@ async function restartNormalRuntime(
         activation.current.runtimeRevision,
         dependencies
     );
+    await services.provision(active.release, active.runtime);
     await services.prepare(active.release, active.runtime);
     await services.start(active.release, active.runtime);
     await services.verifyReady(active.release, active.runtime);
@@ -715,6 +725,10 @@ export async function runProductionDeliveryExecutorUnderLease(
             dependencies.createServices?.(lease, paths, options.readinessUrl) ??
             createSystemdProductionServiceController(lease, paths, {
                 readinessUrl: options.readinessUrl,
+                releaseAuthority:
+                    record.capsule.enqueue.payload.operation === "deploy"
+                        ? record.capsule.enqueue.payload.release
+                        : undefined,
             });
         if (dependencies.loadArtifacts === undefined) {
             await (dependencies.artifactAdmission ?? prepareProductionArtifactAdmission)(

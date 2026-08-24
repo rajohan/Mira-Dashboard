@@ -238,6 +238,7 @@ export function deployMainPrompt(
             expectedMainHeadSha: checkout.remoteHeadSha,
             idempotencyKey: createDeliveryIdempotencyKey(),
             operation: "deploy",
+            release: releases.candidate,
             sourceRevision: checkoutSourceRevision,
         },
         title: `Deploy ${releases.candidate.tagName}?`,

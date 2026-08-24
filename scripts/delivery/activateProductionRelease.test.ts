@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { publishedReleaseAuthority } from "../../src/testSupport/publishedReleaseAuthority.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
     parseActivateProductionReleaseArguments,
@@ -34,6 +35,13 @@ describe("production release activation CLI", () => {
                 "--activation-mode=greenfield",
             ]).activationMode
         ).toBe("greenfield");
+        const releaseAuthority = publishedReleaseAuthority(releaseId);
+        expect(
+            parseActivateProductionReleaseArguments([
+                ...validArguments,
+                `--release-authority-json=${JSON.stringify(releaseAuthority)}`,
+            ]).releaseAuthority
+        ).toEqual(releaseAuthority);
     });
 
     test("rejects unknown, duplicate, external-readiness, and relative inputs", () => {
@@ -46,6 +54,7 @@ describe("production release activation CLI", () => {
                     ? "--readiness-url=https://dashboard.example.test/api/health/ready"
                     : argument
             ),
+            [...validArguments, "--release-authority-json={}"],
             validArguments.map((argument) =>
                 argument.startsWith("--readiness-url=")
                     ? "--readiness-url=http://[::1]:3100/api/health/ready"

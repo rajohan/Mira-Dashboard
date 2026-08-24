@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import type { JobRunRecord } from "../jobs/records.ts";
 import type {
     EnqueueManualRunInput,
@@ -117,6 +118,7 @@ function deployRequest(authorize: () => void = () => {}) {
                     checkoutRevision: sourceRevision,
                     expectedMainHeadSha: headSha,
                     operation: "deploy" as const,
+                    release: publishedReleaseAuthority(headSha),
                     sourceRevision,
                 },
             }),
@@ -127,6 +129,7 @@ function deployRequest(authorize: () => void = () => {}) {
             expectedMainHeadSha: headSha,
             idempotencyKey,
             operation: "deploy" as const,
+            release: publishedReleaseAuthority(headSha),
             sourceRevision,
         },
         requestId: "request-1",
@@ -154,6 +157,7 @@ describe("Delivery operation queue", () => {
             checkoutRevision: sourceRevision,
             expectedMainHeadSha: headSha,
             operation: "deploy",
+            release: publishedReleaseAuthority(headSha),
             sourceRevision,
         });
     });
@@ -184,6 +188,7 @@ describe("Delivery operation queue", () => {
                             checkoutRevision: sourceRevision,
                             expectedMainHeadSha: "d".repeat(40),
                             operation: "deploy" as const,
+                            release: publishedReleaseAuthority("d".repeat(40)),
                             sourceRevision,
                         },
                     }),

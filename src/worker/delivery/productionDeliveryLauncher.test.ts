@@ -10,6 +10,7 @@ import {
     releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../shared/releaseManifest.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { createProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
 import {
     ensureProductionDeliveryExecutor,
@@ -117,6 +118,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
         checkoutRevision: "2".repeat(64),
         expectedMainHeadSha: "c".repeat(40),
         operation: "deploy" as const,
+        release: publishedReleaseAuthority("c".repeat(40), "v1.2.3", "d".repeat(40)),
         sourceRevision: "f".repeat(64),
     };
     return Object.freeze({

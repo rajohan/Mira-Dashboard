@@ -3,7 +3,13 @@ import path from "node:path";
 
 import * as v from "valibot";
 
+import {
+    productionReleaseArtifactReceiptSchema as receiptSchema,
+    type ProductionReleaseArtifactReceipt,
+} from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { releaseManifestSchema } from "../../src/shared/releaseManifest.ts";
+
+export { productionReleaseArtifactReceiptSchema } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 
 const failureMessage = "Production release artifact packaging failed";
 const projectRoot = path.resolve(import.meta.dir, "../..");
@@ -14,25 +20,6 @@ export interface PackageProductionReleaseArtifactOptions {
     readonly projectRoot?: string;
     readonly releaseId?: string;
 }
-
-export const productionReleaseArtifactReceiptSchema = v.strictObject({
-    archive: v.strictObject({
-        bytes: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
-        name: v.literal(archiveName),
-        sha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
-    }),
-    formatVersion: v.literal(1),
-    releaseId: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
-    releaseManifestSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
-    runtime: v.strictObject({
-        revision: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
-        version: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
-    }),
-});
-
-export type ProductionReleaseArtifactReceipt = Readonly<
-    v.InferOutput<typeof productionReleaseArtifactReceiptSchema>
->;
 
 function sha256(bytes: Uint8Array): string {
     return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
@@ -114,7 +101,7 @@ export async function packageProductionReleaseArtifact(
     await runTar(repositoryRoot, outputRoot, releaseId);
     const archiveBytes = await readFile(path.join(outputRoot, archiveName));
     const receipt = Object.freeze(
-        v.parse(productionReleaseArtifactReceiptSchema, {
+        v.parse(receiptSchema, {
             archive: {
                 bytes: archiveBytes.byteLength,
                 name: archiveName,

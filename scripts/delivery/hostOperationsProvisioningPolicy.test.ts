@@ -34,6 +34,12 @@ describe("host-operations provisioning artifact policy", () => {
                 mode: 0o755,
             },
             {
+                artifactPath: "server/productionProvisioning.js",
+                destinationPath:
+                    "/usr/local/libexec/mira-dashboard-production-provisioning.js",
+                mode: 0o555,
+            },
+            {
                 artifactPath:
                     "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
                 destinationPath: "/usr/local/libexec/mira-dashboard-web-runtime",
@@ -103,6 +109,13 @@ describe("host-operations provisioning artifact policy", () => {
                 mode: 0o644,
             },
             {
+                artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning@.service",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
+                mode: 0o644,
+            },
+            {
                 artifactPath: "systemd/mira-dashboard-web.service",
                 destinationPath: "/etc/systemd/system/mira-dashboard-web.service",
                 mode: 0o644,
@@ -131,22 +144,28 @@ describe("host-operations provisioning artifact policy", () => {
             "mira-dashboard-host-system-restart.service",
             "mira-dashboard-host-system-update.service",
             "mira-dashboard-production-authority.conf",
+            "mira-dashboard-production-provisioning@.service",
             "mira-dashboard-web-runtime",
             "policy.ts",
         ]);
         expect(hostOperationsProvisioningReleaseArtifactPaths).toEqual(
-            sourceEntries.map(
-                (fileName) => `scripts/delivery/provisioning/host-operations/${fileName}`
-            )
+            sourceEntries
+                .map(
+                    (fileName) =>
+                        `scripts/delivery/provisioning/host-operations/${fileName}`
+                )
+                .toSorted()
         );
         expect(hostOperationsProvisioningSourceArtifactPaths).toEqual(
             [
                 ...hostOperationsProvisioningReleaseArtifactPaths,
+                "server/productionProvisioning.js",
                 "systemd/mira-dashboard-web.service",
                 "systemd/mira-dashboard-worker.service",
             ].toSorted()
         );
         for (const artifact of hostOperationsProvisioningArtifacts) {
+            if (artifact.artifactPath === "server/productionProvisioning.js") continue;
             const source = path.join(
                 path.resolve(import.meta.dir, "../.."),
                 artifact.artifactPath

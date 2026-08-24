@@ -205,6 +205,11 @@ class TestServiceController implements ProductionServiceController {
     rejectReadyReleaseId: string | undefined;
     rejectStartReleaseId: string | undefined;
 
+    provision(release: PublishedProductionRelease): Promise<void> {
+        this.events.push(`provision:${release.manifest.source.commitSha}`);
+        return Promise.resolve();
+    }
+
     prepare(release: PublishedProductionRelease): Promise<void> {
         this.events.push(`prepare:${release.manifest.source.commitSha}`);
         return Promise.resolve();
@@ -364,14 +369,18 @@ describe("production release activation", () => {
                 )
             ).toBe(firstReleaseId);
             expect(services.events).toEqual([
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,
                 `smoke:${firstReleaseId}`,
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
+                `provision:${secondReleaseId}`,
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
                 `ready:${secondReleaseId}`,
@@ -597,14 +606,18 @@ describe("production release activation", () => {
                     path.join(paths.stateDirectory, "mira-dashboard.db")
                 )
             ).toBe(firstReleaseId);
-            expect(services.events.slice(-10)).toEqual([
+            expect(services.events.slice(-14)).toEqual([
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
+                `provision:${secondReleaseId}`,
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
                 `ready:${secondReleaseId}`,
+                `provision:${secondReleaseId}`,
                 `prepare:${secondReleaseId}`,
                 "stop",
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,
@@ -649,13 +662,17 @@ describe("production release activation", () => {
                     path.join(paths.stateDirectory, "mira-dashboard.db")
                 )
             ).toBe(firstReleaseId);
-            expect(services.events.slice(-9)).toEqual([
+            expect(services.events.slice(-13)).toEqual([
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
+                `provision:${secondReleaseId}`,
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
+                `provision:${secondReleaseId}`,
                 `prepare:${secondReleaseId}`,
                 "stop",
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,
@@ -699,11 +716,12 @@ describe("production release activation", () => {
             const recoveredActivation = await loadProductionActivationState(lease, paths);
             expect(recoveredActivation.record).toEqual(initial);
             expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
-            expect(services.events.slice(-7)).toEqual([
+            expect(services.events.slice(-8)).toEqual([
+                "stop",
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
-                `prepare:${firstReleaseId}`,
-                "stop",
+                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,

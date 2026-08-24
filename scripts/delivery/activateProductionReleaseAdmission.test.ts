@@ -44,6 +44,7 @@ function filesystemCapacity(availableBytes: bigint, availableInodes = 1_000_000n
 }
 
 const services: ProductionServiceController = Object.freeze({
+    provision: async () => {},
     prepare: () => Promise.resolve(),
     start: () => Promise.resolve(),
     stop: () => Promise.resolve(),

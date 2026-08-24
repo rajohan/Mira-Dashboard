@@ -8,6 +8,7 @@ import type {
     DeliveryPullRequestGroup,
     DeliveryReleases,
 } from "../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import {
     deployMainPrompt,
     deliveryOperationIsCurrent,
@@ -68,7 +69,7 @@ const preview = {
 
 const releases = {
     activationRevision: secondResourceRevision,
-    candidate: { releaseId: secondSha, tagName: "v1.2.3" },
+    candidate: publishedReleaseAuthority(secondSha),
     current: {
         builtAtMs: 1_800_000_000_000,
         commitTitle: "Current",
@@ -443,7 +444,7 @@ describe("Delivery operation intents", () => {
         const behindCheckout = { ...checkout, remoteHeadSha };
         const prompt = deployMainPrompt(behindCheckout, sourceRevision, {
             ...releases,
-            candidate: { releaseId: remoteHeadSha, tagName: "v1.2.4" },
+            candidate: publishedReleaseAuthority(remoteHeadSha, "v1.2.4"),
         });
 
         expect(prompt.description).toContain(remoteHeadSha);

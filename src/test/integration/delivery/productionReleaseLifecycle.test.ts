@@ -323,6 +323,10 @@ class DirectProcessController implements ProductionServiceController {
         this.#portReservation = portReservation;
     }
 
+    provision(): Promise<void> {
+        return Promise.resolve();
+    }
+
     prepare(): Promise<void> {
         return Promise.resolve();
     }
