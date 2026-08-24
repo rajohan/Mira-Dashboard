@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
+import type { BackupJobExecutionPort } from "../../../contracts/backupsWorker.ts";
 import type { SqliteMaintenanceExecutionPort } from "../../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../../contracts/databaseObservabilityCollector.ts";
 import {
@@ -36,6 +37,7 @@ import {
     type RuntimeOwnedDatabase,
 } from "../../database/runtime/databaseService.ts";
 import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
+import { createBackupActivityRepository } from "../backups/activityRepository.ts";
 import { createCacheRepository, type CacheRepository } from "../cache/repository.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import { createMonitoringCatalogService } from "../monitoring/catalogService.ts";
@@ -46,11 +48,14 @@ import {
     hostOperationIds,
     type FixedHostOperationsExecutionPort,
     type LogMaintenanceExecutionPort,
+    type OverviewProviderCollectors,
     type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";
 import {
     dockerFreeJobActionDefinitions,
     dockerOperationJobActionDefinition,
+    backupClearAttentionJobActionDefinition,
+    backupScheduledJobActionKeys,
     deliveryOverviewCacheJobActionKey,
     deliveryOverviewCacheJobActionDefinition,
     deliveryGitHubJobActionDefinition,
@@ -63,6 +68,7 @@ import {
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawSessionsCleanupJobActionDefinition,
+    overviewProviderJobActionKeys,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileWriteJobActionDefinition,
     type JobExecutableActionDefinition,
@@ -87,6 +93,7 @@ export interface DashboardWorkerRuntimeOptions {
     /** Exact executable inventory override used by isolated managed-preview runtimes. */
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly bootIdentity: LinuxBootIdentity;
+    readonly backups?: BackupJobExecutionPort;
     readonly database: DatabaseRuntimeLayerOptions;
     readonly databaseObservability: DatabaseObservabilityCollector;
     readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
@@ -105,6 +112,7 @@ export interface DashboardWorkerRuntimeOptions {
     readonly moltbook: MoltbookDashboardCollector;
     readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
     readonly openClawServiceActions?: OpenClawServiceActionsExecutionPort;
+    readonly overviewProviders?: OverviewProviderCollectors;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort & {
         readonly dispose: () => Promise<void> | void;
     };
@@ -594,6 +602,22 @@ export function createDashboardWorkerRuntime(
             } else {
                 baseActionDefinitions = jobActionDefinitions;
             }
+            if (options.backups === undefined) {
+                baseActionDefinitions = baseActionDefinitions.filter(
+                    ({ actionKey }) =>
+                        !backupScheduledJobActionKeys.some(
+                            (backupActionKey) => backupActionKey === actionKey
+                        )
+                );
+            }
+            if (options.overviewProviders === undefined) {
+                baseActionDefinitions = baseActionDefinitions.filter(
+                    ({ actionKey }) =>
+                        !overviewProviderJobActionKeys.some(
+                            (providerActionKey) => providerActionKey === actionKey
+                        )
+                );
+            }
             const optionalActionDefinitions: JobExecutableActionDefinition[] = [];
             if (options.actionDefinitions === undefined) {
                 if (options.openClawGateway !== undefined) {
@@ -624,6 +648,11 @@ export function createDashboardWorkerRuntime(
                 }
                 if (options.docker !== undefined) {
                     optionalActionDefinitions.push(dockerOperationJobActionDefinition);
+                }
+                if (options.backups !== undefined) {
+                    optionalActionDefinitions.push(
+                        backupClearAttentionJobActionDefinition
+                    );
                 }
                 if (delivery !== undefined) {
                     optionalActionDefinitions.push(
@@ -677,6 +706,17 @@ export function createDashboardWorkerRuntime(
                       });
             const findAction = createJobWorkerActionResolver({
                 actionDefinitions,
+                ...(options.backups === undefined
+                    ? {}
+                    : {
+                          backups: {
+                              activityRepository: createBackupActivityRepository(
+                                  database.database,
+                                  repository
+                              ),
+                              executionPort: options.backups,
+                          },
+                      }),
                 databaseObservability: options.databaseObservability,
                 ...(options.databaseObservabilityReconciler === undefined
                     ? {}
@@ -692,6 +732,9 @@ export function createDashboardWorkerRuntime(
                     : { hostOperations: options.hostOperations }),
                 logMaintenance: options.logMaintenance,
                 moltbook: options.moltbook,
+                ...(options.overviewProviders === undefined
+                    ? {}
+                    : { overviewProviders: options.overviewProviders }),
                 ...(options.sqliteMaintenance === undefined
                     ? {}
                     : { sqliteMaintenance: options.sqliteMaintenance }),

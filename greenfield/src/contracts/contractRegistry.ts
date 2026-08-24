@@ -3,6 +3,7 @@ import { agentRealtimeEventContract } from "./agentRealtime.ts";
 import { agentProcedureContracts } from "./agents.ts";
 import { authProcedureContracts } from "./auth.ts";
 import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
+import { backupProcedureContracts } from "./backups.ts";
 import { cacheProcedureContracts } from "./cache.ts";
 import { cacheRealtimeEventContract } from "./cacheRealtime.ts";
 import { chatProcedureContracts } from "./chat.ts";
@@ -55,6 +56,7 @@ import { terminalProcedureContracts, terminalRawHttpContracts } from "./terminal
 
 /** Implemented tRPC procedure metadata used by runtime wiring and docs. */
 const registeredProcedureContracts = [
+    ...backupProcedureContracts,
     ...accountSecurityProcedureContracts,
     ...agentProcedureContracts,
     ...authProcedureContracts,

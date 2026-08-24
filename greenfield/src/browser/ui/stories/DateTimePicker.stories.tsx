@@ -80,7 +80,9 @@ export const Default: Story = {
             if (id === null) throw new Error("The calendar panel did not open.");
             return id;
         });
-        const panel = canvasElement.ownerDocument.getElementById(panelId);
+        const panel = canvasElement.ownerDocument.querySelector(
+            `#${globalThis.CSS.escape(panelId)}`
+        );
         if (!(panel instanceof HTMLElement)) {
             throw new Error("The calendar panel was not mounted.");
         }

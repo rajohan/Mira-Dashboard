@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act } from "react";
@@ -18,6 +18,7 @@ import {
 } from "../data/dashboardCollections.ts";
 import { createDashboardRouter } from "../router.tsx";
 import type { DashboardWebAuthnClient } from "../security/webauthn/webauthnClient.ts";
+import { captureExpectedConsoleErrors } from "../test/expectedConsoleError.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import { agentConfigurationQueryKey, agentStatusesQueryKey } from "./agentQueries.ts";
 
@@ -235,15 +236,16 @@ describe("Dashboard agents route", () => {
         const queryClient = createDashboardQueryClient();
         queryClient.setQueryDefaults(agentConfigurationQueryKey, { retry: false });
         const configurationRequest = Promise.withResolvers<unknown>();
+        const configurationFailure = new TypeError(
+            "redacted initial configuration failure"
+        );
         transport.configurationQueryResponse = configurationRequest.promise;
         renderAgentRoute(transport, queryClient);
 
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([configurationFailure]);
         try {
             await act(async () => {
-                configurationRequest.reject(
-                    new TypeError("redacted initial configuration failure")
-                );
+                configurationRequest.reject(configurationFailure);
                 await configurationRequest.promise.catch(() => {});
             });
             expect(await screen.findByRole("alert")).toBeTruthy();
@@ -255,8 +257,9 @@ describe("Dashboard agents route", () => {
                 .setup()
                 .click(screen.getByRole("button", { name: "Try again" }));
             await expectAgentShellReady();
+            consoleErrors.expectObserved();
         } finally {
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
     });
 
@@ -265,13 +268,14 @@ describe("Dashboard agents route", () => {
         const queryClient = createDashboardQueryClient();
         queryClient.setQueryDefaults(agentStatusesQueryKey, { retry: false });
         const statusRequest = Promise.withResolvers<unknown>();
+        const statusFailure = new TypeError("redacted initial status failure");
         transport.statusQueryResponse = statusRequest.promise;
         renderAgentRoute(transport, queryClient);
 
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([statusFailure]);
         try {
             await act(async () => {
-                statusRequest.reject(new TypeError("redacted initial status failure"));
+                statusRequest.reject(statusFailure);
                 await statusRequest.promise.catch(() => {});
             });
             expect(await screen.findByRole("alert")).toBeTruthy();
@@ -283,8 +287,9 @@ describe("Dashboard agents route", () => {
                 .setup()
                 .click(screen.getByRole("button", { name: "Try again" }));
             await expectAgentShellReady();
+            consoleErrors.expectObserved();
         } finally {
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
     });
 
@@ -463,6 +468,7 @@ describe("Dashboard agents route", () => {
         );
         const user = userEvent.setup();
         const statusRefresh = Promise.withResolvers<unknown>();
+        const statusFailure = new TypeError("redacted status failure");
 
         await expectAgentShellReady();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
@@ -472,24 +478,24 @@ describe("Dashboard agents route", () => {
             backgroundRefresh = collections.agents.statuses.utils.refetch();
         });
 
-        const consoleError = spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrors = captureExpectedConsoleErrors([statusFailure]);
         try {
             await act(async () => {
-                statusRefresh.reject(new TypeError("redacted status failure"));
+                statusRefresh.reject(statusFailure);
                 await statusRefresh.promise.catch(() => {});
                 await backgroundRefresh?.catch(() => {});
             });
-            expect(consoleError).toHaveBeenCalled();
+            expect(await screen.findByRole("alert")).toBeTruthy();
+            expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
+            expect(screen.queryByText(/redacted status failure/u)).toBeNull();
+            expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+            transport.statusQueryResponse = undefined;
+            await user.click(screen.getByRole("button", { name: "Try again" }));
+            await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+            expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
+            consoleErrors.expectObserved();
         } finally {
-            consoleError.mockRestore();
+            consoleErrors.restore();
         }
-        expect(await screen.findByRole("alert")).toBeTruthy();
-        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
-        expect(screen.queryByText(/redacted status failure/u)).toBeNull();
-        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-        transport.statusQueryResponse = undefined;
-        await user.click(screen.getByRole("button", { name: "Try again" }));
-        await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
     });
 });

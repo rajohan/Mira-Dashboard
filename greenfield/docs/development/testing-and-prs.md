@@ -13,33 +13,49 @@ bun run lint
 bun run format:check
 bun run test
 bun run test:coverage
-bun run storybook:test
-bun run storybook:build
+bun run build:storybook
 bun run docs:check
 bun run db:check
 git diff --check
 ```
 
-Use focused Bun tests while iterating, then run the full affected suite before handoff. The
-coverage gate requires at least 85% aggregate production line coverage, rejects executable
-`scripts/` or `src/` modules missing entirely from LCOV, and publishes the same report for
-Codecov's 85% patch gate.
+Use focused tests while iterating, then run the full affected suite before handoff. `bun run test`
+runs the Bun, Happy DOM, and real-browser Storybook partitions in that order. All three use the
+shared exact-inventory and batching engine with their checked-in `.bun-test-timings.json`,
+`.bun-browser-test-timings.json`, and `.storybook-test-timings.json` files. Discovery must match
+each inventory exactly. Every partition runs three deterministic, duration-balanced batches
+sequentially; each Bun or Happy DOM child uses exactly `--parallel=3`, while each Storybook child
+uses exactly `--maxWorkers=3`. Every child also uses Vitest/Bun's single `--no-isolate` switch so
+the selected files reuse the child runtime's global and module registry instead of rebuilding them
+for every file; the next batch starts in fresh worker processes. Three batches and three workers are repository policy in
+the shared batching engine, not package-script or public CLI arguments; any attempted parallelism
+override fails closed.
 
-The non-browser coverage partition uses three isolated Bun worker processes. The checked-in
-`.bun-test-timings.json` file is only a scheduling hint: it starts the slowest files first without
-changing test discovery, assertions, coverage collection, or the 85% gate. Browser tests stay in
-Bun's default per-file isolation because a shared `--no-isolate` environment can retain preload
-teardown state and has triggered a native Bun panic. Browser files use the same three-worker cap,
-with their own `.bun-browser-test-timings.json` scheduling hints. After adding, removing, or
-materially changing tests, refresh both timing inventories before push with:
+`bun run test:coverage` uses the same three-by-three batch plan and merges all nine private LCOV
+reports into `coverage/lcov.info`. Storybook contributes V8 coverage hits for production browser
+modules. Stories, Storybook support and configuration, tests, and test support are excluded from
+the production denominator. The gate requires at least 85% aggregate production line coverage,
+rejects executable `scripts/` or `src/` modules missing entirely from LCOV, and publishes the same
+report for Codecov's 85% patch gate.
+
+After adding, removing, or materially changing tests, refresh all three timing inventories before
+push with:
 
 ```bash
-bun run setup:before-push
+bun run test:timings:update
 ```
 
-The setup stays explicit while linked worktrees are in use. They share Git's default hooks
-directory, so installing a worktree-local Lefthook executable there could make every worktree's
-hook depend on whichever worktree installed it last.
+The top-level update runs all three partitions sequentially. Each timing inventory is staged and
+replaced atomically only after its own three batches pass; a failing partition keeps its tracked
+file unchanged and stops the remaining updates.
+
+In CI, `coverage-bun`, `coverage-browser`, and `coverage-storybook` run concurrently from the same
+nine-batch plan. Each job owns exactly three private LCOV reports; only `coverage-storybook`
+installs Chromium. The downstream `dashboard-checks` aggregator downloads the three explicit
+artifacts, proves that all nine expected reports exist exactly once with no stale LCOV input,
+revalidates the Storybook production-source records, and then applies the same aggregate 85% gate.
+It alone publishes `coverage/lcov.info` to Codecov. `dashboard-static-checks` owns the non-coverage
+checks, while the separate `storybook` job only verifies the static build.
 
 ## TypeScript graphs
 
@@ -86,10 +102,11 @@ Production source must never import test or test-support code. Prefer event- or 
 test timing over arbitrary sleeps. Test-only overrides must preserve the production default and
 exercise the same runtime path.
 
-Every Bun package test command runs through `scripts/runTestSuite.ts`; the separate real-browser
-Storybook command runs through `scripts/runStorybookTests.ts`. Both preserve the child failure code
-and fail an otherwise green suite when output contains a forbidden React, browser, or Bun runtime
-diagnostic. Do not bypass these runners in repository test scripts.
+The Bun and Happy DOM partitions run through `scripts/runBatchedTestSuite.ts`, and the real-browser
+partition runs through `scripts/runStorybookTests.ts`; coverage orchestrates all three with the same
+batching and output policies. Their child processes preserve the failure code and fail an otherwise
+green suite when output contains a forbidden React, browser, or Bun runtime diagnostic. Do not
+bypass these runners in repository test scripts.
 
 Every suite preloads the process-private test root and mock cleanup. The browser suite additionally
 preloads Happy DOM, Testing Library matchers and cleanup, the React act-environment marker, and the

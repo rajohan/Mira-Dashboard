@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import type { SystemMetrics } from "../../contracts/system.ts";
+import {
+    observedSystemApplicationMetrics,
+    unavailableSystemApplicationMetrics,
+} from "../test/systemMetrics.ts";
 import { SystemMetricsCards } from "./SystemMetricsCards.tsx";
 
 const { render, screen, within } = await import("@testing-library/react");
 
 const metrics = Object.freeze({
+    application: unavailableSystemApplicationMetrics,
     cpu: {
         loadAverage: [9.92, 4.2, 2.1],
         loadPercent: 248,
@@ -52,7 +57,65 @@ describe("SystemMetricsCards", () => {
         expect(within(card("Disk")).getByText("60%")).toBeTruthy();
         expect(within(card("Uptime")).getByText("2d 3h")).toBeTruthy();
         expect(within(card("Download")).getByText("12.3 Mbit/s")).toBeTruthy();
+        expect(
+            screen.getByRole("heading", { name: "Application observability" })
+        ).toBeTruthy();
+        expect(screen.getByText("Runtime unavailable")).toBeTruthy();
+        expect(within(card("Web runtime")).getByText("Unavailable")).toBeTruthy();
+        expect(within(card("HTTP requests")).getByText("0")).toBeTruthy();
         expect(screen.queryByText(/hostname|interface|model/iu)).toBeNull();
+    });
+
+    test("renders every observed application component independently", () => {
+        render(
+            <SystemMetricsCards
+                metrics={{
+                    ...metrics,
+                    application: observedSystemApplicationMetrics(metrics.sampledAtMs),
+                }}
+            />
+        );
+
+        expect(screen.getByText("All observed")).toBeTruthy();
+        expect(within(card("Web runtime")).getByText("192 MiB")).toBeTruthy();
+        expect(within(card("Durable operations")).getByText("2 active")).toBeTruthy();
+        expect(within(card("Jobs")).getByText("2 running")).toBeTruthy();
+        expect(within(card("Chat runtime")).getByText("1 active")).toBeTruthy();
+        expect(within(card("SQLite runtime")).getByText("64 MiB")).toBeTruthy();
+        expect(within(card("Gateway")).getByText("connected")).toBeTruthy();
+        expect(within(card("Realtime")).getByText("3 subscribers")).toBeTruthy();
+        expect(within(card("Cache")).getByText("14 entries")).toBeTruthy();
+        expect(within(card("HTTP requests")).getByText("29")).toBeTruthy();
+        expect(within(card("HTTP requests")).getByText(/1 errors/u)).toBeTruthy();
+        const cacheMetrics = screen.getByRole("list", {
+            name: "Cache snapshot metrics",
+        });
+        expect(cacheMetrics.getAttribute("tabindex")).toBe("0");
+        expect(within(cacheMetrics).getByText("system.host")).toBeTruthy();
+        const procedureMetrics = screen.getByRole("list", {
+            name: "HTTP procedure metrics",
+        });
+        expect(procedureMetrics.getAttribute("tabindex")).toBe("0");
+        expect(within(procedureMetrics).getByText("system.metrics")).toBeTruthy();
+        expect(
+            within(procedureMetrics).getByText(/25 requests · 0 errors/u)
+        ).toBeTruthy();
+    });
+
+    test("marks a partial application observation without hiding healthy readers", () => {
+        const application = observedSystemApplicationMetrics(metrics.sampledAtMs);
+        render(
+            <SystemMetricsCards
+                metrics={{
+                    ...metrics,
+                    application: { ...application, realtime: { state: "unavailable" } },
+                }}
+            />
+        );
+
+        expect(screen.getByText("7 of 8 observed")).toBeTruthy();
+        expect(within(card("Realtime")).getByText("Unavailable")).toBeTruthy();
+        expect(within(card("Jobs")).getByText("2 running")).toBeTruthy();
     });
 
     test("discloses the first network sample as warming", () => {

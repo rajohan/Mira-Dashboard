@@ -54,6 +54,7 @@ describe("reviewed pre-cutover parity inventory", () => {
                 .filter((route) => route.target.delivery === "implemented")
                 .map(({ path }) => path)
         ).toEqual([
+            "/",
             "/agents",
             "/chat",
             "/database",
@@ -191,14 +192,16 @@ describe("reviewed pre-cutover parity inventory", () => {
         ]);
     });
 
-    test("keeps full legacy heartbeat diagnostics planned beside schema v4", async () => {
+    test("keeps heartbeat planned beside v5 until the external consumer cutover", async () => {
         const reviewed = await loadReviewedParityInventory();
         const heartbeat = reviewed.legacyEndpoints.endpoints.find(
             ({ id }) => id === "GET /api/cache/heartbeat"
         );
 
         expect(heartbeat?.purpose).toContain("legacy schema v3 payload-bearing");
-        expect(heartbeat?.purpose).toContain("schema v4");
+        expect(heartbeat?.purpose).toContain("schema v5");
+        expect(heartbeat?.purpose).toContain("exact scoped tRPC wrapper");
+        expect(heartbeat?.purpose).toContain("one collection followed by one report");
         expect(heartbeat?.purpose).toContain("without loss");
         expect(heartbeat?.target).toEqual({
             delivery: "planned",
@@ -225,19 +228,18 @@ describe("reviewed pre-cutover parity inventory", () => {
         });
     });
 
-    test("keeps the wider legacy metrics capability planned explicitly", async () => {
+    test("closes the wider legacy metrics capability with bounded application signals", async () => {
         const reviewed = await loadReviewedParityInventory();
         const metrics = reviewed.legacyEndpoints.endpoints.find(
             ({ id }) => id === "GET /api/metrics"
         );
 
         expect(metrics?.purpose).toContain("application observability");
-        expect(metrics?.purpose).toContain("HTTP counters");
-        expect(metrics?.purpose).toContain("polling-snapshot");
-        expect(metrics?.purpose).toContain("token projections");
-        expect(metrics?.purpose).toContain("health diagnostics");
+        expect(metrics?.purpose).toContain("SQLite");
+        expect(metrics?.purpose).toContain("fixed-procedure HTTP counters");
+        expect(metrics?.purpose).toContain("quota capability");
         expect(metrics?.target).toEqual({
-            delivery: "planned",
+            delivery: "implemented",
             kind: "procedure",
             names: ["system.metrics"],
             phase: "phase-3",
@@ -300,7 +302,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             ["POST /api/exec/:jobId/stop", "implemented", ["terminal.terminateSession"]],
             [
                 "POST /api/exec/start",
-                "planned",
+                "implemented",
                 ["serviceActions.request", "terminal.prepareSession"],
             ],
             [
@@ -323,7 +325,11 @@ describe("reviewed pre-cutover parity inventory", () => {
         expect(endpoints[3]?.purpose).toContain("14-day and 1 GiB retention");
         expect(endpoints[3]?.purpose).toContain("older than 168 hours");
         expect(endpoints[3]?.purpose).toContain("never deletes volumes");
-        expect(endpoints[3]?.purpose).toContain("distinct-worker production topology");
+        expect(endpoints[3]?.purpose).toContain("distinct OS principals");
+        expect(endpoints[3]?.purpose).toContain("exact root fragments");
+        expect(endpoints[3]?.purpose).toContain("empty web groups");
+        expect(endpoints[3]?.purpose).toContain("Docker/system-manager IPC absent");
+        expect(endpoints[3]?.purpose).toContain("rejects arbitrary unit/argv requests");
     });
 
     test("closes read-only database observability without importing backup authority", async () => {
@@ -368,7 +374,7 @@ describe("reviewed pre-cutover parity inventory", () => {
         expect(
             backupEndpoints.every(
                 ({ target }) =>
-                    target.kind === "procedure" && target.delivery === "planned"
+                    target.kind === "procedure" && target.delivery === "implemented"
             )
         ).toBeTrue();
     });

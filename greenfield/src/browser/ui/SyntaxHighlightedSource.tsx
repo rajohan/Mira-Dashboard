@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from "react";
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
+import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 import bash from "react-syntax-highlighter/dist/esm/languages/hljs/bash";
 import css from "react-syntax-highlighter/dist/esm/languages/hljs/css";
 import dockerfile from "react-syntax-highlighter/dist/esm/languages/hljs/dockerfile";
@@ -11,6 +11,7 @@ import sql from "react-syntax-highlighter/dist/esm/languages/hljs/sql";
 import typescript from "react-syntax-highlighter/dist/esm/languages/hljs/typescript";
 import xml from "react-syntax-highlighter/dist/esm/languages/hljs/xml";
 import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/light";
 
 import type { SyntaxHighlightedSourceLanguage } from "./syntaxHighlightedSourceLanguage.ts";
 
@@ -48,7 +49,8 @@ interface SyntaxHighlightedSourceProps {
     readonly numbered: boolean;
 }
 
-const sourceLineProperties = Object.freeze({ className: "source-viewer-line" });
+const sourceLineProperties: NonNullable<SyntaxHighlighterProps["lineProps"]> =
+    Object.freeze({ className: "source-viewer-line" });
 
 function HighlightCode({
     style: _style,

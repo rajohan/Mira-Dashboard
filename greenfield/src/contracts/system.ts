@@ -58,8 +58,313 @@ export const systemMetricCapacitySchema = v.pipe(
     )
 );
 
-/** Bounded session-only host metrics returned to the operational overview. */
-export const systemMetricsSchema = v.strictObject({
+/** Fixed operational procedures with dedicated HTTP metric buckets. */
+export const systemHttpMetricProcedureNames = [
+    "auth.status",
+    "cache.getHeartbeat",
+    "database.overview",
+    "docker.overview",
+    "events.stream",
+    "jobs.listRuns",
+    "logs.maintenanceStatus",
+    "notifications.list",
+    "reports.list",
+    "schedules.list",
+    "system.healthDiagnostics",
+    "system.metrics",
+] as const;
+
+/** Final bounded bucket for all procedures outside the reviewed fixed set. */
+export const systemHttpMetricOverflowProcedure = "overflow" as const;
+const systemHttpMetricProcedureSchema = v.picklist([
+    ...systemHttpMetricProcedureNames,
+    systemHttpMetricOverflowProcedure,
+]);
+const systemMetricCountSchema = nonnegativeSafeIntegerSchema(
+    "Application metric count is invalid"
+);
+const systemMetricDurationSchema = nonnegativeSafeIntegerSchema(
+    "Application metric duration is invalid"
+);
+const systemMetricTimestampSchema = timestampMillisecondsSchema(
+    "Application metric timestamp is invalid"
+);
+const systemMetricUnavailableSchema = v.strictObject({
+    state: v.literal("unavailable"),
+});
+
+/** Maximum durable run sample used for aggregate external-operation metrics. */
+export const systemOperationMetricSampleMaximum = 100;
+/** Maximum registered cache rows rendered as payload-free snapshot diagnostics. */
+export const systemCacheSnapshotMetricMaximum = 32;
+
+const systemHttpMetricRowObjectSchema = v.strictObject({
+    errorCount: systemMetricCountSchema,
+    maximumDurationMs: systemMetricDurationSchema,
+    procedure: systemHttpMetricProcedureSchema,
+    requestCount: systemMetricCountSchema,
+    totalDurationMs: systemMetricDurationSchema,
+});
+type SystemHttpMetricRow = v.InferOutput<typeof systemHttpMetricRowObjectSchema>;
+
+/** @returns Whether one HTTP bucket's counts and duration aggregates agree. */
+export function systemHttpMetricRowIsConsistent(row: SystemHttpMetricRow): boolean {
+    return (
+        row.errorCount <= row.requestCount &&
+        (row.requestCount === 0
+            ? row.maximumDurationMs === 0 && row.totalDurationMs === 0
+            : row.maximumDurationMs <= row.totalDurationMs)
+    );
+}
+
+const systemHttpMetricRowSchema = v.pipe(
+    systemHttpMetricRowObjectSchema,
+    v.check(systemHttpMetricRowIsConsistent, "HTTP metric row is inconsistent")
+);
+const systemHttpMetricExpectedProcedures = [
+    ...systemHttpMetricProcedureNames,
+    systemHttpMetricOverflowProcedure,
+] as const;
+
+/**
+ * @param rows Fixed HTTP metric buckets.
+ * @returns Whether fixed HTTP buckets appear once in canonical order.
+ */
+export function systemHttpMetricRowsAreCanonical(rows: SystemHttpMetricRow[]): boolean {
+    return rows.every(
+        (row, index) => row.procedure === systemHttpMetricExpectedProcedures[index]
+    );
+}
+
+const systemHttpMetricRowsSchema = v.pipe(
+    v.array(systemHttpMetricRowSchema, "HTTP metric rows are invalid"),
+    v.length(
+        systemHttpMetricExpectedProcedures.length,
+        "HTTP metric bucket inventory is incomplete"
+    ),
+    v.check(systemHttpMetricRowsAreCanonical, "HTTP metric buckets are not canonical")
+);
+
+const systemWebMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.strictObject({
+        eventLoopDelayMs: systemMetricDurationSchema,
+        externalBytes: systemMetricByteCountSchema,
+        heapTotalBytes: systemMetricByteCountSchema,
+        heapUsedBytes: systemMetricByteCountSchema,
+        rssBytes: systemMetricByteCountSchema,
+        state: v.literal("observed"),
+        uptimeSeconds: systemMetricCountSchema,
+    }),
+]);
+
+const systemOperationMetricsObjectSchema = v.strictObject({
+    activeRuns: systemMetricCountSchema,
+    averageDurationMs: systemMetricDurationSchema,
+    failedRuns: systemMetricCountSchema,
+    maximumDurationMs: systemMetricDurationSchema,
+    sampledRuns: v.pipe(
+        systemMetricCountSchema,
+        v.maxValue(
+            systemOperationMetricSampleMaximum,
+            "Application operation sample is outside its budget"
+        )
+    ),
+    state: v.literal("observed"),
+    succeededRuns: systemMetricCountSchema,
+});
+type SystemOperationMetrics = v.InferOutput<typeof systemOperationMetricsObjectSchema>;
+
+/** @returns Whether sampled durable operation states and durations agree. */
+export function systemOperationMetricsAreConsistent(
+    metrics: SystemOperationMetrics
+): boolean {
+    return (
+        metrics.activeRuns + metrics.failedRuns + metrics.succeededRuns ===
+            metrics.sampledRuns &&
+        (metrics.failedRuns + metrics.succeededRuns === 0
+            ? metrics.averageDurationMs === 0 && metrics.maximumDurationMs === 0
+            : metrics.averageDurationMs <= metrics.maximumDurationMs)
+    );
+}
+
+const systemOperationMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.pipe(
+        systemOperationMetricsObjectSchema,
+        v.check(
+            systemOperationMetricsAreConsistent,
+            "Application operation metrics are inconsistent"
+        )
+    ),
+]);
+
+const systemChatMetricsObjectSchema = v.strictObject({
+    activeRuns: systemMetricCountSchema,
+    failedOrUnknownRuns: systemMetricCountSchema,
+    retainedEventBytes: systemMetricByteCountSchema,
+    retainedEvents: systemMetricCountSchema,
+    retainedRuns: systemMetricCountSchema,
+    retainedSnapshotBytes: systemMetricByteCountSchema,
+    retainedSnapshots: systemMetricCountSchema,
+    state: v.literal("observed"),
+});
+type SystemChatMetrics = v.InferOutput<typeof systemChatMetricsObjectSchema>;
+
+/** @returns Whether durable chat subsets fit within their retained run inventory. */
+export function systemChatMetricsAreConsistent(metrics: SystemChatMetrics): boolean {
+    return (
+        metrics.activeRuns <= metrics.retainedRuns &&
+        metrics.failedOrUnknownRuns <= metrics.retainedRuns &&
+        metrics.retainedSnapshots <= metrics.retainedRuns
+    );
+}
+
+const systemChatMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.pipe(
+        systemChatMetricsObjectSchema,
+        v.check(
+            systemChatMetricsAreConsistent,
+            "Application chat metrics are inconsistent"
+        )
+    ),
+]);
+
+const systemJobsMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.strictObject({
+        claimingPaused: v.boolean(),
+        queuedRuns: systemMetricCountSchema,
+        runningRuns: systemMetricCountSchema,
+        scheduleLagMs: systemMetricDurationSchema,
+        state: v.literal("observed"),
+        workers: v.strictObject({
+            capacity: systemMetricCountSchema,
+            draining: systemMetricCountSchema,
+            online: systemMetricCountSchema,
+        }),
+    }),
+]);
+
+const systemSqliteMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.strictObject({
+        freeBytes: systemMetricByteCountSchema,
+        freePages: systemMetricCountSchema,
+        freePercent: systemMetricPercentSchema,
+        pageCount: systemMetricCountSchema,
+        readLatencyMs: systemMetricDurationSchema,
+        state: v.literal("observed"),
+        storageBytes: systemMetricByteCountSchema,
+    }),
+]);
+
+const systemGatewayMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.strictObject({
+        checkedAtMs: systemMetricTimestampSchema,
+        freshness: gatewayConnectionFreshnessSchema,
+        lastActivityAtMs: v.optional(systemMetricTimestampSchema),
+        phase: gatewayConnectionPhaseSchema,
+        reconnectAttempt: systemMetricCountSchema,
+        state: v.literal("observed"),
+    }),
+]);
+
+const systemRealtimeMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.strictObject({
+        activeSubscribers: systemMetricCountSchema,
+        droppedSlowSubscribers: systemMetricCountSchema,
+        forcedResyncs: systemMetricCountSchema,
+        pollFailures: systemMetricCountSchema,
+        polls: systemMetricCountSchema,
+        retainedEvents: v.optional(systemMetricCountSchema),
+        state: v.literal("observed"),
+        subscriberCapacityRejections: systemMetricCountSchema,
+        subscriptionReadFailures: systemMetricCountSchema,
+        wakeups: systemMetricCountSchema,
+    }),
+]);
+
+const systemCacheSnapshotMetricSchema = v.strictObject({
+    attemptCount: systemMetricCountSchema,
+    consecutiveFailures: systemMetricCountSchema,
+    freshness: v.picklist(["fresh", "missing", "stale"]),
+    key: v.pipe(
+        v.string("Application cache key is invalid"),
+        v.minLength(1, "Application cache key is invalid"),
+        v.maxLength(128, "Application cache key is invalid"),
+        v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "Application cache key is invalid")
+    ),
+    lastAttemptDurationMs: systemMetricDurationSchema,
+    lastAttemptStatus: v.picklist(["failed", "succeeded"]),
+});
+type SystemCacheSnapshotMetric = v.InferOutput<typeof systemCacheSnapshotMetricSchema>;
+
+/**
+ * @param snapshots Payload-free registered cache snapshot rows.
+ * @returns Whether registered cache snapshot rows use strict canonical key order.
+ */
+export function systemCacheSnapshotsAreCanonical(
+    snapshots: SystemCacheSnapshotMetric[]
+): boolean {
+    return snapshots.every(
+        (snapshot, index) =>
+            index === 0 || snapshots[index - 1]!.key.localeCompare(snapshot.key) < 0
+    );
+}
+
+const systemCacheMetricsSchema = v.variant("state", [
+    systemMetricUnavailableSchema,
+    v.strictObject({
+        entryCount: systemMetricCountSchema,
+        failedEntryCount: systemMetricCountSchema,
+        latestAttemptAtMs: v.optional(systemMetricTimestampSchema),
+        maximumAttemptDurationMs: systemMetricDurationSchema,
+        missingEntryCount: systemMetricCountSchema,
+        refreshAttemptCount: systemMetricCountSchema,
+        snapshots: v.pipe(
+            v.array(systemCacheSnapshotMetricSchema),
+            v.maxLength(
+                systemCacheSnapshotMetricMaximum,
+                "Application cache snapshot inventory is outside its budget"
+            ),
+            v.check(
+                systemCacheSnapshotsAreCanonical,
+                "Application cache snapshots are not canonically ordered"
+            )
+        ),
+        staleEntryCount: systemMetricCountSchema,
+        state: v.literal("observed"),
+    }),
+]);
+
+const systemHttpMetricsSchema = v.strictObject({
+    procedures: systemHttpMetricRowsSchema,
+    state: v.literal("observed"),
+});
+
+/** Independent application components; one failed reader never hides another. */
+export const systemApplicationMetricsSchema = v.strictObject({
+    cache: systemCacheMetricsSchema,
+    chat: systemChatMetricsSchema,
+    gateway: systemGatewayMetricsSchema,
+    http: systemHttpMetricsSchema,
+    jobs: systemJobsMetricsSchema,
+    operations: systemOperationMetricsSchema,
+    realtime: systemRealtimeMetricsSchema,
+    sqlite: systemSqliteMetricsSchema,
+    web: systemWebMetricsSchema,
+});
+
+export type SystemApplicationMetrics = v.InferOutput<
+    typeof systemApplicationMetricsSchema
+>;
+
+/** Existing bounded host gauges, kept separate from optional application readers. */
+export const systemHostMetricsSchema = v.strictObject({
     cpu: v.strictObject({
         loadAverage: v.tuple([
             systemMetricLoadSchema,
@@ -85,6 +390,66 @@ export const systemMetricsSchema = v.strictObject({
     sampledAtMs: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
     uptimeSeconds: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
 });
+
+export type SystemHostMetrics = v.InferOutput<typeof systemHostMetricsSchema>;
+
+/** @returns Whether component timestamps and count partitions are causal. */
+export function systemApplicationMetricsAreConsistent(
+    application: SystemApplicationMetrics,
+    sampledAtMs: number
+): boolean {
+    const cache = application.cache;
+    const chat = application.chat;
+    const gateway = application.gateway;
+    const jobs = application.jobs;
+    const sqlite = application.sqlite;
+    const web = application.web;
+    return (
+        (cache.state === "unavailable" ||
+            (cache.failedEntryCount <= cache.entryCount &&
+                cache.missingEntryCount <= cache.entryCount &&
+                cache.staleEntryCount <= cache.entryCount &&
+                cache.snapshots.length <= cache.entryCount &&
+                (cache.latestAttemptAtMs === undefined ||
+                    cache.latestAttemptAtMs <= sampledAtMs))) &&
+        (chat.state === "unavailable" ||
+            (chat.activeRuns <= chat.retainedRuns &&
+                chat.failedOrUnknownRuns <= chat.retainedRuns &&
+                chat.retainedSnapshots <= chat.retainedRuns)) &&
+        (gateway.state === "unavailable" ||
+            (gateway.checkedAtMs <= sampledAtMs &&
+                (gateway.lastActivityAtMs === undefined ||
+                    gateway.lastActivityAtMs <= gateway.checkedAtMs) &&
+                (gateway.freshness === "fresh") === (gateway.phase === "connected"))) &&
+        (jobs.state === "unavailable" ||
+            jobs.workers.online + jobs.workers.draining <= jobs.workers.capacity) &&
+        (sqlite.state === "unavailable" ||
+            (sqlite.freePages <= sqlite.pageCount &&
+                sqlite.freeBytes <= sqlite.storageBytes)) &&
+        (web.state === "unavailable" || web.heapUsedBytes <= web.heapTotalBytes)
+    );
+}
+
+const systemMetricsObjectSchema = v.strictObject({
+    ...systemHostMetricsSchema.entries,
+    application: systemApplicationMetricsSchema,
+});
+
+/** @returns Whether one complete metrics response has causal application fields. */
+export function systemMetricsApplicationIsConsistent(
+    metrics: v.InferOutput<typeof systemMetricsObjectSchema>
+): boolean {
+    return systemApplicationMetricsAreConsistent(
+        metrics.application,
+        metrics.sampledAtMs
+    );
+}
+
+/** Bounded session-only host and independently available application metrics. */
+export const systemMetricsSchema = v.pipe(
+    systemMetricsObjectSchema,
+    v.check(systemMetricsApplicationIsConsistent, "Application metrics are inconsistent")
+);
 
 export type SystemMetrics = v.InferOutput<typeof systemMetricsSchema>;
 
@@ -394,7 +759,7 @@ export const systemMetricsContract = {
     output: systemMetricsSchema,
     outputSchemaId: "system.metrics.output",
     summary:
-        "Returns bounded host gauges and throughput without host identity or control authority.",
+        "Returns bounded host and independently available application observability without identity or control authority.",
     transport: {
         batching: "adapter-default",
         handler: "default",

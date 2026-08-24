@@ -369,7 +369,8 @@ function recoveryCodes(): string[] {
 
 async function waitForDialogExit(): Promise<void> {
     await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
 }

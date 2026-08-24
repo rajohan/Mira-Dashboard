@@ -1,17 +1,30 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, readdir, readFile, readlink, symlink, unlink } from "node:fs/promises";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+    chmod,
+    mkdir,
+    readdir,
+    readFile,
+    readlink,
+    symlink,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import { configurationEnvironmentNamesForRole } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
+import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import {
-    createLocalReleaseFixture,
     createProductionTargetFixture,
-    publishProductionDeliveryFixtures,
     removeProductionDeliveryFixtures,
 } from "../testSupport/productionDeliveryFixture.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
-import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
+import {
+    prepareProductionDeliveryDirectories,
+    type PreparedProductionDeliveryPaths,
+} from "./productionDeliveryFilesystem.ts";
+import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { pointProductionProcessesAtRelease } from "./productionRuntimePointers.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
@@ -27,40 +40,53 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "c".repeat(40),
     version: "1.4.0",
 });
-const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
-let sharedSourceReleases: readonly [string, string] | undefined;
-
-beforeAll(async () => {
-    sharedSourceReleases = await Promise.all([
-        createLocalReleaseFixture(
-            sourceProjectRoot,
-            firstReleaseId,
-            runtimeIdentity,
-            releaseFixtureDirectories
-        ),
-        createLocalReleaseFixture(
-            sourceProjectRoot,
-            secondReleaseId,
-            runtimeIdentity,
-            releaseFixtureDirectories
-        ),
-    ]);
-});
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
 
-afterAll(async () => {
-    await removeProductionDeliveryFixtures(releaseFixtureDirectories);
-});
+function releaseManifest(commitSha: string): ReleaseManifest {
+    return {
+        runtime: runtimeIdentity,
+        source: { commitSha, treeState: "clean" },
+    } as unknown as ReleaseManifest;
+}
 
-function sourceReleaseFixtures(): readonly [string, string] {
-    if (sharedSourceReleases === undefined) {
-        throw new Error("Production release fixtures are not initialized");
-    }
-    return sharedSourceReleases;
+async function createRuntimePointerFixture(
+    paths: PreparedProductionDeliveryPaths
+): Promise<{
+    readonly first: PublishedProductionRelease;
+    readonly runtime: InstalledProductionRuntime;
+    readonly second: PublishedProductionRelease;
+}> {
+    const bunRoot = path.join(paths.runtimesDirectory, "bun");
+    const firstReleaseRoot = path.join(paths.releasesDirectory, firstReleaseId);
+    const secondReleaseRoot = path.join(paths.releasesDirectory, secondReleaseId);
+    const runtimeRoot = path.join(bunRoot, runtimeIdentity.revision);
+    const runtimeExecutable = path.join(runtimeRoot, "bun");
+    await mkdir(bunRoot, { mode: 0o700 });
+    await Promise.all([
+        mkdir(firstReleaseRoot, { mode: 0o500 }),
+        mkdir(secondReleaseRoot, { mode: 0o500 }),
+        mkdir(runtimeRoot, { mode: 0o700 }),
+    ]);
+    await writeFile(runtimeExecutable, "test-bun-runtime", { mode: 0o500 });
+    await chmod(runtimeRoot, 0o500);
+    return Object.freeze({
+        first: Object.freeze({
+            manifest: releaseManifest(firstReleaseId),
+            releaseRoot: firstReleaseRoot,
+        }),
+        runtime: Object.freeze({
+            executable: runtimeExecutable,
+            identity: runtimeIdentity,
+        }),
+        second: Object.freeze({
+            manifest: releaseManifest(secondReleaseId),
+            releaseRoot: secondReleaseRoot,
+        }),
+    });
 }
 
 function successfulProcessResult(): SystemctlProcessResult {
@@ -79,21 +105,13 @@ function inactiveProcessResult(): SystemctlProcessResult {
     });
 }
 
-describe("production user-systemd service control", () => {
+describe("production root-systemd service control", () => {
     test("points at exact artifacts and controls worker/web in safe order", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             const commands: string[][] = [];
             const requests: Request[] = [];
             const smokes: string[] = [];
@@ -106,7 +124,7 @@ describe("production user-systemd service control", () => {
                     requests.push(request);
                     return Promise.resolve(new Response(null, { status: 200 }));
                 },
-                installUnits: (observedLease, observedPaths, observedRelease) => {
+                verifyUnits: (observedLease, observedPaths, observedRelease) => {
                     expect(observedLease).toBe(lease);
                     expect(observedPaths).toBe(paths);
                     expect(observedRelease).toBe(fixtures.first);
@@ -140,16 +158,16 @@ describe("production user-systemd service control", () => {
                 await readlink(path.join(paths.runtimesDirectory, "bun", "current"))
             ).toBe(runtimeIdentity.revision);
             expect(commands).toEqual([
-                ["--user", "restart", "mira-dashboard-worker.service"],
-                ["--user", "restart", "mira-dashboard-web.service"],
-                ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
-                ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
-                ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
-                ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
-                ["--user", "is-active", "--quiet", "mira-dashboard-worker.service"],
-                ["--user", "is-active", "--quiet", "mira-dashboard-web.service"],
-                ["--user", "stop", "mira-dashboard-web.service"],
-                ["--user", "stop", "mira-dashboard-worker.service"],
+                ["restart", "mira-dashboard-worker.service"],
+                ["restart", "mira-dashboard-web.service"],
+                ["is-active", "--quiet", "mira-dashboard-worker.service"],
+                ["is-active", "--quiet", "mira-dashboard-web.service"],
+                ["is-active", "--quiet", "mira-dashboard-worker.service"],
+                ["is-active", "--quiet", "mira-dashboard-web.service"],
+                ["is-active", "--quiet", "mira-dashboard-worker.service"],
+                ["is-active", "--quiet", "mira-dashboard-web.service"],
+                ["stop", "mira-dashboard-web.service"],
+                ["stop", "mira-dashboard-worker.service"],
             ]);
             expect(requests).toHaveLength(1);
             expect(requests[0]?.method).toBe("HEAD");
@@ -240,19 +258,11 @@ describe("production user-systemd service control", () => {
     });
 
     test("removes crash-left pointer stages before replacing current", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -293,19 +303,11 @@ describe("production user-systemd service control", () => {
     });
 
     test("refuses to remove an untrusted pointer-stage symlink", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -341,19 +343,11 @@ describe("production user-systemd service control", () => {
     });
 
     test("bounds crash-left pointer-stage inventory before mutation", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -385,19 +379,11 @@ describe("production user-systemd service control", () => {
     });
 
     test("refuses to replace an untrusted current entry", async () => {
-        const sourceReleases = sourceReleaseFixtures();
-        const { projectRoot, runtimeSource } =
-            await createProductionTargetFixture(temporaryDirectories);
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
             const paths = await prepareProductionDeliveryDirectories(state);
-            const fixtures = await publishProductionDeliveryFixtures(
-                lease,
-                paths,
-                sourceReleases,
-                runtimeSource,
-                runtimeIdentity
-            );
+            const fixtures = await createRuntimePointerFixture(paths);
             await pointProductionProcessesAtRelease(
                 lease,
                 paths,
@@ -421,13 +407,18 @@ describe("production user-systemd service control", () => {
 
     test("ships project-local logs and the reviewed resource ceilings", async () => {
         const systemdRoot = path.join(sourceProjectRoot, "systemd");
-        const [web, worker] = await Promise.all([
+        const [web, worker, webRuntime] = await Promise.all([
             readFile(path.join(systemdRoot, "mira-dashboard-web.service"), "utf8"),
             readFile(path.join(systemdRoot, "mira-dashboard-worker.service"), "utf8"),
+            readFile(
+                path.join(
+                    sourceProjectRoot,
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime"
+                ),
+                "utf8"
+            ),
         ]);
-        const webExecStart = web
-            .split("\n")
-            .find((line) => line.startsWith("ExecStart="));
+        const webExecStart = webRuntime;
         const workerExecStart = worker
             .split("\n")
             .find((line) => line.startsWith("ExecStart="));
@@ -437,61 +428,96 @@ describe("production user-systemd service control", () => {
             expect(unit).not.toContain("/var/lib/");
             expect(unit).not.toContain("/var/log/");
             expect(unit).toContain(
-                "Environment=MIRA_DASHBOARD_PROJECT_ROOT=%h/projects/mira-dashboard"
+                "Environment=MIRA_DASHBOARD_PROJECT_ROOT=/home/ubuntu/projects/mira-dashboard"
             );
             expect(unit).toContain(
-                "Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=%h/.openclaw/workspace"
+                "Environment=MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace"
             );
             expect(unit).toContain(
-                "WorkingDirectory=%h/projects/mira-dashboard/production/releases/current"
-            );
-            expect(unit).toContain("--no-exit-on-missing-only-secrets");
-            expect(unit).toMatch(
-                /StandardOutput=append:%h\/projects\/mira-dashboard\/production\/state\/logs\//u
+                "WorkingDirectory=/home/ubuntu/projects/mira-dashboard/production/releases/current"
             );
             expect(unit).toMatch(
-                /StandardError=append:%h\/projects\/mira-dashboard\/production\/state\/logs\//u
+                /StandardOutput=append:\/home\/ubuntu\/projects\/mira-dashboard\/production\/state\/logs\//u
             );
+            expect(unit).toMatch(
+                /StandardError=append:\/home\/ubuntu\/projects\/mira-dashboard\/production\/state\/logs\//u
+            );
+            expect(unit).toContain("WantedBy=multi-user.target");
         }
         expect(web).toContain("MemoryHigh=768M");
-        expect(web).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(web).toContain(
+            "Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw"
+        );
+        expect(webRuntime).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
-        expect(web).toContain(
+        expect(webRuntime).toContain("--no-exit-on-missing-only-secrets");
+        expect(webRuntime).toContain(
             `--only-secrets ${configurationEnvironmentNamesForRole("web").join(",")}`
         );
         expect(webExecStart).not.toContain("MOLTBOOK_API_KEY");
         expect(web).toContain(
             "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD DOCKER_LOGIN DOCKER_TOKEN MIRA_GITHUB_USERNAME MIRA_GITHUB_TOKEN RAJOHAN_GITHUB_TOKEN MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
         );
-        expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
+        expect(worker).toContain(
+            "Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw"
+        );
         expect(worker).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
+        expect(worker).toContain("--no-exit-on-missing-only-secrets");
         expect(worker).toContain(
             `--only-secrets ${configurationEnvironmentNamesForRole("worker").join(",")}`
         );
-        expect(workerExecStart).not.toContain("ELEVENLABS_API_KEY");
+        expect(workerExecStart).toContain("ELEVENLABS_API_KEY");
+        expect(workerExecStart).toContain("OPENROUTER_API_KEY");
+        expect(workerExecStart).toContain("SYNTHETIC_API_KEY");
         expect(workerExecStart).not.toContain("MIRA_DASHBOARD_TOTP_KEYRING");
-        expect(worker).toContain(
-            "UnsetEnvironment=ELEVENLABS_API_KEY MIRA_DASHBOARD_TOTP_KEYRING"
-        );
+        expect(worker).toContain("UnsetEnvironment=MIRA_DASHBOARD_TOTP_KEYRING");
         expect(web).toContain("MemoryMax=1G");
         expect(web).toContain("TasksMax=96");
-        expect(web).toContain("ReadOnlyPaths=%h/.openclaw");
+        expect(web).toContain("User=mira-dashboard-web");
+        expect(web).toContain("Group=mira-dashboard-web");
+        expect(worker).toContain("User=ubuntu");
+        expect(worker).toContain("Group=ubuntu");
+        expect(worker).toContain("SupplementaryGroups=docker");
+        expect(web).not.toContain("SupplementaryGroups=");
+        expect(web).toContain("ProtectHome=tmpfs");
+        expect(web).toContain(
+            "BindReadOnlyPaths=/home/ubuntu/projects/mira-dashboard:/run/mira-dashboard-web-mounts/project"
+        );
+        expect(web).toContain(
+            "BindPaths=/home/ubuntu/projects/mira-dashboard/production/state:/run/mira-dashboard-web-mounts/state"
+        );
+        expect(web).toContain(
+            "BindReadOnlyPaths=/home/ubuntu/.openclaw:/run/mira-dashboard-web-mounts/openclaw"
+        );
         expect(web).toContain(
             "InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/opt/docker"
         );
+        expect(web).toContain("ExecStart=!/usr/local/libexec/mira-dashboard-web-runtime");
+        for (const path of [
+            "/run/docker.sock",
+            "/var/run/docker.sock",
+            "/opt/docker",
+            "/run/systemd/private",
+            "/run/dbus/system_bus_socket",
+        ]) {
+            expect(webRuntime).toContain(`[ ! -e ${path} ]`);
+        }
+        expect(webRuntime).toContain("--clear-groups");
+        expect(webRuntime).toContain("--bounding-set=-all");
+        expect(webRuntime).toContain("X-mount.idmap=u:");
         expect(worker).not.toContain("InaccessiblePaths=");
-        expect(web).toContain("PrivateTmp=true\nBindReadOnlyPaths=-/tmp/openclaw");
+        expect(web).toContain("PrivateTmp=true");
+        expect(web).toContain("BindReadOnlyPaths=-/tmp/openclaw");
         expect(web).not.toContain("\nBindPaths=-/tmp/openclaw");
         // Atomic replacement creates a stage file beside its target before
         // renameat2 exchange. A read-only OpenClaw root with exact-file
         // exceptions would therefore fail at runtime; the descriptor writer's
         // reviewed replacement manifest is the write boundary instead.
-        expect(worker).not.toContain("ReadOnlyPaths=%h/.openclaw");
-        expect(worker).not.toContain("ReadWritePaths=%h/.openclaw");
+        expect(worker).not.toContain("ReadOnlyPaths=/home/ubuntu/.openclaw");
+        expect(worker).not.toContain("ReadWritePaths=/home/ubuntu/.openclaw");
         expect(worker).toContain("PrivateTmp=true\nBindPaths=-/tmp/openclaw");
         expect(worker).not.toContain("BindReadOnlyPaths=-/tmp/openclaw");
         expect(web).toContain("CPUQuota=100%");
@@ -499,5 +525,60 @@ describe("production user-systemd service control", () => {
         expect(worker).toContain("MemoryMax=1536M");
         expect(worker).toContain("TasksMax=128");
         expect(worker).toContain("CPUQuota=150%");
+    });
+
+    test("projects only web secrets without exposing the operator Doppler credential", async () => {
+        const [web, webRuntime] = await Promise.all([
+            readFile(
+                path.join(sourceProjectRoot, "systemd/mira-dashboard-web.service"),
+                "utf8"
+            ),
+            readFile(
+                path.join(
+                    sourceProjectRoot,
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime"
+                ),
+                "utf8"
+            ),
+        ]);
+
+        expect(web).toContain("BindReadOnlyPaths=/home/ubuntu/.doppler");
+        expect(web.match(/BindReadOnlyPaths=.*\/home\/ubuntu\/\.doppler/gu)).toHaveLength(
+            1
+        );
+        expect(web).not.toContain("/run/mira-dashboard-web-mounts/doppler");
+        expect(webRuntime).not.toContain(
+            "mount_idmapped \\\n    /run/mira-dashboard-web-mounts/doppler"
+        );
+        expect(webRuntime).toContain(
+            '"$(/usr/bin/stat -c %u:%g:%a -- "$operator_doppler")" = "$owner_uid:$owner_gid:700"'
+        );
+        expect(webRuntime).toContain(
+            '"$(/usr/bin/stat -c %u:%g:%a:%h -- "$operator_doppler_config")" = "$owner_uid:$owner_gid:600:1"'
+        );
+        expect(webRuntime).toContain('-- /usr/bin/test -r "$operator_doppler"');
+        expect(webRuntime).toContain('-- /usr/bin/test -x "$operator_doppler"');
+        expect(webRuntime).toContain('/usr/bin/umount -- "$operator_doppler"');
+        expect(webRuntime).toContain('[ ! -e "$operator_doppler_config" ]');
+
+        const dopplerLaunch = webRuntime.indexOf("/usr/local/bin/doppler \\\n");
+        const credentialHidden = webRuntime.indexOf(
+            '/usr/bin/umount -- "$operator_doppler"'
+        );
+        const irreversibleDrop = webRuntime.indexOf(
+            "exec /usr/bin/setpriv \\\n",
+            credentialHidden
+        );
+        expect(dopplerLaunch).toBeGreaterThanOrEqual(0);
+        expect(credentialHidden).toBeGreaterThanOrEqual(0);
+        expect(irreversibleDrop).toBeGreaterThan(credentialHidden);
+        expect(webRuntime).toContain("--config-dir=/home/ubuntu/.doppler");
+        expect(webRuntime).toContain("--no-read-env");
+        expect(webRuntime).toContain("--fallback-readonly");
+        expect(webRuntime).toContain("--no-liveness-ping");
+        expect(webRuntime).toContain(
+            "-- /usr/local/libexec/mira-dashboard-web-runtime projected-web-runtime"
+        );
+        expect(webRuntime).not.toContain("DOPPLER_TOKEN");
     });
 });

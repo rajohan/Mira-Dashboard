@@ -46,7 +46,7 @@ describe("fixed host operations provisioning", () => {
         expect(helper).not.toContain("--volumes");
     });
 
-    test("grants the worker group access to exactly the three public units", async () => {
+    test("binds the worker OS identity to only fixed host and application units", async () => {
         const policy = await readFile(
             path.join(artifacts, "60-mira-dashboard-host-operations.rules"),
             "utf8"
@@ -55,43 +55,48 @@ describe("fixed host operations provisioning", () => {
         for (const unit of Object.values(fixedHostOperationUnits)) {
             expect(policy).toContain(`"${unit}"`);
         }
-        expect(policy).toContain('action.lookup("verb") !== "start"');
-        expect(policy).toContain('!subject.isInGroup("mira-dashboard-host-operations")');
+        expect(policy).toContain('subject.user !== "ubuntu"');
+        expect(policy).toContain('verb === "start"');
+        expect(policy).toContain('"mira-dashboard-web.service"');
+        expect(policy).toContain('"mira-dashboard-worker.service"');
+        expect(policy).toContain('["restart", "start", "stop"]');
         expect(policy).not.toContain("deferred-reboot");
-        expect(policy).not.toContain('action.lookup("verb") !== "stop"');
-        expect(policy).not.toContain('action.lookup("verb") !== "restart"');
+        expect(policy).not.toContain("subject.isInGroup");
+        expect(policy).not.toContain('"reload"');
     });
 
     test("defers reboot and preserves worker NoNewPrivileges", async () => {
-        const [restart, update, cleanup, timer, reboot, worker] = await Promise.all([
-            readFile(
-                path.join(artifacts, "mira-dashboard-host-system-restart.service"),
-                "utf8"
-            ),
-            readFile(
-                path.join(artifacts, "mira-dashboard-host-system-update.service"),
-                "utf8"
-            ),
-            readFile(
-                path.join(artifacts, "mira-dashboard-host-system-cleanup.service"),
-                "utf8"
-            ),
-            readFile(
-                path.join(artifacts, "mira-dashboard-deferred-reboot.timer"),
-                "utf8"
-            ),
-            readFile(
-                path.join(artifacts, "mira-dashboard-deferred-reboot.service"),
-                "utf8"
-            ),
-            readFile(
-                path.resolve(
-                    import.meta.dir,
-                    "../../../systemd/mira-dashboard-worker.service"
+        const [restart, update, cleanup, timer, reboot, worker, webRuntime] =
+            await Promise.all([
+                readFile(
+                    path.join(artifacts, "mira-dashboard-host-system-restart.service"),
+                    "utf8"
                 ),
-                "utf8"
-            ),
-        ]);
+                readFile(
+                    path.join(artifacts, "mira-dashboard-host-system-update.service"),
+                    "utf8"
+                ),
+                readFile(
+                    path.join(artifacts, "mira-dashboard-host-system-cleanup.service"),
+                    "utf8"
+                ),
+                readFile(
+                    path.join(artifacts, "mira-dashboard-deferred-reboot.timer"),
+                    "utf8"
+                ),
+                readFile(
+                    path.join(artifacts, "mira-dashboard-deferred-reboot.service"),
+                    "utf8"
+                ),
+                readFile(
+                    path.resolve(
+                        import.meta.dir,
+                        "../../../systemd/mira-dashboard-worker.service"
+                    ),
+                    "utf8"
+                ),
+                readFile(path.join(artifacts, "mira-dashboard-web-runtime"), "utf8"),
+            ]);
         expect(restart).toContain("NoNewPrivileges=true");
         expect(update).not.toContain("NoNewPrivileges=");
         expect(cleanup).not.toContain("NoNewPrivileges=");
@@ -130,5 +135,13 @@ describe("fixed host operations provisioning", () => {
         expect(cleanup).toContain("TimeoutStartSec=30min");
         expect(cleanup).toContain("StandardOutput=null");
         expect(cleanup).toContain("StandardError=null");
+        expect(webRuntime).toContain("X-mount.idmap=u:");
+        expect(webRuntime).toContain("--reuid=mira-dashboard-web");
+        expect(webRuntime).toContain("--clear-groups");
+        expect(webRuntime).toContain("--bounding-set=-all");
+        expect(webRuntime).toContain("--no-new-privs");
+        expect(webRuntime).not.toContain("eval");
+        expect(webRuntime).not.toContain("sh -c");
+        expect(webRuntime).not.toContain("sudo");
     });
 });

@@ -44,7 +44,9 @@ export const AnchoredPanel: Story = {
             return id;
         });
         await waitFor(async () => {
-            const panel = canvasElement.ownerDocument.getElementById(panelId);
+            const panel = canvasElement.ownerDocument.querySelector(
+                `#${globalThis.CSS.escape(panelId)}`
+            );
 
             if (!(panel instanceof HTMLElement)) {
                 throw new Error("The queue controls popover panel was not mounted.");
@@ -58,7 +60,9 @@ export const AnchoredPanel: Story = {
         await waitFor(async () => {
             await expect(trigger).toHaveAttribute("aria-expanded", "false");
             await expect(
-                canvasElement.ownerDocument.getElementById(panelId)
+                canvasElement.ownerDocument.querySelector(
+                    `#${globalThis.CSS.escape(panelId)}`
+                )
             ).not.toBeInTheDocument();
             await expect(trigger).toHaveFocus();
         });
@@ -90,7 +94,9 @@ export const ViewportEdge: Story = {
             const panel =
                 panelId === null
                     ? null
-                    : canvasElement.ownerDocument.getElementById(panelId);
+                    : canvasElement.ownerDocument.querySelector(
+                          `#${globalThis.CSS.escape(panelId)}`
+                      );
 
             if (!(panel instanceof HTMLElement)) {
                 throw new Error("The edge popover panel was not mounted.");

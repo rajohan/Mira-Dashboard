@@ -123,12 +123,10 @@ jobs:
                   name: backend
                   fail_ci_if_error: true
 
-    dashboard-checks:
-        name: dashboard-checks
+    dashboard-static-checks:
+        name: dashboard-static-checks
         runs-on: ubuntu-latest
         timeout-minutes: 25
-        env:
-            CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
         steps:
             - name: Checkout
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,9 +171,122 @@ jobs:
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
               run: bun run build:processes
 
-            - name: Test isolated future root with coverage
+            - name: Verify isolated generated documentation
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: bun run test:coverage
+              run: bun run docs:check
+
+            - name: Verify isolated migration graph
+              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
+              run: bun run db:check
+
+    dashboard-coverage:
+        name: coverage-${{ matrix.partition }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        strategy:
+            fail-fast: false
+            matrix:
+                partition: [bun, browser, storybook]
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version-file: greenfield/.bun-version
+
+            - name: Copy the future root into isolation
+              run: |
+                  mkdir -p "${RUNNER_TEMP}/mira-dashboard-greenfield"
+                  cp -a greenfield/. "${RUNNER_TEMP}/mira-dashboard-greenfield/"
+
+            - name: Install isolated dependencies
+              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
+              run: bun install --frozen-lockfile
+
+            - name: Install Chromium
+              if: ${{ matrix.partition == 'storybook' }}
+              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
+              run: |
+                  bunx playwright install-deps chromium
+                  bun run storybook:install-browser
+
+            - name: Test ${{ matrix.partition }} coverage
+              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
+              run: bun run test:coverage:${{ matrix.partition }}
+
+            - name: Upload ${{ matrix.partition }} coverage artifact
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              if: always()
+              with:
+                  name: dashboard-coverage-${{ matrix.partition }}-lcov
+                  path: |
+                      ${{ runner.temp }}/mira-dashboard-greenfield/coverage/${{ matrix.partition }}-001/lcov.info
+                      ${{ runner.temp }}/mira-dashboard-greenfield/coverage/${{ matrix.partition }}-002/lcov.info
+                      ${{ runner.temp }}/mira-dashboard-greenfield/coverage/${{ matrix.partition }}-003/lcov.info
+                  if-no-files-found: error
+                  retention-days: 14
+
+    dashboard-checks:
+        name: dashboard-checks
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        needs: [dashboard-static-checks, dashboard-coverage]
+        if: ${{ always() }}
+        env:
+            CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
+        steps:
+            - name: Require static checks and every coverage partition
+              env:
+                  COVERAGE_MATRIX_RESULT: ${{ needs['dashboard-coverage'].result }}
+                  STATIC_CHECKS_RESULT: ${{ needs['dashboard-static-checks'].result }}
+              run: |
+                  test "${STATIC_CHECKS_RESULT}" = "success"
+                  test "${COVERAGE_MATRIX_RESULT}" = "success"
+
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version-file: greenfield/.bun-version
+
+            - name: Copy the future root into isolation
+              run: |
+                  mkdir -p "${RUNNER_TEMP}/mira-dashboard-greenfield"
+                  cp -a greenfield/. "${RUNNER_TEMP}/mira-dashboard-greenfield/"
+
+            - name: Install isolated dependencies
+              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
+              run: bun install --frozen-lockfile
+
+            - name: Download Bun coverage
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: dashboard-coverage-bun-lcov
+                  path: ${{ runner.temp }}/mira-dashboard-greenfield/coverage
+
+            - name: Download browser coverage
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: dashboard-coverage-browser-lcov
+                  path: ${{ runner.temp }}/mira-dashboard-greenfield/coverage
+
+            - name: Download Storybook coverage
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: dashboard-coverage-storybook-lcov
+                  path: ${{ runner.temp }}/mira-dashboard-greenfield/coverage
+
+            - name: Merge and verify isolated coverage
+              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
+              run: bun run test:coverage:merge
 
             - name: Prefix isolated LCOV paths for the coexistence checkout
               run: |
@@ -213,14 +324,6 @@ jobs:
                   name: dashboard
                   fail_ci_if_error: true
 
-            - name: Verify isolated generated documentation
-              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: bun run docs:check
-
-            - name: Verify isolated migration graph
-              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: bun run db:check
-
     storybook:
         name: storybook
         runs-on: ubuntu-latest
@@ -245,16 +348,6 @@ jobs:
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
               run: bun install --frozen-lockfile
 
-            - name: Install Chromium
-              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: |
-                  bunx playwright install-deps chromium
-                  bun run storybook:install-browser
-
-            - name: Test Storybook
-              working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: bun run storybook:test
-
             - name: Build Storybook
               working-directory: ${{ runner.temp }}/mira-dashboard-greenfield
-              run: bun run storybook:build
+              run: bun run build:storybook

@@ -171,6 +171,30 @@
             "name": "automationSecurity.rotateCredential"
         },
         {
+            "kind": "mutation",
+            "name": "backups.clearKopiaAttention"
+        },
+        {
+            "kind": "mutation",
+            "name": "backups.clearWalgAttention"
+        },
+        {
+            "kind": "query",
+            "name": "backups.getKopiaStatus"
+        },
+        {
+            "kind": "query",
+            "name": "backups.getWalgStatus"
+        },
+        {
+            "kind": "mutation",
+            "name": "backups.runKopia"
+        },
+        {
+            "kind": "mutation",
+            "name": "backups.runWalg"
+        },
+        {
             "kind": "query",
             "name": "cache.getEntry"
         },

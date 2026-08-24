@@ -2,9 +2,14 @@ import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import { expect, within } from "storybook/test";
 
 import type { SystemMetrics } from "../../../contracts/system.ts";
+import {
+    observedStorySystemApplicationMetrics,
+    unavailableStorySystemApplicationMetrics,
+} from "../../storySupport/systemMetricsStoryFixture.ts";
 import { SystemMetricsCards } from "../SystemMetricsCards.tsx";
 
 const freshMetrics = Object.freeze({
+    application: observedStorySystemApplicationMetrics(1_800_000_000_000),
     cpu: {
         loadAverage: [9.92, 4.2, 2.1],
         loadPercent: 248,
@@ -48,6 +53,40 @@ export const Fresh: Story = {
         const canvas = within(canvasElement);
         await expect(canvas.getByRole("heading", { name: "CPU" })).toBeVisible();
         await expect(canvas.getByText("12.3 Mbit/s")).toBeVisible();
+        await expect(canvas.getByText("All observed")).toBeVisible();
+        await expect(canvas.getByText("3 subscribers")).toBeVisible();
+        await expect(
+            canvas.getByRole("heading", { name: "Durable operations" })
+        ).toBeVisible();
+        await expect(canvas.getByRole("heading", { name: "Chat runtime" })).toBeVisible();
+        await expect(
+            canvas.getByRole("heading", { name: "Cache snapshots" })
+        ).toBeVisible();
+        await expect(
+            canvas.getByRole("heading", { name: "HTTP procedures" })
+        ).toBeVisible();
+    },
+};
+
+export const PartialApplicationObservation: Story = {
+    args: {
+        metrics: {
+            ...freshMetrics,
+            application: {
+                ...freshMetrics.application,
+                cache: { state: "unavailable" },
+                realtime: { state: "unavailable" },
+            },
+        },
+    },
+};
+
+export const ApplicationUnavailable: Story = {
+    args: {
+        metrics: {
+            ...freshMetrics,
+            application: unavailableStorySystemApplicationMetrics,
+        },
     },
 };
 

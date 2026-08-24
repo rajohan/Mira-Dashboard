@@ -10,8 +10,10 @@ const webEntrypoint = "src/app/dashboardServer.ts";
 const workerEntrypoint = "src/app/worker.ts";
 const databaseMaintenanceEntrypoint = "src/app/databaseMaintenance.ts";
 const productionDeliveryEntrypoint = "scripts/delivery/productionDeliveryExecutor.ts";
+const openClawHeartbeatEntrypoint = "scripts/openClawHeartbeat.ts";
 const maximumDatabaseMaintenanceGzipBytes = 2 * 1024 * 1024;
 const maximumProductionDeliveryGzipBytes = 2 * 1024 * 1024;
+const maximumOpenClawHeartbeatGzipBytes = 2 * 1024 * 1024;
 const maximumWebGzipBytes = 4 * 1024 * 1024;
 const maximumWorkerGzipBytes = 2 * 1024 * 1024;
 
@@ -22,6 +24,10 @@ export interface ProcessBuildResult {
         rawBytes: number;
     }>;
     readonly outputDirectory: string;
+    readonly openClawHeartbeat: Readonly<{
+        gzipBytes: number;
+        rawBytes: number;
+    }>;
     readonly productionDelivery: Readonly<{
         gzipBytes: number;
         rawBytes: number;
@@ -44,7 +50,12 @@ function validatedOutputDirectory(
 async function measurements(
     filePath: string,
     maximumGzipBytes: number,
-    role: "database-maintenance" | "production-delivery" | "web" | "worker"
+    role:
+        | "database-maintenance"
+        | "openclaw-heartbeat"
+        | "production-delivery"
+        | "web"
+        | "worker"
 ): Promise<Readonly<{ gzipBytes: number; rawBytes: number }>> {
     const contents = await readFile(filePath);
     const gzipBytes = gzipSync(contents, { level: 9 }).byteLength;
@@ -75,6 +86,7 @@ export async function buildProcessArtifacts(
             entrypoints: [
                 path.join(repositoryRoot, databaseMaintenanceEntrypoint),
                 path.join(repositoryRoot, productionDeliveryEntrypoint),
+                path.join(repositoryRoot, openClawHeartbeatEntrypoint),
                 path.join(repositoryRoot, webEntrypoint),
                 path.join(repositoryRoot, workerEntrypoint),
             ],
@@ -96,11 +108,12 @@ export async function buildProcessArtifacts(
             .map(({ path: outputPath }) => path.basename(outputPath))
             .toSorted();
         if (
-            emittedNames.length !== 4 ||
+            emittedNames.length !== 5 ||
             emittedNames[0] !== "dashboardServer.js" ||
             emittedNames[1] !== "databaseMaintenance.js" ||
-            emittedNames[2] !== "productionDeliveryExecutor.js" ||
-            emittedNames[3] !== "worker.js"
+            emittedNames[2] !== "openClawHeartbeat.js" ||
+            emittedNames[3] !== "productionDeliveryExecutor.js" ||
+            emittedNames[4] !== "worker.js"
         ) {
             throw new Error("Dashboard process build emitted an unexpected artifact set");
         }
@@ -112,26 +125,33 @@ export async function buildProcessArtifacts(
             path.join(output, "productionDeliveryExecutor.js"),
             path.join(output, "productionDelivery.js")
         );
-        const [databaseMaintenance, productionDelivery, web, worker] = await Promise.all([
-            measurements(
-                path.join(output, "databaseMaintenance.js"),
-                maximumDatabaseMaintenanceGzipBytes,
-                "database-maintenance"
-            ),
-            measurements(
-                path.join(output, "productionDelivery.js"),
-                maximumProductionDeliveryGzipBytes,
-                "production-delivery"
-            ),
-            measurements(path.join(output, "web.js"), maximumWebGzipBytes, "web"),
-            measurements(
-                path.join(output, "worker.js"),
-                maximumWorkerGzipBytes,
-                "worker"
-            ),
-        ]);
+        const [databaseMaintenance, openClawHeartbeat, productionDelivery, web, worker] =
+            await Promise.all([
+                measurements(
+                    path.join(output, "databaseMaintenance.js"),
+                    maximumDatabaseMaintenanceGzipBytes,
+                    "database-maintenance"
+                ),
+                measurements(
+                    path.join(output, "openClawHeartbeat.js"),
+                    maximumOpenClawHeartbeatGzipBytes,
+                    "openclaw-heartbeat"
+                ),
+                measurements(
+                    path.join(output, "productionDelivery.js"),
+                    maximumProductionDeliveryGzipBytes,
+                    "production-delivery"
+                ),
+                measurements(path.join(output, "web.js"), maximumWebGzipBytes, "web"),
+                measurements(
+                    path.join(output, "worker.js"),
+                    maximumWorkerGzipBytes,
+                    "worker"
+                ),
+            ]);
         return Object.freeze({
             databaseMaintenance,
+            openClawHeartbeat,
             outputDirectory: output,
             productionDelivery,
             web,
@@ -156,6 +176,8 @@ if (import.meta.main) {
                 status: "BUILT",
                 databaseMaintenanceGzipBytes: result.databaseMaintenance.gzipBytes,
                 databaseMaintenanceRawBytes: result.databaseMaintenance.rawBytes,
+                openClawHeartbeatGzipBytes: result.openClawHeartbeat.gzipBytes,
+                openClawHeartbeatRawBytes: result.openClawHeartbeat.rawBytes,
                 productionDeliveryGzipBytes: result.productionDelivery.gzipBytes,
                 productionDeliveryRawBytes: result.productionDelivery.rawBytes,
                 webGzipBytes: result.web.gzipBytes,

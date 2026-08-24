@@ -90,7 +90,7 @@ function ReportListItem({ onSelect, report, selected }: ReportListItemProps) {
                 </Badge>
             </span>
             <time
-                className="text-primary-500 mt-2 block text-xs"
+                className="text-primary-400 mt-2 block text-xs"
                 dateTime={new Date(report.occurredAtMs).toISOString()}
             >
                 {formatDashboardDateTime(report.occurredAtMs)}

@@ -37,7 +37,7 @@ const longSource = [
     "    retries: 3,",
     "};",
 ].join("\n");
-const maximumLineTail = `last-line-${"workspace/".repeat(80)}`;
+const maximumLineTail = "last-line-20000";
 const maximumLineSource = `${"\n".repeat(19_999)}${maximumLineTail}`;
 
 export const TypeScriptSource: Story = {
@@ -124,6 +124,9 @@ export const LongLinesWrapByDefault: Story = {
         await waitFor(() =>
             expect(region.scrollWidth).toBeGreaterThan(region.clientWidth)
         );
+        region.scrollLeft = region.scrollWidth;
+        await waitFor(() => expect(region.scrollLeft).toBeGreaterThan(0));
+        await expect(getComputedStyle(longLine, "::before").position).toBe("sticky");
         await expect(longLine.getBoundingClientRect().height).toBeLessThanOrEqual(
             referenceLine.getBoundingClientRect().height + 1
         );
@@ -195,41 +198,58 @@ export const MaximumLineNumberGutter: Story = {
         ),
     ],
     play: async ({ canvasElement }) => {
-        const canvas = within(canvasElement);
-        const region = canvas.getByRole("region", { name: "Maximum numbered source" });
-        const wrapSwitch = canvas.getByRole("switch", { name: "Wrap lines" });
-        const sourceLines =
-            canvasElement.querySelectorAll<HTMLElement>(".source-viewer-line");
-        const lastLine = sourceLines[19_999];
+        const code = canvasElement.querySelector<HTMLElement>(
+            "code.source-viewer-lines[data-language='text']"
+        );
+        const toolbar = canvasElement.querySelector<HTMLElement>(
+            "[data-testid='source-viewer-toolbar']"
+        );
 
-        if (!lastLine) {
+        if (!code || !toolbar) {
+            throw new TypeError("Maximum source story did not render its source surface");
+        }
+
+        const lastLine = code.lastElementChild;
+        if (
+            !(lastLine instanceof HTMLElement) ||
+            !lastLine.classList.contains("source-viewer-line")
+        ) {
             throw new TypeError("Maximum source story did not render line 20,000");
         }
 
+        const wrapSwitch = within(toolbar).getByRole("switch", { name: "Wrap lines" });
         const gutterStyle = getComputedStyle(lastLine, "::before");
         const textContext = document.createElement("canvas").getContext("2d");
         if (!textContext) {
             throw new TypeError("Maximum source story could not measure its line number");
         }
-        textContext.font = getComputedStyle(lastLine).font;
+        textContext.font = gutterStyle.font;
 
-        await expect(sourceLines).toHaveLength(20_000);
-        await expect(lastLine.textContent).toBe(maximumLineTail);
-        await expect(gutterStyle.content).toBe("counter(source-viewer-line-number)");
-        await expect(gutterStyle.position).toBe("sticky");
-        await expect(gutterStyle.left).toBe("0px");
-        await expect(gutterStyle.width).toBe("64px");
-        await expect(gutterStyle.paddingRight).toBe("16px");
-        await expect(gutterStyle.color).toBe("rgb(133, 140, 153)");
-        await expect(textContext.measureText("20000").width).toBeLessThan(48);
-        await expect(wrapSwitch).toBeChecked();
-
-        await userEvent.click(wrapSwitch);
-        region.scrollLeft = region.scrollWidth;
-
-        await expect(wrapSwitch).not.toBeChecked();
-        await waitFor(() => expect(region.scrollLeft).toBeGreaterThan(0));
-        await expect(getComputedStyle(lastLine, "::before").position).toBe("sticky");
-        await expect(lastLine.textContent).toBe(maximumLineTail);
+        await expect({
+            color: gutterStyle.color,
+            content: gutterStyle.content,
+            lastLine: lastLine.textContent,
+            left: gutterStyle.left,
+            lineCount: code.childElementCount,
+            lineElementsOnly:
+                code.querySelector(":scope > :not(.source-viewer-line)") === null,
+            lineNumberFits: textContext.measureText("20000").width < 48,
+            paddingRight: gutterStyle.paddingRight,
+            position: gutterStyle.position,
+            width: gutterStyle.width,
+            wrapChecked: wrapSwitch.getAttribute("aria-checked") === "true",
+        }).toEqual({
+            color: "rgb(133, 140, 153)",
+            content: "counter(source-viewer-line-number)",
+            lastLine: maximumLineTail,
+            left: "0px",
+            lineCount: 20_000,
+            lineElementsOnly: true,
+            lineNumberFits: true,
+            paddingRight: "16px",
+            position: "sticky",
+            width: "64px",
+            wrapChecked: true,
+        });
     },
 };

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactElement, useState } from "react";
 
 import { Badge } from "./Badge.tsx";
 import { CopyTextButton } from "./CopyTextButton.tsx";
@@ -23,6 +23,12 @@ interface SourceSurfaceProps {
     readonly content: string;
     readonly highlight?: boolean;
     readonly language: string;
+    readonly wrapLongLines: boolean;
+}
+
+interface SourceSurfaceFrameProps {
+    readonly ariaLabel: string;
+    readonly source: ReactElement;
     readonly wrapLongLines: boolean;
 }
 
@@ -61,7 +67,49 @@ function PlainSource({ content, language, numbered }: PlainSourceProps) {
     );
 }
 
+function sourceCode(
+    content: string,
+    highlighted: boolean,
+    language: string,
+    numbered: boolean
+): ReactElement {
+    return highlighted && supportsSyntaxHighlightedSourceLanguage(language) ? (
+        <SyntaxHighlightedSource
+            content={content}
+            language={language}
+            numbered={numbered}
+        />
+    ) : (
+        <PlainSource content={content} language={language} numbered={numbered} />
+    );
+}
+
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The bounded source viewport must be keyboard-focusable when either axis scrolls. */
+function SourceSurfaceFrame({
+    ariaLabel,
+    source,
+    wrapLongLines,
+}: SourceSurfaceFrameProps) {
+    return (
+        <section
+            aria-label={ariaLabel}
+            className="focus-visible:ring-accent-300 min-h-0 min-w-0 flex-1 overflow-auto contain-[layout_paint_style] outline-none focus-visible:ring-2 focus-visible:ring-inset"
+            tabIndex={0}
+        >
+            <pre
+                className={`source-viewer-source min-h-full min-w-full bg-transparent py-4 font-mono text-sm leading-6 tab-4 ${
+                    wrapLongLines
+                        ? "source-viewer-source-wrapped"
+                        : "source-viewer-source-unwrapped"
+                }`}
+                data-testid="source-viewer-source"
+            >
+                {source}
+            </pre>
+        </section>
+    );
+}
+
 /**
  * Renders the shared line-numbered source surface without adding a toolbar.
  * @returns A CSP-safe, optionally highlighted source viewport.
@@ -81,55 +129,34 @@ export function SourceSurface({
             supportsSyntaxHighlightedSourceLanguage(language));
 
     return (
-        <section
-            aria-label={ariaLabel}
-            className="focus-visible:ring-accent-300 min-h-0 min-w-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset"
-            tabIndex={0}
-        >
-            <pre
-                className={`source-viewer-source min-h-full min-w-full bg-transparent py-4 font-mono text-sm leading-6 tab-4 ${
-                    wrapLongLines
-                        ? "source-viewer-source-wrapped"
-                        : "source-viewer-source-unwrapped"
-                }`}
-                data-testid="source-viewer-source"
-            >
-                {highlighted && supportsSyntaxHighlightedSourceLanguage(language) ? (
-                    <SyntaxHighlightedSource
-                        content={content}
-                        language={language}
-                        numbered={numbered}
-                    />
-                ) : (
-                    <PlainSource
-                        content={content}
-                        language={language}
-                        numbered={numbered}
-                    />
-                )}
-            </pre>
-        </section>
+        <SourceSurfaceFrame
+            ariaLabel={ariaLabel}
+            source={sourceCode(content, highlighted, language, numbered)}
+            wrapLongLines={wrapLongLines}
+        />
     );
 }
 
-/**
- * Renders bounded source text without parsing or executing its contents.
- * @returns A reusable language-labelled, copyable, line-numbered source surface.
- */
-export function SourceViewer({
+interface InteractiveSourceViewerProps {
+    readonly ariaLabel: string;
+    readonly content: string;
+    readonly copyLabel: string;
+    readonly languageLabel: string;
+    readonly lineSummary: string;
+    readonly numbered: boolean;
+    readonly source: ReactElement;
+}
+
+function InteractiveSourceViewer({
     ariaLabel,
     content,
     copyLabel,
-    language,
     languageLabel,
-}: SourceViewerProps) {
+    lineSummary,
+    numbered,
+    source,
+}: InteractiveSourceViewerProps) {
     const [wrapLongLines, setWrapLongLines] = useState(true);
-    const lineCount = sourceLineCount(content);
-    const numbered = lineCount <= sourceViewerLineNumberMaximum;
-    const highlighted =
-        content.length <= sourceViewerHighlightByteMaximum &&
-        supportsSyntaxHighlightedSourceLanguage(language);
-    const lineSummary = `${lineCount.toLocaleString("en-US")} ${lineCount === 1 ? "line" : "lines"}`;
 
     return (
         <div className="flex min-h-full min-w-0 flex-col">
@@ -152,14 +179,43 @@ export function SourceViewer({
                     <CopyTextButton label={copyLabel} text={content} />
                 </div>
             </div>
-            <SourceSurface
+            <SourceSurfaceFrame
                 ariaLabel={ariaLabel}
-                content={content}
-                highlight={highlighted}
-                language={language}
+                source={source}
                 wrapLongLines={wrapLongLines}
             />
         </div>
+    );
+}
+
+/**
+ * Renders bounded source text without parsing or executing its contents.
+ * @returns A reusable language-labelled, copyable, line-numbered source surface.
+ */
+export function SourceViewer({
+    ariaLabel,
+    content,
+    copyLabel,
+    language,
+    languageLabel,
+}: SourceViewerProps) {
+    const lineCount = sourceLineCount(content);
+    const numbered = lineCount <= sourceViewerLineNumberMaximum;
+    const highlighted =
+        content.length <= sourceViewerHighlightByteMaximum &&
+        supportsSyntaxHighlightedSourceLanguage(language);
+    const lineSummary = `${lineCount.toLocaleString("en-US")} ${lineCount === 1 ? "line" : "lines"}`;
+
+    return (
+        <InteractiveSourceViewer
+            ariaLabel={ariaLabel}
+            content={content}
+            copyLabel={copyLabel}
+            languageLabel={languageLabel}
+            lineSummary={lineSummary}
+            numbered={numbered}
+            source={sourceCode(content, highlighted, language, numbered)}
+        />
     );
 }
 /* oxlint-enable jsx-a11y/no-noninteractive-tabindex */

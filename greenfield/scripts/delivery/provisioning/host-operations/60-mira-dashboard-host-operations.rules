@@ -1,19 +1,33 @@
 polkit.addRule(function (action, subject) {
     if (
         action.id !== "org.freedesktop.systemd1.manage-units" ||
-        action.lookup("verb") !== "start" ||
-        !subject.isInGroup("mira-dashboard-host-operations")
+        subject.user !== "ubuntu"
     ) {
         return polkit.Result.NOT_HANDLED;
     }
 
     var unit = action.lookup("unit");
-    var allowed = [
+    var verb = action.lookup("verb");
+    var hostOperations = [
         "mira-dashboard-host-system-cleanup.service",
         "mira-dashboard-host-system-restart.service",
         "mira-dashboard-host-system-update.service"
     ];
-    return allowed.indexOf(unit) === -1
-        ? polkit.Result.NOT_HANDLED
-        : polkit.Result.YES;
+    if (verb === "start" && hostOperations.indexOf(unit) !== -1) {
+        return polkit.Result.YES;
+    }
+
+    var applicationUnits = [
+        "mira-dashboard-web.service",
+        "mira-dashboard-worker.service"
+    ];
+    var applicationVerbs = ["restart", "start", "stop"];
+    if (
+        applicationUnits.indexOf(unit) !== -1 &&
+        applicationVerbs.indexOf(verb) !== -1
+    ) {
+        return polkit.Result.YES;
+    }
+
+    return polkit.Result.NOT_HANDLED;
 });

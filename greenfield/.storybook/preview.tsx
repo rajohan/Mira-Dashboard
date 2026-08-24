@@ -1,16 +1,18 @@
 import type { Preview } from "@storybook/tanstack-react";
 import { themes } from "storybook/theming";
 
-import { installPinnedStorybookDiagnosticWorkarounds } from "../src/browser/storySupport/storybookDiagnostics.ts";
+import {
+    prepareStorybookBrowserStorage,
+    resetStorybookBrowserStorage,
+} from "../src/browser/storySupport/storybookBrowserStorage.ts";
 
 import "../src/browser/storySupport/storybook.css";
 
 const dashboardBackground = "#0b0b0c";
 
 const preview: Preview = {
-    beforeEach(context) {
-        return installPinnedStorybookDiagnosticWorkarounds(context.id);
-    },
+    afterEach: resetStorybookBrowserStorage,
+    beforeEach: prepareStorybookBrowserStorage,
     initialGlobals: {
         backgrounds: {
             value: "dashboard",
@@ -47,6 +49,7 @@ const preview: Preview = {
             storySort: {
                 method: "alphabetical",
                 order: [
+                    "Pages",
                     "UI",
                     "Authentication",
                     "Agents",

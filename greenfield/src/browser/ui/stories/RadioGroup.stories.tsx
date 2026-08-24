@@ -107,12 +107,12 @@ export const Default: Story = {
     play: async ({ canvasElement }) => {
         const radioCards = within(canvasElement).getAllByRole("radio");
 
-        await waitFor(() => {
+        await waitFor(async () => {
             const expectedHeight = radioCards[0]?.getBoundingClientRect().height;
-            expect(expectedHeight).toBeGreaterThan(0);
+            await expect(expectedHeight).toBeGreaterThan(0);
 
             for (const radioCard of radioCards.slice(1)) {
-                expect(radioCard.getBoundingClientRect().height).toBeCloseTo(
+                await expect(radioCard.getBoundingClientRect().height).toBeCloseTo(
                     expectedHeight ?? 0,
                     2
                 );

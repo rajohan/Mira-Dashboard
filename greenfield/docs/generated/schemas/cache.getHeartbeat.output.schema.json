@@ -745,8 +745,891 @@
       ],
       "$comment": "Live Valibot validation additionally requires OpenClaw-cron coverage, truncation, pending synchronization, and freshness to agree."
     },
+    "operationalSignals": {
+      "type": "object",
+      "properties": {
+        "backups": {
+          "type": "object",
+          "properties": {
+            "kopia": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "fresh"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "staleSinceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "last-known-good"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "staleSinceMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+            },
+            "walg": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "fresh"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "staleSinceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "last-known-good"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "staleSinceMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+            }
+          },
+          "required": [
+            "kopia",
+            "walg"
+          ],
+          "additionalProperties": false
+        },
+        "database": {
+          "type": "object",
+          "properties": {
+            "postgresqlMaintenance": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "not-assessed",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "fresh"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "not-assessed",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "staleSinceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "last-known-good"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "staleSinceMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+            },
+            "sqliteMaintenance": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "not-assessed",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "fresh"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy",
+                        "not-assessed",
+                        "running"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "staleSinceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "last-known-good"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "staleSinceMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+            }
+          },
+          "required": [
+            "postgresqlMaintenance",
+            "sqliteMaintenance"
+          ],
+          "additionalProperties": false
+        },
+        "docker": {
+          "type": "object",
+          "properties": {
+            "health": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "fresh"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "healthy"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "staleSinceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "last-known-good"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "staleSinceMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+            },
+            "updates": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "current"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "fresh"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "condition": {
+                      "enum": [
+                        "attention",
+                        "current"
+                      ],
+                      "type": "string"
+                    },
+                    "observedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "staleSinceMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "state": {
+                      "const": "last-known-good"
+                    }
+                  },
+                  "required": [
+                    "condition",
+                    "observedAtMs",
+                    "staleSinceMs",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+            }
+          },
+          "required": [
+            "health",
+            "updates"
+          ],
+          "additionalProperties": false
+        },
+        "git": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "clean"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "fresh"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "clean"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "staleSinceMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "last-known-good"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "staleSinceMs",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+        },
+        "hostCapacity": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "healthy"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "fresh"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "healthy"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "staleSinceMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "last-known-good"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "staleSinceMs",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+        },
+        "logs": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "healthy",
+                    "running"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "fresh"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "healthy",
+                    "running"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "staleSinceMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "last-known-good"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "staleSinceMs",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+        },
+        "quota": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "healthy"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "fresh"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "attention",
+                    "healthy"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "staleSinceMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "last-known-good"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "staleSinceMs",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+        },
+        "weather": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "available"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "fresh"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "condition": {
+                  "enum": [
+                    "available"
+                  ],
+                  "type": "string"
+                },
+                "observedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "staleSinceMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "state": {
+                  "const": "last-known-good"
+                }
+              },
+              "required": [
+                "condition",
+                "observedAtMs",
+                "staleSinceMs",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "$comment": "Live Valibot validation additionally requires each last-known-good operational signal to have causal observation and staleness timestamps."
+        }
+      },
+      "required": [
+        "backups",
+        "database",
+        "docker",
+        "git",
+        "hostCapacity",
+        "logs",
+        "quota",
+        "weather"
+      ],
+      "additionalProperties": false
+    },
     "schemaVersion": {
-      "const": 4
+      "const": 5
     },
     "tasks": {
       "oneOf": [
@@ -947,6 +1830,7 @@
     "gateway",
     "generatedAtMs",
     "openClawCron",
+    "operationalSignals",
     "schemaVersion",
     "tasks"
   ],

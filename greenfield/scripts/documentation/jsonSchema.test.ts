@@ -227,7 +227,7 @@ describe("contract JSON Schema conversion", () => {
         );
     });
 
-    test("documents heartbeat v4 bounds and secure runtime-only invariants", () => {
+    test("documents heartbeat v5 bounds and payload-free operational invariants", () => {
         const document = convertContractSchema(
             cacheHeartbeatResultSchema,
             "cache.getHeartbeat",
@@ -236,7 +236,7 @@ describe("contract JSON Schema conversion", () => {
         const serialized = JSON.stringify(document);
 
         expect(document).toMatchObject({
-            properties: { schemaVersion: { const: 4 } },
+            properties: { schemaVersion: { const: 5 } },
         });
         expect(serialized).toContain('"maxItems":100');
         expect(serialized).toContain('"maxItems":32');
@@ -244,6 +244,7 @@ describe("contract JSON Schema conversion", () => {
         expect(serialized).toContain("disable-intent validity to match expiry");
         expect(serialized).toContain("cron health categories");
         expect(serialized).toContain("linked-cron actual, desired");
+        expect(serialized).toContain("last-known-good operational signal");
     });
 
     test("documents the runtime-only terminal replay window invariant", () => {
@@ -312,6 +313,8 @@ describe("contract JSON Schema conversion", () => {
                 enum: [
                     "agents:read",
                     "agents:write",
+                    "backups:read",
+                    "backups:write",
                     "cache:read",
                     "cache:write",
                     "chat:read",
@@ -346,7 +349,7 @@ describe("contract JSON Schema conversion", () => {
                     "terminal:write",
                 ],
             },
-            maxItems: 34,
+            maxItems: 36,
             type: "array",
             uniqueItems: true,
         });

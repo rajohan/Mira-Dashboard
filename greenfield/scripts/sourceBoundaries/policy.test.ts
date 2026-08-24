@@ -115,6 +115,12 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
         expect(
             validateSourceImport(
+                ".storybook/vitest.config.ts",
+                staticImport("../scripts/storybookTestProjects.ts")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
                 "tailwind.config.ts",
                 staticImport("./src/browser/client.ts")
             )?.message
@@ -174,6 +180,18 @@ describe("source-boundary policy", () => {
             validateSourceImport(".storybook/main.ts", staticImport("./preview.tsx"))
                 ?.message
         ).toContain("storybook-config may not import story");
+        expect(
+            validateSourceImport(
+                ".storybook/main.ts",
+                staticImport("../scripts/storybookTestProjects.ts")
+            )?.message
+        ).toContain("storybook-config may not import scripts");
+        expect(
+            validateSourceImport(
+                ".storybook/vitest.config.ts",
+                staticImport("../scripts/testBatching.ts")
+            )?.message
+        ).toContain("storybook-config may not import scripts");
         expect(
             validateSourceImport("src/contracts/auth.ts", staticImport("./auth.test.ts"))
                 ?.message

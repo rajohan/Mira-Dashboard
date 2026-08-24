@@ -160,22 +160,24 @@ export async function expectVirtualizedTable({
     const canvasStyles = getComputedStyle(canvasElement);
     const canvasContentWidth =
         canvasElement.clientWidth -
-        Number.parseFloat(canvasStyles.paddingLeft) -
-        Number.parseFloat(canvasStyles.paddingRight);
+        Number(canvasStyles.paddingLeft.replace(/px$/u, "")) -
+        Number(canvasStyles.paddingRight.replace(/px$/u, ""));
 
-    await waitFor(() => {
+    await waitFor(async () => {
         const indexes = renderedVirtualIndexes(table);
-        expect(table).toHaveAttribute("aria-rowcount", String(rowCount + 1));
-        expect(indexes.length).toBeGreaterThan(0);
-        expect(indexes.length).toBeLessThan(rowCount);
+        await expect(table).toHaveAttribute("aria-rowcount", String(rowCount + 1));
+        await expect(indexes.length).toBeGreaterThan(0);
+        await expect(indexes.length).toBeLessThan(rowCount);
         if (fillCanvas) {
-            expect(scrollRegion.getBoundingClientRect().width).toBeGreaterThanOrEqual(
-                canvasContentWidth - 1
-            );
+            await expect(
+                scrollRegion.getBoundingClientRect().width
+            ).toBeGreaterThanOrEqual(canvasContentWidth - 1);
         }
-        expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
-        expect(scrollRegion.scrollHeight).toBeGreaterThan(scrollRegion.clientHeight);
-        expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBe(
+        await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
+        await expect(scrollRegion.scrollHeight).toBeGreaterThan(
+            scrollRegion.clientHeight
+        );
+        await expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBe(
             canvasElement.ownerDocument.documentElement.clientWidth
         );
     });
@@ -185,20 +187,20 @@ export async function expectVirtualizedTable({
     scrollRegion.scrollTop = scrollRegion.scrollHeight;
     scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
 
-    await waitFor(() => {
+    await waitFor(async () => {
         const indexes = renderedVirtualIndexes(table);
-        expect(scrollRegion.scrollTop).toBeGreaterThan(0);
-        expect(Math.max(...indexes)).toBeGreaterThan(initialMaximumIndex);
-        expect(indexes.length).toBeLessThan(rowCount);
+        await expect(scrollRegion.scrollTop).toBeGreaterThan(0);
+        await expect(Math.max(...indexes)).toBeGreaterThan(initialMaximumIndex);
+        await expect(indexes.length).toBeLessThan(rowCount);
     });
 
     scrollRegion.scrollTop = 0;
     scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
 
-    await waitFor(() => {
+    await waitFor(async () => {
         const indexes = renderedVirtualIndexes(table);
-        expect(scrollRegion.scrollTop).toBe(0);
-        expect(Math.min(...indexes)).toBe(0);
+        await expect(scrollRegion.scrollTop).toBe(0);
+        await expect(Math.min(...indexes)).toBe(0);
     });
 }
 
@@ -217,15 +219,15 @@ export async function expectResponsiveTableCards({
         throw new Error("The responsive table card fixture is incomplete.");
     }
 
-    await waitFor(() => {
-        expect(getComputedStyle(table).display).toBe("block");
-        expect(getComputedStyle(firstRow).display).toBe("block");
-        expect(getComputedStyle(firstLabel).display).toBe("block");
-        expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
-        expect(table.getBoundingClientRect().width).toBeLessThanOrEqual(
+    await waitFor(async () => {
+        await expect(getComputedStyle(table).display).toBe("block");
+        await expect(getComputedStyle(firstRow).display).toBe("block");
+        await expect(getComputedStyle(firstLabel).display).toBe("block");
+        await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
+        await expect(table.getBoundingClientRect().width).toBeLessThanOrEqual(
             scrollRegion.clientWidth
         );
-        expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBe(
+        await expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBe(
             canvasElement.ownerDocument.documentElement.clientWidth
         );
     });
@@ -249,54 +251,54 @@ export async function expectResponsiveVirtualizedTableTransition({
 
     container.style.width = "70rem";
     container.style.maxWidth = "none";
-    await waitFor(() => {
-        expect(getComputedStyle(table).display).toBe("table");
-        expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
-        expect(scrollRegion.scrollHeight).toBeLessThan(rowCount * 80);
+    await waitFor(async () => {
+        await expect(getComputedStyle(table).display).toBe("table");
+        await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
+        await expect(scrollRegion.scrollHeight).toBeLessThan(rowCount * 80);
     });
 
     scrollRegion.scrollTop = scrollRegion.scrollHeight / 2;
     scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
     let wideAnchor: number | undefined;
-    await waitFor(() => {
+    await waitFor(async () => {
         wideAnchor = firstVisibleVirtualIndex(scrollRegion, table);
-        expect(scrollRegion.scrollTop).toBeGreaterThan(0);
-        expect(wideAnchor).toBeDefined();
+        await expect(scrollRegion.scrollTop).toBeGreaterThan(0);
+        await expect(wideAnchor).toBeDefined();
     });
 
     container.style.width = "20rem";
     container.style.maxWidth = "20rem";
-    await waitFor(() => {
+    await waitFor(async () => {
         const narrowAnchor = firstVisibleVirtualIndex(scrollRegion, table);
-        expect(getComputedStyle(table).display).toBe("block");
-        expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
-        expect(scrollRegion.scrollHeight).toBeGreaterThan(rowCount * 100);
-        expect(Math.abs((narrowAnchor ?? -1) - (wideAnchor ?? -1))).toBeLessThanOrEqual(
-            Math.ceil(rowCount / 4)
-        );
+        await expect(getComputedStyle(table).display).toBe("block");
+        await expect(scrollRegion.scrollWidth).toBe(scrollRegion.clientWidth);
+        await expect(scrollRegion.scrollHeight).toBeGreaterThan(rowCount * 100);
+        await expect(
+            Math.abs((narrowAnchor ?? -1) - (wideAnchor ?? -1))
+        ).toBeLessThanOrEqual(Math.ceil(rowCount / 4));
     });
 
     scrollRegion.scrollTop = scrollRegion.scrollHeight;
     scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
-    await waitFor(() => {
-        expect(Math.max(...renderedVirtualIndexes(table))).toBe(rowCount - 1);
+    await waitFor(async () => {
+        await expect(Math.max(...renderedVirtualIndexes(table))).toBe(rowCount - 1);
     });
 
     container.style.width = "70rem";
     container.style.maxWidth = "none";
-    await waitFor(() => {
-        expect(getComputedStyle(table).display).toBe("table");
-        expect(scrollRegion.scrollHeight).toBeLessThan(rowCount * 80);
-        expect(Math.max(...renderedVirtualIndexes(table))).toBe(rowCount - 1);
+    await waitFor(async () => {
+        await expect(getComputedStyle(table).display).toBe("table");
+        await expect(scrollRegion.scrollHeight).toBeLessThan(rowCount * 80);
+        await expect(Math.max(...renderedVirtualIndexes(table))).toBe(rowCount - 1);
     });
 
     container.style.width = "20rem";
     container.style.maxWidth = "20rem";
     scrollRegion.scrollTop = 0;
     scrollRegion.dispatchEvent(new Event("scroll", { bubbles: true }));
-    await waitFor(() => {
-        expect(getComputedStyle(table).display).toBe("block");
-        expect(Math.min(...renderedVirtualIndexes(table))).toBe(0);
+    await waitFor(async () => {
+        await expect(getComputedStyle(table).display).toBe("block");
+        await expect(Math.min(...renderedVirtualIndexes(table))).toBe(0);
     });
 }
 
@@ -318,11 +320,11 @@ export async function expectVirtualizedList({
         throw new Error("The virtualized list scroll container is missing.");
     }
 
-    await waitFor(() => {
+    await waitFor(async () => {
         const indexes = renderedVirtualIndexes(list);
-        expect(indexes.length).toBeGreaterThan(0);
-        expect(indexes.length).toBeLessThan(itemCount);
-        expect(scrollContainer.scrollHeight).toBeGreaterThan(
+        await expect(indexes.length).toBeGreaterThan(0);
+        await expect(indexes.length).toBeLessThan(itemCount);
+        await expect(scrollContainer.scrollHeight).toBeGreaterThan(
             scrollContainer.clientHeight
         );
     });
@@ -332,10 +334,10 @@ export async function expectVirtualizedList({
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
     scrollContainer.dispatchEvent(new Event("scroll", { bubbles: true }));
 
-    await waitFor(() => {
+    await waitFor(async () => {
         const indexes = renderedVirtualIndexes(list);
-        expect(scrollContainer.scrollTop).toBeGreaterThan(0);
-        expect(Math.max(...indexes)).toBeGreaterThan(initialMaximumIndex);
-        expect(indexes.length).toBeLessThan(itemCount);
+        await expect(scrollContainer.scrollTop).toBeGreaterThan(0);
+        await expect(Math.max(...indexes)).toBeGreaterThan(initialMaximumIndex);
+        await expect(indexes.length).toBeLessThan(itemCount);
     });
 }

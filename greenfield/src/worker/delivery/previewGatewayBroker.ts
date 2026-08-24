@@ -39,7 +39,7 @@ interface PreviewGatewayBrokerSocketData {
     marker: "preview-gateway-broker";
     pending: Uint8Array;
     settled: boolean;
-    timer?: ReturnType<typeof setTimeout>;
+    timer?: PreviewGatewayBrokerTimer;
 }
 
 interface PreviewGatewayBrokerSocketIdentity {
@@ -53,9 +53,18 @@ export interface PreviewGatewayBroker {
     stop(): Promise<void>;
 }
 
+export interface PreviewGatewayBrokerTimer {
+    cancel(): void;
+}
+
+export interface PreviewGatewayBrokerScheduler {
+    schedule(callback: () => void, delayMs: number): PreviewGatewayBrokerTimer;
+}
+
 export interface PreviewGatewayBrokerOptions {
     readonly operationId: string;
     readonly port: PreviewGatewayProxyPort;
+    readonly scheduler?: PreviewGatewayBrokerScheduler;
     readonly specification: PreviewGatewaySocketSpecification;
 }
 
@@ -226,6 +235,16 @@ function writeResponse(
     socket.data.pending = frame.slice(written);
 }
 
+function defaultScheduler(): PreviewGatewayBrokerScheduler {
+    return Object.freeze({
+        schedule(callback: () => void, delayMs: number) {
+            const timer = setTimeout(callback, delayMs);
+            timer.unref?.();
+            return Object.freeze({ cancel: () => clearTimeout(timer) });
+        },
+    });
+}
+
 /**
  * Starts one exact-slot, worker-owned Unix broker for the preview Gateway capability.
  * @param options Exact operation identity, socket specification, and narrow Gateway port.
@@ -244,6 +263,7 @@ export async function startPreviewGatewayBroker(
         fail()
     );
     await removeStaleSocket(options.specification.socketPath, userId).catch(() => fail());
+    const scheduler = options.scheduler ?? defaultScheduler();
     const sockets = new Set<Bun.Socket<PreviewGatewayBrokerSocketData>>();
     let stopped = false;
     let listener: { stop(closeActiveConnections?: boolean): void } | undefined;
@@ -259,9 +279,7 @@ export async function startPreviewGatewayBroker(
             socket: {
                 binaryType: "uint8array",
                 close(socket) {
-                    if (socket.data.timer !== undefined) {
-                        clearTimeout(socket.data.timer);
-                    }
+                    socket.data.timer?.cancel();
                     socket.data.pending = new Uint8Array();
                     sockets.delete(socket);
                 },
@@ -289,10 +307,8 @@ export async function startPreviewGatewayBroker(
                         return;
                     }
                     socket.data.settled = true;
-                    if (socket.data.timer !== undefined) {
-                        clearTimeout(socket.data.timer);
-                        socket.data.timer = undefined;
-                    }
+                    socket.data.timer?.cancel();
+                    socket.data.timer = undefined;
                     void executeRequest(options, messages[0])
                         .then((response) => !stopped && writeResponse(socket, response))
                         .catch(() => socket.close());
@@ -322,11 +338,10 @@ export async function startPreviewGatewayBroker(
                         settled: false,
                     };
                     sockets.add(socket);
-                    socket.data.timer = setTimeout(
+                    socket.data.timer = scheduler.schedule(
                         () => socket.close(),
                         gatewayHandshakeTimeoutMs
                     );
-                    socket.data.timer.unref?.();
                 },
             },
             unix: options.specification.socketPath,

@@ -6218,6 +6218,54 @@
           "isExpression": false
         },
         {
+          "value": "\"updated_at\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"id\" desc",
+          "isExpression": true
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"action_key\" = 'backup.kopia.run' OR \"job_runs\".\"action_key\" = 'backup.walg.run'",
+      "origin": "manual",
+      "name": "job_runs_backup_attention_history_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "json_extract(\"result_json\", '$.type')",
+          "isExpression": true
+        },
+        {
+          "value": "json_extract(\"result_json\", '$.attentionRunId')",
+          "isExpression": true
+        },
+        {
+          "value": "queued_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"action_key\" = 'backup.clear-attention' AND \"job_runs\".\"state\" = 'succeeded'",
+      "origin": "manual",
+      "name": "job_runs_backup_clear_history_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
+          "value": "action_key",
+          "isExpression": false
+        },
+        {
           "value": "payload_json",
           "isExpression": false
         },
@@ -7274,7 +7322,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'database:read', 'delivery:read', 'delivery:write', 'docker:read', 'docker:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'backups:read', 'backups:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'database:read', 'delivery:read', 'delivery:write', 'docker:read', 'docker:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"

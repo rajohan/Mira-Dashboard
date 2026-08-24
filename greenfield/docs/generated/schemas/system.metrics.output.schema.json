@@ -154,6 +154,706 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "application": {
+      "type": "object",
+      "properties": {
+        "cache": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "entryCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "failedEntryCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "latestAttemptAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "maximumAttemptDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "missingEntryCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "refreshAttemptCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "snapshots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "attemptCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "consecutiveFailures": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "freshness": {
+                        "enum": [
+                          "fresh",
+                          "missing",
+                          "stale"
+                        ],
+                        "type": "string"
+                      },
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                      },
+                      "lastAttemptDurationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "lastAttemptStatus": {
+                        "enum": [
+                          "failed",
+                          "succeeded"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "attemptCount",
+                      "consecutiveFailures",
+                      "freshness",
+                      "key",
+                      "lastAttemptDurationMs",
+                      "lastAttemptStatus"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "maxItems": 32,
+                  "$comment": "Live Valibot validation additionally requires registered cache snapshot rows to use strict canonical key order."
+                },
+                "staleEntryCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                }
+              },
+              "required": [
+                "entryCount",
+                "failedEntryCount",
+                "maximumAttemptDurationMs",
+                "missingEntryCount",
+                "refreshAttemptCount",
+                "snapshots",
+                "staleEntryCount",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "chat": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "activeRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "failedOrUnknownRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "retainedEventBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "retainedEvents": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "retainedRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "retainedSnapshotBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "retainedSnapshots": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                }
+              },
+              "required": [
+                "activeRuns",
+                "failedOrUnknownRuns",
+                "retainedEventBytes",
+                "retainedEvents",
+                "retainedRuns",
+                "retainedSnapshotBytes",
+                "retainedSnapshots",
+                "state"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires active, uncertain, and snapshot chat counts to fit within retained durable runs."
+            }
+          ]
+        },
+        "gateway": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "checkedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "freshness": {
+                  "enum": [
+                    "fresh",
+                    "stale",
+                    "unavailable"
+                  ],
+                  "type": "string"
+                },
+                "lastActivityAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8640000000000000
+                },
+                "phase": {
+                  "enum": [
+                    "connected",
+                    "connecting",
+                    "degraded",
+                    "stopped",
+                    "stopping"
+                  ],
+                  "type": "string"
+                },
+                "reconnectAttempt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                }
+              },
+              "required": [
+                "checkedAtMs",
+                "freshness",
+                "phase",
+                "reconnectAttempt",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "http": {
+          "type": "object",
+          "properties": {
+            "procedures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "errorCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maximumDurationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "procedure": {
+                    "enum": [
+                      "auth.status",
+                      "cache.getHeartbeat",
+                      "database.overview",
+                      "docker.overview",
+                      "events.stream",
+                      "jobs.listRuns",
+                      "logs.maintenanceStatus",
+                      "notifications.list",
+                      "reports.list",
+                      "schedules.list",
+                      "system.healthDiagnostics",
+                      "system.metrics",
+                      "overflow"
+                    ],
+                    "type": "string"
+                  },
+                  "requestCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "totalDurationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "errorCount",
+                  "maximumDurationMs",
+                  "procedure",
+                  "requestCount",
+                  "totalDurationMs"
+                ],
+                "additionalProperties": false,
+                "$comment": "Live Valibot validation additionally requires HTTP error counts and duration aggregates not to exceed their request totals."
+              },
+              "minItems": 13,
+              "maxItems": 13,
+              "$comment": "Live Valibot validation additionally requires the fixed HTTP metric buckets to appear once in canonical procedure order."
+            },
+            "state": {
+              "const": "observed"
+            }
+          },
+          "required": [
+            "procedures",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "jobs": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "claimingPaused": {
+                  "type": "boolean"
+                },
+                "queuedRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "runningRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "scheduleLagMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                },
+                "workers": {
+                  "type": "object",
+                  "properties": {
+                    "capacity": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "draining": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "online": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "capacity",
+                    "draining",
+                    "online"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "claimingPaused",
+                "queuedRuns",
+                "runningRuns",
+                "scheduleLagMs",
+                "state",
+                "workers"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "operations": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "activeRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "averageDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "failedRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "maximumDurationMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sampledRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "state": {
+                  "const": "observed"
+                },
+                "succeededRuns": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "activeRuns",
+                "averageDurationMs",
+                "failedRuns",
+                "maximumDurationMs",
+                "sampledRuns",
+                "state",
+                "succeededRuns"
+              ],
+              "additionalProperties": false,
+              "$comment": "Live Valibot validation additionally requires durable operation states to partition the bounded sample and its durations to agree."
+            }
+          ]
+        },
+        "realtime": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "activeSubscribers": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "droppedSlowSubscribers": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "forcedResyncs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "pollFailures": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "polls": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "retainedEvents": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                },
+                "subscriberCapacityRejections": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "subscriptionReadFailures": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "wakeups": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "activeSubscribers",
+                "droppedSlowSubscribers",
+                "forcedResyncs",
+                "pollFailures",
+                "polls",
+                "state",
+                "subscriberCapacityRejections",
+                "subscriptionReadFailures",
+                "wakeups"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "sqlite": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "freeBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freePages": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "freePercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "pageCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "readLatencyMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                },
+                "storageBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "freeBytes",
+                "freePages",
+                "freePercent",
+                "pageCount",
+                "readLatencyMs",
+                "state",
+                "storageBytes"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "web": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "eventLoopDelayMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "externalBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "heapTotalBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "heapUsedBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "rssBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "state": {
+                  "const": "observed"
+                },
+                "uptimeSeconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "eventLoopDelayMs",
+                "externalBytes",
+                "heapTotalBytes",
+                "heapUsedBytes",
+                "rssBytes",
+                "state",
+                "uptimeSeconds"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "cache",
+        "chat",
+        "gateway",
+        "http",
+        "jobs",
+        "operations",
+        "realtime",
+        "sqlite",
+        "web"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -163,8 +863,10 @@
     "memory",
     "network",
     "sampledAtMs",
-    "uptimeSeconds"
+    "uptimeSeconds",
+    "application"
   ],
   "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally binds all application-metrics timestamps and aggregates to the enclosing host sample.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

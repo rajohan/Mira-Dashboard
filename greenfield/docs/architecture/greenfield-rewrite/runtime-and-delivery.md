@@ -181,6 +181,22 @@ authority. Adding an unclassified composition root or forbidden edge fails that 
 `bunfig.toml` contains only shared Bun test and selected serve-plugin configuration; operational
 policy lives in typed source, not hidden shell environment.
 
+### Source-development parity profile
+
+The ordinary source-watched web and worker keep the exact production route, procedure, cache,
+Service Action, Job-action, and schedule inventories. One runtime adapter supplies representative
+contract-valid database, Docker, Delivery, backup, Git, quota, and weather state through the same
+worker cache executors. Accepted mutations remain normal durable Jobs and settle through normal UI
+results, but their only effect is a sanitized receipt beneath the exact owner-marked development
+root. Source conflicts and unknown outcomes therefore remain testable without retaining provider,
+Docker-daemon, GitHub, PostgreSQL, systemd, production-Git, or production-path authority.
+
+The fixed Docker broker may run in ordinary development only when backed by those simulated
+operations. Managed PR previews do not compose the adapter or broker and continue to advertise only
+the manifest-bound worker smoke action. The machine-verifiable runtime authority bundle requires
+exact production/development action and schedule equality and an explicit `isolated`, `live-read`,
+or `simulated` disposition for every production capability.
+
 ## Generated Documentation
 
 Documentation generation is a product feature and a CI invariant, not an optional wiki task.
@@ -481,10 +497,11 @@ build                   deterministic browser and server/worker artifacts
 typecheck               root TypeScript solution (browser + Bun), no emit
 lint                    oxlint type-aware rules and type-check diagnostics, partitioned by runtime
 format / format:check   oxfmt
-test                    Bun graph followed by browser graph
+test                    Bun, Happy DOM browser, then real-browser Storybook graphs
 test:bun                scripts, server, worker, contracts, integration, and parity tests
 test:browser            Happy DOM + Testing Library behavior tests
-test:coverage           all tests + 85% executable-source line gate and LCOV
+test:storybook          real Chromium stories, interactions, and accessibility tests
+test:coverage           all three test graphs + 85% executable-source line gate and LCOV
 docs:generate/check     deterministic generated documentation
 verify                  sequential local gate with explicit resource caps
 ```
@@ -645,10 +662,10 @@ boundary.
 
 The fixed Service Actions contract and Overview include host cleanup, host restart, and host
 update. A fixed `/usr/bin/systemctl` broker and root-owned helper, policy, service/timer, and
-manifest-verified installer artifacts ship in the release, but the current production composition
-does not instantiate the broker or mutate root-owned host state. Web and worker still share one
-Unix identity, so group-authorizing that identity would also authorize the internet-facing web
-process. Consequently all host actions remain `unavailable` and enqueue rechecks fail closed.
+manifest-verified installer artifacts ship in the release. The root-installed topology keeps
+`ubuntu` as the trusted production-state/worker principal and moves web to the dedicated
+`mira-dashboard-web` UID. The production worker now composes the broker; web has no supplementary
+groups and cannot see Docker or broker paths.
 
 Before the worker can request the fixed restart unit, it atomically arms the database-global
 restart claim fence using the validated Linux `/proc/sys/kernel/random/boot_id` identity. Arming
@@ -660,11 +677,16 @@ it, while five-minute same-boot expiry restores admission if no reboot occurs. T
 is independent of the operator-controlled queue pause.
 
 Host-action enablement is a reviewed delivery/topology operation rather than an application
-toggle. It must first move the worker to a distinct OS principal, keep the web principal outside
-that identity and its groups, execute only root-owned immutable code/configuration, constrain
-authorization to the three exact units, verify no-follow identity/ownership/mode/content, retain
-explicit rollback to the previous immutable release, and then compose the broker. Only that
-boundary may make the worker advertise a host action.
+toggle. The two system services run as distinct OS principals; a root-owned fixed launcher creates
+only the reviewed id-mapped project/OpenClaw/state mounts inside web's private mount namespace.
+The operator's `0700` Doppler directory remains root-launcher-readable but is never identity-mapped
+to the web principal. The launcher validates its ownership and modes, requests only the fixed web
+secret allowlist, and fails startup unless the dropped web identity cannot read or traverse the
+credential directory. The projected phase unmounts that directory and verifies the credential
+file is absent before it proves Docker and system-manager IPC absent and irreversibly drops to the
+web UID with no groups or capabilities. The root polkit policy admits only
+the `ubuntu` worker identity, the three exact host units with `start`, and the two Dashboard units
+with `start|stop|restart`. It rejects every arbitrary unit and verb.
 The root installer must never consume the application-owned release tree directly. A reviewed
 handoff first transfers the exact release into a dedicated root-owned immutable staging path. The
 release root and every traversed source directory must be `root:root 0500`; the release identity,
@@ -694,8 +716,8 @@ vacuum bounds, and Docker system prune for unused content older than 168 hours; 
 `--volumes`. Each phase is attempted, any failure fails the unit, output is discarded, and the
 worker receives only a completed status. Together with the bounded PTY this defines the narrow
 replacement for the legacy `POST /api/exec/start` behavior without recreating the old shared shell
-boundary. That parity row remains planned until the distinct worker identity and separately
-approved root provisioning make `system-cleanup` executable in production.
+boundary. That parity row is implemented through the PTY plus fixed Service Actions; no generic
+command, argv, shell, cwd, or raw output contract is restored.
 
 The web process also derives the fixed `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` descriptor boundary
 from that same reviewed root. It exposes no configurable media directory, recursive listing, or
@@ -722,13 +744,27 @@ startup never repairs permissions. On the current host, first cutover therefore 
 `chmod go-w /home/ubuntu/projects` (currently `0775` to `0755`) without moving any project data.
 Unit source remains under `<project-root>/production/checkout/systemd` or the active development
 worktree, and the exact two unit files are copied into and hashed by every immutable release. The
-installer accepts only those manifest artifacts, atomically replaces current-user-owned regular
-unit files, and performs only `systemctl --user daemon-reload`; enabling or service control is a
-separate activation action. Activation prepares and reloads the verified units for the currently
-running release—or the candidate on an empty host—before its first stop, so first deployment does
-not depend on pre-existing unit files. Only installed copies of systemd unit files may live outside
+root installer accepts only those manifest artifacts, atomically replaces root-owned regular unit
+files, creates the fixed web principal, reloads root systemd, and enables only the two Dashboard
+units without starting them. Activation never rewrites root state: it verifies both installed unit
+bytes against the exact candidate manifest before its first stop. The authenticated target smoke
+then proves distinct live principals, exact root fragment paths, empty web supplementary groups,
+and the worker Docker group. Reinstalling the previous root-owned immutable release is the explicit
+rollback. Only installed copies of systemd unit files may live outside
 `<project-root>/development` or `<project-root>/production`; all Dashboard state, logs, backups,
 runtime binaries, checkouts, and release artifacts remain inside those project directories.
+
+The first production cutover is an explicit operator-run replacement, not a rolling activation
+through the previously published user-systemd executor. The operator stops, disables, and removes
+the legacy user units, stages and runs the manifest-bound root installer, verifies the exact
+root-owned candidate units and principals, and only then invokes `bun run delivery:activate`
+directly from the verified candidate. It does not launch the previously published
+`server/productionDelivery.js` or its user-unit installer, and the legacy service pair is not
+recorded as a Greenfield rollback target. The candidate repository therefore contains no
+compatibility installer for user units. After this one-time authority transfer, ordinary
+Greenfield activation controls only root systemd and fails closed before service effects whenever
+the installed root-unit bytes differ from the candidate manifest; changed unit bytes require the
+root provisioning step before activation.
 
 Recommended layout:
 
@@ -738,6 +774,7 @@ Recommended layout:
     checkout/
     releases/<release-id>/
       server/
+        openClawHeartbeat.js
         productionDelivery.js
       browser/
       migrations/
@@ -772,6 +809,27 @@ required process roles, and the exact cross-release Delivery protocol. Every rel
 manifest-bound `productionDelivery.js` executor for `delivery.production.v1`. It contains no
 secrets.
 
+Every release also contains the manifest-bound `openClawHeartbeat.js` executable and the exact
+`scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md` consumer contract. The executable
+has only `collect` and `report` modes and reads the existing `openclaw-heartbeat.token` from its
+fixed private client path. The live workspace prompt is external runtime authority and is not
+updated during build, publication, or ordinary application activation. The coordinated final
+cutover must first verify the Greenfield target and exact automation capabilities
+`cache:read,monitoring:write`, then atomically replace the prompt from the immutable candidate and
+fsync its parent. Rollback restores the previous release's prompt before the previous service pair
+resumes. An authenticated smoke must observe one v5 collection and one complete-snapshot report
+before heartbeat parity can close.
+
+Heartbeat cutover is one journaled filesystem transition, not an ordinary application write. It
+descriptor-reads and verifies both the live prompt and the manifest-bound candidate, retains the
+exact pre-transition bytes while that activation remains rollback-eligible, writes a private
+sibling stage, fsyncs the stage, renames it over the target, and fsyncs the workspace directory.
+The credential capability change and prompt replacement are committed only after target readiness;
+a failure before the authenticated smoke performs the same atomic replacement from the retained
+pre-transition bytes. Later rollbacks use the exact prompt retained with the authoritative previous
+release. Identity, mode, mount, inode, or journal drift blocks the transition without touching the
+live prompt. Build, publication, retention, and a normal service restart never install or reset it.
+
 PR-preview publication requires one explicit new-host bootstrap: a root operator runs the
 manifest-inventoried Tailscale provisioning artifact, which delegates the fixed local account
 `ubuntu` through `/usr/bin/tailscale set --operator=ubuntu`. The production worker keeps
@@ -780,7 +838,7 @@ uses `sudo`. Production cutover reads Tailscale preferences and requires the exa
 confirming the journal or stopping services. Missing or drifted delegation therefore fails closed
 before deployment effects, and bootstrap is never applied implicitly by deployment.
 
-Deployment flow:
+Post-cutover Greenfield deployment flow:
 
 1. Build and test one artifact using the same resolved Bun runtime throughout the build.
 2. Verify every source artifact hash and the exact runtime identity without copying into the
@@ -801,19 +859,19 @@ Deployment flow:
    manifest-verifies the current immutable executor and launches it through a fixed transient
    user-systemd unit in a separate cgroup with `env -i`; GitHub, Doppler, Gateway, Docker, and
    reviewer credentials never cross that handoff. The executor confirms the exact journal before
-   installing/reloading the verified stop-owner units, draining active jobs, entering maintenance
+   verifying the manifest-bound root-installed stop-owner units, draining active jobs, entering maintenance
    mode, and quiescing database writers. Recovery treats the pre-snapshot phase as
    database-unmodified and idempotently restores the previous service owner.
 5. Snapshot and verify the current database while writers remain stopped.
 6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
    database state.
-7. Reinstall the candidate release's manifest-verified user units, reload user systemd, then let
-   the deployment-held activation start worker in `validate-only` mode before web, with readiness
-   deadlines. The authoritative activation record is not committed until target readiness and the
-   required target validation succeed. A rollback preloads only the exact authoritative previous
-   snapshot, snapshots the current database before restoring it, and records that fresh snapshot
-   beside the now-previous release. Repeated `current → previous → current` rollback therefore
-   preserves the correct database state in both directions.
+7. Reverify the candidate release's manifest-bound root units, then let the deployment-held
+   activation start worker in `validate-only` mode before web, with readiness deadlines. The
+   authoritative activation record is not committed until target readiness and the required target
+   validation succeed. A rollback preloads only the exact authoritative previous snapshot,
+   snapshots the current database before restoring it, and records that fresh snapshot beside the
+   now-previous release. Repeated `current → previous → current` rollback therefore preserves the
+   correct database state in both directions.
 8. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
 9. Store one immutable terminal operation receipt before clearing the in-flight record. A restarted
    worker reconciles that receipt before ordinary Job claiming; if paired rollback restored an

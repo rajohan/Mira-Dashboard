@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { compareStrings } from "../../../shared/validation.ts";
 import { jobActionDefinitions } from "../jobs/actionRegistry.ts";
 import type {
     JobRepositoryReader,
@@ -326,24 +327,17 @@ describe("cache heartbeat projection", () => {
         } satisfies Pick<JobRepositoryReader, "findSchedule">;
 
         const result = readCacheHeartbeatDashboardJobs(repository, 5000);
+        const missingItems = jobActionDefinitions
+            .filter(({ scheduleId }) => !byId.has(scheduleId))
+            .map(({ defaultEnabled, scheduleId }) => ({
+                defaultEnabled,
+                id: scheduleId,
+                state: "missing" as const,
+            }));
         expect(result.generatedAtMs).toBe(6000);
-        expect(result.dashboardJobs).toMatchObject({
+        expect(result.dashboardJobs).toEqual({
             items: [
-                {
-                    defaultEnabled: true,
-                    id: "cache.database-observability",
-                    state: "missing",
-                },
-                {
-                    defaultEnabled: true,
-                    id: "cache.delivery-overview",
-                    state: "missing",
-                },
-                {
-                    defaultEnabled: true,
-                    id: "cache.docker-overview",
-                    state: "missing",
-                },
+                ...missingItems,
                 {
                     activeRun: {
                         firstStartedAtMs: 4500,
@@ -385,16 +379,6 @@ describe("cache heartbeat projection", () => {
                 },
                 {
                     defaultEnabled: true,
-                    id: "database.sqlite-maintenance",
-                    state: "missing",
-                },
-                {
-                    defaultEnabled: true,
-                    id: "docker.updater",
-                    state: "missing",
-                },
-                {
-                    defaultEnabled: true,
                     disableIntent: { valid: true },
                     enabled: false,
                     id: "maintenance.rotate-managed-logs",
@@ -410,12 +394,7 @@ describe("cache heartbeat projection", () => {
                     nextRunAtMs: null,
                     state: "present",
                 },
-                {
-                    defaultEnabled: false,
-                    id: "system.worker-smoke",
-                    state: "missing",
-                },
-            ],
+            ].toSorted((left, right) => compareStrings(left.id, right.id)),
             state: "available",
         });
         const serialized = JSON.stringify(result);

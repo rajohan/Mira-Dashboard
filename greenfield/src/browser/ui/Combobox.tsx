@@ -87,13 +87,15 @@ export function Combobox<TValue extends string>({
         .map((option) => option.value);
     const virtualOptions: (TValue | typeof emptyOption)[] =
         filteredValues.length === 0 ? [emptyOption] : filteredValues;
-    const virtualized = options.length >= virtualizationThreshold;
+    const virtualized =
+        options.length >= virtualizationThreshold &&
+        options.every((option) => option.description === undefined);
 
     function renderOption(optionValue: TValue | typeof emptyOption, key?: string) {
         if (optionValue === emptyOption) {
             return (
                 <HeadlessComboboxOption
-                    className="text-primary-400 px-3 py-2 text-sm"
+                    className="text-primary-400 h-10 px-3 py-2 text-sm"
                     disabled
                     key={key}
                     value={emptyOption}
@@ -111,7 +113,8 @@ export function Combobox<TValue extends string>({
             <HeadlessComboboxOption
                 className={cn(
                     "group text-primary-200 relative flex w-full max-w-full cursor-pointer items-start gap-2 rounded-md py-2 pr-3 pl-9 text-sm select-none",
-                    "data-selected:bg-accent-500/15 data-selected:text-primary-50 data-focus:bg-primary-700 data-focus:text-primary-50 data-disabled:cursor-not-allowed data-disabled:opacity-50"
+                    "data-selected:bg-accent-500/15 data-selected:text-primary-50 data-focus:bg-primary-700 data-focus:text-primary-50 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+                    definition.description === undefined && "h-10"
                 )}
                 disabled={definition.disabled}
                 key={key}
@@ -190,7 +193,8 @@ export function Combobox<TValue extends string>({
                 anchor={{ gap: 4, padding: 8, to: "bottom start" }}
                 className={cn(
                     "border-primary-600 bg-primary-900 z-60 max-h-64 w-(--input-width) max-w-[calc(100vw-1rem)] overflow-auto rounded-lg border p-1 shadow-xl shadow-black/35",
-                    "transition duration-100 outline-none data-closed:scale-95 data-closed:opacity-0 motion-reduce:transition-none"
+                    "transition duration-100 outline-none data-closed:scale-95 data-closed:opacity-0 motion-reduce:transition-none",
+                    virtualized && "h-64"
                 )}
                 modal={false}
                 transition

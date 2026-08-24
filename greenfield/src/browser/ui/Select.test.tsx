@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
 import { useState } from "react";
 
@@ -6,17 +6,20 @@ import { Button } from "./Button.tsx";
 import { FormField } from "./FormField.tsx";
 import { Select } from "./Select.tsx";
 
-const { render, screen, waitFor } = await import("@testing-library/react");
+const { render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
-const instrumentedInteractionTimeoutMs = 30_000;
 
 const options = Object.freeze([
     { label: "Mira", value: "mira" },
     { label: "Raymond", value: "raymond" },
 ] as const);
 
-function ControlledSelect() {
+function ControlledSelect({
+    onOutsideAction,
+}: {
+    readonly onOutsideAction?: () => void;
+}) {
     const [value, setValue] = useState<(typeof options)[number]["value"]>("mira");
 
     return (
@@ -27,9 +30,22 @@ function ControlledSelect() {
                 options={options}
                 value={value}
             />
-            <Button variant="secondary">Outside action</Button>
+            <Button onClick={onOutsideAction} variant="secondary">
+                Outside action
+            </Button>
         </div>
     );
+}
+
+function expectClosingListbox(trigger: HTMLElement, listbox: HTMLElement): void {
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    if (listbox.isConnected) {
+        expect(listbox).toHaveAttribute("aria-hidden", "true");
+        expect(listbox.inert).toBe(true);
+    } else {
+        expect(document.body).not.toContainElement(listbox);
+    }
 }
 
 describe("Select", () => {
@@ -82,46 +98,38 @@ describe("Select", () => {
         expect(screen.getByRole("button", { name: "Assignee" })).toBeDisabled();
     });
 
-    test(
-        "supports repeated controlled selections after reopening",
-        async () => {
-            render(<ControlledSelect />);
-            const user = userEvent.setup();
-            const trigger = screen.getByRole("button", { name: "Task assignee" });
+    test("supports repeated controlled selections after reopening", async () => {
+        render(<ControlledSelect />);
+        const user = userEvent.setup();
+        const trigger = screen.getByRole("button", { name: "Task assignee" });
 
-            await user.click(trigger);
-            await user.click(screen.getByRole("option", { name: "Raymond" }));
-            expect(trigger).toHaveTextContent("Raymond");
+        await user.click(trigger);
+        await user.click(screen.getByRole("option", { name: "Raymond" }));
+        expect(trigger).toHaveTextContent("Raymond");
 
-            await user.click(trigger);
-            await user.click(screen.getByRole("option", { name: "Mira" }));
-            expect(trigger).toHaveTextContent("Mira");
-            await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
-        },
-        instrumentedInteractionTimeoutMs
-    );
+        await user.click(trigger);
+        const listbox = screen.getByRole("listbox");
+        await user.click(screen.getByRole("option", { name: "Mira" }));
+        expect(trigger).toHaveTextContent("Mira");
+        expectClosingListbox(trigger, listbox);
+    });
 
-    test(
-        "closes on outside click without making surrounding actions inert",
-        async () => {
-            render(<ControlledSelect />);
-            const user = userEvent.setup();
-            const trigger = screen.getByRole("button", { name: "Task assignee" });
-            const outsideAction = screen.getByRole("button", {
-                name: "Outside action",
-            });
+    test("closes on outside click without making surrounding actions inert", async () => {
+        const onOutsideAction = mock(() => {});
+        render(<ControlledSelect onOutsideAction={onOutsideAction} />);
+        const user = userEvent.setup();
+        const trigger = screen.getByRole("button", { name: "Task assignee" });
+        const outsideAction = screen.getByRole("button", {
+            name: "Outside action",
+        });
 
-            await user.click(trigger);
+        await user.click(trigger);
 
-            expect(screen.getByRole("listbox")).toBeTruthy();
-            expect(outsideAction).not.toHaveAttribute("aria-hidden");
-            expect(outsideAction.inert).toBe(false);
-            await user.click(document.body);
-            await waitFor(() => {
-                expect(trigger).toHaveAttribute("aria-expanded", "false");
-                expect(screen.queryByRole("listbox")).toBeNull();
-            });
-        },
-        instrumentedInteractionTimeoutMs
-    );
+        const listbox = screen.getByRole("listbox");
+        expect(outsideAction).not.toHaveAttribute("aria-hidden");
+        expect(outsideAction.inert).toBe(false);
+        await user.click(outsideAction);
+        expect(onOutsideAction).toHaveBeenCalledTimes(1);
+        expectClosingListbox(trigger, listbox);
+    });
 });

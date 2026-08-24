@@ -45,7 +45,7 @@ function createGatewayVerificationRuntime() {
 
 async function openGatewayVerificationSystem(
     behavior: GatewayCredentialFixtureBehavior = "normal",
-    gatewayVerificationTimeoutMs = 100
+    gatewayVerificationTimeoutMs?: number
 ) {
     const database = await openFreshMigratedDatabase();
     const gateway = startGatewayCredentialVerifierFixture({
@@ -61,7 +61,9 @@ async function openGatewayVerificationSystem(
             ),
             browserOrigin: mfaHttpSystemBrowserOrigin,
             gatewayUrl: gateway.url,
-            gatewayVerificationTimeoutMs,
+            ...(gatewayVerificationTimeoutMs === undefined
+                ? {}
+                : { gatewayVerificationTimeoutMs }),
             port: 0,
             readiness: createReadinessController(),
             totpSecretCipher: testTotpSecretCipher,
@@ -222,7 +224,7 @@ describe("native Gateway bootstrap verification through the real server", () => 
     }
 
     test("aborts a silent socket at the Effect-owned deadline without publishing state", async () => {
-        const system = await openGatewayVerificationSystem("silent");
+        const system = await openGatewayVerificationSystem("silent", 100);
         try {
             const response = await postTrpcMutation(
                 system.server.url,

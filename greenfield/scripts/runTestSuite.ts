@@ -1,37 +1,19 @@
 import { once } from "node:events";
-import { rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Writable } from "node:stream";
 
+import { readTestTimingsInventory } from "./testBatching.ts";
 import { TestOutputInspector, type TestOutputViolation } from "./testOutputPolicy.ts";
 
-interface TestTimingsInventory {
-    readonly files: Readonly<Record<string, number>>;
-    readonly version: 1;
-}
+const testRootParentEnvironmentName = "MIRA_DASHBOARD_TEST_ROOT_PARENT";
 
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
-}
-
-function parseTestTimingsInventory(value: unknown): TestTimingsInventory {
-    if (!isUnknownRecord(value)) {
-        throw new TypeError("Test timings must be an object");
-    }
-    const { files: rawFiles, version } = value;
-    if (version !== 1 || !isUnknownRecord(rawFiles)) {
-        throw new TypeError("Test timings must contain version 1 and a file map");
-    }
-
-    const files: Record<string, number> = {};
-    for (const [filePath, duration] of Object.entries(rawFiles)) {
-        if (typeof duration !== "number" || !Number.isFinite(duration) || duration < 0) {
-            throw new TypeError(`Invalid test timing duration: ${filePath}`);
-        }
-        files[filePath] = duration;
-    }
-    return { files, version };
-}
+export {
+    parseTestTimingsInventory,
+    readTestTimingsInventory,
+    type TestTimingsInventory,
+} from "./testBatching.ts";
 
 /**
  * Removes deleted test paths that Bun intentionally retains while merging timings.
@@ -43,9 +25,7 @@ export async function pruneMissingTestTimings(
     projectRoot: string
 ): Promise<void> {
     const resolvedTimingsPath = path.resolve(projectRoot, timingsPath);
-    const timingsFile = Bun.file(resolvedTimingsPath);
-    const rawInventory: unknown = await timingsFile.json();
-    const inventory = parseTestTimingsInventory(rawInventory);
+    const inventory = await readTestTimingsInventory(resolvedTimingsPath, projectRoot);
     const entriesWithExistence = await Promise.all(
         Object.entries(inventory.files).map(async ([filePath, duration]) => {
             const testFile = Bun.file(path.resolve(projectRoot, filePath));
@@ -128,6 +108,21 @@ function firstViolation(
     return stdout.violation ?? stderr.violation;
 }
 
+function isBunTestCommand(command: readonly string[]): boolean {
+    return command[0] === process.execPath && command[1] === "test";
+}
+
+async function createTestRootParent(): Promise<string> {
+    const directory = await mkdtemp(path.join(tmpdir(), "mira-dashboard-test-process-"));
+    try {
+        await chmod(directory, 0o700);
+        return directory;
+    } catch (error) {
+        await rm(directory, { force: true, recursive: true });
+        throw error;
+    }
+}
+
 /**
  * Runs one test process and enforces the repository test-output policy.
  * @param command Exact executable and arguments for the child process.
@@ -138,28 +133,51 @@ export async function runTestProcess(
     command: readonly string[],
     projectRoot: string
 ): Promise<number> {
-    const child = Bun.spawn([...command], {
-        cwd: projectRoot,
-        stderr: "pipe",
-        stdin: "inherit",
-        stdout: "pipe",
-    });
-    const stdoutInspector = new TestOutputInspector();
-    const stderrInspector = new TestOutputInspector();
+    const testRootParent = isBunTestCommand(command)
+        ? await createTestRootParent()
+        : undefined;
+    try {
+        const child = Bun.spawn([...command], {
+            cwd: projectRoot,
+            ...(testRootParent === undefined
+                ? {}
+                : {
+                      env: {
+                          ...process.env,
+                          [testRootParentEnvironmentName]: testRootParent,
+                      },
+                  }),
+            stderr: "pipe",
+            stdin: "inherit",
+            stdout: "pipe",
+        });
+        try {
+            const stdoutInspector = new TestOutputInspector();
+            const stderrInspector = new TestOutputInspector();
 
-    const [exitCode] = await Promise.all([
-        child.exited,
-        relayOutput(child.stdout, process.stdout, stdoutInspector),
-        relayOutput(child.stderr, process.stderr, stderrInspector),
-    ]);
-    const violation = firstViolation(stdoutInspector, stderrInspector);
-    if (violation !== undefined) {
-        process.stderr.write(`Test output policy failed: ${violation.description}.\n`);
+            const [exitCode] = await Promise.all([
+                child.exited,
+                relayOutput(child.stdout, process.stdout, stdoutInspector),
+                relayOutput(child.stderr, process.stderr, stderrInspector),
+            ]);
+            const violation = firstViolation(stdoutInspector, stderrInspector);
+            if (violation !== undefined) {
+                process.stderr.write(
+                    `Test output policy failed: ${violation.description}.\n`
+                );
+            }
+
+            if (exitCode !== 0) return exitCode;
+            if (violation !== undefined) return 1;
+            return 0;
+        } finally {
+            await child.exited;
+        }
+    } finally {
+        if (testRootParent !== undefined) {
+            await rm(testRootParent, { force: true, recursive: true });
+        }
     }
-
-    if (exitCode !== 0) return exitCode;
-    if (violation !== undefined) return 1;
-    return 0;
 }
 
 /**

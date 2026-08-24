@@ -1,6 +1,16 @@
 import * as v from "valibot";
 
 import {
+    backupStatusCacheGroupKey,
+    backupStatusCacheKeys,
+    backupStatusCacheSchemaIds,
+    backupStatusCacheSource,
+    backupStatusCacheTtlMs,
+    backupStatusPayloadMaximumBytes,
+    kopiaBackupCachePayloadSchema,
+    walgBackupCachePayloadSchema,
+} from "../../../contracts/backups.ts";
+import {
     cacheEntryKeySchema,
     cacheEntryPayloadMaximumBytes,
     cacheEntryPayloadSchema,
@@ -29,7 +39,28 @@ import {
     dockerOverviewCacheSchemaId,
     dockerOverviewCacheSource,
 } from "../../../contracts/docker.ts";
+import {
+    gitWorkspaceCacheKey,
+    gitWorkspaceCachePayloadSchema,
+    gitWorkspaceCacheSchemaId,
+    gitWorkspaceCacheSource,
+    gitWorkspaceCacheTtlMs,
+} from "../../../contracts/gitWorkspace.ts";
 import { moltbookDashboardCachePayloadSchema } from "../../../contracts/moltbook.ts";
+import {
+    quotaCacheKey,
+    quotaCachePayloadSchema,
+    quotaCacheSchemaId,
+    quotaCacheSource,
+    quotaCacheTtlMs,
+} from "../../../contracts/quota.ts";
+import {
+    weatherCacheKey,
+    weatherCachePayloadSchema,
+    weatherCacheSchemaId,
+    weatherCacheSource,
+    weatherCacheTtlMs,
+} from "../../../contracts/weather.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import {
@@ -40,8 +71,16 @@ import {
     dockerOverviewCacheJobActionKey,
     dockerOverviewCacheJobScheduleId,
     findJobActionDefinition,
+    gitWorkspaceCacheJobActionKey,
+    gitWorkspaceCacheJobScheduleId,
     moltbookDashboardCacheJobActionKey,
     moltbookDashboardCacheJobScheduleId,
+    backupStatusJobActionKey,
+    backupStatusJobScheduleId,
+    quotaCacheJobActionKey,
+    quotaCacheJobScheduleId,
+    weatherCacheJobActionKey,
+    weatherCacheJobScheduleId,
 } from "../jobs/actionRegistry.ts";
 
 export interface CacheProviderDefinition {
@@ -113,6 +152,43 @@ const moltbookDashboardProvider = validateCacheProviderDefinition({
     ttlMs: 30 * 60_000,
 });
 
+const overviewProviders = [
+    {
+        actionKey: gitWorkspaceCacheJobActionKey,
+        key: gitWorkspaceCacheKey,
+        payloadSchema: gitWorkspaceCachePayloadSchema,
+        scheduleId: gitWorkspaceCacheJobScheduleId,
+        schemaId: gitWorkspaceCacheSchemaId,
+        source: gitWorkspaceCacheSource,
+        ttlMs: gitWorkspaceCacheTtlMs,
+    },
+    {
+        actionKey: quotaCacheJobActionKey,
+        key: quotaCacheKey,
+        payloadSchema: quotaCachePayloadSchema,
+        scheduleId: quotaCacheJobScheduleId,
+        schemaId: quotaCacheSchemaId,
+        source: quotaCacheSource,
+        ttlMs: quotaCacheTtlMs,
+    },
+    {
+        actionKey: weatherCacheJobActionKey,
+        key: weatherCacheKey,
+        payloadSchema: weatherCachePayloadSchema,
+        scheduleId: weatherCacheJobScheduleId,
+        schemaId: weatherCacheSchemaId,
+        source: weatherCacheSource,
+        ttlMs: weatherCacheTtlMs,
+    },
+].map((provider) =>
+    validateCacheProviderDefinition({
+        ...provider,
+        manualRefresh: true,
+        payloadExposure: "cache-read",
+        payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
+    })
+);
+
 const databaseObservabilityProvider = validateCacheProviderDefinition({
     actionKey: databaseObservabilityCacheJobActionKey,
     key: databaseObservabilityCacheKey,
@@ -139,6 +215,33 @@ const dockerOverviewProvider = validateCacheProviderDefinition({
     ttlMs: 5 * 60_000,
 });
 
+const backupStatusProviders = [
+    {
+        key: backupStatusCacheKeys.kopia,
+        payloadSchema: kopiaBackupCachePayloadSchema,
+        schemaId: backupStatusCacheSchemaIds.kopia,
+    },
+    {
+        key: backupStatusCacheKeys.walg,
+        payloadSchema: walgBackupCachePayloadSchema,
+        schemaId: backupStatusCacheSchemaIds.walg,
+    },
+].map(({ key, payloadSchema, schemaId }) =>
+    validateCacheProviderDefinition({
+        actionKey: backupStatusJobActionKey,
+        actionPayloadKey: backupStatusCacheGroupKey,
+        key,
+        manualRefresh: false,
+        payloadSchema,
+        payloadExposure: "domain-only",
+        payloadMaximumBytes: backupStatusPayloadMaximumBytes,
+        scheduleId: backupStatusJobScheduleId,
+        schemaId,
+        source: backupStatusCacheSource,
+        ttlMs: backupStatusCacheTtlMs,
+    })
+);
+
 const deliveryOverviewProviders = deliveryOverviewSectionIds.map((section) =>
     validateCacheProviderDefinition({
         actionKey: deliveryOverviewCacheJobActionKey,
@@ -162,9 +265,11 @@ const deliveryOverviewProviders = deliveryOverviewSectionIds.map((section) =>
 export const cacheProviderDefinitions = Object.freeze([
     systemHostProvider,
     moltbookDashboardProvider,
+    ...overviewProviders,
     databaseObservabilityProvider,
     ...deliveryOverviewProviders,
     dockerOverviewProvider,
+    ...backupStatusProviders,
 ]);
 
 const providerByKey = new Map(

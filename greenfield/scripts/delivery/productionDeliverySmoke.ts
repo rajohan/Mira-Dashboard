@@ -16,6 +16,7 @@ import {
     runtimeIdentitySchema,
     systemHealthDiagnosticsSchema,
 } from "../../src/contracts/system.ts";
+import { runProductionAuthoritySmoke } from "./productionAuthoritySmoke.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
@@ -64,6 +65,7 @@ interface SubscribeToJobRunsInput extends JobRunRealtimeObserver {
 /** Deterministic transport and filesystem seams used only by focused smoke tests. */
 export interface ProductionDeliverySmokeTestHooks {
     readonly afterDocumentationOpen?: () => Promise<void> | void;
+    readonly authoritySmoke?: typeof runProductionAuthoritySmoke;
     readonly fetch?: ProductionDeliverySmokeFetch;
     readonly subscribeToJobRuns?: (
         input: SubscribeToJobRunsInput
@@ -387,6 +389,7 @@ export async function runProductionDeliveryTargetSmoke(
         ) {
             throw failure();
         }
+        await (testHooks.authoritySmoke ?? runProductionAuthoritySmoke)();
 
         const frontend = await fetcher(baseUrl, {
             headers,

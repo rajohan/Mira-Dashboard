@@ -25,6 +25,7 @@ import { resolveDirectPackageVersions } from "../packageIdentity.ts";
 import { databaseObservabilityProvisioningReleaseArtifactPaths } from "./databaseObservabilityProvisioningPolicy.ts";
 import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
 import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
+import { openClawHeartbeatProvisioningReleaseArtifactPaths } from "./openClawHeartbeatProvisioningPolicy.ts";
 import { previewTailscaleProvisioningReleaseArtifactPaths } from "./previewTailscaleProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
 import {
@@ -66,6 +67,7 @@ const exactScriptPaths = Object.freeze(
         ...databaseObservabilityProvisioningReleaseArtifactPaths,
         ...hostOperationsProvisioningReleaseArtifactPaths,
         ...logMaintenanceProvisioningReleaseArtifactPaths,
+        ...openClawHeartbeatProvisioningReleaseArtifactPaths,
         ...previewTailscaleProvisioningReleaseArtifactPaths,
     ].toSorted()
 );
@@ -238,6 +240,7 @@ function assertArtifactShape(
         ...exactSystemdPaths,
         "browser/index.html",
         "server/databaseMaintenance.js",
+        "server/openClawHeartbeat.js",
         "server/productionDelivery.js",
         "server/web.js",
         "server/worker.js",

@@ -221,6 +221,7 @@ describe("production Delivery target smoke", () => {
             | undefined;
         const connected = Promise.withResolvers<void>();
         const subscriptionStarted = Promise.withResolvers<void>();
+        let authoritySmokeCount = 0;
         let observedMfaProof = false;
         let scheduleRequested = false;
         let unsubscribed = false;
@@ -297,6 +298,10 @@ describe("production Delivery target smoke", () => {
             "http://127.0.0.1:3100/readyz",
             "018f6f50-6a9e-7b88-8000-000000000003",
             {
+                authoritySmoke() {
+                    authoritySmokeCount += 1;
+                    return Promise.resolve();
+                },
                 fetch: fetcher,
                 subscribeToJobRuns(input) {
                     observer = input;
@@ -316,6 +321,7 @@ describe("production Delivery target smoke", () => {
         connected.resolve();
         await smoke;
 
+        expect(authoritySmokeCount).toBe(1);
         expect(observedMfaProof).toBeTrue();
         expect(unsubscribed).toBeTrue();
         const database = new Database(databasePath, {

@@ -284,6 +284,7 @@ function processFixture(
             observedOpenClawRoot,
             observedLogMaintenance,
             _observedMoltbook,
+            observedOverviewProviders,
             observedDatabaseObservability,
             observedDatabaseObservabilityReconciler,
             observedHostOperations,
@@ -320,6 +321,9 @@ function processFixture(
                 writable: true,
             });
             expect(observedLogMaintenance).toBe(logMaintenance);
+            expect(observedOverviewProviders.git).toBeFunction();
+            expect(observedOverviewProviders.quota).toBeFunction();
+            expect(observedOverviewProviders.weather).toBeFunction();
             expect(observedDatabaseObservability.collect).toBeFunction();
             if (observedDatabaseObservabilityReconciler !== undefined) {
                 expect(
@@ -614,10 +618,10 @@ describe("Delivery worker composition", () => {
 });
 
 describe("Dashboard worker process", () => {
-    test("does not compose shared-identity host-operation authority", () => {
+    test("composes the fixed host-operation broker only in production defaults", () => {
         expect(
             createDefaultDashboardWorkerProcessDependencies().createHostOperations
-        ).toBeUndefined();
+        ).toBeFunction();
     });
 
     test("binds managed rotation state to protected project-local paths", () => {

@@ -1539,8 +1539,16 @@ describe("descriptor workspace file structural writer", () => {
         const { root, spool, writer } = fixture();
         const target = Path.join(root, "note.txt");
         Fs.writeFileSync(target, "initial");
+        for (let index = 0; index < 255; index += 1) {
+            const occupiedSpoolId = `30000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+            Fs.writeFileSync(
+                Path.join(spool, `${occupiedSpoolId}.replace-intent`),
+                "{}",
+                { mode: 0o600 }
+            );
+        }
 
-        for (let index = 0; index < 257; index += 1) {
+        for (let index = 0; index < 2; index += 1) {
             const contents = `replacement-${index}`;
             const spoolId = randomUUID();
             const command: WorkerWorkspaceFileWriteCommand = {
@@ -1556,14 +1564,23 @@ describe("descriptor workspace file structural writer", () => {
             };
 
             await writer.apply(command);
+            expect(Fs.existsSync(Path.join(spool, `${spoolId}.replace-settled`))).toBe(
+                true
+            );
             await writer.removeSettledReplacementIntent(command);
+            expect(Fs.existsSync(Path.join(spool, `${spoolId}.replace-settled`))).toBe(
+                false
+            );
         }
 
-        expect(Fs.readFileSync(target, "utf8")).toBe("replacement-256");
+        expect(Fs.readFileSync(target, "utf8")).toBe("replacement-1");
+        expect(
+            Fs.readdirSync(spool).filter((name) => name.endsWith(".replace-intent"))
+        ).toHaveLength(255);
         expect(
             Fs.readdirSync(spool).filter((name) => name.endsWith(".replace-settled"))
         ).toHaveLength(0);
-    }, 30_000);
+    });
 
     test("rejects replacement targets beyond the bounded digest budget", async () => {
         const { root, spool, writer } = fixture();

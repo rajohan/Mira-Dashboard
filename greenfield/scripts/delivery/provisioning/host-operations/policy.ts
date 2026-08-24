@@ -8,8 +8,20 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
     }),
     Object.freeze({
         artifactPath:
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-authority.conf",
+        destinationPath: "/etc/sysusers.d/mira-dashboard-production-authority.conf",
+        mode: 0o644,
+    }),
+    Object.freeze({
+        artifactPath:
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
         destinationPath: "/usr/local/libexec/mira-dashboard-host-operation",
+        mode: 0o755,
+    }),
+    Object.freeze({
+        artifactPath:
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
+        destinationPath: "/usr/local/libexec/mira-dashboard-web-runtime",
         mode: 0o755,
     }),
     Object.freeze({
@@ -42,6 +54,16 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
         destinationPath: "/etc/systemd/system/mira-dashboard-host-system-update.service",
         mode: 0o644,
     }),
+    Object.freeze({
+        artifactPath: "systemd/mira-dashboard-web.service",
+        destinationPath: "/etc/systemd/system/mira-dashboard-web.service",
+        mode: 0o644,
+    }),
+    Object.freeze({
+        artifactPath: "systemd/mira-dashboard-worker.service",
+        destinationPath: "/etc/systemd/system/mira-dashboard-worker.service",
+        mode: 0o644,
+    }),
 ] as const);
 
 export type HostOperationsProvisioningArtifactPolicy =
@@ -63,7 +85,21 @@ export const hostOperationsProvisioningSupportArtifactPaths = Object.freeze([
 /** Complete exact provisioning subtree admitted into an immutable release. */
 export const hostOperationsProvisioningReleaseArtifactPaths = Object.freeze(
     [
-        ...hostOperationsProvisioningArtifacts.map(({ artifactPath }) => artifactPath),
+        ...hostOperationsProvisioningArtifacts
+            .map(({ artifactPath }) => artifactPath)
+            .filter((artifactPath) =>
+                artifactPath.startsWith("scripts/delivery/provisioning/host-operations/")
+            ),
         ...hostOperationsProvisioningSupportArtifactPaths,
     ].toSorted()
+);
+
+/** Every immutable-release artifact read and revalidated by the root installer. */
+export const hostOperationsProvisioningSourceArtifactPaths = Object.freeze(
+    [
+        ...hostOperationsProvisioningReleaseArtifactPaths,
+        ...hostOperationsProvisioningArtifacts.map(({ artifactPath }) => artifactPath),
+    ]
+        .toSorted()
+        .filter((artifactPath, index, paths) => paths[index - 1] !== artifactPath)
 );

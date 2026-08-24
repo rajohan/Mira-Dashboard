@@ -99,13 +99,16 @@ function enableTestUserMfa(
 
 /**
  * Opens one persisted browser/automation fixture with a confirmed recent MFA session.
+ * @param now Shared composition clock used to create the authenticated fixture.
  * @returns The migrated database fixture and its authenticated browser cookie jar.
  */
-export async function openAutomationAuthenticationFixture(): Promise<{
+export async function openAutomationAuthenticationFixture(
+    now: () => Date = () => new Date()
+): Promise<{
     readonly fixture: AutomationAuthenticationFixture;
     readonly jar: CookieJar;
 }> {
-    const fixtureTime = new Date();
+    const fixtureTime = now();
     const fixture = await openAuthenticationTestDatabase(fixtureTime);
     try {
         enableTestUserMfa(fixture, fixtureTime);
@@ -121,6 +124,7 @@ export async function openAutomationAuthenticationFixture(): Promise<{
 interface AutomationHttpSystemOptions {
     readonly applicationRuntime: ApplicationRuntime;
     readonly authenticationLeaseDurationMs?: number;
+    readonly now?: () => Date;
     readonly principalId?: string;
 }
 
@@ -130,7 +134,7 @@ interface AutomationHttpSystemOptions {
  * @returns The running server, browser session, initial credential, and deterministic cleanup.
  */
 export async function openAutomationHttpSystem(options: AutomationHttpSystemOptions) {
-    const { fixture, jar } = await openAutomationAuthenticationFixture();
+    const { fixture, jar } = await openAutomationAuthenticationFixture(options.now);
     let server: ApplicationServer | undefined;
 
     try {
@@ -147,7 +151,7 @@ export async function openAutomationHttpSystem(options: AutomationHttpSystemOpti
                   }),
             browserOrigin: automationHttpSystemBrowserOrigin,
             gatewayUrl: "ws://127.0.0.1:1",
-            now: () => new Date(),
+            now: options.now ?? (() => new Date()),
             port: 0,
             readiness: createReadinessController(),
             totpSecretCipher: testTotpSecretCipher,

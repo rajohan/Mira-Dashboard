@@ -117,7 +117,9 @@ export const KeyboardAndFocus: Story = {
             const optionsElement =
                 optionsId === null
                     ? null
-                    : canvasElement.ownerDocument.getElementById(optionsId);
+                    : canvasElement.ownerDocument.querySelector(
+                          `#${globalThis.CSS.escape(optionsId)}`
+                      );
 
             if (!(optionsElement instanceof HTMLElement)) {
                 throw new Error("The assignee option panel was not mounted.");

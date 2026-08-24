@@ -48,7 +48,8 @@ export function SystemMetricsSection() {
                         System usage
                     </Heading>
                     <Text className="mt-1" tone="muted">
-                        Current CPU, memory, disk, network, and uptime readings.
+                        Current host gauges and independently available application
+                        runtime observations.
                     </Text>
                 </div>
                 {query.data !== undefined && (

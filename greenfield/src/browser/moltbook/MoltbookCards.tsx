@@ -129,7 +129,7 @@ export function MoltbookFeedPostCard({ post }: Readonly<{ post: MoltbookFeedPost
                     href={moltbookPostUrl(post.id)}
                     showIcon={false}
                 >
-                    <Heading className="wrap-break-word" level={3}>
+                    <Heading className="wrap-break-word" level={2} size="subsection">
                         {post.title}
                     </Heading>
                     {post.contentPreview !== "" && (
@@ -166,7 +166,7 @@ export function MoltbookOwnPostCard({ post }: Readonly<{ post: MoltbookOwnPost }
                 href={moltbookPostUrl(post.id)}
                 showIcon={false}
             >
-                <Heading className="wrap-break-word" level={3}>
+                <Heading className="wrap-break-word" level={2} size="subsection">
                     {post.title}
                 </Heading>
                 {post.contentPreview !== "" && (

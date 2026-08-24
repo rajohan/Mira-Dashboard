@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
@@ -14,6 +14,7 @@ import {
 
 interface AuthenticatedBrowserCacheBoundaryProps {
     readonly children: ReactNode;
+    readonly onCacheReset?: (queryClient: QueryClient) => void;
 }
 
 interface CacheTransitionState {
@@ -33,6 +34,7 @@ const unresolvedAuthenticationIdentity = "unresolved-auth-status";
  */
 export function AuthenticatedBrowserCacheBoundary({
     children,
+    onCacheReset,
 }: AuthenticatedBrowserCacheBoundaryProps) {
     const queryClient = useQueryClient();
     const collections = useDashboardBrowserCollections();
@@ -71,6 +73,7 @@ export function AuthenticatedBrowserCacheBoundary({
         startedVersion.current = requestVersion;
         void resetAuthenticatedBrowserDataPreservingAuth(queryClient, collections)
             .then(() => {
+                onCacheReset?.(queryClient);
                 const currentStatus =
                     queryClient.getQueryData<AuthStatus>(authStatusQueryKey);
                 const currentIdentity =
@@ -100,7 +103,7 @@ export function AuthenticatedBrowserCacheBoundary({
                         : current
                 );
             });
-    }, [collections, queryClient, transition]);
+    }, [collections, onCacheReset, queryClient, transition]);
 
     const resetRequired =
         transition.pendingIdentity !== undefined ||

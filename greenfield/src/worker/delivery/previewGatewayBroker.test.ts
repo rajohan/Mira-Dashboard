@@ -17,6 +17,7 @@ import {
     PreviewGatewayBrokerFrameDecoder,
     startPreviewGatewayBroker,
     type PreviewGatewayBroker,
+    type PreviewGatewayBrokerScheduler,
 } from "./previewGatewayBroker.ts";
 import {
     buildPreviewGatewaySocketSpecification,
@@ -27,6 +28,30 @@ const operationId = "019fd974-54a2-74dd-a64b-d4186f8d8801";
 const requestId = "019fd974-54a2-74dd-a64b-d4186f8d8802";
 const temporaryDirectories: string[] = [];
 const brokers: PreviewGatewayBroker[] = [];
+
+class ManualHandshakeScheduler implements PreviewGatewayBrokerScheduler {
+    readonly entries: Array<{
+        readonly callback: () => void;
+        cancelled: boolean;
+        readonly delayMs: number;
+    }> = [];
+
+    schedule(callback: () => void, delayMs: number) {
+        const entry = { callback, cancelled: false, delayMs };
+        this.entries.push(entry);
+        return {
+            cancel() {
+                entry.cancelled = true;
+            },
+        };
+    }
+
+    expirePending(): void {
+        for (const entry of this.entries) {
+            if (!entry.cancelled) entry.callback();
+        }
+    }
+}
 
 afterEach(async () => {
     for (const broker of brokers.splice(0)) await broker.stop().catch(() => {});
@@ -101,22 +126,33 @@ function rawExchange(
     });
 }
 
-function openIdleConnection(socketPath: string): Promise<void> {
+function openIdleConnection(
+    socketPath: string
+): Promise<{ readonly closed: Promise<void> }> {
+    const closed = Promise.withResolvers<void>();
     return new Promise((resolve, reject) => {
+        let opened = false;
+        const fail = (): void => {
+            const error = new Error("Preview Gateway idle connection failed");
+            if (opened) closed.reject(error);
+            else reject(error);
+        };
         void Bun.connect<{ marker: "preview-gateway-idle-test" }>({
             data: { marker: "preview-gateway-idle-test" },
             socket: {
                 close() {
-                    resolve();
+                    if (opened) closed.resolve();
+                    else fail();
                 },
                 data() {},
-                error() {
-                    reject(new Error("Preview Gateway idle connection failed"));
+                error: fail,
+                open() {
+                    opened = true;
+                    resolve({ closed: closed.promise });
                 },
-                open() {},
             },
             unix: socketPath,
-        }).catch(() => reject(new Error("Preview Gateway idle connection failed")));
+        }).catch(fail);
     });
 }
 
@@ -177,17 +213,25 @@ describe("preview Gateway Unix broker", () => {
 
     test("expires all eight idle handshakes before accepting later work", async () => {
         const context = await fixture();
+        const scheduler = new ManualHandshakeScheduler();
         const broker = await startPreviewGatewayBroker({
             operationId,
             port: {
                 invoke: () => Promise.resolve({ body: new Uint8Array([9]) }),
             },
+            scheduler,
             specification: context.specification,
         });
         brokers.push(broker);
-        await Promise.all(
+        const connections = await Promise.all(
             Array.from({ length: 8 }, () => openIdleConnection(broker.socketPath))
         );
+        expect(scheduler.entries.map(({ delayMs }) => delayMs)).toEqual(
+            Array.from({ length: 8 }, () => 2000)
+        );
+        scheduler.expirePending();
+        await Promise.all(connections.map(({ closed }) => closed));
+        expect(scheduler.entries.every(({ cancelled }) => cancelled)).toBe(true);
 
         const frame = encodePreviewGatewayBrokerFrame({
             body: "",

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import * as v from "valibot";
 
+import type { BackupJobExecutionPort } from "../../../contracts/backupsWorker.ts";
 import {
     databaseObservabilityCacheKey,
     databaseObservabilityCacheSchemaId,
@@ -10,11 +11,32 @@ import {
 } from "../../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../../contracts/databaseObservabilityCollector.ts";
 import {
+    gitWorkspaceCacheKey,
+    gitWorkspaceCacheSchemaId,
+    gitWorkspaceCacheSource,
+    gitWorkspaceCacheTtlMs,
+    type GitWorkspaceCachePayload,
+} from "../../../contracts/gitWorkspace.ts";
+import {
     logMaintenanceJobResultSchema,
     type LogMaintenancePolicyId,
     type LogMaintenanceExecutionSummary,
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
+import {
+    quotaCacheKey,
+    quotaCacheSchemaId,
+    quotaCacheSource,
+    quotaCacheTtlMs,
+    type QuotaCachePayload,
+} from "../../../contracts/quota.ts";
+import {
+    weatherCacheKey,
+    weatherCacheSchemaId,
+    weatherCacheSource,
+    weatherCacheTtlMs,
+    type WeatherCachePayload,
+} from "../../../contracts/weather.ts";
 import {
     DatabaseObservabilityCollectionLeaseError,
     databaseObservabilityReconciliationStatuses,
@@ -27,6 +49,7 @@ import {
     OpenClawServiceActionsExecutionError,
     type OpenClawServiceActionsExecutionPort,
 } from "../../../shared/openClawServiceActions.ts";
+import type { BackupActivityRepository } from "../backups/activityRepository.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
@@ -39,6 +62,11 @@ import {
     type JobActionSuccessfulSettlementHandler,
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    backupClearAttentionJobActionDefinition,
+    backupKopiaRunJobActionKey,
+    backupStatusJobActionKey,
+    backupScheduledJobActionKeys,
+    backupWalgRunJobActionKey,
     databaseObservabilityCacheJobActionKey,
     deliveryGitHubJobActionDefinition,
     deliveryOverviewCacheJobActionKey,
@@ -59,6 +87,7 @@ import {
     hostSystemUpdateJobActionDefinition,
     hostSystemUpdateJobActionKey,
     hostSystemUpdateJobResultSchema,
+    gitWorkspaceCacheJobActionKey,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
     openClawGatewayRestartJobActionDefinition,
@@ -70,13 +99,21 @@ import {
     openClawSessionsCleanupJobActionDefinition,
     openClawSessionsCleanupJobActionKey,
     openClawSessionsCleanupJobResultSchema,
+    overviewProviderJobActionKeys,
+    quotaCacheJobActionKey,
     sqliteMaintenanceJobActionKey,
     validateJobActionRegistration,
+    weatherCacheJobActionKey,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileReplaceJobActionKey,
     workspaceFileWriteJobActionDefinition,
     workspaceFileWriteJobActionKey,
 } from "./actionRegistry.ts";
+import {
+    createBackupClearAttentionJobExecutor,
+    createBackupRunJobExecutor,
+    createBackupStatusJobExecutor,
+} from "./backupActionExecutors.ts";
 import {
     createDeliveryGitHubJobExecutor,
     createDeliveryOverviewJobExecutor,
@@ -117,6 +154,11 @@ const moltbookDashboardActionPayloadSchema = v.strictObject({
 const databaseObservabilityActionPayloadSchema = v.strictObject({
     key: v.literal(databaseObservabilityCacheKey),
 });
+const gitWorkspaceActionPayloadSchema = v.strictObject({
+    key: v.literal(gitWorkspaceCacheKey),
+});
+const quotaActionPayloadSchema = v.strictObject({ key: v.literal(quotaCacheKey) });
+const weatherActionPayloadSchema = v.strictObject({ key: v.literal(weatherCacheKey) });
 const logMaintenanceActionPayloadSchema = v.pipe(
     v.strictObject({
         dryRun: v.optional(v.boolean("Log maintenance mode is invalid"), false),
@@ -336,6 +378,30 @@ export interface DatabaseObservabilityExecutorDependencies {
     readonly collector: DatabaseObservabilityCollector;
     readonly monotonicNowMs?: () => number;
     readonly reconciler?: DatabaseObservabilityReconciliationPort;
+}
+
+export interface OverviewProviderCollectors {
+    readonly git: (signal?: AbortSignal) => Promise<GitWorkspaceCachePayload>;
+    readonly quota: (signal?: AbortSignal) => Promise<QuotaCachePayload>;
+    readonly weather: (signal?: AbortSignal) => Promise<WeatherCachePayload>;
+}
+
+function createOverviewProviderExecutor<TPayload extends JsonObject>(input: {
+    readonly collect: (signal?: AbortSignal) => Promise<TPayload>;
+    readonly failureCode: string;
+    readonly failureMessage: string;
+    readonly key: string;
+    readonly metadata: JsonObject;
+    readonly schemaId: string;
+    readonly source: string;
+    readonly ttlMs: number;
+    readonly validatePayload: (payload: JsonObject) => void;
+}): JobActionExecutor {
+    return createCacheRefreshExecutor({
+        ...input,
+        collect: (signal) => input.collect(signal),
+        monotonicNowMs: () => performance.now(),
+    });
 }
 
 const databaseObservabilityReconciliationStatusSchema = v.picklist(
@@ -666,6 +732,10 @@ export function createJobWorkerActionRegistry(
  */
 export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
+    readonly backups?: {
+        readonly activityRepository: BackupActivityRepository;
+        readonly executionPort: BackupJobExecutionPort;
+    };
     readonly databaseObservability?: DatabaseObservabilityCollector;
     readonly databaseObservabilityReconciler?: DatabaseObservabilityReconciliationPort;
     readonly delivery?: DeliveryJobExecutionPort;
@@ -675,6 +745,7 @@ export interface JobWorkerActionResolverDependencies {
     readonly moltbook: MoltbookDashboardCollector;
     readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
     readonly openClawServiceActions?: OpenClawServiceActionsExecutionPort;
+    readonly overviewProviders?: OverviewProviderCollectors;
     readonly sqliteMaintenance?: SqliteMaintenanceExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
 }
@@ -711,6 +782,16 @@ export function createJobWorkerActionResolver(
     } else {
         domainDefinitions = jobActionDefinitions;
     }
+    if (dependencies.backups === undefined) {
+        domainDefinitions = domainDefinitions.filter(
+            ({ actionKey }) => !backupScheduledJobActionKeys.includes(actionKey)
+        );
+    }
+    if (dependencies.overviewProviders === undefined) {
+        domainDefinitions = domainDefinitions.filter(
+            ({ actionKey }) => !overviewProviderJobActionKeys.includes(actionKey)
+        );
+    }
     const definitions =
         dependencies.actionDefinitions ??
         Object.freeze([
@@ -740,6 +821,9 @@ export function createJobWorkerActionResolver(
             ...(dependencies.docker === undefined
                 ? []
                 : [dockerOperationJobActionDefinition]),
+            ...(dependencies.backups === undefined
+                ? []
+                : [backupClearAttentionJobActionDefinition]),
             ...(dependencies.delivery === undefined
                 ? []
                 : [
@@ -770,7 +854,85 @@ export function createJobWorkerActionResolver(
                   }),
               ];
     const executors = [
+        ...gatedExecutor(
+            backupStatusJobActionKey,
+            dependencies.backups === undefined
+                ? undefined
+                : createBackupStatusJobExecutor(dependencies.backups.executionPort)
+        ),
+        ...gatedExecutor(
+            backupKopiaRunJobActionKey,
+            dependencies.backups === undefined
+                ? undefined
+                : createBackupRunJobExecutor("kopia", dependencies.backups)
+        ),
+        ...gatedExecutor(
+            backupWalgRunJobActionKey,
+            dependencies.backups === undefined
+                ? undefined
+                : createBackupRunJobExecutor("walg", dependencies.backups)
+        ),
+        ...gatedExecutor(
+            backupClearAttentionJobActionDefinition.actionKey,
+            dependencies.backups === undefined
+                ? undefined
+                : createBackupClearAttentionJobExecutor(dependencies.backups)
+        ),
         ...gatedExecutor("cache.refresh.system-host", systemHostExecutor),
+        ...gatedExecutor(
+            gitWorkspaceCacheJobActionKey,
+            dependencies.overviewProviders === undefined
+                ? undefined
+                : createOverviewProviderExecutor({
+                      collect: dependencies.overviewProviders.git,
+                      failureCode: "provider/git-workspace-unavailable",
+                      failureMessage: "Managed Git projection could not be collected.",
+                      key: gitWorkspaceCacheKey,
+                      metadata: { kind: "git-workspace" },
+                      schemaId: gitWorkspaceCacheSchemaId,
+                      source: gitWorkspaceCacheSource,
+                      ttlMs: gitWorkspaceCacheTtlMs,
+                      validatePayload: (payload) => {
+                          v.parse(gitWorkspaceActionPayloadSchema, payload);
+                      },
+                  })
+        ),
+        ...gatedExecutor(
+            quotaCacheJobActionKey,
+            dependencies.overviewProviders === undefined
+                ? undefined
+                : createOverviewProviderExecutor({
+                      collect: dependencies.overviewProviders.quota,
+                      failureCode: "provider/quota-unavailable",
+                      failureMessage: "Provider quota projection could not be collected.",
+                      key: quotaCacheKey,
+                      metadata: { kind: "quota" },
+                      schemaId: quotaCacheSchemaId,
+                      source: quotaCacheSource,
+                      ttlMs: quotaCacheTtlMs,
+                      validatePayload: (payload) => {
+                          v.parse(quotaActionPayloadSchema, payload);
+                      },
+                  })
+        ),
+        ...gatedExecutor(
+            weatherCacheJobActionKey,
+            dependencies.overviewProviders === undefined
+                ? undefined
+                : createOverviewProviderExecutor({
+                      collect: dependencies.overviewProviders.weather,
+                      failureCode: "provider/weather-unavailable",
+                      failureMessage: "Weather projection could not be collected.",
+                      key: weatherCacheKey,
+                      metadata: { kind: "weather" },
+                      schemaId: weatherCacheSchemaId,
+                      source: weatherCacheSource,
+                      ttlMs: weatherCacheTtlMs,
+                      validatePayload: (payload) => {
+                          v.parse(weatherActionPayloadSchema, payload);
+                      },
+                  })
+        ),
         ...gatedExecutor(
             "cache.refresh.moltbook-dashboard",
             createMoltbookDashboardExecutor({

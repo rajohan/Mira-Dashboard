@@ -12,6 +12,7 @@ import {
     max,
     notInArray,
     or,
+    sql,
 } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import * as v from "valibot";
@@ -35,6 +36,7 @@ import {
     chatRuntimeDurableResponseMaximumBytes,
     chatRuntimeEventSchema,
     chatRuntimeSnapshotSchema,
+    type ChatRunState,
     type ChatRunSummary,
     type ChatRuntimeEvent,
     type ChatRuntimeSnapshot,
@@ -154,6 +156,17 @@ export interface ChatHistoryAlias {
     readonly sessionKey: string;
 }
 
+/** Payload- and identity-free durable chat aggregates for system observability. */
+export interface ChatRepositoryMetrics {
+    readonly activeRuns: number;
+    readonly failedOrUnknownRuns: number;
+    readonly retainedEventBytes: number;
+    readonly retainedEvents: number;
+    readonly retainedRuns: number;
+    readonly retainedSnapshotBytes: number;
+    readonly retainedSnapshots: number;
+}
+
 export interface ChatRepository extends ChatTranscriptLifecycleStore {
     acknowledgeDispatch(
         runId: string,
@@ -188,6 +201,7 @@ export interface ChatRepository extends ChatTranscriptLifecycleStore {
     listProviderRunWatermarks(sessionKey: string): readonly ChatProviderRunWatermark[];
     markOutcomeUnknown(runId: string, at?: Date): Promise<ChatRunSummary>;
     pruneExpired(at?: Date, limit?: number): Promise<number>;
+    readMetrics(): ChatRepositoryMetrics;
     readRuntime(input: ChatRuntimeInput): ChatRuntimeOutput;
     readIntent(runId: string): ChatRecoveryCandidate | undefined;
     signalRuntimeChanged(at?: Date): Promise<void>;
@@ -2023,6 +2037,57 @@ export function createChatRepository(
                     appendRealtimeMarker(transaction, at);
                 }
                 return ids.length;
+            });
+        },
+        readMetrics() {
+            return read((transaction) => {
+                const countRuns = (states?: readonly ChatRunState[]): number =>
+                    requiredCount(
+                        transaction
+                            .select({ value: count() })
+                            .from(chatRuns)
+                            .where(
+                                states === undefined
+                                    ? undefined
+                                    : inArray(chatRuns.state, [...states])
+                            )
+                            .get()
+                    );
+                const aggregate = (column: typeof chatRuns.eventBytes): number =>
+                    requiredCount(
+                        transaction
+                            .select({
+                                value: sql<number>`coalesce(sum(${column}), 0)`,
+                            })
+                            .from(chatRuns)
+                            .get()
+                    );
+                return Object.freeze({
+                    activeRuns: countRuns(chatActiveRunStates),
+                    failedOrUnknownRuns: countRuns([
+                        "failed",
+                        "interrupted",
+                        "outcome-unknown",
+                        "unresolved",
+                    ]),
+                    retainedEventBytes: aggregate(chatRuns.eventBytes),
+                    retainedEvents: aggregate(chatRuns.eventCount),
+                    retainedRuns: countRuns(),
+                    retainedSnapshotBytes: requiredCount(
+                        transaction
+                            .select({
+                                value: sql<number>`coalesce(sum(${chatRuntimeSnapshots.snapshotBytes}), 0)`,
+                            })
+                            .from(chatRuntimeSnapshots)
+                            .get()
+                    ),
+                    retainedSnapshots: requiredCount(
+                        transaction
+                            .select({ value: count() })
+                            .from(chatRuntimeSnapshots)
+                            .get()
+                    ),
+                });
             });
         },
         readRuntime(rawInput) {

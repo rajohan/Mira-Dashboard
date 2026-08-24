@@ -8,11 +8,20 @@ import {
     type CacheStatusResult,
     type GetCacheEntryInput,
     type RefreshCacheEntryInput,
+    cacheHeartbeatBackupSignalSchema,
     cacheHeartbeatDashboardJobsAreConsistent,
     cacheHeartbeatDashboardJobsSchema,
+    cacheHeartbeatDatabaseMaintenanceSignalSchema,
+    cacheHeartbeatDockerHealthSignalSchema,
+    cacheHeartbeatDockerUpdatesSignalSchema,
+    cacheHeartbeatGitSignalSchema,
+    cacheHeartbeatHostCapacitySignalSchema,
+    cacheHeartbeatLogsSignalSchema,
+    cacheHeartbeatQuotaSignalSchema,
     cacheHeartbeatResultSchema,
     cacheHeartbeatSchemaVersion,
     cacheHeartbeatTasksSchema,
+    cacheHeartbeatWeatherSignalSchema,
     cacheStatusResultSchema,
 } from "../../../contracts/cache.ts";
 import { type JobRunSummary, jobTimestampSchema } from "../../../contracts/jobModel.ts";
@@ -93,6 +102,12 @@ function asyncReadEffect<T>(operation: () => Promise<T>): Effect.Effect<T> {
             Effect.die(error.cause)
         )
     );
+}
+
+function asUnknownRecord(value: unknown): Readonly<Record<string, unknown>> {
+    return typeof value === "object" && value !== null
+        ? (value as Readonly<Record<string, unknown>>)
+        : {};
 }
 
 function mutationEffect<T>(
@@ -199,6 +214,9 @@ export interface CacheServiceDependencies {
         | CacheHeartbeatResult["tasks"]
         | Promise<CacheHeartbeatResult["tasks"]>;
     readonly readOpenClawCronProjection?: () => CacheHeartbeatResult["openClawCron"];
+    readonly readOperationalSignals?: () =>
+        | CacheHeartbeatResult["operationalSignals"]
+        | Promise<CacheHeartbeatResult["operationalSignals"]>;
     readonly wakeEventPump?: () => Promise<void> | void;
 }
 
@@ -288,6 +306,76 @@ export function createCacheService(
         }
     }
 
+    async function readOperationalSignals(): Promise<
+        CacheHeartbeatResult["operationalSignals"]
+    > {
+        const unavailable = { state: "unavailable" as const };
+        const unavailableSignals = (): CacheHeartbeatResult["operationalSignals"] => ({
+            backups: { kopia: unavailable, walg: unavailable },
+            database: {
+                postgresqlMaintenance: unavailable,
+                sqliteMaintenance: unavailable,
+            },
+            docker: { health: unavailable, updates: unavailable },
+            git: unavailable,
+            hostCapacity: unavailable,
+            logs: unavailable,
+            quota: unavailable,
+            weather: unavailable,
+        });
+        const parseSignal = <T>(
+            schema: v.GenericSchema<unknown, T>,
+            value: unknown
+        ): T => {
+            const parsed = v.safeParse(schema, value);
+            return parsed.success ? parsed.output : (unavailable as T);
+        };
+        try {
+            const candidate = await dependencies.readOperationalSignals?.();
+            if (candidate === undefined) return unavailableSignals();
+            const signals = asUnknownRecord(candidate);
+            const backups = asUnknownRecord(signals.backups);
+            const database = asUnknownRecord(signals.database);
+            const docker = asUnknownRecord(signals.docker);
+            return {
+                backups: {
+                    kopia: parseSignal(cacheHeartbeatBackupSignalSchema, backups.kopia),
+                    walg: parseSignal(cacheHeartbeatBackupSignalSchema, backups.walg),
+                },
+                database: {
+                    postgresqlMaintenance: parseSignal(
+                        cacheHeartbeatDatabaseMaintenanceSignalSchema,
+                        database.postgresqlMaintenance
+                    ),
+                    sqliteMaintenance: parseSignal(
+                        cacheHeartbeatDatabaseMaintenanceSignalSchema,
+                        database.sqliteMaintenance
+                    ),
+                },
+                docker: {
+                    health: parseSignal(
+                        cacheHeartbeatDockerHealthSignalSchema,
+                        docker.health
+                    ),
+                    updates: parseSignal(
+                        cacheHeartbeatDockerUpdatesSignalSchema,
+                        docker.updates
+                    ),
+                },
+                git: parseSignal(cacheHeartbeatGitSignalSchema, signals.git),
+                hostCapacity: parseSignal(
+                    cacheHeartbeatHostCapacitySignalSchema,
+                    signals.hostCapacity
+                ),
+                logs: parseSignal(cacheHeartbeatLogsSignalSchema, signals.logs),
+                quota: parseSignal(cacheHeartbeatQuotaSignalSchema, signals.quota),
+                weather: parseSignal(cacheHeartbeatWeatherSignalSchema, signals.weather),
+            };
+        } catch {
+            return unavailableSignals();
+        }
+    }
+
     function readDashboardJobsProjection(
         generatedAtMs: number
     ): CacheHeartbeatDashboardJobsRead {
@@ -364,6 +452,7 @@ export function createCacheService(
                     connection
                 );
                 const taskProjection = await readTasksProjection();
+                const operationalSignals = await readOperationalSignals();
                 const openClawCron = demoteCronWhenDisconnected(
                     readCronProjection(),
                     connection
@@ -406,6 +495,25 @@ export function createCacheService(
                                     ]
                                   : [];
                           })),
+                    ...Object.values({
+                        ...operationalSignals.backups,
+                        ...operationalSignals.database,
+                        ...operationalSignals.docker,
+                        git: operationalSignals.git,
+                        hostCapacity: operationalSignals.hostCapacity,
+                        logs: operationalSignals.logs,
+                        quota: operationalSignals.quota,
+                        weather: operationalSignals.weather,
+                    }).flatMap((signal) =>
+                        signal.state === "unavailable"
+                            ? []
+                            : [
+                                  signal.observedAtMs,
+                                  ...(signal.state === "last-known-good"
+                                      ? [signal.staleSinceMs]
+                                      : []),
+                              ]
+                    ),
                 ];
                 const initialGeneratedAtMs = Math.max(
                     requestedAtMs,
@@ -422,6 +530,7 @@ export function createCacheService(
                         dashboardJobRead.generatedAtMs
                     ),
                     openClawCron,
+                    operationalSignals,
                     schemaVersion: cacheHeartbeatSchemaVersion,
                     tasks: heartbeatTasks,
                 });

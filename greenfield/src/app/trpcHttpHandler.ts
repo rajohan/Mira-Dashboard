@@ -1,6 +1,7 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
 import type { AgentService } from "../server/domains/agents/service.ts";
+import type { BackupService } from "../server/domains/backups/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
 import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
@@ -54,6 +55,7 @@ export interface TrpcHttpHandlerOptions {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
+    readonly backupService?: BackupService;
     readonly chatService?: ChatService;
     readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly deliveryService?: DeliveryService;
@@ -248,6 +250,9 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     automationSecurityLifecycle: options.automationSecurityLifecycle,
                     authenticateCredential: options.authenticateCredential,
                     cacheService: options.cacheService,
+                    ...(options.backupService === undefined
+                        ? {}
+                        : { backupService: options.backupService }),
                     ...(options.chatService === undefined
                         ? {}
                         : { chatService: options.chatService }),

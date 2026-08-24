@@ -40,6 +40,7 @@ const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
     "src/app/dashboardServerProcess.test.ts",
     "src/app/databaseMaintenance.test.ts",
     "src/app/developmentProcesses.test.ts",
+    "src/app/runtimeAuthorityBundle.test.ts",
     "src/app/trpcHttpHandler.test.ts",
     "src/app/trpcRequestPolicy.test.ts",
     "src/app/worker.test.ts",
@@ -74,6 +75,7 @@ const reviewedApplicationServerTargets: ReadonlyMap<
         "src/app/developmentWorker.ts",
         new Set([
             "src/server/domains/jobs/actionRegistry.ts",
+            "src/server/domains/jobs/sourceDevelopmentActionComposition.ts",
             "src/server/domains/jobs/workerRuntime.ts",
             "src/server/platform/gateway/previewGatewayTransport.ts",
             "src/server/platform/release/developmentRuntimeRelease.ts",
@@ -108,6 +110,13 @@ const reviewedScriptBrowserTargets: ReadonlyMap<string, ReadonlySet<string>> = n
     ["scripts/developmentFrontend.ts", new Set(["src/browser/index.html"])],
 ]);
 
+const reviewedStorybookConfigScriptTargets: ReadonlyMap<
+    string,
+    ReadonlySet<string>
+> = new Map([
+    [".storybook/vitest.config.ts", new Set(["scripts/storybookTestProjects.ts"])],
+]);
+
 /**
  * Checks the one reviewed Bun full-stack HTML entry edge.
  * @param importer Normalized development script path.
@@ -116,6 +125,19 @@ const reviewedScriptBrowserTargets: ReadonlyMap<string, ReadonlySet<string>> = n
  */
 export function isReviewedScriptBrowserTarget(importer: string, target: string): boolean {
     return reviewedScriptBrowserTargets.get(importer)?.has(target) === true;
+}
+
+/**
+ * Checks the one reviewed Storybook test-config project-ownership edge.
+ * @param importer Normalized Storybook configuration path.
+ * @param target Normalized script target path.
+ * @returns Whether the exact edge owns deterministic Storybook project isolation.
+ */
+export function isReviewedStorybookConfigScriptTarget(
+    importer: string,
+    target: string
+): boolean {
+    return reviewedStorybookConfigScriptTargets.get(importer)?.has(target) === true;
 }
 
 /**

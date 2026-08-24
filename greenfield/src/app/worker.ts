@@ -10,7 +10,10 @@ import {
     deliveryGitHubReviewerLogin,
 } from "../contracts/deliveryGithub.ts";
 import type { DockerJobExecutionPort } from "../contracts/dockerWorker.ts";
-import type { FixedHostOperationsExecutionPort } from "../server/domains/jobs/actionExecutors.ts";
+import type {
+    FixedHostOperationsExecutionPort,
+    OverviewProviderCollectors,
+} from "../server/domains/jobs/actionExecutors.ts";
 import { managedPreviewJobActionDefinitions } from "../server/domains/jobs/actionRegistry.ts";
 import { createDeliveryProductionRecovery } from "../server/domains/jobs/deliveryProductionRecovery.ts";
 import {
@@ -64,6 +67,7 @@ import type { DatabaseObservabilityReconciliationPort } from "../shared/database
 import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
+import { createDockerBackupJobExecutionPort } from "../worker/backups/dockerBackupProvider.ts";
 import {
     createBunSqlDatabaseObservabilityCollector,
     createUnavailableDatabaseObservabilityCollector,
@@ -141,7 +145,12 @@ import {
     type ManagedLogRotationEngine,
 } from "../worker/logs/managedLogRotation.ts";
 import { createFixedOpenClawGatewayLifecycle } from "../worker/openClaw/gatewayLifecycle.ts";
+import { resolveCodexQuotaCollectorOptions } from "../worker/overview/codexQuotaCollector.ts";
+import { collectGitWorkspacePayload } from "../worker/overview/gitWorkspaceCollector.ts";
+import { collectQuotaPayload } from "../worker/overview/quotaCollector.ts";
+import { collectWeatherPayload } from "../worker/overview/weatherCollector.ts";
 import { type DashboardWorkerRuntime } from "../worker/runtime.ts";
+import { createFixedHostOperationsBroker } from "../worker/system/fixedHostOperationsBroker.ts";
 import { readLinuxBootIdentity } from "../worker/system/linuxBootIdentity.ts";
 import { taskNotificationWorkerLoop } from "../worker/taskNotifications.ts";
 import {
@@ -199,6 +208,7 @@ export interface DashboardWorkerProcessDependencies {
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor,
         moltbook: MoltbookDashboardCollector,
+        overviewProviders: OverviewProviderCollectors,
         databaseObservability: DatabaseObservabilityCollector,
         databaseObservabilityReconciler:
             | DatabaseObservabilityReconciliationPort
@@ -616,6 +626,7 @@ const defaultDependencies = Object.freeze({
         }),
     createDocker: createWorkerDockerComposition,
     createDelivery: createWorkerDeliveryProcessComposition,
+    createHostOperations: createFixedHostOperationsBroker,
     createDatabaseObservabilityConnectionResolver:
         createDockerDatabaseObservabilityConnectionResolver,
     createDatabaseObservabilityReconciler: createFixedDatabaseObservabilityReconciler,
@@ -638,6 +649,7 @@ const defaultDependencies = Object.freeze({
         openClawRoot,
         logMaintenance,
         moltbook,
+        overviewProviders,
         databaseObservability,
         databaseObservabilityReconciler,
         hostOperations,
@@ -655,6 +667,7 @@ const defaultDependencies = Object.freeze({
             spoolRoot: layout.production.state.workspaceFileUploads,
         });
         return createDashboardWorkerRuntime({
+            backups: createDockerBackupJobExecutionPort(),
             bootIdentity,
             database: {
                 migrationsDirectory: path.join(release.releaseRoot, "migrations"),
@@ -668,6 +681,7 @@ const defaultDependencies = Object.freeze({
                 : { databaseObservabilityReconciler }),
             logMaintenance,
             moltbook,
+            overviewProviders,
             ...(openClawGateway === undefined ? {} : { openClawGateway }),
             ...(openClawServiceActions === undefined ? {} : { openClawServiceActions }),
             ...(hostOperations === undefined ? {} : { hostOperations }),
@@ -915,6 +929,25 @@ export async function runDashboardWorkerProcess(
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
         });
+        const quotaCredentials = configuration.quotaCredentials ?? {};
+        const overviewProviders: OverviewProviderCollectors = Object.freeze({
+            git: (signal?: AbortSignal) =>
+                collectGitWorkspacePayload(
+                    [
+                        { id: "dashboard", root: layout.production.checkout },
+                        { id: "docker", root: "/opt/docker" },
+                        { id: "openclaw", root: configuration.openClawRoot },
+                    ],
+                    signal
+                ),
+            quota: async (signal?: AbortSignal) =>
+                collectQuotaPayload(quotaCredentials, signal, {
+                    codex: await resolveCodexQuotaCollectorOptions(
+                        path.dirname(configuration.openClawRoot)
+                    ),
+                }),
+            weather: (signal?: AbortSignal) => collectWeatherPayload(signal),
+        });
         const databaseObservabilityConnectionResolver =
             configuration.databaseObservabilityPassword === undefined
                 ? undefined
@@ -949,6 +982,7 @@ export async function runDashboardWorkerProcess(
             openClawRoot,
             logMaintenance,
             moltbook,
+            overviewProviders,
             databaseObservability,
             databaseObservabilityReconciler,
             hostOperations,

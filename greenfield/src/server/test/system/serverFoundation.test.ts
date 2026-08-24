@@ -12,6 +12,7 @@ import {
 } from "../../../app/server.ts";
 import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
+import { createSystemMetricsRuntimeService } from "../../domains/system/systemMetricsService.ts";
 import {
     createReadinessController,
     type ReadinessController,
@@ -83,6 +84,66 @@ describe("system foundation", () => {
             invalidInputError = error;
         }
         expect(invalidInputError).toBeInstanceOf(Error);
+    });
+
+    test("records tRPC traffic only in fixed HTTP metric buckets", async () => {
+        const metricsService = createSystemMetricsRuntimeService({
+            sample: () =>
+                Promise.resolve({
+                    cpu: {
+                        loadAverage: [0, 0, 0],
+                        loadPercent: 0,
+                        logicalCoreCount: 1,
+                    },
+                    disk: {
+                        freeBytes: 1,
+                        totalBytes: 1,
+                        usedBytes: 0,
+                        usedPercent: 0,
+                    },
+                    freshness: "fresh",
+                    memory: {
+                        freeBytes: 1,
+                        totalBytes: 1,
+                        usedBytes: 0,
+                        usedPercent: 0,
+                    },
+                    network: {
+                        downloadBitsPerSecond: 0,
+                        state: "warming",
+                        uploadBitsPerSecond: 0,
+                    },
+                    sampledAtMs: Date.now(),
+                    uptimeSeconds: 1,
+                }),
+        });
+        const server = await createServer({
+            ...createTestServerSecurityServices(),
+            applicationRuntime: createTestApplicationRuntime({
+                systemMetrics: metricsService,
+            }),
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        const runtimeIdentityResponse = await fetch(
+            new URL("/trpc/system.runtimeIdentity", server.url)
+        );
+        const metricsResponse = await fetch(new URL("/trpc/system.metrics", server.url));
+        expect(runtimeIdentityResponse.status).toBe(200);
+        expect(metricsResponse.status).toBe(401);
+
+        const metrics = await metricsService.read();
+        const procedures = metrics.application.http.procedures;
+        expect(
+            procedures.find(({ procedure }) => procedure === "overflow")
+        ).toMatchObject({ errorCount: 0, requestCount: 1 });
+        expect(
+            procedures.find(({ procedure }) => procedure === "system.metrics")
+        ).toMatchObject({ errorCount: 1, requestCount: 1 });
+        expect(JSON.stringify(procedures)).not.toContain("runtimeIdentity");
     });
 
     test("keeps health checks as explicit raw HTTP protocol routes", async () => {

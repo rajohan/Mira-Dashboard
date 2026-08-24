@@ -373,7 +373,10 @@ function DatabaseOverviewContent({
     );
     return (
         <PageState status="ready">
-            <div className="space-y-6">
+            <section aria-labelledby="sqlite-overview-heading" className="space-y-6">
+                <Heading id="sqlite-overview-heading" level={2} size="section">
+                    SQLite overview
+                </Heading>
                 {retained ? (
                     <Alert
                         focusOnError={false}
@@ -475,7 +478,7 @@ function DatabaseOverviewContent({
                 <ConnectionPolicy overview={overview} />
                 <SqliteStorageDetails sqlite={overview.sqlite} />
                 <SqliteLifecycleBoundaries lifecycle={overview.sqlite.lifecycle} />
-            </div>
+            </section>
         </PageState>
     );
 }

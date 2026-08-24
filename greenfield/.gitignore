@@ -19,6 +19,7 @@ release-manifest.json
 .test-data
 dist-ssr
 *.local
+*.tsbuildinfo
 
 # Editor directories and files
 .vscode/*

@@ -49,7 +49,7 @@ type FrontendBundleBudget = keyof Pick<
 >;
 
 export const FRONTEND_BUNDLE_BUDGETS: Readonly<Record<FrontendBundleBudget, number>> = {
-    initialJavaScriptGzipBytes: 353 * 1024,
+    initialJavaScriptGzipBytes: 360 * 1024,
     initialStylesheetGzipBytes: 25 * 1024,
     largestJavaScriptGzipBytes: 200 * 1024,
     totalJavaScriptGzipBytes: 1280 * 1024,

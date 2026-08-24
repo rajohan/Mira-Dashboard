@@ -10,7 +10,10 @@ import {
 
 import * as v from "valibot";
 
-import { type SystemMetrics, systemMetricsSchema } from "../../../contracts/system.ts";
+import {
+    type SystemHostMetrics,
+    systemHostMetricsSchema,
+} from "../../../contracts/system.ts";
 
 interface SystemMetricsFilesystemStats {
     readonly bavail: bigint;
@@ -38,8 +41,8 @@ interface NetworkBaseline extends SystemMetricsNetworkCounters {
     readonly sampledAtMs: number;
 }
 
-/** One demand-driven metrics collection operation. */
-export type SystemMetricsSampler = () => Promise<SystemMetrics>;
+/** One demand-driven host-metrics collection operation. */
+export type SystemMetricsSampler = () => Promise<SystemHostMetrics>;
 
 function parseCounter(value: string, field: string): bigint {
     if (!/^\d+$/u.test(value)) {
@@ -125,7 +128,7 @@ function rounded(value: number, digits: number): number {
     return Math.round(value * scale) / scale;
 }
 
-function capacity(totalBytes: number, freeBytes: number): SystemMetrics["memory"] {
+function capacity(totalBytes: number, freeBytes: number): SystemHostMetrics["memory"] {
     const usedBytes = totalBytes - freeBytes;
     return {
         freeBytes,
@@ -151,7 +154,7 @@ function networkProjection(
     counters: SystemMetricsNetworkCounters,
     sampledAtMs: number,
     previous: NetworkBaseline | undefined
-): SystemMetrics["network"] {
+): SystemHostMetrics["network"] {
     if (
         previous === undefined ||
         sampledAtMs <= previous.sampledAtMs ||
@@ -219,7 +222,7 @@ export function createSystemMetricsSampler(
             "disk free"
         );
         const firstLoad = loadAverage[0];
-        const metrics = v.parse(systemMetricsSchema, {
+        const metrics = v.parse(systemHostMetricsSchema, {
             cpu: {
                 loadAverage: [
                     rounded(loadAverage[0] ?? Number.NaN, 2),

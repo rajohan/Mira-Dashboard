@@ -9,6 +9,7 @@ import {
     createDashboardTrpcClient,
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
+import { unavailableSystemApplicationMetrics } from "../test/systemMetrics.ts";
 import {
     systemMetricsQueryKey,
     systemMetricsQueryOptions,
@@ -16,6 +17,7 @@ import {
 } from "./systemMetricsQueries.ts";
 
 const freshMetrics = Object.freeze({
+    application: unavailableSystemApplicationMetrics,
     cpu: {
         loadAverage: [2, 1, 0.5],
         loadPercent: 50,

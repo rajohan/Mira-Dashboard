@@ -44,6 +44,8 @@ describe("Dashboard process artifacts", () => {
         const result = JSON.parse(execution.stdout) as {
             databaseMaintenanceGzipBytes: number;
             databaseMaintenanceRawBytes: number;
+            openClawHeartbeatGzipBytes: number;
+            openClawHeartbeatRawBytes: number;
             outputDirectory: string;
             productionDeliveryGzipBytes: number;
             productionDeliveryRawBytes: number;
@@ -55,16 +57,19 @@ describe("Dashboard process artifacts", () => {
         };
         const directoryEntries = await readdir(outputDirectory);
         const files = directoryEntries.toSorted();
-        const [databaseMaintenance, productionDelivery, web, worker] = await Promise.all([
-            readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
-            readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
-            readFile(path.join(outputDirectory, "web.js"), "utf8"),
-            readFile(path.join(outputDirectory, "worker.js"), "utf8"),
-        ]);
+        const [databaseMaintenance, openClawHeartbeat, productionDelivery, web, worker] =
+            await Promise.all([
+                readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
+                readFile(path.join(outputDirectory, "openClawHeartbeat.js"), "utf8"),
+                readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
+                readFile(path.join(outputDirectory, "web.js"), "utf8"),
+                readFile(path.join(outputDirectory, "worker.js"), "utf8"),
+            ]);
 
         expect(execution).toMatchObject({ exitCode: 0, stderr: "" });
         expect(files).toEqual([
             "databaseMaintenance.js",
+            "openClawHeartbeat.js",
             "productionDelivery.js",
             "web.js",
             "worker.js",
@@ -78,6 +83,10 @@ describe("Dashboard process artifacts", () => {
         expect(result.productionDeliveryRawBytes).toBeGreaterThan(
             result.productionDeliveryGzipBytes
         );
+        expect(result.openClawHeartbeatGzipBytes).toBeGreaterThan(0);
+        expect(result.openClawHeartbeatRawBytes).toBeGreaterThan(
+            result.openClawHeartbeatGzipBytes
+        );
         expect(result.webGzipBytes).toBeGreaterThan(0);
         expect(result.workerGzipBytes).toBeGreaterThan(0);
         expect(result.webRawBytes).toBeGreaterThan(result.webGzipBytes);
@@ -85,11 +94,15 @@ describe("Dashboard process artifacts", () => {
         expect(web).toContain("Mira Dashboard web startup failed");
         expect(databaseMaintenance).toContain("Dashboard database maintenance failed");
         expect(productionDelivery).toContain("Production Delivery executor failed");
+        expect(openClawHeartbeat).toContain("OpenClaw heartbeat automation failed");
         expect(worker).toContain("Mira Dashboard worker startup failed");
         expect(web).not.toContain("sourceMappingURL");
         expect(databaseMaintenance).not.toContain("sourceMappingURL");
+        expect(openClawHeartbeat).not.toContain("sourceMappingURL");
         expect(productionDelivery).not.toContain("sourceMappingURL");
+        expect(web).not.toContain("openclaw-heartbeat.token");
         expect(worker).not.toContain("sourceMappingURL");
+        expect(worker).not.toContain("openclaw-heartbeat.token");
     }, 60_000);
 
     test("rejects output outside the repository dist boundary", async () => {

@@ -63,11 +63,9 @@ import {
     updaterOperationPrompt,
     volumeDeletePrompt,
 } from "./dockerOperations.ts";
+import { dockerOverviewQueryOptions } from "./dockerQueries.ts";
 import { DockerResourcePanels } from "./DockerResourcePanels.tsx";
 import { DockerUpdaterPanel } from "./DockerUpdaterPanel.tsx";
-
-const dockerOverviewQueryKey = ["docker", "overview"] as const;
-const dockerOverviewRefreshIntervalMs = 30_000;
 
 function dockerFailureMessage(error: unknown): string {
     if (isDashboardOperationOutcomeUnknown(error)) {
@@ -183,32 +181,37 @@ function DockerSummary({ overview }: DockerSummaryProps) {
         0
     );
     return (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-                description={overview.containers.length + " discovered in total"}
-                icon={Boxes}
-                title="Running containers"
-                value={running + " / " + overview.containers.length}
-            />
-            <MetricCard
-                description="Containers reporting an unhealthy health check"
-                icon={HeartPulse}
-                title="Unhealthy"
-                value={unhealthy}
-            />
-            <MetricCard
-                description="Containers with a complete Compose identity"
-                icon={Layers3}
-                title="Compose managed"
-                value={composeManaged}
-            />
-            <MetricCard
-                description={overview.images.length + " Engine images"}
-                icon={Package}
-                title="Image storage"
-                value={formatByteCount(imageBytes)}
-            />
-        </div>
+        <section aria-labelledby="docker-summary-heading">
+            <Heading id="docker-summary-heading" level={2}>
+                Engine summary
+            </Heading>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricCard
+                    description={overview.containers.length + " discovered in total"}
+                    icon={Boxes}
+                    title="Running containers"
+                    value={running + " / " + overview.containers.length}
+                />
+                <MetricCard
+                    description="Containers reporting an unhealthy health check"
+                    icon={HeartPulse}
+                    title="Unhealthy"
+                    value={unhealthy}
+                />
+                <MetricCard
+                    description="Containers with a complete Compose identity"
+                    icon={Layers3}
+                    title="Compose managed"
+                    value={composeManaged}
+                />
+                <MetricCard
+                    description={overview.images.length + " Engine images"}
+                    icon={Package}
+                    title="Image storage"
+                    value={formatByteCount(imageBytes)}
+                />
+            </div>
+        </section>
     );
 }
 
@@ -320,13 +323,7 @@ interface DockerRouteProps {
 /** @returns Complete fresh-gated Docker observability and exact control page. */
 export function DockerRoute({ client }: DockerRouteProps) {
     const mutationBoundary = useAuthenticatedMutationBoundary();
-    const overviewQuery = useQuery({
-        queryFn: ({ signal }) => client.query("docker.overview", {}, { signal }),
-        queryKey: dockerOverviewQueryKey,
-        refetchInterval: dockerOverviewRefreshIntervalMs,
-        refetchOnMount: "always",
-        retry: false,
-    });
+    const overviewQuery = useQuery(dockerOverviewQueryOptions(client));
     const overview = overviewQuery.data;
     const controlsAvailable = overview?.state === "fresh" && overviewQuery.error === null;
     const [pendingOperation, setPendingOperation] = useState<DockerOperationPrompt>();

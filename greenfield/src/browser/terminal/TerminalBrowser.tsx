@@ -38,11 +38,11 @@ const reconnectInitialDelayMs = 120;
 const reconnectRetryDelayMs = 250;
 const reconnectSafetyMarginMs = 250;
 
-type TerminalSocketConnectionFactory = (
+export type TerminalSocketConnectionFactory = (
     options: CreateTerminalSocketConnectionOptions
 ) => TerminalSocketConnection;
 
-interface TerminalBrowserProps {
+export interface TerminalBrowserProps {
     readonly createEmulator?: TerminalEmulatorFactory;
     readonly createSocketConnection?: TerminalSocketConnectionFactory;
     readonly dockerContainerId?: string;

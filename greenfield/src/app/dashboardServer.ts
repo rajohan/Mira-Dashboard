@@ -11,10 +11,20 @@ import {
 import { serviceActionIds } from "../contracts/serviceActions.ts";
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
+import { createBackupActivityRepository } from "../server/domains/backups/activityRepository.ts";
+import { createSqliteBackupOperationAuditWriter } from "../server/domains/backups/operationAudit.ts";
+import { createBackupOperationQueue } from "../server/domains/backups/operationQueue.ts";
+import { createBackupService } from "../server/domains/backups/service.ts";
+import { createBackupSnapshotRepository } from "../server/domains/backups/snapshotRepository.ts";
 import {
     readCacheHeartbeatDashboardJobs,
     readCacheHeartbeatTasksWithCronRefresh,
 } from "../server/domains/cache/heartbeatProjection.ts";
+import {
+    cacheHeartbeatBackupSignalFromStatus,
+    createCacheHeartbeatOperationalSignalsReader,
+    createCacheHeartbeatOverviewSignalReaders,
+} from "../server/domains/cache/operationalSignals.ts";
 import { createCacheRepository } from "../server/domains/cache/repository.ts";
 import { createCacheService } from "../server/domains/cache/service.ts";
 import { createChatRepository } from "../server/domains/chat/repository.ts";
@@ -144,6 +154,7 @@ import {
     createSqliteServiceActionAuditWriter,
 } from "../server/domains/serviceActions/service.ts";
 import { createSqliteServiceActionStatusReader } from "../server/domains/serviceActions/statusReader.ts";
+import { createSystemApplicationMetricsReader } from "../server/domains/system/applicationMetricsCollector.ts";
 import { createSystemHealthDiagnosticsService } from "../server/domains/system/healthDiagnosticsService.ts";
 import { createTaskRepository } from "../server/domains/tasks/repository.ts";
 import { createTaskService } from "../server/domains/tasks/service.ts";
@@ -239,6 +250,7 @@ export interface DashboardServerOptions extends Omit<
     | "automationSecurityLifecycle"
     | "browserOrigin"
     | "cacheService"
+    | "backupService"
     | "chatRawHttpHandler"
     | "chatService"
     | "databaseObservabilityService"
@@ -695,6 +707,33 @@ export async function createDashboardServer(
         const database = await databaseRuntime.orm();
         const cacheRepository = createCacheRepository(database, databaseRuntime);
         const jobRepository = createJobRepository(database, databaseRuntime);
+        const backupActivityRepository = createBackupActivityRepository(
+            database,
+            jobRepository
+        );
+        const backupService = createBackupService({
+            activityRepository: backupActivityRepository,
+            auditWriter: createSqliteBackupOperationAuditWriter({
+                ...(options.now === undefined ? {} : { clock: options.now }),
+                database,
+                writeAdmission: databaseRuntime,
+            }),
+            ...(options.now === undefined
+                ? {}
+                : { nowMs: () => options.now!().getTime() }),
+            operationQueue: createBackupOperationQueue({
+                ...(options.now === undefined
+                    ? {}
+                    : { nowMs: () => options.now!().getTime() }),
+                repository: jobRepository,
+                ...(options.verifiedReleaseId === undefined
+                    ? {}
+                    : { requiredWorkerReleaseId: options.verifiedReleaseId }),
+                wakeEventPump: () =>
+                    options.applicationRuntime.services.realtimeEvents.wake(),
+            }),
+            snapshotRepository: createBackupSnapshotRepository(cacheRepository),
+        });
         const scheduleActionDefinitions =
             options.jobActionDefinitions ?? jobActionDefinitions;
         const observabilityNow = options.now;
@@ -1218,6 +1257,20 @@ export async function createDashboardServer(
                       domainNow === undefined ? Date.now : () => domainNow().getTime(),
                       wakeEventPump
                   );
+        options.applicationRuntime.services.systemMetrics.configureApplicationReader?.(
+            createSystemApplicationMetricsReader({
+                cacheRepository,
+                ...(chatRepository === undefined ? {} : { chatReader: chatRepository }),
+                databaseDiagnostics: databaseRuntime.diagnostics,
+                gatewayConnectionService,
+                jobReader: jobRepository,
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                realtimeMetrics: () =>
+                    options.applicationRuntime.services.realtimeEvents.metrics(),
+            })
+        );
         const chatTranscriptLifecycle =
             chatRepository === undefined
                 ? undefined
@@ -1527,6 +1580,23 @@ export async function createDashboardServer(
                     openClawCronService.readHeartbeatJobProjection
                 ),
             readOpenClawCronProjection: openClawCronService.readHeartbeatProjection,
+            readOperationalSignals: createCacheHeartbeatOperationalSignalsReader({
+                ...createCacheHeartbeatOverviewSignalReaders(
+                    cacheRepository,
+                    domainNow === undefined ? Date.now : () => domainNow().getTime()
+                ),
+                databaseService: databaseObservabilityService,
+                readKopiaBackup: () =>
+                    cacheHeartbeatBackupSignalFromStatus(backupService.getKopiaStatus()),
+                readWalgBackup: () =>
+                    cacheHeartbeatBackupSignalFromStatus(backupService.getWalgStatus()),
+                ...(dockerService === undefined ? {} : { dockerService }),
+                ...(logsService === undefined ? {} : { logsService }),
+                ...(domainNow === undefined
+                    ? {}
+                    : { nowMs: () => domainNow().getTime() }),
+                systemMetricsService: options.applicationRuntime.services.systemMetrics,
+            }),
             wakeEventPump,
         });
         const openClawCronExpiryReconciler = createOpenClawCronExpiryReconciler({
@@ -1560,6 +1630,7 @@ export async function createDashboardServer(
         });
         const serverOptions: ServerOptions = {
             agentService,
+            backupService,
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: (credential) =>
                 authenticator.authenticate(credential),

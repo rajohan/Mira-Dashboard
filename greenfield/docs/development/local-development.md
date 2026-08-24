@@ -139,6 +139,30 @@ bun run dev:state:prepare
 
 Both reset paths validate the exact owner marker and refuse symlinked or ambiguous targets.
 
+## Production-Shaped Development Authority
+
+Ordinary source development advertises the same routes, procedures, cache providers, Service
+Actions, durable Job actions, and schedules as production. A single development runtime adapter
+replaces provider authority behind those unchanged contracts:
+
+- SQLite and PostgreSQL, Docker, Delivery, Kopia/WAL-G, Git, quota, and weather receive bounded,
+  representative, Valibot-validated snapshots so their production pages and controls can be
+  exercised before cutover;
+- mutations still pass through the normal recent-auth admission, durable Jobs, cache refresh, and
+  UI result paths, but the worker records only explicitly marked development receipts beneath the
+  isolated state root;
+- stale source revisions and deterministic unknown outcomes exercise the same conflict and
+  reconciliation surfaces without dispatching to Docker, systemd, GitHub, PostgreSQL, backup
+  providers, production Git, or production paths;
+- the development Docker socket is the existing fixed broker protocol backed only by the adapter's
+  in-memory inventory and simulated operations. It never opens the host Docker daemon;
+- live Gateway, Moltbook, and host observations remain read-only. Their write-capable actions use
+  the same marked simulator boundary.
+
+Managed PR previews do not receive this adapter. Both preview processes retain the single
+`system.worker-smoke` action and their existing capability sandbox, so representative local data
+cannot widen untrusted PR authority.
+
 ## Trust Boundaries
 
 - All listeners bind to loopback; only the explicit Tailscale Serve route publishes the browser.

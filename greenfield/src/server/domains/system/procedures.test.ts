@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import { TRPCError } from "@trpc/server";
 
-import type {
-    SystemHealthDiagnostics,
-    SystemMetrics,
+import {
+    systemHttpMetricOverflowProcedure,
+    systemHttpMetricProcedureNames,
+    type SystemHealthDiagnostics,
+    type SystemMetrics,
 } from "../../../contracts/system.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
@@ -21,6 +23,29 @@ import {
 } from "./systemMetricsService.ts";
 
 const metrics = Object.freeze({
+    application: {
+        cache: { state: "unavailable" },
+        chat: { state: "unavailable" },
+        gateway: { state: "unavailable" },
+        http: {
+            procedures: [
+                ...systemHttpMetricProcedureNames,
+                systemHttpMetricOverflowProcedure,
+            ].map((procedure) => ({
+                errorCount: 0,
+                maximumDurationMs: 0,
+                procedure,
+                requestCount: 0,
+                totalDurationMs: 0,
+            })),
+            state: "observed",
+        },
+        jobs: { state: "unavailable" },
+        operations: { state: "unavailable" },
+        realtime: { state: "unavailable" },
+        sqlite: { state: "unavailable" },
+        web: { state: "unavailable" },
+    },
     cpu: {
         loadAverage: [2, 1, 0.5],
         loadPercent: 50,
@@ -68,6 +93,8 @@ const healthDiagnostics = Object.freeze({
 async function caller(
     authentication = createTestSessionAuthentication([]),
     systemMetrics: SystemMetricsRuntimeService = Object.freeze({
+        configureApplicationReader: () => {},
+        recordHttpRequest: () => {},
         read: () => Promise.resolve(metrics),
     }),
     systemHealthDiagnosticsService: SystemHealthDiagnosticsService = Object.freeze({
