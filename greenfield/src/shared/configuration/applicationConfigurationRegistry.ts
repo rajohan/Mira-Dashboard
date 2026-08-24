@@ -6,6 +6,7 @@ export type ConfigurationBrowserExposure = "none" | "presence-only" | "value";
 
 /** Shared parser/documentation limits for immutable application configuration. */
 export const applicationConfigurationLimits = Object.freeze({
+    elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
     port: Object.freeze({ maximum: 65_535, minimum: 1 }),
@@ -26,6 +27,7 @@ export const applicationConfigurationLimits = Object.freeze({
 
 /** Stable field names used by typed server configuration. */
 export type ApplicationConfigurationField =
+    | "elevenLabsApiKey"
     | "gatewayToken"
     | "gatewayUrl"
     | "logLevel"
@@ -48,6 +50,7 @@ export const applicationConfigurationEnvironmentNames = [
     "PORT",
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
+    "ELEVENLABS_API_KEY",
     "OPENCLAW_GATEWAY_TOKEN",
     "OPENCLAW_GATEWAY_URL",
     "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
@@ -76,6 +79,7 @@ export interface ApplicationConfigurationMetadata {
         readonly test: boolean;
     };
     readonly restartRequired: boolean;
+    readonly required: boolean;
     readonly roles: readonly ApplicationProcessRole[];
     readonly secret: boolean;
     readonly validationConstraints: string;
@@ -98,11 +102,17 @@ export interface ApplicationConfigurationMetadata {
 const allRoleOverrides = Object.freeze({ development: true, test: true });
 
 function metadata(
-    value: Omit<ApplicationConfigurationMetadata, "overridePolicy">
+    value: Omit<ApplicationConfigurationMetadata, "overridePolicy" | "required"> & {
+        readonly required?: boolean;
+    }
 ): ApplicationConfigurationMetadata {
     if (value.allowedValues !== null) Object.freeze(value.allowedValues);
     Object.freeze(value.roles);
-    return Object.freeze({ ...value, overridePolicy: allRoleOverrides });
+    return Object.freeze({
+        ...value,
+        overridePolicy: allRoleOverrides,
+        required: value.required ?? value.defaultValue === null,
+    });
 }
 
 /**
@@ -187,6 +197,23 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             secret: false,
             validationConstraints: `Zero to ${applicationConfigurationLimits.trustedProxyAddresses.maximumItems} unique canonical IP addresses, comma-separated, at most ${applicationConfigurationLimits.trustedProxyAddresses.maximumLength} code units.`,
             valueType: "ip-address-list",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional server-only ElevenLabs credential for ephemeral Chat transcription and speech generation.",
+            environmentName: "ELEVENLABS_API_KEY",
+            field: "elevenLabsApiKey",
+            operationalEffect:
+                "Enables capability-scoped Chat speech endpoints; when absent both controls remain unavailable.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["web"]),
+            secret: true,
+            validationConstraints: `When present, a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.elevenLabsApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
         }),
         metadata({
             allowedValues: null,

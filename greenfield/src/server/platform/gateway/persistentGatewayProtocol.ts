@@ -1,5 +1,6 @@
 import * as v from "valibot";
 
+import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import { openClawGatewayProtocolVersion } from "./gatewayCredentialProtocol.ts";
 
 /** Installed OpenClaw's hard application-frame ceiling after authentication. */
@@ -10,11 +11,16 @@ export const persistentGatewayBufferedAmountPolicyMaximumBytes = 50 * 1024 * 102
 export const persistentGatewayBufferedAmountMaximumBytes = 4 * 1024 * 1024;
 /** Dashboard's tighter bound for the challenge that precedes credential disclosure. */
 export const persistentGatewayChallengeFrameMaximumBytes = 4 * 1024;
-/** Conservative default for Dashboard-originated request frames, including attachments. */
+/** Conservative default for non-chat Dashboard-originated request frames. */
 export const persistentGatewayOutboundFrameMaximumBytes = 1024 * 1024;
+/** Audited ceiling for a chat.send JSON frame containing base64 attachment content. */
+export const persistentGatewayChatOutboundFrameMaximumBytes = 24 * 1024 * 1024;
 
 export const persistentGatewayWebReadScopes = Object.freeze(["operator.read"] as const);
 export const persistentGatewayTaskNotificationScopes = Object.freeze([
+    "operator.write",
+] as const);
+export const persistentGatewayChatWriteScopes = Object.freeze([
     "operator.write",
 ] as const);
 export const persistentGatewayAdminScopes = Object.freeze(["operator.admin"] as const);
@@ -23,6 +29,8 @@ export const persistentGatewaySessionScopedEventsCapability =
 
 export type PersistentGatewayConnectionProfile =
     | "admin"
+    | "chat-read-mutation"
+    | "chat-write"
     | "task-notification-worker"
     | "web-read";
 
@@ -30,12 +38,52 @@ export type PersistentGatewayConnectionProfile =
 export const persistentGatewayEventNames = Object.freeze([
     "cron",
     "sessions.changed",
+    "task",
 ] as const);
 
 export type PersistentGatewayEventName = (typeof persistentGatewayEventNames)[number];
 
 /** chat.send stays behind the task-notification port rather than the generic RPC port. */
 export const persistentGatewayTaskNotificationMethod = "chat.send" as const;
+
+/** Exact chat reads retained on the persistent operator.read connection. */
+export const persistentGatewayChatReadMethods = Object.freeze([
+    "chat.history",
+    "chat.message.get",
+    "models.list",
+    "sessions.companion.state",
+] as const);
+
+/** Non-idempotent chat operation whose installed Gateway scope is operator.read. */
+export const persistentGatewayChatReadMutationMethods = Object.freeze([
+    "sessions.companion.ask",
+] as const);
+
+/** Exact chat mutations allowed on fresh, single-use operator.write sockets. */
+export const persistentGatewayChatWriteMethods = Object.freeze([
+    "chat.abort",
+    "chat.send",
+    "sessions.companion.reset",
+] as const);
+
+export type PersistentGatewayChatReadMethod =
+    (typeof persistentGatewayChatReadMethods)[number];
+export type PersistentGatewayChatReadMutationMethod =
+    (typeof persistentGatewayChatReadMutationMethods)[number];
+export type PersistentGatewayChatWriteMethod =
+    (typeof persistentGatewayChatWriteMethods)[number];
+
+/** Strict OpenClaw task reads retained on the persistent operator.read lane. */
+export const persistentGatewayTaskReadMethods = Object.freeze([
+    "tasks.get",
+    "tasks.list",
+] as const);
+/** Strict task cancellation runs on a fresh one-shot operator.write lane. */
+export const persistentGatewayTaskWriteMethods = Object.freeze(["tasks.cancel"] as const);
+export type PersistentGatewayTaskReadMethod =
+    (typeof persistentGatewayTaskReadMethods)[number];
+export type PersistentGatewayTaskWriteMethod =
+    (typeof persistentGatewayTaskWriteMethods)[number];
 
 /** Installed protocol-v4 top-level request error discriminants. */
 export const persistentGatewayErrorCodes = Object.freeze([
@@ -72,6 +120,7 @@ export const persistentGatewayAdminMethods = Object.freeze([
     "cron.update",
     "sessions.compact",
     "sessions.delete",
+    "sessions.patch",
     "sessions.reset",
 ] as const);
 
@@ -83,6 +132,13 @@ export type PersistentGatewayAdminMethod = (typeof persistentGatewayAdminMethods
 
 const webReadMethodSet = new Set<string>(persistentGatewayWebReadMethods);
 const adminMethodSet = new Set<string>(persistentGatewayAdminMethods);
+const chatReadMethodSet = new Set<string>(persistentGatewayChatReadMethods);
+const chatReadMutationMethodSet = new Set<string>(
+    persistentGatewayChatReadMutationMethods
+);
+const chatWriteMethodSet = new Set<string>(persistentGatewayChatWriteMethods);
+const taskReadMethodSet = new Set<string>(persistentGatewayTaskReadMethods);
+const taskWriteMethodSet = new Set<string>(persistentGatewayTaskWriteMethods);
 const eventNameSet = new Set<string>(persistentGatewayEventNames);
 
 const boundedIdentifierSchema = v.pipe(
@@ -201,6 +257,363 @@ const gatewaySessionsSubscriptionAcknowledgementSchema = v.strictObject({
     subscribed: v.literal(true),
 });
 
+const chatSessionKeySchema = v.pipe(
+    v.string("Gateway chat session key is invalid"),
+    v.minLength(1, "Gateway chat session key is invalid"),
+    v.maxLength(512, "Gateway chat session key is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat session key is invalid")
+);
+const chatAgentIdSchema = v.pipe(
+    v.string("Gateway chat agent id is invalid"),
+    v.minLength(1, "Gateway chat agent id is invalid"),
+    v.maxLength(512, "Gateway chat agent id is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat agent id is invalid")
+);
+const chatRunIdSchema = v.pipe(
+    v.string("Gateway chat run id is invalid"),
+    v.minLength(1, "Gateway chat run id is invalid"),
+    v.maxLength(256, "Gateway chat run id is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat run id is invalid")
+);
+const chatMessageIdSchema = v.pipe(
+    v.string("Gateway chat message id is invalid"),
+    v.minLength(1, "Gateway chat message id is invalid"),
+    v.maxLength(256, "Gateway chat message id is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat message id is invalid")
+);
+const chatIdempotencyKeySchema = v.pipe(
+    v.string("Gateway chat idempotency key is invalid"),
+    v.minLength(16, "Gateway chat idempotency key is invalid"),
+    v.maxLength(128, "Gateway chat idempotency key is invalid"),
+    v.regex(/^[A-Za-z0-9_-]+$/u, "Gateway chat idempotency key is invalid")
+);
+const chatModelSchema = v.pipe(
+    v.string("Gateway chat model is invalid"),
+    v.maxLength(256, "Gateway chat model is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat model is invalid")
+);
+const chatThinkingLevelSchema = v.pipe(
+    v.string("Gateway chat thinking level is invalid"),
+    v.maxLength(128, "Gateway chat thinking level is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat thinking level is invalid")
+);
+const chatDeltaTextSchema = v.pipe(
+    v.string("Gateway chat event text is invalid"),
+    v.maxLength(64 * 1024, "Gateway chat event text is invalid"),
+    v.check((text) => !text.includes("\0"), "Gateway chat event text is invalid")
+);
+const chatStopReasonSchema = v.pipe(
+    v.string("Gateway chat stop reason is invalid"),
+    v.maxLength(128, "Gateway chat stop reason is invalid"),
+    v.check(hasNoControlCharacter, "Gateway chat stop reason is invalid")
+);
+const gatewaySessionLifecycleEventBaseSchemas = {
+    sessionId: v.optional(chatRunIdSchema),
+    sessionKey: v.optional(chatSessionKeySchema),
+    ts: nonnegativeSafeIntegerSchema,
+    updatedAt: v.optional(nonnegativeSafeIntegerSchema),
+};
+const gatewaySessionLifecycleEventSchema = v.variant("reason", [
+    v.object({
+        ...gatewaySessionLifecycleEventBaseSchemas,
+        compacted: v.boolean("Gateway session lifecycle compaction state is invalid"),
+        reason: v.literal("compact"),
+    }),
+    v.object({
+        ...gatewaySessionLifecycleEventBaseSchemas,
+        reason: v.literal("delete"),
+    }),
+    v.object({
+        ...gatewaySessionLifecycleEventBaseSchemas,
+        reason: v.literal("new"),
+    }),
+    v.object({
+        ...gatewaySessionLifecycleEventBaseSchemas,
+        reason: v.literal("reset"),
+    }),
+]);
+const gatewayChatEventBaseSchemas = {
+    agentId: v.optional(chatAgentIdSchema),
+    runId: chatRunIdSchema,
+    seq: positiveSafeIntegerSchema,
+    sessionKey: chatSessionKeySchema,
+};
+const gatewayChatEventSchema = v.variant("state", [
+    v.object({
+        ...gatewayChatEventBaseSchemas,
+        phase: v.picklist([
+            "preparing_workspace",
+            "provisioning_environment",
+            "preparing_context",
+            "starting_model",
+        ]),
+        state: v.literal("status"),
+    }),
+    v.object({
+        ...gatewayChatEventBaseSchemas,
+        deltaText: chatDeltaTextSchema,
+        replace: v.optional(v.boolean()),
+        state: v.literal("delta"),
+    }),
+    v.object({
+        ...gatewayChatEventBaseSchemas,
+        state: v.literal("final"),
+        stopReason: v.optional(chatStopReasonSchema),
+    }),
+    v.object({
+        ...gatewayChatEventBaseSchemas,
+        state: v.literal("aborted"),
+        stopReason: v.optional(chatStopReasonSchema),
+    }),
+    v.object({
+        ...gatewayChatEventBaseSchemas,
+        errorKind: v.optional(
+            v.picklist(["refusal", "timeout", "rate_limit", "context_length", "unknown"])
+        ),
+        state: v.literal("error"),
+        stopReason: v.optional(chatStopReasonSchema),
+    }),
+]);
+/** Maximum encoded size of the allowlisted agent-stream data projection. */
+export const persistentGatewayAgentEventDataMaximumBytes = 128 * 1024;
+const gatewayAgentEventDataSchema = v.pipe(
+    v.object({
+        args: v.optional(v.unknown()),
+        callId: v.optional(v.unknown()),
+        delta: v.optional(v.unknown()),
+        input: v.optional(v.unknown()),
+        isError: v.optional(v.unknown()),
+        item: v.optional(v.unknown()),
+        itemId: v.optional(v.unknown()),
+        kind: v.optional(v.unknown()),
+        name: v.optional(v.unknown()),
+        output: v.optional(v.unknown()),
+        partialResult: v.optional(v.unknown()),
+        payload: v.optional(v.unknown()),
+        phase: v.optional(v.unknown()),
+        replace: v.optional(v.unknown()),
+        result: v.optional(v.unknown()),
+        steps: v.optional(v.unknown()),
+        text: v.optional(v.unknown()),
+        tool_call_id: v.optional(v.unknown()),
+        tool_name: v.optional(v.unknown()),
+        toolCallId: v.optional(v.unknown()),
+        toolName: v.optional(v.unknown()),
+        type: v.optional(v.unknown()),
+    }),
+    v.check(
+        (data) =>
+            jsonValueFitsByteBudget(data, persistentGatewayAgentEventDataMaximumBytes),
+        "Gateway agent event data is outside its budget"
+    )
+);
+const gatewayAgentEventSchema = v.object({
+    agentId: v.optional(chatAgentIdSchema),
+    data: gatewayAgentEventDataSchema,
+    runId: chatRunIdSchema,
+    seq: positiveSafeIntegerSchema,
+    sessionKey: chatSessionKeySchema,
+    stream: v.picklist(["assistant", "thinking", "tool", "item", "plan", "run_status"]),
+    ts: nonnegativeSafeIntegerSchema,
+});
+const gatewaySessionMessagesSubscriptionAcknowledgementSchema = v.strictObject({
+    key: chatSessionKeySchema,
+    subscribed: v.boolean(),
+});
+
+const gatewayChatHistoryParamsSchema = v.pipe(
+    v.strictObject({
+        agentId: v.optional(chatAgentIdSchema),
+        limit: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1000))),
+        maxChars: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1024 * 1024))),
+        messageId: v.optional(chatMessageIdSchema),
+        offset: v.optional(nonnegativeSafeIntegerSchema),
+        sessionId: v.optional(chatRunIdSchema),
+        sessionKey: chatSessionKeySchema,
+    }),
+    v.check(
+        ({ messageId, offset, sessionId }) =>
+            !(messageId !== undefined && offset !== undefined) &&
+            !(sessionId !== undefined && messageId === undefined),
+        "Gateway chat history parameters are invalid"
+    )
+);
+const gatewayChatMessageGetParamsSchema = v.strictObject({
+    agentId: v.optional(chatAgentIdSchema),
+    maxChars: v.optional(v.pipe(positiveSafeIntegerSchema, v.maxValue(1024 * 1024))),
+    messageId: chatMessageIdSchema,
+    sessionKey: chatSessionKeySchema,
+});
+const gatewayModelsListParamsSchema = v.strictObject({
+    includeProviderCapabilities: v.literal(true),
+    view: v.literal("configured"),
+});
+const gatewayCompanionStateParamsSchema = v.strictObject({
+    sessionKey: chatSessionKeySchema,
+});
+const gatewayCompanionAskParamsSchema = v.strictObject({
+    question: v.pipe(
+        v.string("Gateway companion question is invalid"),
+        v.trim(),
+        v.minLength(1, "Gateway companion question is invalid"),
+        v.maxLength(400, "Gateway companion question is invalid")
+    ),
+    sessionKey: chatSessionKeySchema,
+});
+
+const gatewayChatAttachmentSchema = v.strictObject({
+    content: v.pipe(
+        v.string("Gateway chat attachment content is invalid"),
+        v.maxLength(
+            Math.ceil(chatAttachmentLimits.maximumFileBytes / 3) * 4,
+            "Gateway chat attachment content is invalid"
+        ),
+        v.check(isCanonicalBase64, "Gateway chat attachment content is invalid")
+    ),
+    fileName: v.pipe(
+        v.string("Gateway chat attachment file name is invalid"),
+        v.minLength(1, "Gateway chat attachment file name is invalid"),
+        v.maxLength(255, "Gateway chat attachment file name is invalid"),
+        v.check(hasNoControlCharacter, "Gateway chat attachment file name is invalid")
+    ),
+    mimeType: v.pipe(
+        v.string("Gateway chat attachment MIME type is invalid"),
+        v.maxLength(127, "Gateway chat attachment MIME type is invalid"),
+        v.regex(
+            /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/u,
+            "Gateway chat attachment MIME type is invalid"
+        )
+    ),
+    sizeBytes: v.pipe(
+        positiveSafeIntegerSchema,
+        v.maxValue(chatAttachmentLimits.maximumFileBytes)
+    ),
+    type: v.literal("file"),
+});
+const maximumSerializedGatewayRequestId = "\uD800".repeat(128);
+const gatewayChatSendParamsObjectSchema = v.strictObject({
+    attachments: v.optional(
+        v.pipe(v.array(gatewayChatAttachmentSchema), v.maxLength(10))
+    ),
+    fastMode: v.optional(v.union([v.boolean(), v.literal("auto")])),
+    idempotencyKey: chatIdempotencyKeySchema,
+    message: v.pipe(
+        v.string("Gateway chat message is invalid"),
+        v.maxLength(256 * 1024, "Gateway chat message is invalid")
+    ),
+    queueMode: v.optional(v.picklist(["collect", "followup", "interrupt", "steer"])),
+    sessionKey: chatSessionKeySchema,
+    thinking: v.optional(chatThinkingLevelSchema),
+});
+
+function gatewayChatSendFitsOutboundFrame(
+    parameters: v.InferOutput<typeof gatewayChatSendParamsObjectSchema>
+): boolean {
+    try {
+        return (
+            Buffer.byteLength(
+                JSON.stringify({
+                    id: maximumSerializedGatewayRequestId,
+                    method: "chat.send",
+                    params: parameters,
+                    type: "req",
+                }),
+                "utf8"
+            ) <= persistentGatewayChatOutboundFrameMaximumBytes
+        );
+    } catch {
+        return false;
+    }
+}
+
+const gatewayChatSendParamsSchema = v.pipe(
+    gatewayChatSendParamsObjectSchema,
+    v.check(
+        ({ attachments }) =>
+            (attachments ?? []).every(
+                (attachment) =>
+                    decodedBase64Bytes(attachment.content) <=
+                        chatAttachmentLimits.maximumFileBytes &&
+                    decodedBase64Bytes(attachment.content) === attachment.sizeBytes
+            ) &&
+            (attachments ?? []).reduce(
+                (bytes, attachment) => bytes + decodedBase64Bytes(attachment.content),
+                0
+            ) <= chatAttachmentLimits.maximumAggregateRawBytes,
+        "Gateway chat attachments exceed their aggregate raw-byte budget"
+    ),
+    v.check(
+        gatewayChatSendFitsOutboundFrame,
+        "Gateway chat send exceeds its serialized frame budget"
+    )
+);
+const gatewayChatAbortParamsSchema = v.strictObject({
+    preserveSideRuns: v.literal(false),
+    runId: v.optional(chatRunIdSchema),
+    sessionKey: chatSessionKeySchema,
+});
+const gatewayCompanionResetParamsSchema = gatewayCompanionStateParamsSchema;
+const gatewayChatSessionPatchParamsSchema = v.strictObject({
+    expectedSessionId: v.optional(chatRunIdSchema),
+    fastMode: v.optional(v.nullable(v.union([v.boolean(), v.literal("auto")]))),
+    key: chatSessionKeySchema,
+    model: v.optional(v.nullable(chatModelSchema)),
+    thinkingLevel: v.optional(v.nullable(chatThinkingLevelSchema)),
+});
+
+const gatewayTaskStatusSchema = v.picklist([
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "timed_out",
+]);
+const gatewayTaskIdSchema = v.pipe(
+    v.string("Gateway task id is invalid"),
+    v.minLength(1, "Gateway task id is invalid"),
+    v.maxLength(256, "Gateway task id is invalid"),
+    v.check(hasNoControlCharacter, "Gateway task id is invalid")
+);
+const gatewayTaskListParamsSchema = v.strictObject({
+    agentId: v.optional(chatAgentIdSchema),
+    cursor: v.optional(
+        v.pipe(
+            v.string("Gateway task cursor is invalid"),
+            v.regex(/^(?:0|[1-9][0-9]*)$/u, "Gateway task cursor is invalid"),
+            v.check(
+                (cursor) => Number.isSafeInteger(Number(cursor)),
+                "Gateway task cursor is invalid"
+            )
+        )
+    ),
+    limit: v.pipe(positiveSafeIntegerSchema, v.maxValue(200)),
+    sessionKey: v.optional(chatSessionKeySchema),
+    status: v.optional(
+        v.pipe(
+            v.array(gatewayTaskStatusSchema),
+            v.minLength(1),
+            v.maxLength(6),
+            v.check((statuses) => new Set(statuses).size === statuses.length)
+        )
+    ),
+});
+const gatewayTaskGetParamsSchema = v.strictObject({ taskId: gatewayTaskIdSchema });
+const gatewayTaskCancelParamsSchema = v.strictObject({
+    reason: v.optional(
+        v.pipe(
+            v.string("Gateway task cancellation reason is invalid"),
+            v.minLength(1, "Gateway task cancellation reason is invalid"),
+            v.maxLength(500, "Gateway task cancellation reason is invalid"),
+            v.check(
+                (reason) => !reason.includes("\0"),
+                "Gateway task cancellation reason is invalid"
+            )
+        )
+    ),
+    taskId: gatewayTaskIdSchema,
+});
+
 export interface PersistentGatewayResponseFrame {
     readonly error?: {
         readonly code: PersistentGatewayErrorCode;
@@ -217,8 +630,19 @@ export interface PersistentGatewayResponseFrame {
 
 export interface PersistentGatewayEventFrame {
     readonly event: PersistentGatewayEventName;
+    readonly sessionLifecycle?: PersistentGatewaySessionLifecycleEvent;
     readonly seq?: number;
     readonly type: "event";
+}
+
+/** Sanitized session transcript-generation boundary projected from sessions.changed. */
+export interface PersistentGatewaySessionLifecycleEvent {
+    readonly compacted?: boolean;
+    readonly occurredAtMs: number;
+    readonly reason: "compact" | "delete" | "new" | "reset";
+    readonly sessionId?: string;
+    readonly sessionKey?: string;
+    readonly updatedAtMs?: number;
 }
 
 /** Payload-free projection used to consume every valid authenticated event safely. */
@@ -227,6 +651,74 @@ export interface PersistentGatewayEventEnvelope {
     readonly seq?: number;
     readonly type: "event";
 }
+
+export type PersistentGatewayChatEvent =
+    | Readonly<{
+          readonly agentId?: string;
+          readonly phase:
+              | "preparing_workspace"
+              | "provisioning_environment"
+              | "preparing_context"
+              | "starting_model";
+          readonly runId: string;
+          readonly seq: number;
+          readonly sessionKey: string;
+          readonly state: "status";
+      }>
+    | Readonly<{
+          readonly agentId?: string;
+          readonly deltaText: string;
+          readonly replace?: boolean;
+          readonly runId: string;
+          readonly seq: number;
+          readonly sessionKey: string;
+          readonly state: "delta";
+      }>
+    | Readonly<{
+          readonly agentId?: string;
+          readonly runId: string;
+          readonly seq: number;
+          readonly sessionKey: string;
+          readonly state: "final";
+          readonly stopReason?: string;
+      }>
+    | Readonly<{
+          readonly agentId?: string;
+          readonly runId: string;
+          readonly seq: number;
+          readonly sessionKey: string;
+          readonly state: "aborted";
+          readonly stopReason?: string;
+      }>
+    | Readonly<{
+          readonly agentId?: string;
+          readonly errorKind?:
+              | "refusal"
+              | "timeout"
+              | "rate_limit"
+              | "context_length"
+              | "unknown";
+          readonly errorMessage?: string;
+          readonly runId: string;
+          readonly seq: number;
+          readonly sessionKey: string;
+          readonly state: "error";
+          readonly stopReason?: string;
+      }>;
+
+export interface PersistentGatewayAgentEvent {
+    readonly agentId?: string;
+    readonly data: Readonly<Record<string, unknown>>;
+    readonly runId: string;
+    readonly seq: number;
+    readonly sessionKey: string;
+    readonly stream: "assistant" | "thinking" | "tool" | "item" | "plan" | "run_status";
+    readonly ts: number;
+}
+
+export type PersistentGatewayPrivateChatEvent =
+    | Readonly<{ event: "agent"; payload: PersistentGatewayAgentEvent }>
+    | Readonly<{ event: "chat"; payload: PersistentGatewayChatEvent }>;
 
 export interface PersistentGatewayHello {
     readonly auth: { readonly role: "operator"; readonly scopes: readonly string[] };
@@ -265,15 +757,77 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function jsonValueFitsByteBudget(value: unknown, maximumBytes: number): boolean {
+    try {
+        const encoded = JSON.stringify(value);
+        return (
+            typeof encoded === "string" &&
+            Buffer.byteLength(encoded, "utf8") <= maximumBytes
+        );
+    } catch {
+        return false;
+    }
+}
+
+function hasNoControlCharacter(value: string): boolean {
+    for (const character of value) {
+        const codePoint = character.codePointAt(0);
+        if (codePoint !== undefined && (codePoint <= 31 || codePoint === 127)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function canonicalBase64Padding(value: string): number {
+    if (value.endsWith("==")) return 2;
+    return value.endsWith("=") ? 1 : 0;
+}
+
+function isCanonicalBase64(value: string): boolean {
+    if (value.length === 0 || value.length % 4 !== 0) return false;
+    const padding = canonicalBase64Padding(value);
+    const contentLength = value.length - padding;
+    if (contentLength % 4 === 1) return false;
+    for (let index = 0; index < contentLength; index += 1) {
+        const code = value.codePointAt(index);
+        if (
+            code === undefined ||
+            !(
+                (code >= 65 && code <= 90) ||
+                (code >= 97 && code <= 122) ||
+                (code >= 48 && code <= 57) ||
+                code === 43 ||
+                code === 47
+            )
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function decodedBase64Bytes(value: string): number {
+    if (!isCanonicalBase64(value)) return Number.POSITIVE_INFINITY;
+    const padding = canonicalBase64Padding(value);
+    return (value.length / 4) * 3 - padding;
+}
+
 function scopesForProfile(
     profile: PersistentGatewayConnectionProfile
 ):
     | typeof persistentGatewayAdminScopes
-    | typeof persistentGatewayTaskNotificationScopes
+    | typeof persistentGatewayChatWriteScopes
     | typeof persistentGatewayWebReadScopes {
     switch (profile) {
         case "admin": {
             return persistentGatewayAdminScopes;
+        }
+        case "chat-read-mutation": {
+            return persistentGatewayWebReadScopes;
+        }
+        case "chat-write": {
+            return persistentGatewayChatWriteScopes;
         }
         case "task-notification-worker": {
             return persistentGatewayTaskNotificationScopes;
@@ -288,6 +842,12 @@ function displayNameForProfile(profile: PersistentGatewayConnectionProfile): str
     switch (profile) {
         case "admin": {
             return "Mira Dashboard bounded admin request";
+        }
+        case "chat-read-mutation": {
+            return "Mira Dashboard bounded chat read-scope mutation";
+        }
+        case "chat-write": {
+            return "Mira Dashboard bounded chat write";
         }
         case "task-notification-worker": {
             return "Mira Dashboard task notification worker";
@@ -326,6 +886,36 @@ export function isPersistentGatewayAdminMethod(
     return adminMethodSet.has(method);
 }
 
+export function isPersistentGatewayChatReadMethod(
+    method: string
+): method is PersistentGatewayChatReadMethod {
+    return chatReadMethodSet.has(method);
+}
+
+export function isPersistentGatewayChatReadMutationMethod(
+    method: string
+): method is PersistentGatewayChatReadMutationMethod {
+    return chatReadMutationMethodSet.has(method);
+}
+
+export function isPersistentGatewayChatWriteMethod(
+    method: string
+): method is PersistentGatewayChatWriteMethod {
+    return chatWriteMethodSet.has(method);
+}
+
+export function isPersistentGatewayTaskReadMethod(
+    method: string
+): method is PersistentGatewayTaskReadMethod {
+    return taskReadMethodSet.has(method);
+}
+
+export function isPersistentGatewayTaskWriteMethod(
+    method: string
+): method is PersistentGatewayTaskWriteMethod {
+    return taskWriteMethodSet.has(method);
+}
+
 /**
  * Enforces the installed Gateway's dynamic least-privilege rules before a
  * request reaches the long-lived read/write socket.
@@ -341,11 +931,99 @@ export function assertPersistentGatewayReadWriteParameters(
 
 /** Admin parameters remain method-bound and must at least be one JSON object. */
 export function assertPersistentGatewayAdminParameters(
-    _method: PersistentGatewayAdminMethod,
+    method: PersistentGatewayAdminMethod,
     parameters: unknown
 ): asserts parameters is Readonly<Record<string, unknown>> {
     if (!isRecord(parameters)) {
         throw new TypeError("Persistent Gateway request parameters are invalid");
+    }
+    if (method === "sessions.patch") {
+        const parsed = v.safeParse(gatewayChatSessionPatchParamsSchema, parameters);
+        if (!parsed.success) {
+            throw new TypeError("Persistent Gateway request parameters are invalid");
+        }
+    }
+}
+
+export function assertPersistentGatewayChatReadParameters(
+    method: PersistentGatewayChatReadMethod,
+    parameters: unknown
+): asserts parameters is Readonly<Record<string, unknown>> {
+    const valid = (() => {
+        switch (method) {
+            case "chat.history": {
+                return v.safeParse(gatewayChatHistoryParamsSchema, parameters).success;
+            }
+            case "chat.message.get": {
+                return v.safeParse(gatewayChatMessageGetParamsSchema, parameters).success;
+            }
+            case "models.list": {
+                return v.safeParse(gatewayModelsListParamsSchema, parameters).success;
+            }
+            case "sessions.companion.state": {
+                return v.safeParse(gatewayCompanionStateParamsSchema, parameters).success;
+            }
+        }
+    })();
+    if (!valid) {
+        throw new TypeError("Persistent Gateway chat read parameters are invalid");
+    }
+}
+
+export function assertPersistentGatewayChatReadMutationParameters(
+    _method: PersistentGatewayChatReadMutationMethod,
+    parameters: unknown
+): asserts parameters is Readonly<Record<string, unknown>> {
+    if (!v.safeParse(gatewayCompanionAskParamsSchema, parameters).success) {
+        throw new TypeError(
+            "Persistent Gateway chat read-scope mutation parameters are invalid"
+        );
+    }
+}
+
+export function assertPersistentGatewayChatWriteParameters(
+    method: PersistentGatewayChatWriteMethod,
+    parameters: unknown
+): asserts parameters is Readonly<Record<string, unknown>> {
+    let valid: boolean;
+    switch (method) {
+        case "chat.send": {
+            valid = v.safeParse(gatewayChatSendParamsSchema, parameters).success;
+            break;
+        }
+        case "chat.abort": {
+            valid = v.safeParse(gatewayChatAbortParamsSchema, parameters).success;
+            break;
+        }
+        case "sessions.companion.reset": {
+            valid = v.safeParse(gatewayCompanionResetParamsSchema, parameters).success;
+            break;
+        }
+    }
+    if (!valid) {
+        throw new TypeError("Persistent Gateway chat write parameters are invalid");
+    }
+}
+
+export function assertPersistentGatewayTaskReadParameters(
+    method: PersistentGatewayTaskReadMethod,
+    parameters: unknown
+): asserts parameters is Readonly<Record<string, unknown>> {
+    const schema =
+        method === "tasks.list"
+            ? gatewayTaskListParamsSchema
+            : gatewayTaskGetParamsSchema;
+    if (!v.safeParse(schema, parameters).success) {
+        throw new TypeError("Persistent Gateway task read parameters are invalid");
+    }
+}
+
+export function assertPersistentGatewayTaskWriteParameters(
+    _method: PersistentGatewayTaskWriteMethod,
+    parameters: unknown
+): asserts parameters is Readonly<Record<string, unknown>> {
+    if (!v.safeParse(gatewayTaskCancelParamsSchema, parameters).success) {
+        throw new TypeError("Persistent Gateway task write parameters are invalid");
     }
 }
 
@@ -450,13 +1128,41 @@ export function parsePersistentGatewayChatSendAcknowledgement(value: unknown):
     return Object.freeze({ runId: parsed.output.runId, status: parsed.output.status });
 }
 
+function parsePersistentGatewaySessionLifecycleEvent(
+    value: unknown
+): PersistentGatewaySessionLifecycleEvent | undefined {
+    const parsed = v.safeParse(gatewaySessionLifecycleEventSchema, value);
+    if (!parsed.success) return undefined;
+    return Object.freeze({
+        ...(parsed.output.reason === "compact"
+            ? { compacted: parsed.output.compacted }
+            : {}),
+        occurredAtMs: parsed.output.ts,
+        reason: parsed.output.reason,
+        ...(parsed.output.sessionId === undefined
+            ? {}
+            : { sessionId: parsed.output.sessionId }),
+        ...(parsed.output.sessionKey === undefined
+            ? {}
+            : { sessionKey: parsed.output.sessionKey }),
+        ...(parsed.output.updatedAt === undefined
+            ? {}
+            : { updatedAtMs: parsed.output.updatedAt }),
+    });
+}
+
 export function parsePersistentGatewayEvent(
     value: unknown
 ): PersistentGatewayEventFrame | undefined {
     const parsed = v.safeParse(gatewayEventFrameSchema, value);
     if (!parsed.success || !eventNameSet.has(parsed.output.event)) return undefined;
+    const sessionLifecycle =
+        parsed.output.event === "sessions.changed"
+            ? parsePersistentGatewaySessionLifecycleEvent(parsed.output.payload)
+            : undefined;
     return Object.freeze({
         event: parsed.output.event as PersistentGatewayEventName,
+        ...(sessionLifecycle === undefined ? {} : { sessionLifecycle }),
         ...(parsed.output.seq === undefined ? {} : { seq: parsed.output.seq }),
         type: parsed.output.type,
     });
@@ -481,6 +1187,43 @@ export function parsePersistentGatewayEventEnvelope(
 }
 
 /**
+ * Validates and projects the private session-scoped chat event payload. The
+ * generic listener receives only the payload-free envelope and can never call
+ * this parser implicitly.
+ * @param value Untrusted decoded Gateway frame.
+ * @returns A validated private chat payload, or undefined for malformed input.
+ */
+export function parsePersistentGatewayChatEvent(
+    value: unknown
+): PersistentGatewayChatEvent | undefined {
+    const frame = v.safeParse(gatewayEventFrameSchema, value);
+    if (!frame.success || frame.output.event !== "chat") return undefined;
+    const parsed = v.safeParse(gatewayChatEventSchema, frame.output.payload);
+    if (!parsed.success) return undefined;
+    return Object.freeze(parsed.output);
+}
+
+export function parsePersistentGatewayPrivateChatEvent(
+    value: unknown
+): PersistentGatewayPrivateChatEvent | undefined {
+    const frame = v.safeParse(gatewayEventFrameSchema, value);
+    if (!frame.success) return undefined;
+    if (frame.output.event === "chat") {
+        const payload = v.safeParse(gatewayChatEventSchema, frame.output.payload);
+        return payload.success
+            ? Object.freeze({ event: "chat", payload: Object.freeze(payload.output) })
+            : undefined;
+    }
+    if (frame.output.event === "agent") {
+        const payload = v.safeParse(gatewayAgentEventSchema, frame.output.payload);
+        return payload.success
+            ? Object.freeze({ event: "agent", payload: Object.freeze(payload.output) })
+            : undefined;
+    }
+    return undefined;
+}
+
+/**
  * Accepts only the installed sessions.subscribe success projection.
  * @param value Untrusted successful response payload.
  * @returns True only for the exact subscribed acknowledgement.
@@ -491,4 +1234,19 @@ export function parsePersistentGatewaySessionsSubscriptionAcknowledgement(
     return v.safeParse(gatewaySessionsSubscriptionAcknowledgementSchema, value).success
         ? true
         : undefined;
+}
+
+export function parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement(
+    value: unknown,
+    subscribed: boolean
+): Readonly<{ key: string; subscribed: boolean }> | undefined {
+    const parsed = v.safeParse(
+        gatewaySessionMessagesSubscriptionAcknowledgementSchema,
+        value
+    );
+    if (!parsed.success || parsed.output.subscribed !== subscribed) return undefined;
+    return Object.freeze({
+        key: parsed.output.key,
+        subscribed: parsed.output.subscribed,
+    });
 }

@@ -16,6 +16,7 @@ describe("application configuration registry", () => {
             "PORT",
             "MIRA_DASHBOARD_PUBLIC_ORIGIN",
             "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
+            "ELEVENLABS_API_KEY",
             "OPENCLAW_GATEWAY_TOKEN",
             "OPENCLAW_GATEWAY_URL",
             "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
@@ -26,7 +27,7 @@ describe("application configuration registry", () => {
             "MIRA_DASHBOARD_TOTP_KEYRING",
             "MIRA_DASHBOARD_LOG_LEVEL",
         ]);
-        expect(applicationConfigurationRegistry).toHaveLength(14);
+        expect(applicationConfigurationRegistry).toHaveLength(15);
         expect(
             applicationConfigurationRegistry
                 .map((entry) => entry.environmentName)
@@ -52,6 +53,7 @@ describe("application configuration registry", () => {
             expect(entry.validationConstraints.length).toBeGreaterThan(0);
             expect(entry.valueType.length).toBeGreaterThan(0);
             expect(typeof entry.restartRequired).toBe("boolean");
+            expect(typeof entry.required).toBe("boolean");
             expect(typeof entry.secret).toBe("boolean");
             expect(typeof entry.overridePolicy.development).toBe("boolean");
             expect(typeof entry.overridePolicy.test).toBe("boolean");
@@ -68,7 +70,11 @@ describe("application configuration registry", () => {
             applicationConfigurationRegistry
                 .filter((entry) => entry.secret)
                 .map((entry) => entry.environmentName)
-        ).toEqual(["OPENCLAW_GATEWAY_TOKEN", "MIRA_DASHBOARD_TOTP_KEYRING"]);
+        ).toEqual([
+            "ELEVENLABS_API_KEY",
+            "OPENCLAW_GATEWAY_TOKEN",
+            "MIRA_DASHBOARD_TOTP_KEYRING",
+        ]);
     });
 
     test("names parsed fields consistently with typed web configuration", () => {
@@ -80,6 +86,7 @@ describe("application configuration registry", () => {
                 ])
             )
         ).toEqual({
+            ELEVENLABS_API_KEY: "elevenLabsApiKey",
             MIRA_DASHBOARD_LOG_LEVEL: "logLevel",
             MIRA_DASHBOARD_PROJECT_ROOT: "projectRoot",
             MIRA_DASHBOARD_PUBLIC_ORIGIN: "publicOrigin",
@@ -126,5 +133,6 @@ describe("application configuration registry", () => {
         ]);
         expect(workerEnvironment).toHaveProperty("OPENCLAW_GATEWAY_TOKEN");
         expect(workerEnvironment).not.toHaveProperty("MIRA_DASHBOARD_TOTP_KEYRING");
+        expect(workerEnvironment).not.toHaveProperty("ELEVENLABS_API_KEY");
     });
 });

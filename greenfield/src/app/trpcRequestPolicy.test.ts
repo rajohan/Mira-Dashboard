@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 
 import { confirmWebAuthnEnrollmentInputSchema } from "../contracts/accountSecurity.ts";
+import { chatSendInputSchema } from "../contracts/chat.ts";
+import { chatSendInputMaximumBytes } from "../contracts/chatModel.ts";
 import {
     taskAutomationScheduleSummaryMaximumLength,
     taskAutomationTextMaximumLength,
@@ -29,6 +31,7 @@ import {
 import {
     authenticationHandlerIdleTimeoutSeconds,
     authenticationRequestBodyMaximumBytes,
+    chatSendRequestBodyMaximumBytes,
     isTrpcRequestPath,
     monitoringRequestBodyMaximumBytes,
     readTrpcRequestPolicy,
@@ -85,6 +88,11 @@ describe("tRPC request policy", () => {
             rejectsBatch: false,
             requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
         });
+        expect(policy("/trpc/chat.send")).toEqual({
+            handlerIdleTimeoutSeconds: 0,
+            rejectsBatch: false,
+            requestBodyMaximumBytes: chatSendRequestBodyMaximumBytes,
+        });
         expect(policy("/trpc/system.runtimeIdentity")).toEqual({
             rejectsBatch: false,
             requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
@@ -123,12 +131,14 @@ describe("tRPC request policy", () => {
         });
         expect(serverRequestBodyMaximumBytes).toBe(
             Math.max(
+                chatSendRequestBodyMaximumBytes,
                 taskContentRequestBodyMaximumBytes,
                 monitoringRequestBodyMaximumBytes
             )
         );
         for (const procedureLimit of [
             authenticationRequestBodyMaximumBytes,
+            chatSendRequestBodyMaximumBytes,
             monitoringRequestBodyMaximumBytes,
             taskContentRequestBodyMaximumBytes,
             taskProgressRequestBodyMaximumBytes,
@@ -137,6 +147,36 @@ describe("tRPC request policy", () => {
         ]) {
             expect(procedureLimit).toBeLessThanOrEqual(serverRequestBodyMaximumBytes);
         }
+    });
+
+    test("keeps maximum durable chat sends inside the dedicated body budget", () => {
+        const base = {
+            clientRunId: "019fe5a1-6cb9-7e51-ad2a-bf1f69861218",
+            idempotencyKey: "A".repeat(32),
+            sessionKey: "agent:main:main",
+        } as const;
+        const emptyBytes = Buffer.byteLength(JSON.stringify({ ...base, message: "" }));
+        const remainingBytes = chatSendInputMaximumBytes - emptyBytes;
+        const messages = [
+            "a".repeat(remainingBytes),
+            "\u0001".repeat(Math.floor(remainingBytes / 6)),
+            "😀".repeat(Math.floor(remainingBytes / 4)),
+        ];
+        const encodedBytes = messages.map((message) => {
+            const input = v.parse(chatSendInputSchema, { ...base, message });
+            return Buffer.byteLength(JSON.stringify({ json: input }));
+        });
+
+        expect(Math.max(...encodedBytes)).toBeLessThan(chatSendRequestBodyMaximumBytes);
+        expect(Math.max(...encodedBytes)).toBeLessThanOrEqual(
+            chatSendInputMaximumBytes + 16
+        );
+        expect(
+            v.safeParse(chatSendInputSchema, {
+                ...base,
+                message: "a".repeat(remainingBytes + 1),
+            }).success
+        ).toBeFalse();
     });
 
     test("combines mixed batches using the strictest applicable policies", () => {
@@ -243,7 +283,9 @@ describe("tRPC request policy", () => {
         expect(Math.max(...encodedBytes)).toBeLessThan(
             taskContentRequestBodyMaximumBytes
         );
-        expect(taskContentRequestBodyMaximumBytes).toBe(serverRequestBodyMaximumBytes);
+        expect(taskContentRequestBodyMaximumBytes).toBeLessThan(
+            serverRequestBodyMaximumBytes
+        );
     });
 
     test("fits the largest canonical progress update inside its exact budget", () => {

@@ -51,6 +51,7 @@ const preview: Preview = {
                     "Authentication",
                     "Agents",
                     "Cache",
+                    "Chat",
                     "Jobs",
                     "Monitoring",
                     "Notifications",

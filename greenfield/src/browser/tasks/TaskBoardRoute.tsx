@@ -67,7 +67,7 @@ export function TaskBoardRoute() {
     return (
         <div>
             <PageHeader
-                description="Track, assign, automate, and audit work across the operator and Mira."
+                description="Track, assign, automate, and audit work across the operator and Mira. Updates automatically from task events, with 30-second safety polling if realtime disconnects."
                 eyebrow="Work management"
                 title="Tasks"
             />
@@ -79,7 +79,6 @@ export function TaskBoardRoute() {
                     onAssigneeChange={setAssignee}
                     onAutomationChange={setAutomation}
                     onCreate={() => setNewTaskOpen(true)}
-                    onRefresh={() => void taskPages.refetch()}
                     onSearchChange={setSearch}
                     search={search}
                 />

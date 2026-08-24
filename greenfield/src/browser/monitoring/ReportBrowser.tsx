@@ -47,7 +47,7 @@ type ReportStatusFilter = (typeof reportStatusOptions)[number]["value"];
 function reportDeletionFailureMessage(error: unknown): string {
     switch (classifyDashboardBrowserFailure(error)) {
         case "not-found": {
-            return "This report no longer exists. Refresh the list and choose another report.";
+            return "This report no longer exists. Review the automatically updated list and choose another report.";
         }
         case "conflict": {
             return "This report has too many linked notifications to delete safely. Clear the linked notifications first and try again.";

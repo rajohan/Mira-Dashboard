@@ -5,6 +5,8 @@ import type { ProcedureContract } from "../contracts/registry.ts";
 export const trpcEndpoint = "/trpc";
 /** Default raw body ceiling for non-authentication tRPC procedures. */
 export const trpcRequestBodyMaximumBytes = 64 * 1024;
+/** Raw body ceiling for one maximum escaped 256-Ki-code-unit chat send. */
+export const chatSendRequestBodyMaximumBytes = 2 * 1024 * 1024;
 /** Raw body ceiling for task create and content-update procedures. */
 export const taskContentRequestBodyMaximumBytes = 640 * 1024;
 /** Raw body ceiling for task progress create and update procedures. */
@@ -13,6 +15,7 @@ export const taskProgressRequestBodyMaximumBytes = 128 * 1024;
 export const monitoringRequestBodyMaximumBytes = 640 * 1024;
 /** Bun-level ceiling applied before the Fetch handler is invoked. */
 export const serverRequestBodyMaximumBytes = Math.max(
+    chatSendRequestBodyMaximumBytes,
     taskContentRequestBodyMaximumBytes,
     monitoringRequestBodyMaximumBytes
 );
@@ -128,6 +131,7 @@ function encodedPathContainsAuthenticationNamespace(
 
 function effectivePolicy(input: {
     readonly containsAuthenticationProcedure: boolean;
+    readonly containsChatSendProcedure: boolean;
     readonly containsForbiddenBatchProcedure: boolean;
     readonly containsLongLivedProcedure: boolean;
     readonly containsMonitoringProcedure: boolean;
@@ -151,6 +155,12 @@ function effectivePolicy(input: {
         requestBodyMaximumBytes = Math.max(
             requestBodyMaximumBytes,
             monitoringRequestBodyMaximumBytes
+        );
+    }
+    if (input.containsChatSendProcedure) {
+        requestBodyMaximumBytes = Math.max(
+            requestBodyMaximumBytes,
+            chatSendRequestBodyMaximumBytes
         );
     }
     if (input.containsTaskContentProcedure) {
@@ -202,6 +212,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             ? decodedProcedures.split(",")
             : [decodedProcedures];
         let containsAuthenticationProcedure = false;
+        let containsChatSendProcedure = false;
         let containsForbiddenBatchProcedure = false;
         let containsLongLivedProcedure = false;
         let containsMonitoringProcedure = false;
@@ -217,6 +228,8 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
                     contract.transport.batching === "forbidden";
                 containsLongLivedProcedure ||=
                     contract.transport.handler === "long-lived";
+                containsChatSendProcedure ||=
+                    contract.transport.requestBody === "chat-send";
                 containsMonitoringProcedure ||=
                     contract.transport.requestBody === "monitoring";
                 containsTaskContentProcedure ||=
@@ -235,6 +248,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
         }
         return effectivePolicy({
             containsAuthenticationProcedure,
+            containsChatSendProcedure,
             containsForbiddenBatchProcedure,
             containsLongLivedProcedure,
             containsMonitoringProcedure,
@@ -248,6 +262,7 @@ export function readTrpcRequestPolicy(url: URL): TrpcRequestPolicy {
             encodedPathContainsAuthenticationNamespace(encodedProcedures, isBatchRequest);
         return effectivePolicy({
             containsAuthenticationProcedure,
+            containsChatSendProcedure: false,
             containsForbiddenBatchProcedure: containsAuthenticationProcedure,
             containsLongLivedProcedure: false,
             containsMonitoringProcedure: false,

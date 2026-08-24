@@ -76,6 +76,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/cache.ts");
             return module.cacheProcedureContracts;
         }
+        case "chat": {
+            const module = await import("../../contracts/chat.ts");
+            return module.chatProcedureContracts;
+        }
         case "gatewaySessions": {
             const module = await import("../../contracts/gatewaySessions.ts");
             return module.gatewaySessionProcedureContracts;
@@ -99,6 +103,10 @@ async function procedureContractsFor(
         case "openClawCron": {
             const module = await import("../../contracts/openClawCron.ts");
             return module.openClawCronProcedureContracts;
+        }
+        case "openClawTasks": {
+            const module = await import("../../contracts/openClawTasks.ts");
+            return module.openClawTaskProcedureContracts;
         }
         case "accountSecurity": {
             const module = await import("../../contracts/accountSecurity.ts");

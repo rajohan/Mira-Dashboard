@@ -70,15 +70,21 @@ function deferred<T>() {
 
 describe("Gateway sessions browser", () => {
     test("shows a safe initial unavailable state without raw transport details", async () => {
+        let available = false;
+        const query = jest.fn(() =>
+            available
+                ? Promise.resolve(snapshot)
+                : Promise.reject(
+                      Object.assign(new Error("private gateway diagnostic"), {
+                          data: { code: "SERVICE_UNAVAILABLE" },
+                      })
+                  )
+        );
         const client = {
-            query: () =>
-                Promise.reject(
-                    Object.assign(new Error("private gateway diagnostic"), {
-                        data: { code: "SERVICE_UNAVAILABLE" },
-                    })
-                ),
+            query,
         } as unknown as DashboardTrpcClient;
         const rendered = renderBrowser(client);
+        const user = userEvent.setup();
 
         try {
             expect(
@@ -93,6 +99,16 @@ describe("Gateway sessions browser", () => {
             expect(
                 screen.queryByRole("table", { name: "Current OpenClaw sessions" })
             ).toBeNull();
+            expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+
+            available = true;
+            await user.click(screen.getByRole("button", { name: "Try again" }));
+            expect(
+                await screen.findByRole("table", {
+                    name: "Current OpenClaw sessions",
+                })
+            ).toBeTruthy();
+            expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         } finally {
             rendered.queryClient.clear();
         }
@@ -237,7 +253,7 @@ describe("Gateway sessions browser", () => {
 
             expect(
                 await screen.findByText(
-                    "Outcome could not be confirmed; refresh before retry."
+                    "Outcome could not be confirmed; reconciliation is required before retry."
                 )
             ).toBeTruthy();
             await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
@@ -248,7 +264,7 @@ describe("Gateway sessions browser", () => {
             });
             expect(
                 within(unresolvedDialog).getByText(
-                    "The action outcome could not be confirmed, and the current projection could not be refreshed. Retry refresh before another action."
+                    "The action outcome could not be confirmed, and reconciliation failed. Retry reconciliation before another action."
                 )
             ).toBeTruthy();
             expect(
@@ -258,10 +274,21 @@ describe("Gateway sessions browser", () => {
             ).toBeDisabled();
             expect(mutation).toHaveBeenCalledTimes(1);
 
-            await user.click(
+            expect(
                 within(unresolvedDialog).getByRole("button", {
-                    name: "Retry refresh",
+                    name: "Retry reconciliation",
                 })
+            ).toBeTruthy();
+            await user.click(
+                within(unresolvedDialog).getByRole("button", { name: "Cancel" })
+            );
+            await waitFor(() =>
+                expect(
+                    screen.queryByRole("dialog", { name: "Reset session?" })
+                ).toBeNull()
+            );
+            await user.click(
+                screen.getByRole("button", { name: "Retry reconciliation" })
             );
 
             expect(
@@ -274,12 +301,12 @@ describe("Gateway sessions browser", () => {
             );
             expect(
                 screen.getByText(
-                    "Current projection refreshed. Review the session before choosing another action."
+                    "Current projection reconciled. Review the session before choosing another action."
                 )
             ).toBeTruthy();
             expect(
                 screen.queryByText(
-                    "Outcome could not be confirmed; refresh before retry."
+                    "Outcome could not be confirmed; reconciliation is required before retry."
                 )
             ).toBeNull();
             expect(mutation).toHaveBeenCalledTimes(1);
@@ -412,14 +439,14 @@ describe("Gateway sessions browser", () => {
             ).toBeDisabled();
             expect(
                 within(blockedDialog).getByText(
-                    "The action outcome could not be confirmed, and the current projection could not be refreshed. Retry refresh before another action."
+                    "The action outcome could not be confirmed, and reconciliation failed. Retry reconciliation before another action."
                 )
             ).toBeTruthy();
             expect(mutation).toHaveBeenCalledTimes(1);
 
             await user.click(
                 within(blockedDialog).getByRole("button", {
-                    name: "Retry refresh",
+                    name: "Retry reconciliation",
                 })
             );
 
@@ -493,7 +520,7 @@ describe("Gateway sessions browser", () => {
 
             await user.click(
                 within(blockedDialog).getByRole("button", {
-                    name: "Retry refresh",
+                    name: "Retry reconciliation",
                 })
             );
 
@@ -573,7 +600,7 @@ describe("Gateway sessions browser", () => {
                 name: "Reset session?",
             });
             expect(
-                await within(blockedDialog).findByText(/could not be refreshed/u)
+                await within(blockedDialog).findByText(/reconciliation failed/u)
             ).toBeVisible();
             expect(
                 within(blockedDialog).getByRole("button", {

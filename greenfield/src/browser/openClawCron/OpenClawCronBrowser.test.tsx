@@ -368,7 +368,7 @@ describe("OpenClaw cron browser", () => {
         }
     });
 
-    test("honors a controlled deep-link selection and reports row changes", async () => {
+    test("honors controlled selection from the full card hit target and keyboard", async () => {
         const onSelectedJobChange = jest.fn();
         const client = {
             query: (name: string) =>
@@ -384,12 +384,46 @@ describe("OpenClaw cron browser", () => {
             expect(
                 await screen.findByRole("heading", { level: 3, name: "Alpha" })
             ).toBeTruthy();
-            expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
-                "aria-current",
-                "true"
+            const selectedCardTarget = screen.getByRole("button", { name: "Alpha" });
+            const nextCardTarget = screen.getByRole("button", { name: "Beta" });
+            expect(selectedCardTarget).toHaveAttribute("aria-current", "true");
+            expect(selectedCardTarget).toHaveAttribute("aria-pressed", "true");
+            expect(nextCardTarget).toHaveAttribute("aria-pressed", "false");
+            const selectedCard = selectedCardTarget.closest("li");
+            const nextCard = nextCardTarget.closest("li");
+            expect(selectedCard).toHaveClass(
+                "border-accent-400",
+                "bg-accent-500/20",
+                "ring-accent-300/40",
+                "ring-1",
+                "ring-inset"
             );
-            await user.click(screen.getByRole("button", { name: "Beta" }));
+            expect(selectedCard).toHaveTextContent("Selected");
+            expect(nextCard).toHaveClass("border-primary-700", "bg-primary-900/40");
+            expect(nextCard).not.toHaveClass("bg-accent-500/20");
+            expect(nextCard).not.toHaveTextContent("Selected");
+            expect(nextCardTarget).toHaveClass("absolute", "inset-0");
+            expect(nextCardTarget.querySelector("dl")).toBeNull();
+            expect(nextCardTarget.closest("li")?.querySelector("dl")).not.toBeNull();
+
+            await user.hover(nextCardTarget);
+            expect(nextCard).toHaveClass("border-primary-500", "bg-primary-800/55");
+            expect(selectedCard).toHaveClass("border-accent-400", "bg-accent-500/20");
+            await user.unhover(nextCardTarget);
+            expect(nextCard).toHaveClass("border-primary-700", "bg-primary-900/40");
+
+            await user.click(nextCardTarget);
             expect(onSelectedJobChange).toHaveBeenCalledWith(enabledBeta.id);
+
+            onSelectedJobChange.mockClear();
+            nextCardTarget.focus();
+            await user.keyboard("[Enter]");
+            expect(onSelectedJobChange).toHaveBeenCalledWith(enabledBeta.id);
+
+            onSelectedJobChange.mockClear();
+            selectedCardTarget.focus();
+            await user.keyboard(" ");
+            expect(onSelectedJobChange).toHaveBeenCalledWith(disabledAlpha.id);
         } finally {
             rendered.view.unmount();
             rendered.queryClient.clear();
@@ -752,6 +786,14 @@ describe("OpenClaw cron browser", () => {
 
             await user.click(screen.getByRole("button", { name: "Disable" }));
             const disableDialog = screen.getByRole("dialog", { name: "Disable Beta" });
+            expect(
+                within(disableDialog).getByRole("radio", { name: /Indefinitely/u })
+            ).toBeChecked();
+            expect(
+                within(disableDialog).queryByRole("group", {
+                    name: "Disabled until",
+                })
+            ).toBeNull();
             await user.type(
                 within(disableDialog).getByRole("textbox", {
                     name: "Disable reason",

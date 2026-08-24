@@ -35,6 +35,7 @@ import {
 
 /** Immutable, validated configuration consumed by the greenfield web process. */
 export interface WebConfiguration {
+    readonly elevenLabsApiKey?: Redacted.Redacted<string>;
     readonly gatewayToken: Redacted.Redacted<string>;
     readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
@@ -54,6 +55,7 @@ const optionalEnvironmentValueSchema = v.optional(v.unknown());
 
 /** Valibot projection for the complete accepted web-process environment surface. */
 export const webConfigurationEnvironmentSchema = v.object({
+    ELEVENLABS_API_KEY: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PUBLIC_ORIGIN: optionalEnvironmentValueSchema,
@@ -230,6 +232,20 @@ function totpKeyring(input: PickedApplicationEnvironment): Redacted.Redacted<str
     return Object.freeze(Redacted.make(raw, { label: "totp-keyring" }));
 }
 
+function elevenLabsApiKey(
+    input: PickedApplicationEnvironment
+): Redacted.Redacted<string> | undefined {
+    const field = "ELEVENLABS_API_KEY" as const;
+    if (input[field] === null || input[field] === undefined) return undefined;
+    if (input[field] === "") return configurationError(field, "invalid");
+    const raw = requiredConfigurationString(
+        input,
+        field,
+        applicationConfigurationLimits.elevenLabsApiKeyMaximumLength
+    );
+    return Object.freeze(Redacted.make(raw, { label: "elevenlabs-api-key" }));
+}
+
 function durationMs(
     input: PickedApplicationEnvironment,
     field: "MIRA_DASHBOARD_RECENT_AUTH_MINUTES" | "MIRA_DASHBOARD_SESSION_IDLE_MINUTES",
@@ -272,7 +288,9 @@ export function parseWebConfiguration(
     if (nodeEnvironment === "production" && new URL(origin).protocol !== "https:") {
         configurationError("MIRA_DASHBOARD_PUBLIC_ORIGIN", "inconsistent");
     }
+    const speechApiKey = elevenLabsApiKey(input);
     const configuration = Object.freeze({
+        ...(speechApiKey === undefined ? {} : { elevenLabsApiKey: speechApiKey }),
         gatewayToken: configurationGatewayToken(input),
         gatewayUrl: configurationGatewayUrl(input),
         logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [

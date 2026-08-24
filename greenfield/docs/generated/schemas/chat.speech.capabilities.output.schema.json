@@ -1,0 +1,18 @@
+{
+  "$id": "urn:mira-dashboard:chat.speech.capabilities.output",
+  "type": "object",
+  "properties": {
+    "speechToText": {
+      "type": "boolean"
+    },
+    "textToSpeech": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "speechToText",
+    "textToSpeech"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

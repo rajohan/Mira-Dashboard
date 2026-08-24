@@ -290,6 +290,48 @@ afterEach(async () => {
 });
 
 describe("monitoring browser routes", () => {
+    test("auto-updates reports without routine refresh and retains initial retry", async () => {
+        const transport = new MonitoringRouteTransport();
+        transport.reportListFailuresRemaining = 1;
+        renderMonitoringRoute("/reports", transport);
+        const user = userEvent.setup();
+
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Reports" })
+        ).toBeTruthy();
+        expect(
+            screen.getByText(/Updates automatically from report events/u)
+        ).toBeTruthy();
+        expect(screen.getByRole("link", { name: "Browse incidents" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+        expect(await screen.findByText("Reports unavailable")).toBeTruthy();
+
+        await user.click(screen.getByRole("button", { name: "Try again" }));
+        expect(await screen.findByText("Primary heartbeat")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+    });
+
+    test("auto-updates incidents without routine refresh and retains initial retry", async () => {
+        const transport = new MonitoringRouteTransport();
+        transport.incidentListFailuresRemaining = 1;
+        renderMonitoringRoute("/incidents", transport);
+        const user = userEvent.setup();
+
+        expect(
+            await screen.findByRole("heading", { level: 1, name: "Incidents" })
+        ).toBeTruthy();
+        expect(
+            screen.getByText(/Updates automatically from incident events/u)
+        ).toBeTruthy();
+        expect(screen.getByRole("link", { name: "Browse reports" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+        expect(await screen.findByText("Incidents unavailable")).toBeTruthy();
+
+        await user.click(screen.getByRole("button", { name: "Try again" }));
+        expect(await screen.findByText("Primary disk warning")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+    });
+
     test("loads an exact report deep link independently and keeps Markdown raw HTML inert", async () => {
         const transport = new MonitoringRouteTransport();
         transport.reportListIds = [reportId];

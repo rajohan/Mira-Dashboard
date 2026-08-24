@@ -53,7 +53,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             frontend.routes
                 .filter((route) => route.target.delivery === "implemented")
                 .map(({ path }) => path)
-        ).toEqual(["/agents", "/login", "/reports", "/sessions", "/tasks"]);
+        ).toEqual(["/agents", "/chat", "/login", "/reports", "/sessions", "/tasks"]);
         expect(countByPhase(frontend.routes)).toEqual({
             "phase-2": 1,
             "phase-3": 5,
@@ -76,8 +76,8 @@ describe("reviewed pre-cutover parity inventory", () => {
             "phase-1": 7,
             "phase-2": 28,
             "phase-3": 39,
-            "phase-4": 13,
-            "phase-5": 70,
+            "phase-4": 15,
+            "phase-5": 68,
         });
     });
 

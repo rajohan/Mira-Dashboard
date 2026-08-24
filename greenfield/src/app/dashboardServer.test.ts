@@ -10,6 +10,13 @@ import {
     cacheHeartbeatResultSchema,
     cacheStatusResultSchema,
 } from "../contracts/cache.ts";
+import type { ChatHistoryOutput } from "../contracts/chat.ts";
+import { chatHistoryRetainedPageMaximum } from "../contracts/chatModel.ts";
+import {
+    type GatewaySession,
+    deriveGatewaySessionStats,
+    type ListGatewaySessionsResult,
+} from "../contracts/gatewaySessions.ts";
 import { jobRunSummarySchema } from "../contracts/jobModel.ts";
 import { listJobRunsResultSchema } from "../contracts/jobs.ts";
 import {
@@ -39,11 +46,164 @@ import {
     createTestStructuredLogger,
 } from "../server/test/support/requestContext.ts";
 import {
+    createDashboardChatMediaReferenceRefresh,
     createDashboardOpenClawCronProvider,
     createDashboardServer,
+    resolveDashboardGatewayScope,
     startDashboardOpenClawCronExpiryReconciliation,
     validateDashboardWebAuthnBrowserOrigin,
 } from "./dashboardServer.ts";
+
+const mediaRefreshObservedAtMs = 1_800_000_000_000;
+
+function mediaRefreshSessionSnapshot(keys: readonly string[]): ListGatewaySessionsResult {
+    const sessions: GatewaySession[] = keys.map((key, index) => ({
+        displayName: key,
+        hasActiveRun: false,
+        key,
+        kind: "main",
+        model: "gpt-5.6-sol",
+        modelProvider: "openai",
+        totalTokens: index,
+        totalTokensFresh: true,
+        updatedAtMs: mediaRefreshObservedAtMs - index,
+    }));
+    return {
+        filter: "ALL",
+        projectionTruncated: false,
+        sessions,
+        source: {
+            checkedAtMs: mediaRefreshObservedAtMs,
+            connection: "connected",
+            freshness: "fresh",
+            observedAtMs: mediaRefreshObservedAtMs,
+        },
+        stats: deriveGatewaySessionStats(sessions, mediaRefreshObservedAtMs),
+    };
+}
+
+function emptyMediaRefreshHistory(sessionKey: string): ChatHistoryOutput {
+    return {
+        messages: [],
+        providerPagesRead: 1,
+        sessionKey,
+        truncated: false,
+    };
+}
+
+describe("Dashboard chat media-reference refresh", () => {
+    test("hydrates every bounded session while containing individual read failures", async () => {
+        const controller = new AbortController();
+        const historyCalls: unknown[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input, signal) => {
+                    historyCalls.push({ input, signal });
+                    return input.sessionKey === "agent:broken:main"
+                        ? Promise.reject(new Error("history unavailable"))
+                        : Promise.resolve(emptyMediaRefreshHistory(input.sessionKey));
+                },
+            },
+            gatewaySessionsService: {
+                list: (input, signal) => {
+                    expect({ input, signal }).toEqual({
+                        input: { filter: "ALL" },
+                        signal: controller.signal,
+                    });
+                    return Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            "agent:main:main",
+                            "agent:broken:main",
+                            "agent:coder:main",
+                        ])
+                    );
+                },
+            },
+        });
+
+        await refresh(controller.signal);
+
+        expect(historyCalls).toEqual(
+            ["agent:main:main", "agent:broken:main", "agent:coder:main"].map(
+                (sessionKey) => ({
+                    input: { cursor: "0", limit: 100, sessionKey },
+                    signal: controller.signal,
+                })
+            )
+        );
+    });
+
+    test("propagates cancellation instead of treating it as session absence", async () => {
+        const controller = new AbortController();
+        const failure = new Error("request cancelled");
+        let historyCalls = 0;
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: () => {
+                    historyCalls += 1;
+                    controller.abort();
+                    return Promise.reject(failure);
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            "agent:main:main",
+                            "agent:coder:main",
+                        ])
+                    ),
+            },
+        });
+
+        let caught: unknown;
+        try {
+            await refresh(controller.signal);
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).toBe(failure);
+        expect(historyCalls).toBe(1);
+    });
+
+    test("walks the retained history window and stops at completion or its hard cap", async () => {
+        const calls: { cursor: string; sessionKey: string }[] = [];
+        const refresh = createDashboardChatMediaReferenceRefresh({
+            chatService: {
+                history: (input) => {
+                    calls.push({ cursor: input.cursor, sessionKey: input.sessionKey });
+                    const cursor = Number(input.cursor);
+                    const complete =
+                        input.sessionKey === "agent:short:main" && cursor === 1;
+                    return Promise.resolve({
+                        ...emptyMediaRefreshHistory(input.sessionKey),
+                        ...(complete ? {} : { nextCursor: String(cursor + 1) }),
+                    });
+                },
+            },
+            gatewaySessionsService: {
+                list: () =>
+                    Promise.resolve(
+                        mediaRefreshSessionSnapshot([
+                            "agent:short:main",
+                            "agent:long:main",
+                        ])
+                    ),
+            },
+        });
+
+        await refresh(new AbortController().signal);
+
+        expect(calls).toEqual([
+            { cursor: "0", sessionKey: "agent:short:main" },
+            { cursor: "1", sessionKey: "agent:short:main" },
+            ...Array.from({ length: chatHistoryRetainedPageMaximum }, (_, cursor) => ({
+                cursor: String(cursor),
+                sessionKey: "agent:long:main",
+            })),
+        ]);
+    });
+});
 
 describe("Dashboard OpenClaw cron composition", () => {
     test("owns expiry reconciliation across ordered, idempotent server shutdown", async () => {
@@ -253,6 +413,23 @@ describe("Dashboard OpenClaw cron composition", () => {
 });
 
 describe("Dashboard security composition", () => {
+    test("isolates durable chat state by canonical Gateway origin", () => {
+        const scope = resolveDashboardGatewayScope(
+            "wss://Gateway.Example.test:443/socket?token=rotated"
+        );
+
+        expect(scope).toMatch(/^[0-9a-f]{64}$/u);
+        expect(scope).toBe(
+            resolveDashboardGatewayScope("wss://gateway.example.test/other-path")
+        );
+        expect(scope).not.toBe(
+            resolveDashboardGatewayScope("wss://other.example.test/socket")
+        );
+        expect(scope).not.toBe(
+            resolveDashboardGatewayScope("ws://gateway.example.test/socket")
+        );
+    });
+
     test("requires the HTTP browser origin in the WebAuthn allowlist", () => {
         const relyingParty = createWebAuthnRelyingPartyConfiguration({
             allowedOrigins: ["https://dashboard.example"],

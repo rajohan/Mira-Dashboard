@@ -52,6 +52,41 @@ import {
     systemHostCapacityIsConsistent,
 } from "../../src/contracts/cache.ts";
 import { cacheRealtimeIdentityMatches } from "../../src/contracts/cacheRealtime.ts";
+import {
+    availableChatMessageIsCompleteAndFitsBudget,
+    chatExternalRunsHaveUniqueProviderIds,
+    chatHistoryMessagesHaveUniqueIds,
+    chatHistoryOutputFitsBudget,
+    chatModelsHaveUniqueIds,
+    chatRuntimeOutputIsConsistent,
+    chatSendInputFitsAdmissionBudget,
+    chatSendInputHasContent,
+    chatSessionSettingsPatchIsNonempty,
+} from "../../src/contracts/chat.ts";
+import {
+    chatAttachmentAggregateRawBytesFit,
+    chatAttachmentTicketFileMimeTypeIsSupported,
+    chatAttachmentTicketUploadsAreConsistent,
+    normalizeChatAttachmentTicketFile,
+} from "../../src/contracts/chatMedia.ts";
+import {
+    chatMessageAttachmentDispositionIsConsistent,
+    chatMessageFitsHydrationBudget,
+    chatMessagePartsHaveUniqueIds,
+    chatMessagePartToolStateIsConsistent,
+    chatPlanStepsHaveAtMostOneActive,
+    chatRunSummaryIsConsistent,
+    chatRuntimeEventProviderRangeIsConsistent,
+    chatRuntimeEventToolStateIsConsistent,
+    chatRuntimeProjectionPartsAreOrdered,
+    chatRuntimeProjectionToolStateIsConsistent,
+    chatRuntimeSnapshotFitsBudget,
+} from "../../src/contracts/chatModel.ts";
+import {
+    chatSpeechSynthesisTextFitsByteBudget,
+    chatSpeechTranscriptFitsByteBudget,
+    normalizeChatSpeechSynthesisText,
+} from "../../src/contracts/chatSpeech.ts";
 import { gatewayConnectionSnapshotIsConsistent } from "../../src/contracts/gatewayConnection.ts";
 import {
     freshGatewaySessionSourceTimesAreConsistent,
@@ -120,6 +155,14 @@ import {
     openClawCronRunPageIsConsistent,
     openClawCronUpdatePatchIsNonempty,
 } from "../../src/contracts/openClawCron.ts";
+import {
+    openClawTaskCancelledResultWasFound,
+    openClawTaskCancelSnapshotMatchesFound,
+    openClawTaskDetailLifecycleIsConsistent,
+    openClawTaskListOutputFitsBudget,
+    openClawTaskSummaryLifecycleIsConsistent,
+    openClawTasksHaveUniqueIds,
+} from "../../src/contracts/openClawTasks.ts";
 import type { ContractSchema } from "../../src/contracts/registry.ts";
 import {
     newestReportOrderIsStable,
@@ -192,8 +235,132 @@ const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
     [
+        chatSpeechTranscriptFitsByteBudget,
+        "Live Valibot validation additionally limits the ephemeral transcript to 65536 UTF-8 bytes.",
+    ],
+    [
+        chatSpeechSynthesisTextFitsByteBudget,
+        "Live Valibot validation additionally limits speech synthesis text to 16384 UTF-8 bytes.",
+    ],
+    [
         gatewayConnectionSnapshotIsConsistent,
         "Live Valibot validation additionally requires connected phase and fresh state to agree and past transport timestamps not to exceed the check time.",
+    ],
+    [
+        chatHistoryMessagesHaveUniqueIds,
+        "Live Valibot validation additionally requires every chat history message ID to be unique.",
+    ],
+    [
+        chatHistoryOutputFitsBudget,
+        "Live Valibot validation additionally limits the serialized chat history response to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        availableChatMessageIsCompleteAndFitsBudget,
+        "Live Valibot validation additionally requires an available hydrated chat message to be complete and within its reviewed UTF-8 byte budget.",
+    ],
+    [
+        chatSendInputHasContent,
+        "Live Valibot validation additionally requires nonblank chat text or an attachment ticket.",
+    ],
+    [
+        chatSendInputFitsAdmissionBudget,
+        "Live Valibot validation additionally limits the canonical serialized chat send intent to 131072 UTF-8 bytes, stricter than the shared history-message code-unit cap.",
+    ],
+    [
+        chatModelsHaveUniqueIds,
+        "Live Valibot validation additionally requires every configured chat model ID to be unique.",
+    ],
+    [
+        chatSessionSettingsPatchIsNonempty,
+        "Live Valibot validation additionally requires at least one reviewed chat session setting to change.",
+    ],
+    [
+        chatExternalRunsHaveUniqueProviderIds,
+        "Live Valibot validation additionally requires every external chat projection to have a unique provider run ID.",
+    ],
+    [
+        chatRuntimeOutputIsConsistent,
+        "Live Valibot validation additionally binds chat cursors, continuation/reset state, ordered unique run snapshots, session identity, and the aggregate UTF-8 response budget.",
+    ],
+    [
+        chatAttachmentTicketFileMimeTypeIsSupported,
+        "Live Valibot validation additionally requires the declared MIME type and filename extension to resolve to one reviewed attachment type.",
+    ],
+    [
+        chatAttachmentAggregateRawBytesFit,
+        "Live Valibot validation additionally limits all files in one attachment ticket to the reviewed aggregate raw-byte budget.",
+    ],
+    [
+        chatAttachmentTicketUploadsAreConsistent,
+        "Live Valibot validation additionally requires unique attachment IDs, exact same-origin ticket upload URLs, and the reviewed response byte budget.",
+    ],
+    [
+        chatMessagePartToolStateIsConsistent,
+        "Live Valibot validation additionally requires chat tool phase, failure state, and failed output to agree.",
+    ],
+    [
+        chatMessageAttachmentDispositionIsConsistent,
+        "Live Valibot validation additionally binds each chat attachment render policy to its exact managed-media URL disposition.",
+    ],
+    [
+        chatMessagePartsHaveUniqueIds,
+        "Live Valibot validation additionally requires every part ID in one chat message to be unique.",
+    ],
+    [
+        chatMessageFitsHydrationBudget,
+        "Live Valibot validation additionally limits each serialized chat message to its reviewed hydration UTF-8 byte budget.",
+    ],
+    [
+        chatRunSummaryIsConsistent,
+        "Live Valibot validation additionally binds chat run lifecycle, terminal, cancellation, reconciliation, and update timestamps.",
+    ],
+    [
+        chatPlanStepsHaveAtMostOneActive,
+        "Live Valibot validation additionally permits at most one in-progress step in a chat plan.",
+    ],
+    [
+        chatRuntimeEventToolStateIsConsistent,
+        "Live Valibot validation additionally requires runtime tool phase, failure state, and failed output to agree.",
+    ],
+    [
+        chatRuntimeEventProviderRangeIsConsistent,
+        "Live Valibot validation additionally requires provider sequence range endpoints to be absent together or ordered together.",
+    ],
+    [
+        chatRuntimeProjectionToolStateIsConsistent,
+        "Live Valibot validation additionally requires projected tool phase, failure state, and failed output to agree.",
+    ],
+    [
+        chatRuntimeProjectionPartsAreOrdered,
+        "Live Valibot validation additionally requires projected chat parts in strict ascending event-sequence order.",
+    ],
+    [
+        chatRuntimeSnapshotFitsBudget,
+        "Live Valibot validation additionally binds snapshot sequence bounds and terminal plan omission and enforces the reviewed UTF-8 byte budget.",
+    ],
+    [
+        openClawTaskSummaryLifecycleIsConsistent,
+        "Live Valibot validation additionally binds OpenClaw task identity aliases and orders available lifecycle timestamps.",
+    ],
+    [
+        openClawTaskDetailLifecycleIsConsistent,
+        "Live Valibot validation additionally binds OpenClaw task detail identity aliases and orders available lifecycle timestamps.",
+    ],
+    [
+        openClawTasksHaveUniqueIds,
+        "Live Valibot validation additionally requires every OpenClaw task ID in a page to be unique.",
+    ],
+    [
+        openClawTaskListOutputFitsBudget,
+        "Live Valibot validation additionally limits the serialized OpenClaw task page to its reviewed UTF-8 byte budget.",
+    ],
+    [
+        openClawTaskCancelledResultWasFound,
+        "Live Valibot validation additionally requires a cancelled OpenClaw task to have been found.",
+    ],
+    [
+        openClawTaskCancelSnapshotMatchesFound,
+        "Live Valibot validation additionally requires OpenClaw task lookup state and the optional returned snapshot to agree.",
     ],
     [
         openClawCronAtScheduleIsValid,
@@ -850,7 +1017,9 @@ export function convertContractSchema(
                         operation === canonicalAgentDefinitions ||
                         operation === canonicalizeTaskStrings ||
                         operation === freezeTaskStrings ||
-                        operation === normalizeScheduleCronExpression)
+                        operation === normalizeScheduleCronExpression ||
+                        operation === normalizeChatSpeechSynthesisText ||
+                        operation === normalizeChatAttachmentTicketFile)
                 ) {
                     return jsonSchema;
                 }

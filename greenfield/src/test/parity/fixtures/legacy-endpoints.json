@@ -312,10 +312,10 @@
             "purpose": "Proxies an exact managed Gateway media path with backend-held auth.",
             "section": "Files, Config Files, Logs, Media",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "GET",
-                "path": "/api/chat/media/*",
+                "path": "/api/chat/media/:attachmentId",
                 "phase": "phase-4"
             }
         },
@@ -1881,11 +1881,11 @@
             "purpose": "Transcribes audio through ElevenLabs.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "POST",
-                "path": "/api/stt/transcriptions",
-                "phase": "phase-5"
+                "path": "/api/chat/speech/transcribe",
+                "phase": "phase-4"
             }
         },
         {
@@ -1973,11 +1973,11 @@
             "purpose": "Streams ElevenLabs TTS audio.",
             "section": "Moltbook And Voice",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "raw-http",
                 "method": "POST",
-                "path": "/api/tts/speech",
-                "phase": "phase-5"
+                "path": "/api/chat/speech/synthesize",
+                "phase": "phase-4"
             }
         },
         {

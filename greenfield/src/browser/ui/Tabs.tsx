@@ -71,22 +71,20 @@ export function Tabs<TValue extends string>({
                     aria-label={ariaLabel}
                     className={cn(
                         "border-primary-700 bg-primary-900 max-w-full min-w-0 gap-1 rounded-lg border p-1",
-                        vertical
-                            ? "flex flex-col"
-                            : "flex w-full overflow-x-auto overscroll-x-contain"
+                        vertical ? "flex flex-col" : "flex w-full flex-wrap"
                     )}
                 >
                     {tabs.map((tab) => (
                         <Tab
                             className={cn(
                                 "text-primary-300 min-h-10 min-w-0 cursor-pointer rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors",
-                                "not-data-disabled:data-hover:bg-primary-800 not-data-disabled:data-hover:text-primary-50 hover:not-data-disabled:bg-primary-800 hover:not-data-disabled:text-primary-50",
+                                "not-data-selected:not-data-disabled:data-hover:bg-primary-800 not-data-selected:not-data-disabled:data-hover:text-primary-50 hover:not-data-selected:not-data-disabled:bg-primary-800 hover:not-data-selected:not-data-disabled:text-primary-50",
                                 "data-selected:bg-accent-500 data-selected:text-primary-950",
                                 "data-focus:ring-accent-300 data-focus:ring-2 data-focus:outline-none data-focus:ring-inset",
                                 "data-disabled:cursor-not-allowed data-disabled:opacity-45",
                                 vertical
                                     ? "w-full max-w-full text-left"
-                                    : "shrink-0 sm:flex-1"
+                                    : "min-w-0 grow basis-28"
                             )}
                             disabled={tab.disabled}
                             key={tab.value}

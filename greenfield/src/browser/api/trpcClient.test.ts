@@ -209,6 +209,28 @@ describe("Dashboard browser tRPC client", () => {
         ]);
     });
 
+    test("loads Chat and OpenClaw task contracts on demand", async () => {
+        const chatCalls: TransportCall[] = [];
+        const taskCalls: TransportCall[] = [];
+        const chatClient = createDashboardTrpcClient(
+            createRecordingTransport({ models: [] }, chatCalls)
+        );
+        const taskClient = createDashboardTrpcClient(
+            createRecordingTransport({ tasks: [] }, taskCalls)
+        );
+
+        expect(await chatClient.query("chat.listModels", {})).toEqual({ models: [] });
+        expect(await taskClient.query("openClawTasks.list", { limit: 100 })).toEqual({
+            tasks: [],
+        });
+        expect(chatCalls).toEqual([
+            { input: {}, kind: "query", path: "chat.listModels" },
+        ]);
+        expect(taskCalls).toEqual([
+            { input: { limit: 100 }, kind: "query", path: "openClawTasks.list" },
+        ]);
+    });
+
     test("rejects invalid input before transport access", async () => {
         const calls: TransportCall[] = [];
         const client = createDashboardTrpcClient(

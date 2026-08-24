@@ -8,11 +8,11 @@ import type {
 import { isDashboardOperationOutcomeUnknown } from "../api/trpcError.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
-import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
+import { OpenClawCronConfirmationDialog } from "./OpenClawCronConfirmationDialog.tsx";
 import { OpenClawCronDefinitionDialog } from "./OpenClawCronDefinitionDialog.tsx";
 import { OpenClawCronDetail } from "./OpenClawCronDetail.tsx";
 import {
@@ -138,7 +138,7 @@ export function OpenClawCronSectionView({
 
     if (state.status === "loading") {
         return (
-            <section aria-labelledby={headingId}>
+            <section aria-labelledby={headingId} className="max-w-full min-w-0">
                 <Heading id={headingId} level={2}>
                     OpenClaw cron
                 </Heading>
@@ -148,7 +148,7 @@ export function OpenClawCronSectionView({
     }
     if (state.status === "error") {
         return (
-            <section aria-labelledby={headingId}>
+            <section aria-labelledby={headingId} className="max-w-full min-w-0">
                 <Heading className="sr-only" id={headingId} level={2}>
                     OpenClaw cron
                 </Heading>
@@ -277,9 +277,12 @@ export function OpenClawCronSectionView({
     }
 
     return (
-        <section aria-labelledby={headingId}>
+        <section aria-labelledby={headingId} className="max-w-full min-w-0">
             <div className="flex flex-wrap items-start justify-between gap-4">
-                <div ref={inventoryHeadingContainerRef}>
+                <div
+                    className="max-w-full min-w-0 flex-1"
+                    ref={inventoryHeadingContainerRef}
+                >
                     <div className="flex items-center gap-2">
                         <Icon icon={CloudCog} tone="accent" />
                         <Heading id={headingId} level={2} tabIndex={-1}>
@@ -295,21 +298,19 @@ export function OpenClawCronSectionView({
                         Showing {result.jobs.length} of {result.total} Gateway jobs from
                         this bounded browser window.
                     </Text>
+                    <Text className="mt-1 max-w-3xl" size="sm" tone="muted">
+                        Updates automatically every 10 seconds and after Gateway events.
+                    </Text>
                 </div>
-                <Button
-                    busy={reconciliation === "checking"}
-                    busyLabel="Refreshing…"
-                    onClick={
-                        reconciliation === "blocked"
-                            ? () => void retryReconciliation()
-                            : onRetry
-                    }
-                    variant="secondary"
-                >
-                    {reconciliation === "blocked"
-                        ? "Refresh authoritative state"
-                        : "Refresh OpenClaw"}
-                </Button>
+                {reconciliation === "blocked" && (
+                    <Button
+                        className="w-full sm:w-auto"
+                        onClick={() => void retryReconciliation()}
+                        variant="secondary"
+                    >
+                        Refresh authoritative state
+                    </Button>
+                )}
             </div>
 
             <Alert className="mt-5" focusOnError={false} message={backgroundError} />
@@ -333,7 +334,7 @@ export function OpenClawCronSectionView({
                     />
                 </div>
             ) : (
-                <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
+                <div className="mt-6 grid max-w-full min-w-0 grid-cols-1 gap-6 2xl:grid-cols-2">
                     <div className="min-w-0">
                         <OpenClawCronTable
                             jobs={orderedJobs}
@@ -444,7 +445,7 @@ export function OpenClawCronSectionView({
                 />
             )}
             {selected !== undefined && confirmation !== undefined && (
-                <ConfirmModal
+                <OpenClawCronConfirmationDialog
                     busy={actionBusy}
                     confirmLabel={confirmationLabel(confirmation)}
                     danger={confirmation === "delete"}
@@ -458,7 +459,6 @@ export function OpenClawCronSectionView({
                             ? () => void retryReconciliation()
                             : undefined
                     }
-                    open
                     retryBusy={reconciliation === "checking"}
                     retryLabel="Refresh authoritative state"
                     title={confirmationTitle(confirmation)}

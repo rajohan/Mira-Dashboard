@@ -12,6 +12,7 @@ import { createDashboardTrpcClient, type DashboardTrpcClient } from "./api/trpcC
 import { DashboardTrpcProvider } from "./api/trpcContext.tsx";
 import { AuthenticatedBrowserCacheBoundary } from "./auth/AuthenticatedBrowserCacheBoundary.tsx";
 import { AuthenticatedSessionActivity } from "./auth/AuthenticatedSessionActivity.tsx";
+import { ChatRuntimeStoreProvider } from "./chat/ChatRuntimeStoreProvider.tsx";
 import {
     createDashboardBrowserCollections,
     type DashboardBrowserCollections,
@@ -63,9 +64,11 @@ export function DashboardBrowserApplication({
                         <DashboardTrpcProvider client={trpcClient}>
                             <AuthenticatedBrowserCacheBoundary>
                                 <AuthenticatedSessionActivity />
-                                <DashboardWebAuthnProvider client={webAuthnClient}>
-                                    <RouterProvider router={router} />
-                                </DashboardWebAuthnProvider>
+                                <ChatRuntimeStoreProvider>
+                                    <DashboardWebAuthnProvider client={webAuthnClient}>
+                                        <RouterProvider router={router} />
+                                    </DashboardWebAuthnProvider>
+                                </ChatRuntimeStoreProvider>
                             </AuthenticatedBrowserCacheBoundary>
                         </DashboardTrpcProvider>
                     </DashboardRealtimeProvider>

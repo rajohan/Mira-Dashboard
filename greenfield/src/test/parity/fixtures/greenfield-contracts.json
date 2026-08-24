@@ -187,6 +187,50 @@
             "name": "cache.refreshEntry"
         },
         {
+            "kind": "mutation",
+            "name": "chat.abort"
+        },
+        {
+            "kind": "mutation",
+            "name": "chat.companionAsk"
+        },
+        {
+            "kind": "mutation",
+            "name": "chat.companionReset"
+        },
+        {
+            "kind": "query",
+            "name": "chat.companionState"
+        },
+        {
+            "kind": "query",
+            "name": "chat.getMessage"
+        },
+        {
+            "kind": "query",
+            "name": "chat.history"
+        },
+        {
+            "kind": "query",
+            "name": "chat.listModels"
+        },
+        {
+            "kind": "mutation",
+            "name": "chat.prepareAttachmentTicket"
+        },
+        {
+            "kind": "query",
+            "name": "chat.runtime"
+        },
+        {
+            "kind": "mutation",
+            "name": "chat.send"
+        },
+        {
+            "kind": "mutation",
+            "name": "chat.updateSessionSettings"
+        },
+        {
             "kind": "subscription",
             "name": "events.stream"
         },
@@ -292,6 +336,18 @@
         },
         {
             "kind": "mutation",
+            "name": "openClawTasks.cancel"
+        },
+        {
+            "kind": "query",
+            "name": "openClawTasks.get"
+        },
+        {
+            "kind": "query",
+            "name": "openClawTasks.list"
+        },
+        {
+            "kind": "mutation",
             "name": "reports.delete"
         },
         {
@@ -385,6 +441,16 @@
     ],
     "rawHttp": [
         {
+            "id": "GET /api/chat/media/:attachmentId",
+            "method": "GET",
+            "path": "/api/chat/media/:attachmentId"
+        },
+        {
+            "id": "GET /api/chat/speech/capabilities",
+            "method": "GET",
+            "path": "/api/chat/speech/capabilities"
+        },
+        {
             "id": "GET /api/health/live",
             "method": "GET",
             "path": "/api/health/live"
@@ -395,6 +461,11 @@
             "path": "/api/health/ready"
         },
         {
+            "id": "HEAD /api/chat/media/:attachmentId",
+            "method": "HEAD",
+            "path": "/api/chat/media/:attachmentId"
+        },
+        {
             "id": "HEAD /api/health/live",
             "method": "HEAD",
             "path": "/api/health/live"
@@ -403,6 +474,21 @@
             "id": "HEAD /api/health/ready",
             "method": "HEAD",
             "path": "/api/health/ready"
+        },
+        {
+            "id": "POST /api/chat/speech/synthesize",
+            "method": "POST",
+            "path": "/api/chat/speech/synthesize"
+        },
+        {
+            "id": "POST /api/chat/speech/transcribe",
+            "method": "POST",
+            "path": "/api/chat/speech/transcribe"
+        },
+        {
+            "id": "PUT /api/chat/attachments/:ticketId/:attachmentId",
+            "method": "PUT",
+            "path": "/api/chat/attachments/:ticketId/:attachmentId"
         }
     ],
     "schemaVersion": 1,

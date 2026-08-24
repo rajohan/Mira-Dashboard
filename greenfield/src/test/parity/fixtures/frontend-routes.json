@@ -49,7 +49,7 @@
             "searchNormalizer": "normalizeChatSearch",
             "sourceRouteName": "chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/chat",
                 "phase": "phase-4"
             }

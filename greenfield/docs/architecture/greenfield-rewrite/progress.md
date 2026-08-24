@@ -13,7 +13,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 1 — Foundation                      | Complete                             | The self-contained future root builds immutable browser/web/worker artifacts, protects project-local production state, installs exact Bun and systemd artifacts, migrates a database copy, atomically promotes the release/database pair, serves readiness/browser assets, writes project-local logs, and proves crash-safe rollback and shutdown in a disposable lifecycle.                                                                                                                                                                                                                                                                                                 |
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                                                                                                                                                                                                                                                                                                                          |
 | 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server/browser parity are implemented. Dashboard-local durable schedules/jobs, real worker execution, their `/jobs` operator UI, the first claim-fenced `system.host` cache provider, its cache browser, and bounded system metrics are implemented. Root composition covers every implemented Phase 3 operator domain, and Phase 4A now supplies the OpenClaw-cron half of `/jobs`. Full root parity and privileged/external providers remain later gates, so the Phase 3 exit stays open. |
-| 4 — Gateway and chat                | Started                              | The current installed OpenClaw source is hash-pinned again for the persistent protocol surface. Process-owned native Gateway lifecycle, durable realtime invalidation, bounded sessions and agent-availability projections, OpenClaw cron operations, worker task notifications, and the compact automation heartbeat are implemented. The durable chat journal/runtime, history reconciliation, attachments, full chat frontend, plan/companion/background-task controls, live smoke evidence, and the Phase 4 exit gate remain open.                                                                                                                                       |
+| 4 — Gateway and chat                | Started                              | The current installed OpenClaw source is hash-pinned for the persistent sessions, cron, chat, companion, task, and media surfaces. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, the compact heartbeat, the durable chat journal/runtime, bounded history and reconciliation, attachments/media proxy, and the `/chat` frontend are implemented. Recorded contract, protocol, service, browser, restart, load-boundary, and security tests cover the slice; live Gateway smoke/restart evidence and the Phase 4 exit gate remain open.                                                               |
 | 5 — Privileged and external domains | Not started                          | Worker-owned file/media, Docker, database, OpenClaw, GitHub, deployment, backup, and other privileged adapters remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
@@ -1177,3 +1177,71 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   reconciliation, streaming recovery, attachments/media policy, the virtualized chat frontend,
   plan/companion/background-task controls, and live Gateway smoke evidence remain the next large
   slice. The compact heartbeat also remains intentionally short of legacy schema-v3 parity.
+
+### 2026-08-09 — Phase 4B durable chat, media, companion, and background tasks
+
+- `chat_runs`, append-only `chat_run_events`, compact `chat_runtime_snapshots`, and the durable
+  per-session `chat_transcript_generations` pointer now implement
+  durable admission before dispatch, cross-actor idempotency conflict detection, strict positive
+  provider sequencing, restart watermarks, explicit cancellation races, bounded reconciliation,
+  and a 24-hour `unresolved` settlement when an externally dispatched outcome cannot be proven.
+  Database triggers reject admission-identity mutation, state-version/counter regression, settled
+  provider-identity mutation, snapshot replacement, and projection-watermark regression while
+  preserving bounded whole-run cascade retention.
+  Terminal retention is bounded and writes its `chat.runtime` snapshot marker in the same
+  transaction as pruning.
+- Compact, reset, and transcript delete persist a pending generation fence before Gateway
+  dispatch. Definite failure and unchanged compact reopen it; changed or ambiguous outcomes remain
+  blocked until an exact lifecycle event or strictly newer fresh snapshot advances the generation.
+  Process start, reconnect, replacement, and gaps reconcile active work against bounded canonical
+  provider truth before preserving it. Prior-generation reads, events, aliases, recovery rows,
+  companion asks, and browser cursors are retired rather than projected into the replacement
+  transcript.
+- Canonical history reads at most two provider pages and 512 KiB; one-message hydration is capped
+  at 1 MiB. Runtime catch-up retains every active identity, explicitly marks compacted/truncated
+  projections, and never fabricates a local run for provider-origin activity. Local and external
+  assistant/thinking bursts share the audited 150 ms invalidation window, while tool, item, plan,
+  gap, terminal, and shutdown boundaries flush deterministically. Payload-free `chat.runtime` and
+  `chat.history` markers force authoritative snapshots without persisting provider content in the
+  realtime outbox. Projection overflow beyond 256 KiB accumulated text, 512 parts, or a 512 KiB
+  encoded snapshot degrades detail without rolling back the authoritative journal or blocking
+  terminal reconciliation. Canonical history retires only exact provider-origin identities;
+  unmatched interrupted rows expire after 15 minutes.
+- Send owns the full admit/reserve/dispatch/ACK/settle sequence. Attachment tickets are one-shot,
+  actor/session/idempotency bound, limited to ten files and 16 MiB aggregate raw content, and
+  converted to base64 only on the private 24 MiB Gateway chat lane. Raw upload and media reads are
+  same-origin, capability checked, UUID-addressed, MIME-sniffed, transcript-revalidated, and
+  rendered only through the exact preview/download policy; binary content never enters tRPC,
+  SQLite, logs, or browser query caches. Serialized send admission is capped at 128 KiB UTF-8,
+  each journal event at 256 KiB, and each run journal at 1 MiB. Once dispatch may have happened,
+  an unknown outcome consumes the ticket immediately and reconciliation never redispatches it;
+  all post-dispatch settlement ignores caller cancellation.
+- Companion state remains source-audited session-scoped process memory, while each ask result is
+  returned only by its requester RPC. Server admission enforces one ask per session, six per
+  process, and four attempts per actor per rolling minute; duplicate resets are single-flight and
+  a confirmed reset immediately supersedes an active ask. Provider busy and local capacity become
+  a fixed 429, and ambiguous compute acknowledgements use only the allowlisted
+  `operation_outcome_unknown` reason.
+- OpenClaw background tasks expose bounded prompt-free lists, source-bounded detail, idempotent
+  absent cancellation, distinct terminal states, optional source timestamps with chronology checks,
+  and payload-free `openclaw.tasks` snapshot markers. Subscription failures are supervised and
+  restarted; confirmed or unknown cancellation invalidates the snapshot without leaking task
+  payloads through realtime delivery.
+- `/chat` consumes the bounded history/runtime/task procedures through an authenticated,
+  cross-route browser store, reducer, and one-tab realtime stream. It covers concurrent sends, streaming/thinking/tool
+  projections, cancellation and unknown outcomes, hydration placeholders, attachments, model and
+  session controls, companion/task panels, reconnect/reset, session switching, unread/follow, and
+  responsive desktop/mobile behavior. Live Gateway smoke evidence, restart during a real stream,
+  and the aggregate Phase 4 release gate remain open.
+- The legacy ElevenLabs STT/TTS paths are replaced in Phase 4 by three registered same-origin raw
+  routes: caller-scoped availability plus `chat:write` transcription and synthesis. The optional
+  redacted server credential never reaches the browser. Chrome/Firefox Opus WebM/Ogg and Safari
+  AAC MP4 (including fragmented `moof` media) are MIME/codec-sniffed and duration-checked before
+  transcription; Ogg/WebM timestamps are reconciled against cumulative intrinsic Opus packet
+  duration. Ordinary and fragmented AAC MP4 are independently bounded from the AAC-LC access-unit
+  count and sample rate, with sample-table/run byte totals reconciled to `mdat`; forged movie,
+  media, decode-time, timescale, or per-sample duration metadata therefore cannot bypass the 8
+  MiB/120-second cap. Synthesis is capped at 4000
+  characters/16 KiB input and 8 MiB MPEG output. Both lanes are abortable, concurrency/deadline
+  bounded, no-store, sanitized, and deliberately have no audio/text persistence or logging port.
+  Separate identity-bounded rolling per-principal request/work budgets cap paid STT and TTS compute.

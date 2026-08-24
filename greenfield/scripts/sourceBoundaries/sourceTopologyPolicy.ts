@@ -19,6 +19,7 @@ export type SourceRole =
     | "worker-app";
 
 const webApplicationFiles = new Set([
+    "src/app/dashboardChatRuntimeMaintenance.ts",
     "src/app/dashboardServer.ts",
     "src/app/server.ts",
     "src/app/trpcHttpHandler.ts",
@@ -26,6 +27,7 @@ const webApplicationFiles = new Set([
 ]);
 
 const applicationCompositionTestFiles: ReadonlySet<string> = new Set([
+    "src/app/dashboardChatRuntimeMaintenance.test.ts",
     "src/app/dashboardServer.test.ts",
     "src/app/dashboardServerProcess.test.ts",
     "src/app/databaseMaintenance.test.ts",

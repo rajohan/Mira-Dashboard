@@ -117,7 +117,9 @@ export function gatewaySessionMatchesFilter(
 }
 
 /** @returns Compact token-count copy that preserves unknown and explicit stale states. */
-export function gatewaySessionTokenLabel(session: GatewaySession): string {
+export function gatewaySessionTokenLabel(
+    session: Pick<GatewaySession, "contextTokens" | "totalTokens" | "totalTokensFresh">
+): string {
     if (session.totalTokens === undefined) return "Unknown";
     const formatter = new Intl.NumberFormat();
     const count = formatter.format(session.totalTokens);

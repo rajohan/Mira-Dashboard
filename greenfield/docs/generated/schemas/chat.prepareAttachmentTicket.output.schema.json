@@ -1,0 +1,53 @@
+{
+  "$id": "urn:mira-dashboard:chat.prepareAttachmentTicket.output",
+  "type": "object",
+  "properties": {
+    "expiresAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8640000000000000
+    },
+    "ticketId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "uploads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "attachmentId": {
+            "type": "string",
+            "minLength": 36,
+            "maxLength": 36,
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^\\/api\\/chat\\/attachments\\/[0-9a-f-]{36}\\/[0-9a-f-]{36}$"
+          }
+        },
+        "required": [
+          "attachmentId",
+          "uploadUrl"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 10
+    }
+  },
+  "required": [
+    "expiresAtMs",
+    "ticketId",
+    "uploads"
+  ],
+  "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally requires unique attachment IDs, exact same-origin ticket upload URLs, and the reviewed response byte budget.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

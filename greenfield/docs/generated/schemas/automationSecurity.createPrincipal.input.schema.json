@@ -10,6 +10,8 @@
           "agents:write",
           "cache:read",
           "cache:write",
+          "chat:read",
+          "chat:write",
           "gateway-sessions:read",
           "gateway-sessions:write",
           "jobs:read",
@@ -17,6 +19,8 @@
           "monitoring:write",
           "notifications:read",
           "notifications:write",
+          "openclaw-tasks:read",
+          "openclaw-tasks:write",
           "reports:read",
           "reports:write",
           "tasks:read",
@@ -24,7 +28,7 @@
         ],
         "type": "string"
       },
-      "maxItems": 15,
+      "maxItems": 19,
       "uniqueItems": true
     },
     "id": {

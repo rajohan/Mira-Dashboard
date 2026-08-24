@@ -18,10 +18,9 @@ interface ControlledModalProperties {
 function ControlledModal({ properties, updateProperties }: ControlledModalProperties) {
     const [open, setOpen] = useState(properties.open);
 
-    if (!open) {
-        return (
+    return (
+        <>
             <Button
-                autoFocus
                 onClick={() => {
                     setOpen(true);
                     updateProperties({ open: true });
@@ -30,19 +29,16 @@ function ControlledModal({ properties, updateProperties }: ControlledModalProper
             >
                 Open schedule details
             </Button>
-        );
-    }
-
-    return (
-        <Modal
-            {...properties}
-            onClose={() => {
-                properties.onClose();
-                setOpen(false);
-                updateProperties({ open: false });
-            }}
-            open={open}
-        />
+            <Modal
+                {...properties}
+                onClose={() => {
+                    properties.onClose();
+                    setOpen(false);
+                    updateProperties({ open: false });
+                }}
+                open={open}
+            />
+        </>
     );
 }
 
@@ -50,11 +46,7 @@ function RenderControlledModal(properties: ModalProperties) {
     const [, updateProperties] = useArgs<ModalProperties>();
 
     return (
-        <ControlledModal
-            key={String(properties.open)}
-            properties={properties}
-            updateProperties={updateProperties}
-        />
+        <ControlledModal properties={properties} updateProperties={updateProperties} />
     );
 }
 
@@ -67,7 +59,9 @@ const meta = {
         ),
         description: "Inspect the selected schedule before making changes.",
         onClose: fn(),
-        open: true,
+        // Keep autodocs readable. Each example exposes an explicit trigger instead
+        // of mounting a portalled dialog over the documentation page.
+        open: false,
         title: "Schedule details",
     },
     component: Modal,
@@ -98,6 +92,39 @@ export const NonDismissible: Story = {
     },
 };
 
+export const LongUnbrokenTitle: Story = {
+    args: {
+        description:
+            "A bounded dialog must keep every action reachable on narrow screens.",
+        title: `attachment-${"x".repeat(255)}.json`,
+    },
+    parameters: {
+        viewport: { defaultViewport: "mobile1" },
+    },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await userEvent.click(
+            canvas.getByRole("button", { name: "Open schedule details" })
+        );
+        const dialog = await waitFor(() =>
+            within(canvasElement.ownerDocument.body).getByRole("dialog")
+        );
+        const panel = within(dialog).getByTestId("modal-panel");
+        const close = within(dialog).getByRole("button", {
+            name: "Close dialog",
+        });
+        const viewportWidth = canvasElement.ownerDocument.documentElement.clientWidth;
+
+        await expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
+        await expect(panel.getBoundingClientRect().right).toBeLessThanOrEqual(
+            viewportWidth
+        );
+        await expect(close.getBoundingClientRect().right).toBeLessThanOrEqual(
+            viewportWidth
+        );
+    },
+};
+
 export const DismissAndRestoreFocus: Story = {
     args: {
         open: false,
@@ -110,8 +137,8 @@ export const DismissAndRestoreFocus: Story = {
 
         await userEvent.click(openButton);
         const dialog = await waitFor(() => {
-            const portalRoot = canvasElement.ownerDocument.getElementById(
-                "headlessui-portal-root"
+            const portalRoot = canvasElement.ownerDocument.querySelector(
+                "#headlessui-portal-root"
             );
 
             if (!(portalRoot instanceof HTMLElement)) {

@@ -1,6 +1,7 @@
 import type {
     ContractAccess,
     ProcedureContract,
+    RawHttpBodyContract,
     RawHttpContract,
     RealtimeEventContract,
 } from "../../src/contracts/registry.ts";
@@ -101,6 +102,7 @@ export interface ConfigurationDocumentationInput {
         readonly test: boolean;
     };
     readonly restartRequired: boolean;
+    readonly required: boolean;
     readonly roles: readonly string[];
     readonly secret: boolean;
     readonly validationConstraints: string;
@@ -135,6 +137,11 @@ function assertConfigurationMetadata(
     if (entry.defaultValue !== null && typeof entry.defaultValue !== "string") {
         throw new Error(
             `Application configuration metadata is missing ${prefix}.defaultValue`
+        );
+    }
+    if (typeof entry.required !== "boolean") {
+        throw new TypeError(
+            `Application configuration metadata is missing ${prefix}.required`
         );
     }
     if (
@@ -193,6 +200,7 @@ function allowedValuesLabel(entry: ConfigurationDocumentationInput): string {
 }
 
 function defaultBehaviorLabel(entry: ConfigurationDocumentationInput): string {
+    if (!entry.required && entry.defaultValue === null) return "Optional; no default";
     if (entry.secret) {
         return entry.defaultValue === null
             ? "Required; value withheld"
@@ -274,6 +282,34 @@ export function renderProcedures(contracts: readonly ProcedureContract[]): strin
     return `${documentHeader("tRPC Procedures", "bun run docs:generate")}| Procedure | Kind | Domain | Access | Input | Output | Expected errors | Client action reasons | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
+function rawHttpBodyLabel(body: RawHttpBodyContract): string {
+    if (body.kind === "none") return "No body";
+    const contentTypes = body.contentTypes
+        .map((contentType) => `\`${markdownTableCell(contentType)}\``)
+        .join(", ");
+    if (body.kind === "schema") {
+        return `[schema](./schemas/${body.schemaId}.schema.json) — ${contentTypes}`;
+    }
+    const transfer = body.transfer === "buffered" ? "Buffered" : "Streamed";
+    return `${transfer} binary, at most ${body.maximumBytes} bytes — ${contentTypes}`;
+}
+
+function rawHttpPathLabel(contract: RawHttpContract): string {
+    if (contract.query === undefined || contract.query.parameters.length === 0) {
+        return contract.path;
+    }
+    const query = contract.query.parameters
+        .map((parameter) => {
+            const value =
+                parameter.values.length === 1
+                    ? parameter.values[0]
+                    : `{${parameter.values.join(",")}}`;
+            return `${parameter.name}=${value}${parameter.required ? "" : "?"}`;
+        })
+        .join("&");
+    return `${contract.path}?${query}`;
+}
+
 /**
  * Renders raw HTTP route contracts as Markdown.
  * @param contracts Implemented raw HTTP contracts.
@@ -285,14 +321,14 @@ export function renderRawHttp(contracts: readonly RawHttpContract[]): string {
             `${left.path}:${left.method}`.localeCompare(`${right.path}:${right.method}`)
         )
         .map((contract) => {
-            const response =
-                contract.response.kind === "schema"
-                    ? `[response](./schemas/${contract.response.schemaId}.schema.json)`
-                    : "No body";
-            return `| ${contract.method} | \`${contract.path}\` | ${accessLabel(contract.access)} | ${contract.statusCodes.join(", ")} | ${response} | ${contract.summary} |`;
+            const range =
+                contract.rangeRequests === "single-byte-range"
+                    ? "Single byte range"
+                    : "None";
+            return `| ${contract.method} | \`${markdownTableCell(rawHttpPathLabel(contract))}\` | ${accessLabel(contract.access)} | ${contract.statusCodes.join(", ")} | ${rawHttpBodyLabel(contract.requestBody)} | ${rawHttpBodyLabel(contract.response)} | ${range} | ${contract.summary} |`;
         });
 
-    return `${documentHeader("Raw HTTP Routes", "bun run docs:generate")}| Method | Path | Access | Status | Response | Summary |\n| --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
+    return `${documentHeader("Raw HTTP Routes", "bun run docs:generate")}| Method | Path | Access | Status | Request body | Response | Range requests | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /**

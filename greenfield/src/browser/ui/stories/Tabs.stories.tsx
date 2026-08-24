@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
 import type { ComponentProps } from "react";
 import { useState } from "react";
-import { useArgs } from "storybook/preview-api";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import { Tabs, type TabDefinition } from "../Tabs.tsx";
@@ -43,14 +42,9 @@ const workerTabs = Object.freeze([
 interface WorkerTabsStoryProperties {
     readonly className: string;
     readonly properties: WorkerTabsProperties;
-    readonly updateProperties: (properties: Partial<WorkerTabsProperties>) => void;
 }
 
-function WorkerTabsStory({
-    className,
-    properties,
-    updateProperties,
-}: WorkerTabsStoryProperties) {
+function WorkerTabsStory({ className, properties }: WorkerTabsStoryProperties) {
     const [value, setValue] = useState(properties.value);
 
     return (
@@ -59,7 +53,6 @@ function WorkerTabsStory({
                 {...properties}
                 onChange={(nextValue) => {
                     setValue(nextValue);
-                    updateProperties({ value: nextValue });
                     properties.onChange(nextValue);
                 }}
                 value={value}
@@ -69,27 +62,21 @@ function WorkerTabsStory({
 }
 
 function RenderControlledWorkerTabs(properties: WorkerTabsProperties) {
-    const [, updateProperties] = useArgs<WorkerTabsProperties>();
-
     return (
         <WorkerTabsStory
             className="w-full max-w-3xl"
             key={properties.value}
             properties={properties}
-            updateProperties={updateProperties}
         />
     );
 }
 
 function RenderNarrowWorkerTabs(properties: WorkerTabsProperties) {
-    const [, updateProperties] = useArgs<WorkerTabsProperties>();
-
     return (
         <WorkerTabsStory
             className="w-56 max-w-full"
             key={properties.value}
             properties={properties}
-            updateProperties={updateProperties}
         />
     );
 }
@@ -115,6 +102,24 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const SelectedTabKeepsItsSurfaceOnHover: Story = {
+    play: async ({ canvasElement }) => {
+        const overview = within(canvasElement).getByRole("tab", {
+            name: "Overview",
+        });
+        const selectedBackground = getComputedStyle(overview).backgroundColor;
+        const selectedText = getComputedStyle(overview).color;
+
+        await userEvent.hover(overview);
+        await waitFor(async () => {
+            await expect(getComputedStyle(overview).backgroundColor).toBe(
+                selectedBackground
+            );
+            await expect(getComputedStyle(overview).color).toBe(selectedText);
+        });
+    },
+};
 
 export const Vertical: Story = {
     args: {

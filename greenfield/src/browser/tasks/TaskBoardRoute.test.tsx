@@ -79,6 +79,7 @@ interface TransportCall {
 
 class TaskTransport implements DashboardTrpcTransport {
     readonly calls: TransportCall[] = [];
+    taskListQueryResponse: Promise<unknown> | undefined;
     tasks: TaskDetail[] = [initialTask];
     updates: TaskProgressUpdate[] = [];
 
@@ -169,6 +170,9 @@ class TaskTransport implements DashboardTrpcTransport {
                 return Promise.resolve(this.tasks.find((task) => task.id === id));
             }
             case "tasks.list": {
+                if (this.taskListQueryResponse !== undefined) {
+                    return this.taskListQueryResponse;
+                }
                 const summaries: TaskSummary[] = this.tasks.map(
                     ({ bodyMarkdown: _bodyMarkdown, ...task }) => task
                 );
@@ -194,8 +198,10 @@ const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
 const collectionRegistries: DashboardBrowserCollections[] = [];
 const mountedViews: ReturnType<typeof render>[] = [];
 
-function renderTaskRoute(transport: TaskTransport) {
-    const queryClient = createDashboardQueryClient();
+function renderTaskRoute(
+    transport: TaskTransport,
+    queryClient = createDashboardQueryClient()
+) {
     queryClients.push(queryClient);
     const router = createDashboardRouter(
         createMemoryHistory({ initialEntries: ["/tasks"] })
@@ -241,7 +247,31 @@ describe("Dashboard task route", () => {
         expect(
             screen.getByRole("button", { name: "Filter tasks by automation" })
         ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "New task" })).toBeTruthy();
+        expect(screen.getByText(/Updates automatically from task events/u)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(screen.getByText("Build task domain")).toBeTruthy();
+    });
+
+    test("retains explicit retry for an initial list failure", async () => {
+        const transport = new TaskTransport();
+        const listRequest = Promise.withResolvers<unknown>();
+        transport.taskListQueryResponse = listRequest.promise;
+        const queryClient = createDashboardQueryClient();
+        queryClient.setQueryDefaults(taskQueryKey, { retry: false });
+        renderTaskRoute(transport, queryClient);
+
+        await act(async () => {
+            listRequest.reject(new TypeError("private task list failure"));
+            await listRequest.promise.catch(() => {});
+        });
+        expect(await screen.findByRole("alert")).toBeTruthy();
+        expect(screen.queryByText(/private task list failure/u)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+
+        transport.taskListQueryResponse = undefined;
+        await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+        expect(await screen.findByText("Build task domain")).toBeTruthy();
     });
 
     test("opens and edits the task creation form", async () => {

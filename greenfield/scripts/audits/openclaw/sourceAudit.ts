@@ -43,6 +43,21 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "chat-send-handler",
     },
     {
+        fileNamePattern: /^managed-image-attachments-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            'const OUTGOING_IMAGE_ROUTE_PREFIX = "/api/chat/media/outgoing"',
+            "const MANAGED_OUTGOING_ATTACHMENT_ID_RE",
+            "async function handleManagedOutgoingMediaHttpRequest",
+            "resolveByteResponse({",
+        ],
+        role: "managed-outgoing-media",
+    },
+    {
+        fileNamePattern: /^models-[A-Za-z0-9_-]+\.js$/u,
+        markers: ["const modelsHandlers", '"models.list"', "buildModelsListResult"],
+        role: "models-handlers",
+    },
+    {
         fileNamePattern: /^server-chat-[A-Za-z0-9_-]+\.js$/u,
         markers: ["flushBufferedChatDeltaIfNeeded", "run.deltaSentAt"],
         role: "chat-streaming",
@@ -272,6 +287,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "session-change-event",
     },
     {
+        fileNamePattern: /^session-event-payload-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function buildGatewaySessionEventFields",
+            "updatedAt: sessionRow.updatedAt",
+            "sessionId: sessionRow.sessionId",
+        ],
+        role: "session-event-payload",
+    },
+    {
         fileNamePattern: /^lifecycle-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             "SESSION_LIFECYCLE_CHANGED_ERROR_REASON",
@@ -288,6 +312,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "totalCount: list.totalCount",
         ],
         role: "session-list-projection",
+    },
+    {
+        fileNamePattern: /^session-reset-service-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "async function performGatewaySessionReset",
+            "const nextSessionId = currentEntry?.sessionId ?? randomUUID()",
+            "lifecycleRevision: randomUUID()",
+        ],
+        role: "session-reset-service",
     },
     {
         fileNamePattern: /^sessions-shared-[A-Za-z0-9_-]+\.js$/u,
@@ -869,6 +902,836 @@ function assertTaskNotificationChatSendSemantics(
     };
 }
 
+function assertPhase4ChatAdapterSemantics(
+    artifacts: readonly LoadedSourceArtifact[]
+): Pick<SourceAuditResult["chat"], "adapter" | "methodAccess"> {
+    const descriptors = artifactByRole(artifacts, "method-descriptors").contents;
+    for (const [method, scope] of [
+        ["chat.abort", "operator.write"],
+        ["chat.history", "operator.read"],
+        ["chat.message.get", "operator.read"],
+        ["chat.send", "operator.write"],
+        ["models.list", "operator.read"],
+        ["sessions.companion.ask", "operator.read"],
+        ["sessions.companion.state", "operator.read"],
+        ["sessions.messages.subscribe", "operator.read"],
+        ["sessions.messages.unsubscribe", "operator.read"],
+    ] as const) {
+        assertMethodPermission(descriptors, method, scope, false);
+    }
+    assertMethodPermission(
+        descriptors,
+        "sessions.companion.reset",
+        "operator.write",
+        true
+    );
+    assertMethodDescriptorScope(descriptors, "sessions.patch", "dynamic");
+
+    const protocol = artifactByRole(artifacts, "protocol-schemas").contents;
+    const historyParams = boundedSourceRegion(
+        protocol,
+        "const ChatHistoryParamsSchema = closedObject({",
+        "/** Lightweight chat metadata request",
+        4 * 1024,
+        "chat.history adapter params"
+    );
+    assertExactIndentedFields(
+        historyParams,
+        1,
+        [
+            "agentId",
+            "limit",
+            "maxChars",
+            "messageId",
+            "offset",
+            "sessionId",
+            "sessionKey",
+        ],
+        "chat.history adapter params"
+    );
+    assertRequiredMarkers(historyParams, "chat.history bounds", [
+        "minimum: 1",
+        "maximum: 1e3",
+        "maximum: 5e5",
+    ]);
+
+    const messageGetParams = boundedSourceRegion(
+        protocol,
+        "const ChatMessageGetParamsSchema = closedObject({",
+        "/** Permissive attachment envelope",
+        4 * 1024,
+        "chat.message.get adapter"
+    );
+    assertIncludesIndentedFields(
+        messageGetParams,
+        1,
+        ["agentId", "maxChars", "messageId", "sessionKey"],
+        "chat.message.get params"
+    );
+    assertRequiredMarkers(messageGetParams, "chat.message.get result", [
+        'Type.Literal("not_found")',
+        'Type.Literal("not_visible")',
+        'Type.Literal("oversized")',
+    ]);
+
+    const companionExchange = boundedSourceRegion(
+        protocol,
+        "const SessionCompanionExchangeSchema = closedObject({",
+        "/** Asks the read-only companion",
+        2 * 1024,
+        "sessions.companion exchange"
+    );
+    assertExactIndentedFields(
+        companionExchange,
+        1,
+        ["answer", "question", "ts"],
+        "sessions.companion exchange"
+    );
+    const companionAskParams = boundedSourceRegion(
+        protocol,
+        "const SessionsCompanionAskParamsSchema = closedObject({",
+        "/** Companion answer returned",
+        2 * 1024,
+        "sessions.companion.ask params"
+    );
+    assertExactIndentedFields(
+        companionAskParams,
+        1,
+        ["question", "sessionKey"],
+        "sessions.companion.ask params"
+    );
+    const companionAskResult = boundedSourceRegion(
+        protocol,
+        "const SessionsCompanionAskResultSchema = closedObject({",
+        "/** Selects the in-memory companion thread",
+        2 * 1024,
+        "sessions.companion.ask result"
+    );
+    assertExactIndentedFields(
+        companionAskResult,
+        1,
+        ["answer", "ts"],
+        "sessions.companion.ask result"
+    );
+    assertRequiredMarkers(protocol, "sessions.companion state/reset protocol", [
+        "const SessionsCompanionStateParamsSchema = closedObject({ sessionKey: NonEmptyString });",
+        "const SessionsCompanionStateResultSchema = closedObject({ exchanges: Type.Array(SessionCompanionExchangeSchema, { maxItems: 24 }) });",
+        "const SessionsCompanionResetParamsSchema = closedObject({ sessionKey: NonEmptyString });",
+        "const SessionsCompanionResetResultSchema = closedObject({ ok: Type.Literal(true) });",
+    ]);
+    const companionRpc = artifactByRole(artifacts, "session-companion-rpc").contents;
+    assertRequiredMarkers(companionRpc, "sessions.companion RPC acknowledgements", [
+        "if (!client?.connId)",
+        "connId: client.connId",
+        "respond(true, await context.sessionCompanion.ask({",
+        "respond(true, context.sessionCompanion.state(sessionKey))",
+        "context.sessionCompanion.reset(sessionKey)",
+        "respond(true, { ok: true })",
+    ]);
+    const companionRuntime = artifactByRole(artifacts, "runtime-subscriptions").contents;
+    const companionReset = boundedSourceRegion(
+        companionRuntime,
+        "const reset = (sessionKey) => {",
+        "return {",
+        2 * 1024,
+        "sessions.companion reset"
+    );
+    assertRequiredMarkers(companionReset, "sessions.companion reset", [
+        "askRuntime.cancel(key)",
+        "threads.delete(key)",
+    ]);
+    if (
+        companionReset.indexOf("askRuntime.cancel(key)") >
+        companionReset.indexOf("threads.delete(key)")
+    ) {
+        throw new Error(
+            "OpenClaw sessions.companion reset no longer cancels the active ask before deleting its thread"
+        );
+    }
+    assertRequiredMarkers(companionRuntime, "sessions.companion process state", [
+        "const threads = /* @__PURE__ */ new Map()",
+        "const thread = threads.get(key)",
+        "state(sessionKey)",
+    ]);
+
+    const attachmentSchema = boundedSourceRegion(
+        protocol,
+        "const ChatAttachmentSchema = Type.Object({",
+        "/** Attachment list shared by chat.send",
+        4 * 1024,
+        "chat.send attachment envelope"
+    );
+    assertIncludesIndentedFields(
+        attachmentSchema,
+        1,
+        ["content", "fileName", "mimeType", "sizeBytes", "type"],
+        "chat.send attachment envelope"
+    );
+    assertRequiredMarkers(attachmentSchema, "chat.send attachment openness", [
+        "additionalProperties: true",
+    ]);
+
+    const sendParams = boundedSourceRegion(
+        protocol,
+        "const ChatSendParamsSchema = closedObject({",
+        "/** Cancels the active or named run for a chat session. */",
+        8 * 1024,
+        "chat.send adapter params"
+    );
+    assertRequiredMarkers(sendParams, "chat.send adapter params", [
+        "sessionKey: ChatSendSessionKeyString",
+        "message: Type.String()",
+        "thinking: Type.Optional(Type.String())",
+        'fastMode: Type.Optional(Type.Union([Type.Boolean(), Type.Literal("auto")]))',
+        "queueMode: Type.Optional(Type.String({ enum:",
+        "attachments: Type.Optional(ChatAttachmentsSchema)",
+        "idempotencyKey: NonEmptyString",
+    ]);
+
+    const abortParams = boundedSourceRegion(
+        protocol,
+        "const ChatAbortParamsSchema = closedObject({",
+        "/** Inserts an operator-visible synthetic message",
+        2 * 1024,
+        "chat.abort adapter params"
+    );
+    assertExactIndentedFields(
+        abortParams,
+        1,
+        ["agentId", "preserveSideRuns", "runId", "sessionKey"],
+        "chat.abort adapter params"
+    );
+
+    const modelChoice = boundedSourceRegion(
+        protocol,
+        "const ModelChoiceSchema = closedObject({",
+        "/** Semantic owner of an agent roster entry. */",
+        4 * 1024,
+        "models.list row"
+    );
+    assertIncludesIndentedFields(
+        modelChoice,
+        1,
+        ["id", "name", "provider", "reasoning"],
+        "models.list row"
+    );
+    const modelsParams = boundedSourceRegion(
+        protocol,
+        "const ModelsListParamsSchema = closedObject({",
+        "/** Reads model-provider credential health",
+        2 * 1024,
+        "models.list params"
+    );
+    assertExactIndentedFields(
+        modelsParams,
+        1,
+        ["includeProviderCapabilities", "view"],
+        "models.list params"
+    );
+    assertRequiredMarkers(modelsParams, "models.list configured view", [
+        'Type.Literal("configured")',
+    ]);
+    assertRequiredMarkers(
+        artifactByRole(artifacts, "models-handlers").contents,
+        "models.list handler",
+        [
+            '"models.list": async',
+            'assertValidParams(params, validateModelsListParams, "models.list", respond)',
+            "await buildModelsListResult({",
+        ]
+    );
+
+    const messageSubscribeParams = boundedSourceRegion(
+        protocol,
+        "const SessionsMessagesSubscribeParamsSchema = closedObject({",
+        "/** Removes a live message subscription",
+        2 * 1024,
+        "sessions.messages.subscribe params"
+    );
+    assertExactIndentedFields(
+        messageSubscribeParams,
+        1,
+        ["agentId", "includeApprovals", "key"],
+        "sessions.messages.subscribe params"
+    );
+    const messageUnsubscribeParams = boundedSourceRegion(
+        protocol,
+        "const SessionsMessagesUnsubscribeParamsSchema = closedObject({",
+        "/** Aborts the active or named run for a session. */",
+        2 * 1024,
+        "sessions.messages.unsubscribe params"
+    );
+    assertExactIndentedFields(
+        messageUnsubscribeParams,
+        1,
+        ["agentId", "key"],
+        "sessions.messages.unsubscribe params"
+    );
+
+    const chatEvents = boundedSourceRegion(
+        protocol,
+        "const ChatEventBaseSchema = {",
+        "//#endregion",
+        8 * 1024,
+        "chat private event union"
+    );
+    assertRequiredMarkers(chatEvents, "chat private event union", [
+        'state: Type.Literal("status")',
+        'state: Type.Literal("delta")',
+        'state: Type.Literal("final")',
+        'state: Type.Literal("aborted")',
+        'state: Type.Literal("error")',
+        "const ChatEventSchema = Type.Union([",
+    ]);
+
+    const chatHandler = artifactByRole(artifacts, "chat-send-handler").contents;
+    assertRequiredMarkers(chatHandler, "chat history and message hydration", [
+        'const max = Math.min(1e3, typeof limit === "number" ? limit : 200)',
+        'return typeof metadata?.id === "string" ? metadata.id : void 0',
+        "const nextOffset = hasMore ? candidateNextOffset : void 0",
+        "...hasMore ? { nextOffset } : {}",
+        "...hasMore !== void 0 ? { hasMore } : {}",
+        "sessionKey,",
+        "sessionId,",
+        "messages: bounded.messages",
+        'unavailableReason: "not_found"',
+        'unavailableReason: "not_visible"',
+        'unavailableReason: "oversized"',
+    ]);
+    assertRequiredMarkers(chatHandler, "chat in-flight history projection", [
+        "sessionInfo.activeRunIds = activeRunState.runIds",
+        "const boundedInFlightRun = boundInFlightRunSnapshotForChatHistory({",
+        "snapshot: resolveInFlightRunSnapshot({",
+        "messages: bounded.messages",
+        "...boundedInFlightRun ? { inFlightRun: boundedInFlightRun } : {}",
+    ]);
+    const inFlightRunProjection = artifactByRole(
+        artifacts,
+        "chat-run-projection"
+    ).contents;
+    assertRequiredMarkers(inFlightRunProjection, "chat in-flight run selection", [
+        "for (const [runId, entry] of params.chatAbortControllers)",
+        'entry.kind === "agent"',
+        "entry.startedAtMs > best.startedAtMs",
+        "entry.startedAtMs === best.startedAtMs && runId > best.runId",
+        "const run = params.chatRunState.runs.get(best.runId)",
+    ]);
+    assertRequiredMarkers(inFlightRunProjection, "chat in-flight page budget", [
+        "const messagesBytes = jsonUtf8Bytes(params.messages)",
+        "messagesBytes + jsonUtf8Bytes(params.snapshot) <= params.maxBytes",
+        "messagesBytes + jsonUtf8Bytes(withoutText) <= params.maxBytes",
+        "messagesBytes + jsonUtf8Bytes(withoutPlan) <= params.maxBytes",
+    ]);
+    assertRequiredMarkers(chatHandler, "chat abort acknowledgement", [
+        'assertValidParams(params, validateChatAbortParams, "chat.abort", respond)',
+        "aborted: runIds.length > 0",
+        "runIds",
+    ]);
+
+    const sessionsHandler = artifactByRole(artifacts, "sessions-handlers").contents;
+    const messageSubscriptions = boundedSourceRegion(
+        sessionsHandler,
+        '"sessions.messages.subscribe":',
+        "//#region src/gateway/server-methods/session-typing-state.ts",
+        12 * 1024,
+        "session-scoped chat subscription handlers"
+    );
+    assertRequiredMarkers(
+        messageSubscriptions,
+        "session-scoped chat subscription acknowledgements",
+        [
+            "context.subscribeSessionMessageEvents(connId, subscriptionKey)",
+            "subscribed: true",
+            "key: canonicalKey",
+            '"sessions.messages.unsubscribe":',
+            "context.unsubscribeSessionMessageEvents(connId, subscriptionKey)",
+            "subscribed: false",
+        ]
+    );
+
+    const patchParams = boundedSourceRegion(
+        protocol,
+        "const SessionsPatchParamsSchema = closedObject({",
+        "/** Updates or clears one plugin namespace value",
+        12 * 1024,
+        "chat settings params"
+    );
+    assertRequiredMarkers(patchParams, "chat settings params", [
+        "key: NonEmptyString",
+        "expectedSessionId: Type.Optional(NonEmptyString)",
+        "thinkingLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()]))",
+        "fastMode: Type.Optional(Type.Union([",
+        "model: Type.Optional(Type.Union([NonEmptyString, Type.Null()]))",
+    ]);
+    const patchScopes = boundedSourceRegion(
+        artifactByRole(artifacts, "method-scopes").contents,
+        "* sessions.patch fields a write-scoped operator may mutate",
+        "function resolveSessionsCreateRequiredScopes",
+        4 * 1024,
+        "chat settings scope"
+    );
+    assertRequiredMarkers(patchScopes, "chat settings admin scope", [
+        "Any other field (model, sendPolicy, tool inheritance,",
+        "Object.keys(params).every",
+        "? [WRITE_SCOPE] : [ADMIN_SCOPE]",
+    ]);
+    if (
+        ["model", "thinkingLevel", "fastMode", "expectedSessionId"].some((field) =>
+            new RegExp(`^[\\t ]*"${field}",[\\t ]*$`, "mu").test(patchScopes)
+        )
+    ) {
+        throw new Error("OpenClaw chat settings no longer require operator.admin");
+    }
+    const patchHandler = boundedSourceRegion(
+        sessionsHandler,
+        '"sessions.patch": async',
+        '"sessions.pluginPatch": async',
+        24 * 1024,
+        "chat settings acknowledgement"
+    );
+    assertRequiredMarkers(patchHandler, "chat settings acknowledgement", [
+        "p.expectedSessionId !== void 0 && currentLifecycleEntry?.sessionId !== p.expectedSessionId",
+        "entry: applied.entry",
+        "resolved: {",
+        "model: resolvedDisplayModel.model",
+        "thinkingLevel: thinkingProjection.effectiveThinkingLevel",
+    ]);
+
+    const streaming = artifactByRole(artifacts, "chat-streaming").contents;
+    const deltaDelivery = boundedSourceRegion(
+        streaming,
+        "const flushPayload = {",
+        "run.deltaLastBroadcastLen = text.length",
+        4 * 1024,
+        "chat delta backpressure"
+    );
+    assertRequiredMarkers(deltaDelivery, "chat delta backpressure", [
+        'state: "delta"',
+        "dropIfSlow: true",
+    ]);
+    const terminalDelivery = boundedSourceRegion(
+        streaming,
+        "const emitChatTerminal =",
+        "const sendAgentPayload =",
+        8 * 1024,
+        "chat terminal backpressure"
+    );
+    assertRequiredMarkers(terminalDelivery, "chat terminal backpressure", [
+        "flushBufferedChatDeltaIfNeeded",
+        'state: jobState === "done" ? "final" : "aborted"',
+        'state: "error"',
+        "sendChatPayload(sessionKey, payload, opts)",
+    ]);
+    if (terminalDelivery.includes("dropIfSlow: true")) {
+        throw new Error("OpenClaw chat terminal delivery no longer closes slow sockets");
+    }
+
+    const media = artifactByRole(artifacts, "managed-outgoing-media").contents;
+    const mediaHandler = boundedSourceRegion(
+        media,
+        "async function handleManagedOutgoingMediaHttpRequest",
+        "//#endregion",
+        16 * 1024,
+        "managed outgoing media handler"
+    );
+    assertRequiredMarkers(media, "managed outgoing media identity", [
+        'const OUTGOING_IMAGE_ROUTE_PREFIX = "/api/chat/media/outgoing"',
+        "const MANAGED_OUTGOING_ATTACHMENT_ID_RE = /^[0-9a-f]",
+        "async function recordMatchesTranscriptMessage",
+        "return `${OUTGOING_IMAGE_ROUTE_PREFIX}/${encodeURIComponent(sessionKey)}/${attachmentId}/${variant}`",
+    ]);
+    assertRequiredMarkers(mediaHandler, "managed outgoing media authorization", [
+        'req.method !== "GET" && req.method !== "HEAD"',
+        "MANAGED_OUTGOING_ATTACHMENT_ID_RE.test(attachmentId)",
+        "authorizeGatewayHttpRequestOrReply({",
+        'authorizeOperatorScopesForMethod("chat.history"',
+        "resolveOpenAiCompatibleHttpSenderIsOwner",
+        "record.sessionKey !== sessionKey",
+        "recordMatchesTranscriptMessage(record)",
+        "openLocalFileSafely",
+        "resolveByteResponse({",
+        "rangeHeader: req.headers.range",
+    ]);
+
+    return {
+        adapter: {
+            lanes: {
+                abort: "one-shot-write",
+                companionAsk: "one-shot-read-mutation",
+                companionReset: "one-shot-write",
+                companionState: "persistent-read",
+                history: "persistent-read",
+                messageGet: "persistent-read",
+                modelsList: "persistent-read",
+                send: "one-shot-write",
+                settings: "one-shot-admin",
+                subscription: "private-session-scoped",
+            },
+            media: {
+                attachmentId: "uuidv4",
+                bearerServerSide: true,
+                ownerRequired: true,
+                rangeRequests: true,
+                routePrefix: "/api/chat/media/outgoing",
+                transcriptAssociationRequired: true,
+                variant: "full",
+            },
+            methods: {
+                abort: {
+                    method: "chat.abort",
+                    requestParams: ["preserveSideRuns", "runId", "sessionKey"],
+                    resultFields: ["aborted", "ok", "runIds"],
+                },
+                companionAsk: {
+                    connectionRequired: true,
+                    method: "sessions.companion.ask",
+                    requestParams: ["question", "sessionKey"],
+                    resultFields: ["answer", "ts"],
+                },
+                companionReset: {
+                    method: "sessions.companion.reset",
+                    requestParams: ["sessionKey"],
+                    resetCancelsActiveAsk: true,
+                    resultFields: ["ok"],
+                },
+                companionState: {
+                    connectionIndependent: true,
+                    exchangeFields: ["answer", "question", "ts"],
+                    method: "sessions.companion.state",
+                    requestParams: ["sessionKey"],
+                    resultFields: ["exchanges"],
+                },
+                history: {
+                    defaultLimit: 200,
+                    inFlightRun: {
+                        boundedAgainstPageMessages: true,
+                        exactValueStableAcrossPages: false,
+                        multipleActiveRunsPossible: true,
+                        recomputedPerRequest: true,
+                        selection: "newest-visible-run",
+                        tieBreak: "runId-descending",
+                    },
+                    maximumLimit: 1000,
+                    messageIdentityPath: "__openclaw.id",
+                    messageOrder: "chronological",
+                    method: "chat.history",
+                    pagination: {
+                        hasMoreRequiresNextOffset: true,
+                        nextOffsetOnlyWhenHasMore: true,
+                        offsetDirection: "older-from-recent-tail",
+                    },
+                    possibleResponseFields: [
+                        "completeSnapshot",
+                        "defaults",
+                        "fastMode",
+                        "hasMore",
+                        "inFlightRun",
+                        "messages",
+                        "nextOffset",
+                        "offset",
+                        "sessionId",
+                        "sessionInfo",
+                        "sessionKey",
+                        "thinkingLevel",
+                        "toolOverrides",
+                        "totalMessages",
+                        "verboseLevel",
+                    ],
+                    requestParams: [
+                        "agentId",
+                        "limit",
+                        "maxChars",
+                        "messageId",
+                        "offset",
+                        "sessionId",
+                        "sessionKey",
+                    ],
+                    sessionIdentity: {
+                        requestedKeyEchoed: true,
+                        sessionIdOptional: true,
+                    },
+                },
+                messageGet: {
+                    messageIdentityPath: "__openclaw.id",
+                    method: "chat.message.get",
+                    requestParams: ["agentId", "maxChars", "messageId", "sessionKey"],
+                    successFields: ["message", "ok"],
+                    unavailableFields: ["ok", "unavailableReason"],
+                    unavailableReasons: ["not_found", "not_visible", "oversized"],
+                },
+                modelsList: {
+                    method: "models.list",
+                    requestParams: ["includeProviderCapabilities", "view"],
+                    rowFields: ["id", "name", "provider", "reasoning"],
+                },
+                send: {
+                    acknowledgedStatuses: ["in_flight", "ok", "started"],
+                    attachmentFields: [
+                        "content",
+                        "fileName",
+                        "mimeType",
+                        "sizeBytes",
+                        "type",
+                    ],
+                    idempotencyKeyIsRunId: true,
+                    method: "chat.send",
+                },
+                settings: {
+                    generationAcknowledgement: {
+                        requestField: "expectedSessionId",
+                        requiredOnFencedMutation: true,
+                        responseField: "entry.sessionId",
+                    },
+                    method: "sessions.patch",
+                    requestParams: [
+                        "expectedSessionId",
+                        "fastMode",
+                        "key",
+                        "model",
+                        "thinkingLevel",
+                    ],
+                    requiredScope: "operator.admin",
+                },
+            },
+            subscription: {
+                eventNames: ["agent", "chat"],
+                methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+                requiresSessionMessageSubscription: true,
+                slowDeltaPolicy: "drop-event",
+                slowTerminalPolicy: "close-socket",
+                states: ["aborted", "delta", "error", "final", "status"],
+            },
+        },
+        methodAccess: [
+            {
+                controlPlaneWrite: false,
+                name: "chat.abort",
+                scope: "operator.write",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "chat.history",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "chat.message.get",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "chat.send",
+                scope: "operator.write",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "models.list",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.companion.ask",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: true,
+                name: "sessions.companion.reset",
+                scope: "operator.write",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.companion.state",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.messages.subscribe",
+                scope: "operator.read",
+            },
+            {
+                controlPlaneWrite: false,
+                name: "sessions.messages.unsubscribe",
+                scope: "operator.read",
+            },
+        ],
+    };
+}
+
+function assertPhase4TaskAdapterSemantics(
+    artifacts: readonly LoadedSourceArtifact[]
+): SourceAuditResult["tasks"]["adapter"] {
+    const protocol = artifactByRole(artifacts, "protocol-schemas").contents;
+    const summary = boundedSourceRegion(
+        protocol,
+        "const TaskSummarySchema = closedObject({",
+        "/** Task list filters with bounded pagination. */",
+        8 * 1024,
+        "task summary"
+    );
+    const summaryFields = [
+        "agentId",
+        "childSessionKey",
+        "createdAt",
+        "endedAt",
+        "error",
+        "flowId",
+        "id",
+        "kind",
+        "lastToolName",
+        "ownerKey",
+        "parentTaskId",
+        "progressSummary",
+        "prompt",
+        "runId",
+        "runtime",
+        "sessionKey",
+        "sourceId",
+        "startedAt",
+        "status",
+        "taskId",
+        "terminalSummary",
+        "title",
+        "toolUseCount",
+        "updatedAt",
+    ] as const;
+    assertExactIndentedFields(summary, 1, summaryFields, "task summary");
+    assertRequiredMarkers(summary, "task summary timestamps", [
+        "createdAt: Type.Optional(TimestampSchema)",
+        "updatedAt: Type.Optional(TimestampSchema)",
+        "startedAt: Type.Optional(TimestampSchema)",
+        "endedAt: Type.Optional(TimestampSchema)",
+        "prompt: Type.Optional(Type.String())",
+    ]);
+    assertRequiredMarkers(protocol, "task timestamp representations", [
+        "const TimestampSchema = Type.Union([Type.String(), Type.Integer({ minimum: 0 })]);",
+    ]);
+
+    const listParams = boundedSourceRegion(
+        protocol,
+        "const TasksListParamsSchema = closedObject({",
+        "/** Task list page response. */",
+        4 * 1024,
+        "tasks.list params"
+    );
+    assertExactIndentedFields(
+        listParams,
+        1,
+        ["agentId", "cursor", "limit", "sessionKey", "status"],
+        "tasks.list params"
+    );
+    assertRequiredMarkers(listParams, "tasks.list status and bounds", [
+        "Type.Union([TaskLedgerStatusSchema, Type.Array(TaskLedgerStatusSchema)])",
+        "minimum: 1",
+        "maximum: 500",
+    ]);
+    const listResult = boundedSourceRegion(
+        protocol,
+        "const TasksListResultSchema = closedObject({",
+        "/** Lookup request for one task id. */",
+        2 * 1024,
+        "tasks.list result"
+    );
+    assertExactIndentedFields(
+        listResult,
+        1,
+        ["nextCursor", "tasks"],
+        "tasks.list result"
+    );
+    assertRequiredMarkers(protocol, "tasks.get protocol", [
+        "const TasksGetParamsSchema = closedObject({ taskId: NonEmptyString });",
+        "const TasksGetResultSchema = closedObject({ task: TaskSummarySchema });",
+    ]);
+    const cancelParams = boundedSourceRegion(
+        protocol,
+        "const TasksCancelParamsSchema = closedObject({",
+        "/** Cancel result, including the task snapshot when it was found. */",
+        2 * 1024,
+        "tasks.cancel params"
+    );
+    assertExactIndentedFields(
+        cancelParams,
+        1,
+        ["reason", "taskId"],
+        "tasks.cancel params"
+    );
+    const cancelResult = boundedSourceRegion(
+        protocol,
+        "const TasksCancelResultSchema = closedObject({",
+        "/** Approval request raised by a plugin",
+        2 * 1024,
+        "tasks.cancel result"
+    );
+    assertExactIndentedFields(
+        cancelResult,
+        1,
+        ["cancelled", "found", "reason", "task"],
+        "tasks.cancel result"
+    );
+
+    const handlers = artifactByRole(artifacts, "tasks-handlers").contents;
+    assertRequiredMarkers(handlers, "task handler response semantics", [
+        String.raw`if (!/^\d+$/.test(cursor.trim())) return null`,
+        "const nextOffset = cursor + page.tasks.length",
+        "tasks: page.tasks.map((task) => mapTaskSummary(task))",
+        "...page.hasMore ? { nextCursor: String(nextOffset) } : {}",
+        "respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, `task not found: ${taskId}`))",
+        "respond(true, { task: mapTaskSummary(task, { includePrompt: true }) })",
+        "found: result.found",
+        "cancelled: result.cancelled",
+        "...result.task ? { task: mapTaskSummary(result.task) } : {}",
+    ]);
+    const events = artifactByRole(artifacts, "runtime-subscriptions").contents;
+    assertRequiredMarkers(events, "task event payloads", [
+        'action: "upserted"',
+        "task: mapTaskSummary(event.task)",
+        'action: "deleted"',
+        "taskId: event.taskId",
+        'payload = { action: "restored" }',
+        'params.broadcast("task", payload, { dropIfSlow: true })',
+    ]);
+
+    return {
+        cancel: {
+            method: "tasks.cancel",
+            notFoundIsRpcSuccess: true,
+            requestParams: ["reason", "taskId"],
+            resultFields: ["cancelled", "found", "reason", "task"],
+            taskOptional: true,
+        },
+        event: {
+            deletedFields: ["action", "taskId"],
+            delivery: "best-effort-drop-if-slow",
+            restoredFields: ["action"],
+            summariesOmitPrompt: true,
+            upsertedFields: ["action", "task"],
+        },
+        get: {
+            method: "tasks.get",
+            notFound: "invalid-request-rpc-error",
+            promptIncluded: true,
+            requestParams: ["taskId"],
+            resultFields: ["task"],
+        },
+        list: {
+            cursor: "decimal-offset",
+            cursorIncrement: "returned-row-count",
+            method: "tasks.list",
+            nextCursorOnlyWhenHasMore: true,
+            promptIncluded: false,
+            requestParams: ["agentId", "cursor", "limit", "sessionKey", "status"],
+            resultFields: ["nextCursor", "tasks"],
+            statusAcceptsScalarOrArray: true,
+        },
+        summary: {
+            endedAtOptionalForEveryStatus: true,
+            fields: [...summaryFields],
+            promptOptional: true,
+            timestampFields: ["createdAt", "endedAt", "startedAt", "updatedAt"],
+            timestampRepresentations: ["integer", "string"],
+        },
+    };
+}
+
 function assertSystemInfoSemantics(
     artifacts: readonly LoadedSourceArtifact[]
 ): SourceAuditResult["cron"]["adapter"]["operations"]["systemInfo"] {
@@ -1190,8 +2053,30 @@ function assertPhase4SessionsSemantics(
     const sessionEvent = artifactByRole(artifacts, "session-change-event").contents;
     assertRequiredMarkers(sessionEvent, "session change event", [
         'context.broadcastToConnIds("sessions.changed"',
+        "ts: Date.now()",
+        "...buildGatewaySessionEventFields({",
         "dropIfSlow: true",
     ]);
+    assertRequiredMarkers(
+        artifactByRole(artifacts, "session-event-payload").contents,
+        "session change lifecycle projection",
+        ["updatedAt: sessionRow.updatedAt ?? void 0", "sessionId: sessionRow.sessionId"]
+    );
+    assertRequiredMarkers(handlers, "session lifecycle event reasons", [
+        'reason: "compact"',
+        "compacted: true",
+        'reason: "delete"',
+        'const reason = p.reason === "new" ? "new" : "reset"',
+    ]);
+    assertRequiredMarkers(
+        artifactByRole(artifacts, "session-reset-service").contents,
+        "session reset transcript generation",
+        [
+            "const nextSessionId = currentEntry?.sessionId ?? randomUUID()",
+            "sessionId: nextSessionId",
+            "lifecycleRevision: randomUUID()",
+        ]
+    );
     const subscriptionEvents = artifactByRole(
         artifacts,
         "session-subscription-events"
@@ -1358,6 +2243,21 @@ function assertPhase4SessionsSemantics(
                 },
             ],
             delivery: "path-dependent-drop-or-close",
+            lifecycleProjection: {
+                compactIsDestructiveOnlyWhenTrue: true,
+                fields: [
+                    "compacted",
+                    "reason",
+                    "sessionId",
+                    "sessionKey",
+                    "ts",
+                    "updatedAt",
+                ],
+                lossRequiresReconciliation: true,
+                reasons: ["compact", "delete", "new", "reset"],
+                resetPreservesSessionId: true,
+                resetRotatesLifecycleRevision: true,
+            },
             name: "sessions.changed",
             sequence: "omitted",
             targeted: true,
@@ -2724,11 +3624,13 @@ export async function auditInstalledOpenClaw(
         declarations
     );
     const taskNotificationSend = assertTaskNotificationChatSendSemantics(artifacts);
+    const chatAdapter = assertPhase4ChatAdapterSemantics(artifacts);
     assertGatewayHandshake(
         artifactByRole(artifacts, "gateway-websocket").contents,
         declarations
     );
     const taskPromptChars = assertPlanCompanionAndTasks(artifacts);
+    const tasksAdapter = assertPhase4TaskAdapterSemantics(artifacts);
     const sessionsAdapter = assertPhase4SessionsSemantics(artifacts);
     const cronAdapter = assertPhase4CronSemantics(artifacts);
 
@@ -2740,6 +3642,7 @@ export async function auditInstalledOpenClaw(
             schemaVersion: 1,
         },
         chat: {
+            ...chatAdapter,
             domain: "chat",
             gatewayEvents: selectRequiredEvents(gatewayEvents, [
                 "agent",
@@ -2748,13 +3651,6 @@ export async function auditInstalledOpenClaw(
                 "session.tool",
             ]),
             methods: methods.chat,
-            methodAccess: [
-                {
-                    controlPlaneWrite: false,
-                    name: "chat.send",
-                    scope: "operator.write",
-                },
-            ],
             schemaVersion: 1,
             streamingPolicy: {
                 coalescedAgentStreams: ["assistant", "thinking"],
@@ -2981,6 +3877,7 @@ export async function auditInstalledOpenClaw(
         },
         sourceArtifacts: publicArtifacts(artifacts),
         tasks: {
+            adapter: tasksAdapter,
             authority: {
                 cancelTarget: "task-id",
                 ledgerScope: "global-with-optional-filters",

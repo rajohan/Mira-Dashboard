@@ -314,6 +314,7 @@ describe("source-boundary repository discovery", () => {
                 recursive: true,
             });
             const allowlistedFiles = [
+                "dashboardChatRuntimeMaintenance.test.ts",
                 "dashboardServer.test.ts",
                 "trpcHttpHandler.test.ts",
                 "trpcRequestPolicy.test.ts",

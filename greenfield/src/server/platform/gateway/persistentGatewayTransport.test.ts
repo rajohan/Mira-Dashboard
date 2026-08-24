@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 
 import { Effect, Layer, Redacted } from "effect";
 
+import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     persistentGatewayAuthenticatedFrameMaximumBytes,
     persistentGatewayBufferedAmountMaximumBytes,
     persistentGatewayBufferedAmountPolicyMaximumBytes,
+    persistentGatewayChatOutboundFrameMaximumBytes,
     type PersistentGatewayAdminMethod,
     type PersistentGatewayReadWriteMethod,
 } from "./persistentGatewayProtocol.ts";
@@ -15,8 +17,13 @@ import {
     createPersistentGatewayTaskNotificationTransport,
     PersistentGatewayAbortError,
     PersistentGatewayCapacityError,
+    persistentGatewayChatEventQueueMaximumBytes,
+    persistentGatewayChatTrackedRunMaximum,
     persistentGatewayCronJobChangedReason,
+    persistentGatewaySessionCompanionBusyReason,
     type PersistentGatewayConnectionSnapshot,
+    type PersistentGatewayChatEventGap,
+    type PersistentGatewayDeliveredChatEvent,
     type PersistentGatewayDeliveredEvent,
     type PersistentGatewayEventGap,
     type PersistentGatewayRequestOptions,
@@ -143,7 +150,12 @@ interface TestRequestFrame {
     readonly type: "req";
 }
 
-type TestLane = "admin" | "task-notification-worker" | "web-read";
+type TestLane =
+    | "admin"
+    | "chat-read-mutation"
+    | "chat-write"
+    | "task-notification-worker"
+    | "web-read";
 
 function scopesForTestLane(lane: TestLane): readonly string[] {
     switch (lane) {
@@ -152,6 +164,12 @@ function scopesForTestLane(lane: TestLane): readonly string[] {
         }
         case "task-notification-worker": {
             return ["operator.write"];
+        }
+        case "chat-write": {
+            return ["operator.write"];
+        }
+        case "chat-read-mutation": {
+            return ["operator.read"];
         }
         case "web-read": {
             return ["operator.read"];
@@ -175,6 +193,21 @@ function sentFrame(socket: ControlledWebSocket, index: number): TestRequestFrame
     return value as unknown as TestRequestFrame;
 }
 
+function privateAgentEvent(runId: string, sequence: number) {
+    return {
+        event: "agent",
+        payload: {
+            data: { text: `${runId}:${sequence}` },
+            runId,
+            seq: sequence,
+            sessionKey: "agent:main:main",
+            stream: "assistant",
+            ts: 1000,
+        },
+        type: "event",
+    } as const;
+}
+
 function helloPayload(input: {
     readonly connectionId: string;
     readonly events?: readonly string[];
@@ -187,7 +220,7 @@ function helloPayload(input: {
     return {
         auth: { role: "operator", scopes: input.scopes },
         features: {
-            events: input.events ?? ["tick", "cron", "sessions.changed"],
+            events: input.events ?? ["tick", "cron", "sessions.changed", "task"],
             methods: input.methods,
         },
         policy: {
@@ -332,8 +365,7 @@ function createFixtureTaskNotificationTransport(
 }
 
 async function flushMicrotasks(): Promise<void> {
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let index = 0; index < 16; index += 1) await Promise.resolve();
 }
 
 async function stopConnected(
@@ -514,13 +546,27 @@ describe("persistent native Gateway transport", () => {
 
         socket.receive({
             event: "sessions.changed",
-            payload: { reason: "fixture" },
+            payload: {
+                privateProviderShape: "must-not-cross",
+                reason: "reset",
+                sessionId: "provider-session-1",
+                sessionKey: "agent:main:main",
+                ts: 2000,
+                updatedAt: 1900,
+            },
             seq: irrelevantEvents.length + 1,
             type: "event",
         });
         expect(events).toHaveLength(1);
         expect(events[0]?.frame).toEqual({
             event: "sessions.changed",
+            sessionLifecycle: {
+                occurredAtMs: 2000,
+                reason: "reset",
+                sessionId: "provider-session-1",
+                sessionKey: "agent:main:main",
+                updatedAtMs: 1900,
+            },
             seq: irrelevantEvents.length + 1,
             type: "event",
         });
@@ -798,6 +844,88 @@ describe("persistent native Gateway transport", () => {
         });
         expect(await request).toEqual({ sessions: [] });
         await stopConnected(transport, socket);
+    });
+
+    test("admits the worst-case accepted attachment send within the exact 24 MiB chat ceiling", async () => {
+        const content = Buffer.alloc(
+            chatAttachmentLimits.maximumAggregateRawBytes,
+            0x61
+        ).toString("base64");
+        const parameters = {
+            attachments: [
+                {
+                    content,
+                    fileName: "\uD800".repeat(255),
+                    mimeType: `application/${"a".repeat(64)}`,
+                    sizeBytes: chatAttachmentLimits.maximumAggregateRawBytes,
+                    type: "file" as const,
+                },
+            ],
+            fastMode: "auto" as const,
+            idempotencyKey: "a".repeat(128),
+            message: "\uD800".repeat(256 * 1024),
+            queueMode: "interrupt" as const,
+            sessionKey: "\uD800".repeat(512),
+            thinking: "\uD800".repeat(128),
+        };
+        const encodedBytes = Buffer.byteLength(
+            JSON.stringify({
+                id: "request-2",
+                method: "chat.send",
+                params: parameters,
+                type: "req",
+            }),
+            "utf8"
+        );
+        expect(encodedBytes).toBeLessThanOrEqual(
+            persistentGatewayChatOutboundFrameMaximumBytes
+        );
+        expect(encodedBytes).toBeGreaterThan(persistentGatewayBufferedAmountMaximumBytes);
+
+        const passScheduler = new ManualScheduler();
+        const passHarness = new SocketHarness();
+        const passTransport = createFixtureTransport(passHarness, passScheduler);
+        const passing = passTransport.requestChatWrite("chat.send", parameters);
+        const passSocket = passHarness.sockets[0];
+        if (passSocket === undefined) throw new Error("Expected the chat-write socket");
+        passSocket.bufferedAmount =
+            persistentGatewayChatOutboundFrameMaximumBytes - encodedBytes;
+        completeHandshake(passSocket, {
+            lane: "chat-write",
+            maxBufferedBytes: persistentGatewayBufferedAmountPolicyMaximumBytes,
+            maxPayload: persistentGatewayAuthenticatedFrameMaximumBytes,
+            methods: ["chat.send"],
+        });
+        const passRequest = sentFrame(passSocket, 1);
+        passSocket.receive({
+            id: passRequest.id,
+            ok: true,
+            payload: { runId: "provider-run", status: "started" },
+            type: "res",
+        });
+        await flushMicrotasks();
+        passSocket.finishClose();
+        expect(await passing).toEqual({ runId: "provider-run", status: "started" });
+
+        const rejectScheduler = new ManualScheduler();
+        const rejectHarness = new SocketHarness();
+        const rejectTransport = createFixtureTransport(rejectHarness, rejectScheduler);
+        const rejected = rejectTransport.requestChatWrite("chat.send", parameters);
+        const rejectSocket = rejectHarness.sockets[0];
+        if (rejectSocket === undefined) throw new Error("Expected the chat-write socket");
+        rejectSocket.bufferedAmount =
+            persistentGatewayChatOutboundFrameMaximumBytes - encodedBytes + 1;
+        completeHandshake(rejectSocket, {
+            lane: "chat-write",
+            maxBufferedBytes: persistentGatewayBufferedAmountPolicyMaximumBytes,
+            maxPayload: persistentGatewayAuthenticatedFrameMaximumBytes,
+            methods: ["chat.send"],
+        });
+        await flushMicrotasks();
+        rejectSocket.finishClose();
+        expect(await captureFailure(() => rejected)).toBeInstanceOf(
+            PersistentGatewayCapacityError
+        );
     });
 
     test("exposes a strict task-notification chat sender instead of generic chat.send", async () => {
@@ -1411,6 +1539,145 @@ describe("persistent native Gateway transport", () => {
         await transport.stop();
     });
 
+    test("runs companion ask once on a fresh read-scope lane and preserves unknown outcome", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const ask = transport.requestChatReadMutation("sessions.companion.ask", {
+            question: "What changed?",
+            sessionKey: "agent:main:main",
+        });
+        const capturedFailure = captureFailure(() => ask);
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected one companion socket");
+        const connect = completeHandshake(socket, {
+            lane: "chat-read-mutation",
+            methods: ["sessions.companion.ask"],
+        });
+        expect(connect.params).toMatchObject({
+            auth: { token: fixtureToken },
+            scopes: ["operator.read"],
+        });
+        expect(sentFrame(socket, 1)).toMatchObject({
+            method: "sessions.companion.ask",
+            params: {
+                question: "What changed?",
+                sessionKey: "agent:main:main",
+            },
+        });
+
+        socket.finishClose();
+        expect(await capturedFailure).toEqual(new PersistentGatewayUnknownOutcomeError());
+        expect(harness.sockets).toHaveLength(1);
+        await transport.stop();
+    });
+
+    test("sanitizes companion busy details and preserves the transport-instance rate window", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+
+        const busy = transport.requestChatReadMutation("sessions.companion.ask", {
+            question: "What changed?",
+            sessionKey: "agent:main:main",
+        });
+        const capturedBusy = captureFailure(() => busy);
+        const busySocket = harness.sockets[0];
+        if (busySocket === undefined) throw new Error("Expected companion socket");
+        completeHandshake(busySocket, {
+            lane: "chat-read-mutation",
+            methods: ["sessions.companion.ask"],
+        });
+        const busyFrame = sentFrame(busySocket, 1);
+        busySocket.receive({
+            error: {
+                code: "UNAVAILABLE",
+                details: {
+                    code: "SESSION_COMPANION_BUSY",
+                    private: fixtureToken,
+                },
+                message: `private ${fixtureToken}`,
+                retryAfterMs: 60_000,
+                retryable: true,
+            },
+            id: busyFrame.id,
+            ok: false,
+            type: "res",
+        });
+        await flushMicrotasks();
+        busySocket.finishClose();
+        const busyFailure = await capturedBusy;
+        expect(busyFailure).toEqual(
+            new PersistentGatewayRequestError({
+                code: "UNAVAILABLE",
+                reason: persistentGatewaySessionCompanionBusyReason,
+                retryAfterMs: 60_000,
+                retryable: true,
+            })
+        );
+        expect(String(busyFailure)).not.toContain(fixtureToken);
+        expect(String(busyFailure)).not.toContain("SESSION_COMPANION_BUSY");
+
+        for (let index = 1; index <= 4; index += 1) {
+            const ask = transport.requestChatReadMutation("sessions.companion.ask", {
+                question: `Question ${index}`,
+                sessionKey: `agent:main:${index}`,
+            });
+            const socket = harness.sockets[index];
+            if (socket === undefined) throw new Error("Expected companion socket");
+            completeHandshake(socket, {
+                lane: "chat-read-mutation",
+                methods: ["sessions.companion.ask"],
+            });
+            const request = sentFrame(socket, 1);
+            socket.receive({
+                id: request.id,
+                ok: true,
+                payload: { answer: "Answer", ts: scheduler.nowMs },
+                type: "res",
+            });
+            await flushMicrotasks();
+            socket.finishClose();
+            await ask;
+        }
+
+        expect(
+            await captureFailure(() =>
+                transport.requestChatReadMutation("sessions.companion.ask", {
+                    question: "Rate limited",
+                    sessionKey: "agent:main:rate-limited",
+                })
+            )
+        ).toBeInstanceOf(PersistentGatewayCapacityError);
+        expect(harness.sockets).toHaveLength(5);
+
+        scheduler.advance(60_001);
+        const recovered = transport.requestChatReadMutation("sessions.companion.ask", {
+            question: "Recovered",
+            sessionKey: "agent:main:recovered",
+        });
+        const recoveredSocket = harness.sockets[5];
+        if (recoveredSocket === undefined) throw new Error("Expected recovered socket");
+        completeHandshake(recoveredSocket, {
+            lane: "chat-read-mutation",
+            methods: ["sessions.companion.ask"],
+        });
+        const recoveredFrame = sentFrame(recoveredSocket, 1);
+        recoveredSocket.receive({
+            id: recoveredFrame.id,
+            ok: true,
+            payload: { answer: "Recovered", ts: scheduler.nowMs },
+            type: "res",
+        });
+        await flushMicrotasks();
+        recoveredSocket.finishClose();
+        expect(await recovered).toEqual({
+            answer: "Recovered",
+            ts: scheduler.nowMs,
+        });
+        await transport.stop();
+    });
+
     test("classifies post-dispatch timeout, close, and malformed frames as unknown outcomes", async () => {
         for (const failure of ["timeout", "close", "malformed"] as const) {
             const scheduler = new ManualScheduler();
@@ -1684,6 +1951,570 @@ describe("persistent native Gateway transport", () => {
         expect(() => transport.start()).toThrow(TypeError);
     });
 
+    test("shares one strict sequence across private agent and chat events and quarantines gaps", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const delivered: PersistentGatewayDeliveredChatEvent[] = [];
+        const gaps: PersistentGatewayChatEventGap[] = [];
+        transport.start();
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected the persistent socket");
+        completeHandshake(socket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        const unsubscribe = transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+                onEventGap: (gap) => {
+                    gaps.push(gap);
+                },
+            }
+        );
+        const unsubscribeFirstGap = transport.subscribeChat(
+            {
+                runWatermarks: [
+                    {
+                        lastProviderSequence: 0,
+                        providerRunId: "run-first-gap",
+                    },
+                ],
+                sessionKey: "agent:main:secondary",
+            },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+                onEventGap: (gap) => {
+                    gaps.push(gap);
+                },
+            }
+        );
+        const subscription = sentFrame(socket, 1);
+        expect(subscription).toMatchObject({
+            method: "sessions.messages.subscribe",
+            params: { key: "agent:main:main" },
+        });
+        socket.receive({
+            id: subscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        const firstGapSubscription = sentFrame(socket, 2);
+        expect(firstGapSubscription).toMatchObject({
+            method: "sessions.messages.subscribe",
+            params: { key: "agent:main:secondary" },
+        });
+        socket.receive({
+            id: firstGapSubscription.id,
+            ok: true,
+            payload: { key: "agent:main:secondary", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+
+        socket.receive({
+            event: "agent",
+            payload: {
+                data: { text: "first" },
+                runId: "run-contiguous",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                ts: 1000,
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "chat",
+            payload: {
+                deltaText: "second",
+                runId: "run-contiguous",
+                seq: 2,
+                sessionKey: "agent:main:main",
+                state: "delta",
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "chat",
+            payload: {
+                message: { role: "assistant", text: "done" },
+                runId: "run-contiguous",
+                seq: 3,
+                sessionKey: "agent:main:main",
+                state: "final",
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "agent",
+            payload: {
+                data: { text: "late first frame" },
+                runId: "run-first-gap",
+                seq: 5,
+                sessionKey: "agent:main:secondary",
+                stream: "assistant",
+                ts: 1000,
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "agent",
+            payload: {
+                data: { text: "one" },
+                runId: "run-mid-gap",
+                seq: 1,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                ts: 1000,
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "chat",
+            payload: {
+                deltaText: "three",
+                runId: "run-mid-gap",
+                seq: 3,
+                sessionKey: "agent:main:main",
+                state: "delta",
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "chat",
+            payload: {
+                runId: "run-mid-gap",
+                seq: 4,
+                sessionKey: "agent:main:main",
+                state: "aborted",
+            },
+            type: "event",
+        });
+        await flushMicrotasks();
+
+        expect(
+            delivered.map(({ frame }) => [frame.payload.runId, frame.payload.seq])
+        ).toEqual([
+            ["run-contiguous", 1],
+            ["run-contiguous", 2],
+            ["run-contiguous", 3],
+            ["run-mid-gap", 1],
+        ]);
+        expect(gaps).toHaveLength(2);
+        expect(gaps).toContainEqual({
+            connectionGeneration: 1,
+            expectedSequence: 1,
+            receivedSequence: 5,
+            runId: "run-first-gap",
+            sessionKey: "agent:main:secondary",
+        });
+        expect(gaps).toContainEqual({
+            connectionGeneration: 1,
+            expectedSequence: 2,
+            receivedSequence: 3,
+            runId: "run-mid-gap",
+            sessionKey: "agent:main:main",
+        });
+
+        unsubscribe();
+        unsubscribeFirstGap();
+        await stopConnected(transport, socket);
+    });
+
+    test("baselines an external run observed mid-stream and still delivers its terminal", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const delivered: PersistentGatewayDeliveredChatEvent[] = [];
+        const gaps: PersistentGatewayChatEventGap[] = [];
+        transport.start();
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected the persistent socket");
+        completeHandshake(socket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        const unsubscribe = transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+                onEventGap: (gap) => {
+                    gaps.push(gap);
+                },
+            }
+        );
+        const subscription = sentFrame(socket, 1);
+        socket.receive({
+            id: subscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+
+        socket.receive({
+            event: "agent",
+            payload: {
+                data: { delta: "late delta" },
+                runId: "external-mid-run",
+                seq: 5,
+                sessionKey: "agent:main:main",
+                stream: "assistant",
+                ts: 1000,
+            },
+            type: "event",
+        });
+        socket.receive({
+            event: "chat",
+            payload: {
+                message: { role: "assistant", text: "done" },
+                runId: "external-mid-run",
+                seq: 6,
+                sessionKey: "agent:main:main",
+                state: "final",
+            },
+            type: "event",
+        });
+        await flushMicrotasks();
+
+        expect(
+            delivered.map(({ frame }) => [frame.payload.runId, frame.payload.seq])
+        ).toEqual([
+            ["external-mid-run", 5],
+            ["external-mid-run", 6],
+        ]);
+        expect(gaps).toEqual([]);
+
+        unsubscribe();
+        await stopConnected(transport, socket);
+    });
+
+    test("hands off durable run watermarks, drops replays, and serializes an async gap boundary", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const eventGate = Promise.withResolvers<void>();
+        const boundaryObserved = Promise.withResolvers<void>();
+        const order: string[] = [];
+        const gaps: PersistentGatewayChatEventGap[] = [];
+        transport.start();
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected the persistent socket");
+        completeHandshake(socket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        transport.subscribeChat(
+            {
+                runWatermarks: [
+                    { lastProviderSequence: 2, providerRunId: "run-accept" },
+                    { lastProviderSequence: 2, providerRunId: "run-gap" },
+                ],
+                sessionKey: "agent:main:main",
+            },
+            {
+                onEvent: async (event) => {
+                    order.push(
+                        `event:${event.frame.payload.runId}:${event.frame.payload.seq}:start`
+                    );
+                    await eventGate.promise;
+                    order.push(
+                        `event:${event.frame.payload.runId}:${event.frame.payload.seq}:end`
+                    );
+                },
+                onEventGap: (gap) => {
+                    gaps.push(gap);
+                    order.push(`gap:${gap.runId}:${gap.receivedSequence}`);
+                    boundaryObserved.resolve();
+                    throw new Error("fixture async gap rejection");
+                },
+            }
+        );
+        const subscription = sentFrame(socket, 1);
+        socket.receive({
+            id: subscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+        socket.receive(privateAgentEvent("run-accept", 1));
+        socket.receive(privateAgentEvent("run-accept", 2));
+        socket.receive(privateAgentEvent("run-gap", 1));
+        socket.receive(privateAgentEvent("run-gap", 2));
+        socket.receive(privateAgentEvent("run-accept", 3));
+        socket.receive(privateAgentEvent("run-gap", 4));
+        socket.receive(privateAgentEvent("run-accept", 4));
+        await flushMicrotasks();
+        expect(order).toEqual(["event:run-accept:3:start"]);
+        expect(gaps).toEqual([]);
+
+        eventGate.resolve();
+        await boundaryObserved.promise;
+        await flushMicrotasks();
+        expect(order).toEqual([
+            "event:run-accept:3:start",
+            "event:run-accept:3:end",
+            "gap:run-gap:4",
+        ]);
+        expect(gaps).toEqual([
+            {
+                connectionGeneration: 1,
+                expectedSequence: 3,
+                receivedSequence: 4,
+                runId: "run-gap",
+                sessionKey: "agent:main:main",
+            },
+        ]);
+        await stopConnected(transport, socket);
+    });
+
+    test("drops maximum-frame bulk fields and reconciles a slow listener at its encoded byte budget", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const eventGate = Promise.withResolvers<void>();
+        const boundaryObserved = Promise.withResolvers<void>();
+        const delivered: PersistentGatewayDeliveredChatEvent[] = [];
+        const reconciliationReasons: string[] = [];
+        transport.start();
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected the persistent socket");
+        completeHandshake(socket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: async (event) => {
+                    delivered.push(event);
+                    await eventGate.promise;
+                },
+                onReconciliationRequired: (reason) => {
+                    reconciliationReasons.push(reason);
+                    boundaryObserved.resolve();
+                },
+            }
+        );
+        const subscription = sentFrame(socket, 1);
+        socket.receive({
+            id: subscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+
+        const privateBulkValue = "Bearer maximum-frame-chat-private-value";
+        const prefix = `{"event":"chat","payload":{"deltaText":"first","message":{"credential":"${privateBulkValue}","padding":"`;
+        const suffix =
+            '"},"runId":"run-memory","seq":1,"sessionKey":"agent:main:main","state":"delta","usage":{"private":true}},"type":"event"}';
+        const maximumFrame = `${prefix}${"x".repeat(
+            persistentGatewayAuthenticatedFrameMaximumBytes -
+                prefix.length -
+                suffix.length
+        )}${suffix}`;
+        expect(Buffer.byteLength(maximumFrame, "utf8")).toBe(
+            persistentGatewayAuthenticatedFrameMaximumBytes
+        );
+        socket.receiveRaw(maximumFrame);
+        await flushMicrotasks();
+        expect(delivered).toHaveLength(1);
+        expect(JSON.stringify(delivered)).not.toContain(privateBulkValue);
+        expect(Buffer.byteLength(JSON.stringify(delivered[0]), "utf8")).toBeLessThan(512);
+
+        const retainedDelta = "d".repeat(64 * 1024);
+        const projectedEventBytes = Buffer.byteLength(
+            JSON.stringify({
+                connectionGeneration: 1,
+                frame: privateAgentEvent("run-memory", 2),
+                receivedAtMs: scheduler.nowMs,
+            }),
+            "utf8"
+        );
+        expect(projectedEventBytes).toBeLessThan(
+            persistentGatewayChatEventQueueMaximumBytes
+        );
+        const floodCount =
+            Math.ceil(
+                persistentGatewayChatEventQueueMaximumBytes /
+                    Buffer.byteLength(retainedDelta, "utf8")
+            ) + 2;
+        for (let sequence = 2; sequence < floodCount + 2; sequence += 1) {
+            socket.receive({
+                event: "chat",
+                payload: {
+                    deltaText: retainedDelta,
+                    runId: "run-memory",
+                    seq: sequence,
+                    sessionKey: "agent:main:main",
+                    state: "delta",
+                },
+                type: "event",
+            });
+        }
+        eventGate.resolve();
+        await boundaryObserved.promise;
+        await flushMicrotasks();
+
+        expect(delivered).toHaveLength(1);
+        expect(reconciliationReasons).toEqual(["backpressure"]);
+        expect(socket.closeCalls).toHaveLength(0);
+        await stopConnected(transport, socket);
+    });
+
+    test("bounds unique active run identities and quarantines the scope without eviction", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const delivered: PersistentGatewayDeliveredChatEvent[] = [];
+        const reconciliationReasons: string[] = [];
+        transport.start();
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected the persistent socket");
+        completeHandshake(socket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+                onReconciliationRequired: (reason) => {
+                    reconciliationReasons.push(reason);
+                },
+            }
+        );
+        const subscription = sentFrame(socket, 1);
+        socket.receive({
+            id: subscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+
+        for (let index = 0; index < persistentGatewayChatTrackedRunMaximum; index += 1) {
+            socket.receive(privateAgentEvent(`active-run-${index}`, 1));
+            await flushMicrotasks();
+        }
+        expect(delivered).toHaveLength(persistentGatewayChatTrackedRunMaximum);
+        socket.receive(privateAgentEvent("one-active-run-too-many", 1));
+        await flushMicrotasks();
+
+        expect(delivered).toHaveLength(persistentGatewayChatTrackedRunMaximum);
+        expect(reconciliationReasons).toEqual(["backpressure"]);
+        expect(socket.closeCalls).toHaveLength(0);
+        await stopConnected(transport, socket);
+    });
+
+    test("releases terminal run identities and clears active sequence state across reconnect", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const delivered: PersistentGatewayDeliveredChatEvent[] = [];
+        const reconciliationReasons: string[] = [];
+        transport.start();
+        const firstSocket = harness.sockets[0];
+        if (firstSocket === undefined) throw new Error("Expected the first socket");
+        completeHandshake(firstSocket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+                onReconciliationRequired: (reason) => {
+                    reconciliationReasons.push(reason);
+                },
+            }
+        );
+        const firstSubscription = sentFrame(firstSocket, 1);
+        firstSocket.receive({
+            id: firstSubscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+
+        for (let index = 0; index <= persistentGatewayChatTrackedRunMaximum; index += 1) {
+            const runId = `terminal-run-${index}`;
+            firstSocket.receive(privateAgentEvent(runId, 1));
+            firstSocket.receive({
+                event: "chat",
+                payload: {
+                    runId,
+                    seq: 2,
+                    sessionKey: "agent:main:main",
+                    state: "final",
+                },
+                type: "event",
+            });
+            await flushMicrotasks();
+        }
+        await flushMicrotasks();
+        expect(reconciliationReasons).toEqual([]);
+        expect(delivered).toHaveLength((persistentGatewayChatTrackedRunMaximum + 1) * 2);
+
+        firstSocket.receive(privateAgentEvent("reconnect-replay", 1));
+        await flushMicrotasks();
+        firstSocket.finishClose();
+        await flushMicrotasks();
+        expect(reconciliationReasons).toEqual(["transport"]);
+
+        scheduler.advance(100);
+        const secondSocket = harness.sockets[1];
+        if (secondSocket === undefined) throw new Error("Expected the reconnect socket");
+        completeHandshake(secondSocket, {
+            lane: "web-read",
+            methods: ["sessions.messages.subscribe", "sessions.messages.unsubscribe"],
+        });
+        transport.subscribeChat(
+            { runWatermarks: [], sessionKey: "agent:main:main" },
+            {
+                onEvent: (event) => {
+                    delivered.push(event);
+                },
+                onReconciliationRequired: (reason) => {
+                    reconciliationReasons.push(reason);
+                },
+            }
+        );
+        const secondSubscription = sentFrame(secondSocket, 1);
+        secondSocket.receive({
+            id: secondSubscription.id,
+            ok: true,
+            payload: { key: "agent:main:main", subscribed: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+        secondSocket.receive(privateAgentEvent("reconnect-replay", 1));
+        await flushMicrotasks();
+
+        expect(delivered.at(-1)?.frame.payload).toMatchObject({
+            runId: "reconnect-replay",
+            seq: 1,
+        });
+        expect(reconciliationReasons).toEqual(["transport"]);
+        await stopConnected(transport, secondSocket);
+    });
+
     test("keeps the public generic method unions narrow at runtime", async () => {
         const scheduler = new ManualScheduler();
         const harness = new SocketHarness();
@@ -1724,6 +2555,16 @@ describe("persistent native Gateway transport", () => {
         const transport: PersistentGatewayTransport = {
             request: () => Promise.reject(new PersistentGatewayUnavailableError()),
             requestAdmin: () => Promise.reject(new PersistentGatewayUnavailableError()),
+            requestChatRead: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
+            requestChatReadMutation: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
+            requestChatWrite: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
+            requestTaskRead: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
+            requestTaskWrite: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
             snapshot: {
                 connectionGeneration: 0,
                 phase: "stopped",
@@ -1737,6 +2578,7 @@ describe("persistent native Gateway transport", () => {
                 return Promise.resolve();
             },
             subscribe: () => () => {},
+            subscribeChat: () => () => {},
         };
 
         await Effect.runPromise(

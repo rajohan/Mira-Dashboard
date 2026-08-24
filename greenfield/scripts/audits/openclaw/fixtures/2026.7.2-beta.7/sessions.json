@@ -151,6 +151,21 @@
                 }
             ],
             "delivery": "path-dependent-drop-or-close",
+            "lifecycleProjection": {
+                "compactIsDestructiveOnlyWhenTrue": true,
+                "fields": [
+                    "compacted",
+                    "reason",
+                    "sessionId",
+                    "sessionKey",
+                    "ts",
+                    "updatedAt"
+                ],
+                "lossRequiresReconciliation": true,
+                "reasons": ["compact", "delete", "new", "reset"],
+                "resetPreservesSessionId": true,
+                "resetRotatesLifecycleRevision": true
+            },
             "name": "sessions.changed",
             "sequence": "omitted",
             "targeted": true

@@ -11,10 +11,20 @@ import {
 import { parseGatewayCredentialVerifierUrl } from "./gatewayCredentialVerifier.ts";
 import {
     assertPersistentGatewayAdminParameters,
+    assertPersistentGatewayChatReadParameters,
+    assertPersistentGatewayChatReadMutationParameters,
+    assertPersistentGatewayChatWriteParameters,
     assertPersistentGatewayReadWriteParameters,
+    assertPersistentGatewayTaskReadParameters,
+    assertPersistentGatewayTaskWriteParameters,
     createPersistentGatewayConnectFrame,
     isPersistentGatewayAdminMethod,
+    isPersistentGatewayChatReadMethod,
+    isPersistentGatewayChatReadMutationMethod,
+    isPersistentGatewayChatWriteMethod,
     isPersistentGatewayReadWriteMethod,
+    isPersistentGatewayTaskReadMethod,
+    isPersistentGatewayTaskWriteMethod,
     parsePersistentGatewayChatSendAcknowledgement,
     type PersistentGatewayConnectionProfile,
     type PersistentGatewayErrorCode,
@@ -22,17 +32,26 @@ import {
     persistentGatewayAuthenticatedFrameMaximumBytes,
     persistentGatewayBufferedAmountMaximumBytes,
     persistentGatewayChallengeFrameMaximumBytes,
+    type PersistentGatewayChatReadMethod,
+    type PersistentGatewayChatReadMutationMethod,
+    persistentGatewayChatOutboundFrameMaximumBytes,
+    type PersistentGatewayChatWriteMethod,
     type PersistentGatewayEventEnvelope,
     type PersistentGatewayEventFrame,
     type PersistentGatewayHello,
+    type PersistentGatewayPrivateChatEvent,
     persistentGatewayOutboundFrameMaximumBytes,
     type PersistentGatewayReadWriteMethod,
+    type PersistentGatewayTaskReadMethod,
+    type PersistentGatewayTaskWriteMethod,
     persistentGatewayTaskNotificationMethod,
     parsePersistentGatewayChallenge,
     parsePersistentGatewayEvent,
     parsePersistentGatewayEventEnvelope,
     parsePersistentGatewayHello,
+    parsePersistentGatewayPrivateChatEvent,
     parsePersistentGatewayResponse,
+    parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement,
     parsePersistentGatewaySessionsSubscriptionAcknowledgement,
 } from "./persistentGatewayProtocol.ts";
 
@@ -44,6 +63,12 @@ const policyCloseCode = 1008;
 const watchdogCloseCode = 4000;
 const safeCloseReasonMaximumBytes = 123;
 const taskNotificationIdempotencyKeyPrefix = "tasks-notify-";
+export const persistentGatewayChatEventQueueMaximum = 256;
+/** Per-listener encoded projection budget retained while async delivery is blocked. */
+export const persistentGatewayChatEventQueueMaximumBytes = 2 * 1024 * 1024;
+export const persistentGatewayChatSubscriptionMaximum = 64;
+/** Maximum active provider run identities tracked by one session subscription. */
+export const persistentGatewayChatTrackedRunMaximum = 256;
 
 const terminalAuthenticationDetailCodes = new Set([
     "AUTH_BOOTSTRAP_TOKEN_INVALID",
@@ -122,6 +147,46 @@ export interface PersistentGatewayDeliveredEvent {
     readonly receivedAtMs: number;
 }
 
+export interface PersistentGatewayDeliveredChatEvent {
+    readonly connectionGeneration: number;
+    readonly frame: PersistentGatewayPrivateChatEvent;
+    readonly receivedAtMs: number;
+}
+
+export interface PersistentGatewayChatEventGap {
+    readonly connectionGeneration: number;
+    readonly expectedSequence: number;
+    readonly receivedSequence: number;
+    readonly runId: string;
+    readonly sessionKey: string;
+}
+
+export type PersistentGatewayChatReconciliationReason =
+    | "backpressure"
+    | "subscription"
+    | "transport";
+
+export interface PersistentGatewayChatListener {
+    readonly onEvent?: (
+        event: PersistentGatewayDeliveredChatEvent
+    ) => void | Promise<void>;
+    readonly onEventGap?: (gap: PersistentGatewayChatEventGap) => void | Promise<void>;
+    readonly onReconciliationRequired?: (
+        reason: PersistentGatewayChatReconciliationReason
+    ) => void | Promise<void>;
+}
+
+export interface PersistentGatewayChatRunWatermark {
+    readonly lastProviderSequence: number;
+    readonly providerRunId: string;
+}
+
+export interface PersistentGatewayChatSubscription {
+    readonly agentId?: string;
+    readonly runWatermarks: readonly PersistentGatewayChatRunWatermark[];
+    readonly sessionKey: string;
+}
+
 export interface PersistentGatewayEventGap {
     readonly connectionGeneration: number;
     readonly expectedSequence: number;
@@ -149,6 +214,7 @@ export type PersistentGatewayWebSocketFactory = (url: string) => WebSocket;
 export interface PersistentGatewayTransportOptions {
     readonly adminConcurrencyMaximum?: number;
     readonly bufferedAmountMaximumBytes?: number;
+    readonly chatOutboundFrameMaximumBytes?: number;
     readonly clientVersion: string;
     readonly createRequestId?: () => string;
     readonly gracefulStopTimeoutMs?: number;
@@ -223,10 +289,17 @@ export const persistentGatewaySessionChangedReason = "session-changed" as const;
 
 /** Canonicalized audited cron definition-generation conflict. */
 export const persistentGatewayCronJobChangedReason = "cron-job-changed" as const;
+/** Audited INVALID_REQUEST projection used only by tasks.get. */
+export const persistentGatewayTaskNotFoundReason = "task-not-found" as const;
+/** Audited companion saturation detail; raw Gateway details remain transport-private. */
+export const persistentGatewaySessionCompanionBusyReason =
+    "session-companion-busy" as const;
 
 export type PersistentGatewayRequestReason =
     | typeof persistentGatewayCronJobChangedReason
-    | typeof persistentGatewaySessionChangedReason;
+    | typeof persistentGatewaySessionChangedReason
+    | typeof persistentGatewaySessionCompanionBusyReason
+    | typeof persistentGatewayTaskNotFoundReason;
 
 /** Sanitized upstream rejection. Raw messages and details never cross this boundary. */
 export class PersistentGatewayRequestError extends Error {
@@ -261,6 +334,7 @@ export class PersistentGatewayStopTimeoutError extends Error {
 interface ResolvedPersistentGatewayOptions {
     readonly adminConcurrencyMaximum: number;
     readonly bufferedAmountMaximumBytes: number;
+    readonly chatOutboundFrameMaximumBytes: number;
     readonly clientVersion: string;
     readonly createRequestId: () => string;
     readonly gracefulStopTimeoutMs: number;
@@ -269,7 +343,10 @@ interface ResolvedPersistentGatewayOptions {
     readonly nowMs: () => number;
     readonly outboundFrameMaximumBytes: number;
     readonly pendingRequestMaximum: number;
-    readonly profile: Exclude<PersistentGatewayConnectionProfile, "admin">;
+    readonly profile: Exclude<
+        PersistentGatewayConnectionProfile,
+        "admin" | "chat-read-mutation" | "chat-write"
+    >;
     readonly random: () => number;
     readonly reconnect: {
         readonly factor: number;
@@ -294,6 +371,42 @@ interface PendingRequest {
     abortListener?: () => void;
 }
 
+type ChatSubscriberQueueItem =
+    | Readonly<{
+          event: PersistentGatewayDeliveredChatEvent;
+          kind: "event";
+          retainedBytes: number;
+      }>
+    | Readonly<{
+          gap: PersistentGatewayChatEventGap;
+          kind: "gap";
+      }>
+    | Readonly<{
+          kind: "reconciliation";
+          reason: PersistentGatewayChatReconciliationReason;
+      }>;
+
+interface ChatSubscriberState {
+    readonly identity: object;
+    readonly listener: PersistentGatewayChatListener;
+    readonly queue: ChatSubscriberQueueItem[];
+    draining: boolean;
+    queuedEventBytes: number;
+    terminalBoundaryQueued: boolean;
+}
+
+interface ChatSubscriptionScope {
+    readonly agentId?: string;
+    readonly key: string;
+    readonly initialRunSequences: ReadonlyMap<string, number>;
+    readonly subscribers: Map<object, ChatSubscriberState>;
+    readonly runSequences: Map<string, number>;
+    canonicalKey?: string;
+    reconciliationRequired?: PersistentGatewayChatReconciliationReason;
+    subscribedGeneration?: number;
+    synchronizingGeneration?: number;
+}
+
 interface LaneCloseDisposition {
     readonly failure?: PersistentGatewayFailureKind;
     readonly reconnect: boolean;
@@ -310,13 +423,19 @@ interface GatewaySocketLaneCallbacks {
     readonly onActivity: (atMs: number, lastEventSequence?: number) => void;
     readonly onClosed: (report: LaneCloseReport) => void;
     readonly onConnected: (hello: PersistentGatewayHello) => void;
+    readonly onChatEvent: (
+        event: PersistentGatewayPrivateChatEvent,
+        receivedAtMs: number
+    ) => void;
     readonly onEvent: (event: PersistentGatewayEventFrame, receivedAtMs: number) => void;
     readonly onEventGap: (expected: number, received: number) => void;
 }
 
 interface GatewaySocketLaneOptions {
+    readonly bufferedAmountMaximumBytes?: number;
     readonly callbacks: GatewaySocketLaneCallbacks;
     readonly generation: number;
+    readonly outboundFrameMaximumBytes?: number;
     readonly profile: PersistentGatewayConnectionProfile;
     readonly resolved: ResolvedPersistentGatewayOptions;
 }
@@ -379,6 +498,57 @@ function containsControlCharacter(value: string): boolean {
     return false;
 }
 
+function chatSubscriptionScopeIdentifier(
+    input: PersistentGatewayChatSubscription
+): string {
+    const sessionKey = boundedNonblank(
+        input.sessionKey,
+        512,
+        "Persistent Gateway chat session key"
+    );
+    const agentId =
+        input.agentId === undefined
+            ? undefined
+            : boundedNonblank(input.agentId, 512, "Persistent Gateway chat agent id");
+    return JSON.stringify([sessionKey, agentId ?? null]);
+}
+
+function chatRunWatermarkMap(
+    watermarks: readonly PersistentGatewayChatRunWatermark[]
+): ReadonlyMap<string, number> {
+    if (watermarks.length > 32) {
+        throw new TypeError("Persistent Gateway chat run watermarks are invalid");
+    }
+    const resolved = new Map<string, number>();
+    for (const watermark of watermarks) {
+        const runId = boundedNonblank(
+            watermark.providerRunId,
+            256,
+            "Persistent Gateway chat run watermark id"
+        );
+        if (
+            !Number.isSafeInteger(watermark.lastProviderSequence) ||
+            watermark.lastProviderSequence < 0 ||
+            resolved.has(runId)
+        ) {
+            throw new TypeError("Persistent Gateway chat run watermarks are invalid");
+        }
+        resolved.set(runId, watermark.lastProviderSequence);
+    }
+    return resolved;
+}
+
+function chatRunWatermarkMapsEqual(
+    left: ReadonlyMap<string, number>,
+    right: ReadonlyMap<string, number>
+): boolean {
+    if (left.size !== right.size) return false;
+    for (const [runId, sequence] of left) {
+        if (right.get(runId) !== sequence) return false;
+    }
+    return true;
+}
+
 function safeNow(nowMs: () => number): number {
     const value = nowMs();
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -389,6 +559,16 @@ function safeNow(nowMs: () => number): number {
 
 function byteLength(value: string): number {
     return Buffer.byteLength(value, "utf8");
+}
+
+function deliveredChatEventRetainedBytes(
+    event: PersistentGatewayDeliveredChatEvent
+): number {
+    try {
+        return byteLength(JSON.stringify(event));
+    } catch {
+        return Number.POSITIVE_INFINITY;
+    }
 }
 
 function closeReason(value: string): string {
@@ -412,8 +592,25 @@ function detailCode(details: unknown): string | undefined {
 }
 
 function sanitizedRequestReason(
-    details: unknown
+    details: unknown,
+    method: string,
+    code: PersistentGatewayErrorCode,
+    message: string
 ): PersistentGatewayRequestReason | undefined {
+    if (
+        method === "tasks.get" &&
+        code === "INVALID_REQUEST" &&
+        message.startsWith("task not found: ")
+    ) {
+        return persistentGatewayTaskNotFoundReason;
+    }
+    if (
+        method === "sessions.companion.ask" &&
+        code === "UNAVAILABLE" &&
+        detailCode(details) === "SESSION_COMPANION_BUSY"
+    ) {
+        return persistentGatewaySessionCompanionBusyReason;
+    }
     if (details === null || typeof details !== "object" || Array.isArray(details)) {
         return undefined;
     }
@@ -442,7 +639,10 @@ function frozenSnapshot(
 
 function resolveOptions(
     options: PersistentGatewayTransportOptions,
-    profile: Exclude<PersistentGatewayConnectionProfile, "admin">
+    profile: Exclude<
+        PersistentGatewayConnectionProfile,
+        "admin" | "chat-read-mutation" | "chat-write"
+    >
 ): ResolvedPersistentGatewayOptions {
     const token = Redacted.value(options.token);
     if (token.length === 0 || byteLength(token) > 16 * 1024) {
@@ -481,6 +681,13 @@ function resolveOptions(
             1024,
             persistentGatewayBufferedAmountMaximumBytes,
             "Persistent Gateway buffered amount"
+        ),
+        chatOutboundFrameMaximumBytes: boundedInteger(
+            options.chatOutboundFrameMaximumBytes,
+            persistentGatewayChatOutboundFrameMaximumBytes,
+            1024,
+            persistentGatewayChatOutboundFrameMaximumBytes,
+            "Persistent Gateway chat outbound frame limit"
         ),
         clientVersion: boundedNonblank(
             options.clientVersion,
@@ -561,6 +768,7 @@ function resolveOptions(
 
 class GatewaySocketLane {
     readonly #callbacks: GatewaySocketLaneCallbacks;
+    readonly #configuredBufferedAmountMaximumBytes: number;
     readonly #generation: number;
     readonly #profile: PersistentGatewayConnectionProfile;
     readonly #resolved: ResolvedPersistentGatewayOptions;
@@ -571,6 +779,7 @@ class GatewaySocketLane {
     #advertisedMethods = new Set<string>();
     #connectRequestId: string | undefined;
     #connected = false;
+    readonly #configuredOutboundFrameMaximumBytes: number;
     #disposition: LaneCloseDisposition = Object.freeze({
         reconnect: true,
         requested: false,
@@ -589,13 +798,19 @@ class GatewaySocketLane {
 
     constructor(options: GatewaySocketLaneOptions) {
         this.#callbacks = options.callbacks;
+        this.#configuredBufferedAmountMaximumBytes =
+            options.bufferedAmountMaximumBytes ??
+            options.resolved.bufferedAmountMaximumBytes;
+        this.#configuredOutboundFrameMaximumBytes =
+            options.outboundFrameMaximumBytes ??
+            options.resolved.outboundFrameMaximumBytes;
         this.#generation = options.generation;
         this.#profile = options.profile;
         this.#resolved = options.resolved;
         this.#negotiatedBufferedAmountMaximumBytes =
-            options.resolved.bufferedAmountMaximumBytes;
+            this.#configuredBufferedAmountMaximumBytes;
         this.#negotiatedOutboundFrameMaximumBytes =
-            options.resolved.outboundFrameMaximumBytes;
+            this.#configuredOutboundFrameMaximumBytes;
         const close = Promise.withResolvers<void>();
         this.#closePromise = close.promise;
         this.#resolveClose = close.resolve;
@@ -870,7 +1085,8 @@ class GatewaySocketLane {
 
     #onEvent(
         envelope: PersistentGatewayEventEnvelope,
-        frame: PersistentGatewayEventFrame | undefined
+        frame: PersistentGatewayEventFrame | undefined,
+        chatEvent: PersistentGatewayPrivateChatEvent | undefined
     ): void {
         if (envelope.seq !== undefined) {
             const expected =
@@ -891,6 +1107,9 @@ class GatewaySocketLane {
         this.#lastActivityAtMs = receivedAtMs;
         this.#callbacks.onActivity(receivedAtMs, envelope.seq);
         if (frame !== undefined) this.#callbacks.onEvent(frame, receivedAtMs);
+        if (chatEvent !== undefined) {
+            this.#callbacks.onChatEvent(chatEvent, receivedAtMs);
+        }
     }
 
     #onAuthenticatedEvent(value: unknown, deliver: boolean): boolean {
@@ -900,7 +1119,23 @@ class GatewaySocketLane {
             this.#fail("protocol", false, policyCloseCode, "duplicate gateway challenge");
             return true;
         }
-        this.#onEvent(envelope, deliver ? parsePersistentGatewayEvent(value) : undefined);
+        const chatEvent =
+            deliver && (envelope.event === "chat" || envelope.event === "agent")
+                ? parsePersistentGatewayPrivateChatEvent(value)
+                : undefined;
+        if (
+            deliver &&
+            (envelope.event === "chat" || envelope.event === "agent") &&
+            chatEvent === undefined
+        ) {
+            this.#fail("protocol", true, policyCloseCode, "invalid gateway chat event");
+            return true;
+        }
+        this.#onEvent(
+            envelope,
+            deliver ? parsePersistentGatewayEvent(value) : undefined,
+            chatEvent
+        );
         return true;
     }
 
@@ -942,11 +1177,11 @@ class GatewaySocketLane {
         }
         this.#advertisedMethods = new Set(hello.features.methods);
         this.#negotiatedBufferedAmountMaximumBytes = Math.min(
-            this.#resolved.bufferedAmountMaximumBytes,
+            this.#configuredBufferedAmountMaximumBytes,
             hello.policy.maxBufferedBytes
         );
         this.#negotiatedOutboundFrameMaximumBytes = Math.min(
-            this.#resolved.outboundFrameMaximumBytes,
+            this.#configuredOutboundFrameMaximumBytes,
             hello.policy.maxPayload
         );
         this.#markActivity();
@@ -1261,7 +1496,12 @@ class GatewaySocketLane {
         pending.reject(
             new PersistentGatewayRequestError({
                 code: error.code,
-                reason: sanitizedRequestReason(error.details),
+                reason: sanitizedRequestReason(
+                    error.details,
+                    pending.method,
+                    error.code,
+                    error.message
+                ),
                 retryable: error.retryable,
                 retryAfterMs: error.retryAfterMs,
             })
@@ -1287,7 +1527,36 @@ export interface PersistentGatewayTransport extends PersistentGatewayTransportLi
         parameters: Readonly<Record<string, unknown>>,
         options?: PersistentGatewayRequestOptions
     ): Promise<unknown>;
+    requestChatRead(
+        method: PersistentGatewayChatReadMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown>;
+    requestChatReadMutation(
+        method: PersistentGatewayChatReadMutationMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown>;
+    requestChatWrite(
+        method: PersistentGatewayChatWriteMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown>;
+    requestTaskRead(
+        method: PersistentGatewayTaskReadMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown>;
+    requestTaskWrite(
+        method: PersistentGatewayTaskWriteMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown>;
     subscribe(listener: PersistentGatewayListener): () => void;
+    subscribeChat(
+        subscription: PersistentGatewayChatSubscription,
+        listener: PersistentGatewayChatListener
+    ): () => void;
 }
 
 /** Worker-only port with no generic read or admin request capability. */
@@ -1300,6 +1569,8 @@ class PersistentGatewayTransportImplementation
 {
     readonly taskNotificationSender: TaskNotificationChatSender;
     readonly #adminLanes = new Set<GatewaySocketLane>();
+    readonly #companionAskAdmissions: number[] = [];
+    readonly #chatScopes = new Map<string, ChatSubscriptionScope>();
     readonly #listeners = new Map<PersistentGatewayListener, object>();
     readonly #resolved: ResolvedPersistentGatewayOptions;
     #generation = 0;
@@ -1317,7 +1588,10 @@ class PersistentGatewayTransportImplementation
 
     constructor(
         options: PersistentGatewayTransportOptions,
-        profile: Exclude<PersistentGatewayConnectionProfile, "admin">
+        profile: Exclude<
+            PersistentGatewayConnectionProfile,
+            "admin" | "chat-read-mutation" | "chat-write"
+        >
     ) {
         this.#resolved = resolveOptions(options, profile);
         this.taskNotificationSender = Object.freeze<TaskNotificationChatSender>({
@@ -1354,6 +1628,143 @@ class PersistentGatewayTransportImplementation
         );
     }
 
+    requestChatRead(
+        method: PersistentGatewayChatReadMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayChatReadMethod(method)
+        ) {
+            return Promise.reject(new PersistentGatewayUnavailableError());
+        }
+        try {
+            assertPersistentGatewayChatReadParameters(method, parameters);
+        } catch {
+            return Promise.reject(new PersistentGatewayUnavailableError());
+        }
+        return (
+            this.#lane?.request(method, parameters, options) ??
+            Promise.reject(new PersistentGatewayUnavailableError())
+        );
+    }
+
+    async requestChatReadMutation(
+        method: PersistentGatewayChatReadMutationMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options: PersistentGatewayRequestOptions = {}
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayChatReadMutationMethod(method)
+        ) {
+            throw new PersistentGatewayUnavailableError();
+        }
+        try {
+            assertPersistentGatewayChatReadMutationParameters(method, parameters);
+        } catch {
+            throw new PersistentGatewayUnavailableError();
+        }
+        this.#assertOneShotAdmission(options);
+        const admission = this.#reserveCompanionAskRateAdmission();
+        try {
+            return await this.#runOneShotRequest(
+                "chat-read-mutation",
+                method,
+                parameters,
+                options,
+                this.#resolved.bufferedAmountMaximumBytes,
+                this.#resolved.outboundFrameMaximumBytes
+            );
+        } catch (error) {
+            if (
+                !(error instanceof PersistentGatewayUnknownOutcomeError) &&
+                (!(error instanceof PersistentGatewayRequestError) ||
+                    error.reason === persistentGatewaySessionCompanionBusyReason)
+            ) {
+                this.#releaseCompanionAskRateAdmission(admission);
+            }
+            throw error;
+        }
+    }
+
+    async requestChatWrite(
+        method: PersistentGatewayChatWriteMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options: PersistentGatewayRequestOptions = {}
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayChatWriteMethod(method)
+        ) {
+            throw new PersistentGatewayUnavailableError();
+        }
+        try {
+            assertPersistentGatewayChatWriteParameters(method, parameters);
+        } catch {
+            throw new PersistentGatewayUnavailableError();
+        }
+        this.#assertOneShotAdmission(options);
+        return this.#runOneShotRequest(
+            "chat-write",
+            method,
+            parameters,
+            options,
+            this.#resolved.chatOutboundFrameMaximumBytes,
+            this.#resolved.chatOutboundFrameMaximumBytes
+        );
+    }
+
+    requestTaskRead(
+        method: PersistentGatewayTaskReadMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayTaskReadMethod(method)
+        ) {
+            return Promise.reject(new PersistentGatewayUnavailableError());
+        }
+        try {
+            assertPersistentGatewayTaskReadParameters(method, parameters);
+        } catch {
+            return Promise.reject(new PersistentGatewayUnavailableError());
+        }
+        return (
+            this.#lane?.request(method, parameters, options) ??
+            Promise.reject(new PersistentGatewayUnavailableError())
+        );
+    }
+
+    async requestTaskWrite(
+        method: PersistentGatewayTaskWriteMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options: PersistentGatewayRequestOptions = {}
+    ): Promise<unknown> {
+        if (
+            this.#resolved.profile !== "web-read" ||
+            !isPersistentGatewayTaskWriteMethod(method)
+        ) {
+            throw new PersistentGatewayUnavailableError();
+        }
+        try {
+            assertPersistentGatewayTaskWriteParameters(method, parameters);
+        } catch {
+            throw new PersistentGatewayUnavailableError();
+        }
+        this.#assertOneShotAdmission(options);
+        return this.#runOneShotRequest(
+            "chat-write",
+            method,
+            parameters,
+            options,
+            this.#resolved.bufferedAmountMaximumBytes,
+            this.#resolved.outboundFrameMaximumBytes
+        );
+    }
+
     async requestAdmin(
         method: PersistentGatewayAdminMethod,
         parameters: Readonly<Record<string, unknown>>,
@@ -1370,15 +1781,15 @@ class PersistentGatewayTransportImplementation
         } catch {
             throw new PersistentGatewayUnavailableError();
         }
-        if (this.#permanentlyStopped || options.signal?.aborted === true) {
-            throw options.signal?.aborted === true
-                ? new PersistentGatewayAbortError()
-                : new PersistentGatewayUnavailableError();
-        }
-        if (this.#adminLanes.size >= this.#resolved.adminConcurrencyMaximum) {
-            throw new PersistentGatewayCapacityError();
-        }
-        return this.#runAdminRequest(method, parameters, options);
+        this.#assertOneShotAdmission(options);
+        return this.#runOneShotRequest(
+            "admin",
+            method,
+            parameters,
+            options,
+            this.#resolved.bufferedAmountMaximumBytes,
+            this.#resolved.outboundFrameMaximumBytes
+        );
     }
 
     start(): void {
@@ -1407,6 +1818,99 @@ class PersistentGatewayTransportImplementation
             if (this.#listeners.get(listener) === identity)
                 this.#listeners.delete(listener);
         };
+    }
+
+    subscribeChat(
+        subscription: PersistentGatewayChatSubscription,
+        listener: PersistentGatewayChatListener
+    ): () => void {
+        if (this.#permanentlyStopped || this.#resolved.profile !== "web-read") {
+            queueMicrotask(() => {
+                void Promise.resolve()
+                    .then(() => listener.onReconciliationRequired?.("transport"))
+                    .catch(() => {
+                        // Admission-boundary listener failures are contained.
+                    });
+            });
+            return () => {};
+        }
+        const scopeId = chatSubscriptionScopeIdentifier(subscription);
+        const initialRunSequences = chatRunWatermarkMap(subscription.runWatermarks);
+        let scope = this.#chatScopes.get(scopeId);
+        if (scope === undefined) {
+            if (this.#chatScopes.size >= persistentGatewayChatSubscriptionMaximum) {
+                throw new PersistentGatewayCapacityError();
+            }
+            scope = {
+                ...(subscription.agentId === undefined
+                    ? {}
+                    : { agentId: subscription.agentId }),
+                initialRunSequences,
+                key: subscription.sessionKey,
+                runSequences: new Map(),
+                subscribers: new Map(),
+            };
+            this.#chatScopes.set(scopeId, scope);
+        } else if (
+            !chatRunWatermarkMapsEqual(scope.initialRunSequences, initialRunSequences)
+        ) {
+            throw new PersistentGatewayUnavailableError();
+        }
+        const identity = {};
+        scope.subscribers.set(identity, {
+            draining: false,
+            identity,
+            listener,
+            queue: [],
+            queuedEventBytes: 0,
+            terminalBoundaryQueued: false,
+        });
+        if (scope.reconciliationRequired === undefined) {
+            this.#synchronizeChatScope(scope);
+        } else {
+            const subscriber = scope.subscribers.get(identity);
+            if (subscriber !== undefined) {
+                this.#enqueueChatBoundary(scope, subscriber, {
+                    kind: "reconciliation",
+                    reason: scope.reconciliationRequired,
+                });
+            }
+        }
+        return () => {
+            const current = this.#chatScopes.get(scopeId);
+            const subscriber = scope.subscribers.get(identity);
+            if (current !== scope || subscriber === undefined) return;
+            this.#deleteChatSubscriber(scope, subscriber);
+        };
+    }
+
+    #assertOneShotAdmission(options: PersistentGatewayRequestOptions): void {
+        if (this.#permanentlyStopped || options.signal?.aborted === true) {
+            throw options.signal?.aborted === true
+                ? new PersistentGatewayAbortError()
+                : new PersistentGatewayUnavailableError();
+        }
+        if (this.#adminLanes.size >= this.#resolved.adminConcurrencyMaximum) {
+            throw new PersistentGatewayCapacityError();
+        }
+    }
+
+    #reserveCompanionAskRateAdmission(): number {
+        const now = this.#resolved.nowMs();
+        const cutoff = now - 60_000;
+        while ((this.#companionAskAdmissions[0] ?? now) < cutoff) {
+            this.#companionAskAdmissions.shift();
+        }
+        if (this.#companionAskAdmissions.length >= 4) {
+            throw new PersistentGatewayCapacityError();
+        }
+        this.#companionAskAdmissions.push(now);
+        return now;
+    }
+
+    #releaseCompanionAskRateAdmission(admission: number): void {
+        const index = this.#companionAskAdmissions.indexOf(admission);
+        if (index !== -1) this.#companionAskAdmissions.splice(index, 1);
     }
 
     #clearReconnect(): void {
@@ -1443,6 +1947,8 @@ class PersistentGatewayTransportImplementation
                 },
                 onClosed: (report) => this.#handleLaneClosed(lane, report),
                 onConnected: (hello) => this.#handleConnected(lane, hello),
+                onChatEvent: (frame, receivedAtMs) =>
+                    this.#handleChatEvent(lane, frame, receivedAtMs),
                 onEvent: (frame, receivedAtMs) =>
                     this.#handleEvent(lane, frame, receivedAtMs),
                 onEventGap: (expectedSequence, receivedSequence) => {
@@ -1483,6 +1989,325 @@ class PersistentGatewayTransportImplementation
             phase: "connected",
             reconnectAttempt: 0,
         });
+        for (const scope of this.#chatScopes.values()) {
+            this.#synchronizeChatScope(scope);
+        }
+    }
+
+    #synchronizeChatScope(scope: ChatSubscriptionScope): void {
+        const lane = this.#lane;
+        const generation = this.#generation;
+        if (
+            lane === undefined ||
+            !lane.connected ||
+            this.#snapshot.phase !== "connected" ||
+            scope.subscribers.size === 0 ||
+            scope.reconciliationRequired !== undefined ||
+            scope.subscribedGeneration === generation ||
+            scope.synchronizingGeneration === generation
+        ) {
+            return;
+        }
+        scope.synchronizingGeneration = generation;
+        void lane
+            .request(
+                "sessions.messages.subscribe",
+                {
+                    ...(scope.agentId === undefined ? {} : { agentId: scope.agentId }),
+                    key: scope.key,
+                },
+                { timeoutMs: 15_000 }
+            )
+            .then(
+                (payload) => {
+                    if (
+                        this.#lane !== lane ||
+                        this.#generation !== generation ||
+                        scope.synchronizingGeneration !== generation
+                    ) {
+                        return null;
+                    }
+                    scope.synchronizingGeneration = undefined;
+                    const acknowledgement =
+                        parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement(
+                            payload,
+                            true
+                        );
+                    if (acknowledgement === undefined) {
+                        this.#notifyChatScope(scope, "subscription");
+                        return null;
+                    }
+                    scope.canonicalKey = acknowledgement.key;
+                    scope.subscribedGeneration = generation;
+                    scope.runSequences.clear();
+                    for (const [runId, sequence] of scope.initialRunSequences) {
+                        scope.runSequences.set(runId, sequence);
+                    }
+                    if (scope.subscribers.size === 0) this.#unsubscribeChatScope(scope);
+                    return null;
+                },
+                () => {
+                    if (scope.synchronizingGeneration === generation) {
+                        scope.synchronizingGeneration = undefined;
+                    }
+                    if (this.#generation === generation) {
+                        this.#notifyChatScope(scope, "subscription");
+                    }
+                    return null;
+                }
+            );
+    }
+
+    #unsubscribeChatScope(scope: ChatSubscriptionScope): void {
+        const lane = this.#lane;
+        const generation = this.#generation;
+        if (
+            lane === undefined ||
+            !lane.connected ||
+            scope.subscribedGeneration !== generation
+        ) {
+            return;
+        }
+        scope.subscribedGeneration = undefined;
+        void lane
+            .request(
+                "sessions.messages.unsubscribe",
+                {
+                    ...(scope.agentId === undefined ? {} : { agentId: scope.agentId }),
+                    key: scope.canonicalKey ?? scope.key,
+                },
+                { timeoutMs: 15_000 }
+            )
+            .then((payload) => {
+                parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement(
+                    payload,
+                    false
+                );
+                return null;
+            })
+            .catch(() => {
+                // Closing a local subscription is authoritative. Reconnect clears
+                // any surviving upstream connection-scoped subscription.
+            });
+    }
+
+    #quarantineChatScope(
+        scope: ChatSubscriptionScope,
+        reason: PersistentGatewayChatReconciliationReason
+    ): void {
+        scope.reconciliationRequired ??= reason;
+        scope.runSequences.clear();
+        this.#unsubscribeChatScope(scope);
+    }
+
+    #notifyChatScope(
+        scope: ChatSubscriptionScope,
+        reason: PersistentGatewayChatReconciliationReason
+    ): void {
+        this.#quarantineChatScope(scope, reason);
+        const reconciliationReason = scope.reconciliationRequired ?? reason;
+        for (const subscriber of scope.subscribers.values()) {
+            this.#enqueueChatBoundary(scope, subscriber, {
+                kind: "reconciliation",
+                reason: reconciliationReason,
+            });
+        }
+    }
+
+    #clearChatSubscriberQueue(subscriber: ChatSubscriberState): void {
+        subscriber.queue.length = 0;
+        subscriber.queuedEventBytes = 0;
+    }
+
+    #deleteChatSubscriber(
+        scope: ChatSubscriptionScope,
+        subscriber: ChatSubscriberState
+    ): void {
+        if (!scope.subscribers.delete(subscriber.identity)) return;
+        this.#clearChatSubscriberQueue(subscriber);
+        if (scope.subscribers.size > 0) return;
+        for (const [scopeId, candidate] of this.#chatScopes) {
+            if (candidate === scope) {
+                this.#chatScopes.delete(scopeId);
+                break;
+            }
+        }
+        this.#unsubscribeChatScope(scope);
+    }
+
+    #startChatSubscriberDrain(
+        scope: ChatSubscriptionScope,
+        subscriber: ChatSubscriberState
+    ): void {
+        if (subscriber.draining) return;
+        subscriber.draining = true;
+        queueMicrotask(() => void this.#drainChatSubscriber(scope, subscriber));
+    }
+
+    #enqueueChatBoundary(
+        scope: ChatSubscriptionScope,
+        subscriber: ChatSubscriberState,
+        boundary: Exclude<ChatSubscriberQueueItem, { readonly kind: "event" }>
+    ): void {
+        if (
+            subscriber.terminalBoundaryQueued ||
+            scope.subscribers.get(subscriber.identity) !== subscriber
+        ) {
+            return;
+        }
+        if (boundary.kind === "reconciliation") {
+            this.#clearChatSubscriberQueue(subscriber);
+        }
+        subscriber.terminalBoundaryQueued = true;
+        subscriber.queue.push(boundary);
+        this.#startChatSubscriberDrain(scope, subscriber);
+    }
+
+    #enqueueChatEvent(
+        scope: ChatSubscriptionScope,
+        subscriber: ChatSubscriberState,
+        event: PersistentGatewayDeliveredChatEvent,
+        retainedBytes: number
+    ): void {
+        if (subscriber.terminalBoundaryQueued) return;
+        if (
+            !Number.isSafeInteger(retainedBytes) ||
+            retainedBytes < 0 ||
+            retainedBytes > persistentGatewayChatEventQueueMaximumBytes ||
+            subscriber.queue.length >= persistentGatewayChatEventQueueMaximum ||
+            subscriber.queuedEventBytes + retainedBytes >
+                persistentGatewayChatEventQueueMaximumBytes
+        ) {
+            this.#enqueueChatBoundary(scope, subscriber, {
+                kind: "reconciliation",
+                reason: "backpressure",
+            });
+            return;
+        }
+        subscriber.queuedEventBytes += retainedBytes;
+        subscriber.queue.push({ event, kind: "event", retainedBytes });
+        this.#startChatSubscriberDrain(scope, subscriber);
+    }
+
+    async #drainChatSubscriber(
+        scope: ChatSubscriptionScope,
+        subscriber: ChatSubscriberState
+    ): Promise<void> {
+        try {
+            while (scope.subscribers.get(subscriber.identity) === subscriber) {
+                const item = subscriber.queue.shift();
+                if (item === undefined) break;
+                try {
+                    if (item.kind === "event") {
+                        subscriber.queuedEventBytes = Math.max(
+                            0,
+                            subscriber.queuedEventBytes - item.retainedBytes
+                        );
+                        await subscriber.listener.onEvent?.(item.event);
+                        continue;
+                    }
+                    await (item.kind === "gap"
+                        ? subscriber.listener.onEventGap?.(item.gap)
+                        : subscriber.listener.onReconciliationRequired?.(item.reason));
+                } catch {
+                    if (item.kind !== "reconciliation") {
+                        this.#clearChatSubscriberQueue(subscriber);
+                        subscriber.terminalBoundaryQueued = true;
+                        try {
+                            await subscriber.listener.onReconciliationRequired?.(
+                                "backpressure"
+                            );
+                        } catch {
+                            // Subscriber failures are contained at this boundary.
+                        }
+                    }
+                }
+                this.#deleteChatSubscriber(scope, subscriber);
+                return;
+            }
+        } finally {
+            subscriber.draining = false;
+            if (
+                subscriber.queue.length > 0 &&
+                scope.subscribers.get(subscriber.identity) === subscriber
+            ) {
+                subscriber.draining = true;
+                queueMicrotask(() => void this.#drainChatSubscriber(scope, subscriber));
+            }
+        }
+    }
+
+    #handleChatEvent(
+        lane: GatewaySocketLane,
+        frame: PersistentGatewayPrivateChatEvent,
+        receivedAtMs: number
+    ): void {
+        if (this.#lane !== lane || this.#snapshot.phase !== "connected") return;
+        for (const scope of this.#chatScopes.values()) {
+            if (
+                scope.subscribedGeneration !== this.#generation ||
+                scope.reconciliationRequired !== undefined ||
+                (scope.canonicalKey ?? scope.key) !== frame.payload.sessionKey ||
+                (scope.agentId !== undefined && scope.agentId !== frame.payload.agentId)
+            ) {
+                continue;
+            }
+            const sequenceKey = frame.payload.runId;
+            const terminal =
+                frame.event === "chat" &&
+                (frame.payload.state === "final" ||
+                    frame.payload.state === "aborted" ||
+                    frame.payload.state === "error");
+            const previousSequence = scope.runSequences.get(sequenceKey);
+            if (previousSequence !== undefined && frame.payload.seq <= previousSequence) {
+                // A reconnect can replay provider frames already represented by the
+                // durable watermark. They are not a gap and must not cross again.
+                continue;
+            }
+            const expectedSequence = (previousSequence ?? 0) + 1;
+            if (previousSequence !== undefined && frame.payload.seq > expectedSequence) {
+                const gap: PersistentGatewayChatEventGap = Object.freeze({
+                    connectionGeneration: this.#generation,
+                    expectedSequence,
+                    receivedSequence: frame.payload.seq,
+                    runId: frame.payload.runId,
+                    sessionKey: frame.payload.sessionKey,
+                });
+                this.#quarantineChatScope(scope, "backpressure");
+                for (const subscriber of scope.subscribers.values()) {
+                    this.#enqueueChatBoundary(scope, subscriber, {
+                        gap,
+                        kind: "gap",
+                    });
+                }
+                continue;
+            }
+            // sessions.messages.subscribe is a future-event subscription. A run
+            // started outside this process can therefore first be observed after
+            // sequence one. With no durable watermark, that first frame establishes
+            // the baseline; subsequent frames remain strictly contiguous.
+            if (terminal) {
+                scope.runSequences.delete(sequenceKey);
+            } else {
+                if (
+                    previousSequence === undefined &&
+                    scope.runSequences.size >= persistentGatewayChatTrackedRunMaximum
+                ) {
+                    this.#notifyChatScope(scope, "backpressure");
+                    continue;
+                }
+                scope.runSequences.set(sequenceKey, frame.payload.seq);
+            }
+            const delivered = Object.freeze({
+                connectionGeneration: this.#generation,
+                frame,
+                receivedAtMs,
+            });
+            const retainedBytes = deliveredChatEventRetainedBytes(delivered);
+            for (const subscriber of scope.subscribers.values()) {
+                this.#enqueueChatEvent(scope, subscriber, delivered, retainedBytes);
+            }
+        }
     }
 
     #handleEvent(
@@ -1507,6 +2332,16 @@ class PersistentGatewayTransportImplementation
     #handleLaneClosed(lane: GatewaySocketLane, report: LaneCloseReport): void {
         if (this.#lane !== lane || report.generation !== this.#generation) return;
         this.#lane = undefined;
+        for (const scope of this.#chatScopes.values()) {
+            const wasSubscribed =
+                scope.subscribedGeneration === this.#generation ||
+                scope.synchronizingGeneration === this.#generation;
+            scope.subscribedGeneration = undefined;
+            scope.synchronizingGeneration = undefined;
+            scope.canonicalKey = undefined;
+            scope.runSequences.clear();
+            if (wasSubscribed) this.#notifyChatScope(scope, "transport");
+        }
         const disconnectedAtMs = safeNow(this.#resolved.nowMs);
         if (this.#permanentlyStopped) {
             this.#setSnapshot({
@@ -1606,10 +2441,17 @@ class PersistentGatewayTransportImplementation
         }
     }
 
-    async #runAdminRequest(
-        method: PersistentGatewayAdminMethod,
+    async #runOneShotRequest(
+        profile: "admin" | "chat-read-mutation" | "chat-write",
+        method:
+            | PersistentGatewayAdminMethod
+            | PersistentGatewayChatReadMutationMethod
+            | PersistentGatewayChatWriteMethod
+            | PersistentGatewayTaskWriteMethod,
         parameters: Readonly<Record<string, unknown>>,
-        options: PersistentGatewayRequestOptions
+        options: PersistentGatewayRequestOptions,
+        bufferedAmountMaximumBytes: number,
+        outboundFrameMaximumBytes: number
     ): Promise<unknown> {
         let dispatched = false;
         let settled = false;
@@ -1647,11 +2489,14 @@ class PersistentGatewayTransportImplementation
                         })
                         .then(resolveOutcome, rejectOutcome);
                 },
+                onChatEvent: () => {},
                 onEvent: () => {},
                 onEventGap: () => {},
             },
             generation: 1,
-            profile: "admin",
+            bufferedAmountMaximumBytes,
+            outboundFrameMaximumBytes,
+            profile,
             resolved: this.#resolved,
         });
         this.#adminLanes.add(lane);

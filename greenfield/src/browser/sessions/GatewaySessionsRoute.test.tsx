@@ -72,6 +72,10 @@ test("sessions route composes its bounded browser and lazy route registration", 
         expect(
             await screen.findByRole("table", { name: "Current OpenClaw sessions" })
         ).toBeVisible();
+        expect(
+            screen.getAllByText(/Updates automatically every 10 seconds/u)
+        ).toHaveLength(2);
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(screen.getByText("Primary main")).toBeVisible();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
     } finally {

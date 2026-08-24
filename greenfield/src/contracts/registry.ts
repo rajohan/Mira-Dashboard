@@ -63,6 +63,7 @@ export interface ProcedureTransportContract {
     /** Raw request-body budget selected before authentication and parsing. */
     requestBody:
         | "authentication"
+        | "chat-send"
         | "default"
         | "monitoring"
         | "task-content"
@@ -127,17 +128,41 @@ export function assertProcedureContractErrors(
     }
 }
 
-/** Response-body contract for one raw HTTP operation. */
-export type RawHttpResponseContract =
+/** Request/response entity contract for one raw HTTP operation. */
+export type RawHttpBodyContract =
     | { kind: "none" }
-    | { kind: "schema"; schema: ContractSchema; schemaId: string };
+    | {
+          contentTypes: readonly string[];
+          kind: "binary";
+          maximumBytes: number;
+          transfer: "buffered" | "streamed";
+      }
+    | {
+          contentTypes: readonly string[];
+          kind: "schema";
+          schema: ContractSchema;
+          schemaId: string;
+      };
+
+/** Strict query-string metadata for one raw HTTP operation. */
+export interface RawHttpQueryContract {
+    additionalParameters: "forbidden";
+    parameters: readonly {
+        name: string;
+        required: boolean;
+        values: readonly string[];
+    }[];
+}
 
 /** Metadata for one raw HTTP operation. */
 export interface RawHttpContract {
     access: ContractAccess;
-    method: "GET" | "HEAD" | "POST";
+    method: "GET" | "HEAD" | "POST" | "PUT";
     path: string;
-    response: RawHttpResponseContract;
+    query?: RawHttpQueryContract;
+    rangeRequests: "none" | "single-byte-range";
+    requestBody: RawHttpBodyContract;
+    response: RawHttpBodyContract;
     statusCodes: readonly number[];
     summary: string;
 }
