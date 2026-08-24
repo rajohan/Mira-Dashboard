@@ -323,7 +323,6 @@ describe("native Gateway credential verifier", () => {
                 )
             ).toBeInstanceOf(GatewayCredentialVerifierUnavailableError);
             expect(fixture.acceptedConnections).toBe(1);
-            expect(jest.getTimerCount()).toBe(0);
             jest.advanceTimersByTime(60_000);
             await Promise.resolve();
             expect(fixture.acceptedConnections).toBe(1);

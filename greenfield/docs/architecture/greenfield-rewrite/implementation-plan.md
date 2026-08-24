@@ -202,9 +202,9 @@ not package memory alone:
 ### Effect
 
 - [Effect-oriented coding-agent workflow](https://www.effect.website/blog/the-one-weird-git-trick-that-makes-coding-agents-more-effect-ive)
-- [Effect 4 migration and beta API map](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.104/MIGRATION.md)
-- [Scoped `acquireRelease` resources](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.104/ai-docs/src/01_effect/05_resources/10_acquire-release.ts)
-- [Schema-backed tagged errors and `catchTags`](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.104/ai-docs/src/01_effect/04_errors/10_catch-tags.ts)
+- [Effect 4 migration and beta API map](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.106/MIGRATION.md)
+- [Scoped `acquireRelease` resources](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.106/ai-docs/src/01_effect/05_resources/10_acquire-release.ts)
+- [Schema-backed tagged errors and `catchTags`](https://github.com/Effect-TS/effect/blob/effect%404.0.0-beta.106/ai-docs/src/01_effect/04_errors/10_catch-tags.ts)
 
 ### React and TanStack
 

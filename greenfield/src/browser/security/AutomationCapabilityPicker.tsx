@@ -1,10 +1,9 @@
-import { Fieldset, Legend } from "@headlessui/react";
-
 import {
     type ApplicationCapability,
     applicationCapabilities,
 } from "../../contracts/security.ts";
 import { Checkbox } from "../ui/Checkbox.tsx";
+import { Fieldset } from "../ui/Fieldset.tsx";
 
 interface AutomationCapabilityPickerProps {
     readonly disabled?: boolean;
@@ -22,8 +21,7 @@ export function AutomationCapabilityPicker({
     value,
 }: AutomationCapabilityPickerProps) {
     return (
-        <Fieldset className="mt-4" disabled={disabled}>
-            <Legend className="text-primary-200 text-sm font-medium">Capabilities</Legend>
+        <Fieldset className="mt-4" disabled={disabled} legend="Capabilities">
             <div className="mt-2 flex flex-wrap gap-4">
                 {applicationCapabilities.map((capability) => (
                     <Checkbox

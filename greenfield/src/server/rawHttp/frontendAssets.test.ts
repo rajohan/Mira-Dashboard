@@ -96,7 +96,7 @@ async function frontendReleaseFixture(): Promise<RuntimeRelease> {
                 {
                     name: "effect",
                     scope: "dependency",
-                    version: "4.0.0-beta.104",
+                    version: "4.0.0-beta.106",
                 },
             ],
             processRoles: [...releaseProcessRoles],

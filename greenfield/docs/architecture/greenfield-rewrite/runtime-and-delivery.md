@@ -498,7 +498,7 @@ against an arbitrary schema is forbidden.
 | `@valibot/to-json-schema`    |                1.7.1 | generated contract JSON Schema                                     |
 | `drizzle-orm`                | 1.0.0-rc.4 candidate | typed Bun SQLite schema/query layer and Valibot integration        |
 | `drizzle-kit`                | 1.0.0-rc.4 candidate | reviewed SQL migration generation from the schema                  |
-| `effect`                     |       4.0.0-beta.104 | server typed errors, cancellation, schedules, and scoped resources |
+| `effect`                     |       4.0.0-beta.106 | server typed errors, cancellation, schedules, and scoped resources |
 | `superjson`                  |                2.2.6 | symmetric tRPC transformer for deliberately richer API types       |
 
 ### Keep as architectural dependencies

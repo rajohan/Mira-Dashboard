@@ -2,6 +2,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
+import { LoadingDots } from "./LoadingDots.tsx";
 
 const loadingStateSizes = Object.freeze({
     lg: { container: "min-h-64", icon: "size-8" },
@@ -28,14 +29,18 @@ export function LoadingState({
     return (
         <output
             aria-busy="true"
+            aria-label={label}
             className={cn(
                 "text-primary-400 flex w-full flex-col items-center justify-center gap-2 text-sm",
                 styles.container,
                 className
             )}
         >
-            <Icon className={cn("animate-spin", styles.icon)} icon={LoaderCircle} />
-            <span>{label}</span>
+            <Icon
+                className={cn("animate-spin motion-reduce:animate-none", styles.icon)}
+                icon={LoaderCircle}
+            />
+            <LoadingDots label={label} />
         </output>
     );
 }

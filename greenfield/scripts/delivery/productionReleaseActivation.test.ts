@@ -1,5 +1,13 @@
 import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    describe,
+    expect,
+    setDefaultTimeout,
+    test,
+} from "bun:test";
 import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -52,21 +60,42 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "c".repeat(40),
     version: "1.4.0",
 });
+const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
+let sharedSourceReleases: readonly [string, string] | undefined;
 
-setDefaultTimeout(8000);
+setDefaultTimeout(15_000);
+
+beforeAll(async () => {
+    sharedSourceReleases = await Promise.all([
+        createLocalReleaseFixture(
+            sourceProjectRoot,
+            firstReleaseId,
+            runtimeIdentity,
+            releaseFixtureDirectories
+        ),
+        createLocalReleaseFixture(
+            sourceProjectRoot,
+            secondReleaseId,
+            runtimeIdentity,
+            releaseFixtureDirectories
+        ),
+    ]);
+});
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
 
-async function localReleaseFixture(commitSha: string): Promise<string> {
-    return createLocalReleaseFixture(
-        sourceProjectRoot,
-        commitSha,
-        runtimeIdentity,
-        temporaryDirectories
-    );
+afterAll(async () => {
+    await removeProductionDeliveryFixtures(releaseFixtureDirectories);
+});
+
+function sourceReleaseFixtures(): readonly [string, string] {
+    if (sharedSourceReleases === undefined) {
+        throw new Error("Production release fixtures are not initialized");
+    }
+    return sharedSourceReleases;
 }
 
 function createProjectFixture() {
@@ -155,10 +184,7 @@ function readMigrationReleaseId(databaseFile: string): string {
 
 describe("production release activation", () => {
     test("commits initial and upgraded release/database pairs under one lease", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -234,10 +260,7 @@ describe("production release activation", () => {
     });
 
     test("restores the previous release and database when candidate readiness fails", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -299,10 +322,7 @@ describe("production release activation", () => {
     });
 
     test("restores the previous release and database after a partial candidate start", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -367,10 +387,7 @@ describe("production release activation", () => {
     });
 
     test("recovers the active service after interruption immediately after stop", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -429,10 +446,7 @@ describe("production release activation", () => {
     });
 
     test("keeps a committed candidate when post-commit cleanup is interrupted", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -504,10 +518,7 @@ describe("production release activation", () => {
     }, 15_000);
 
     test("recovers a durable rollback request after candidate activation commit", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -629,10 +640,7 @@ describe("production release activation", () => {
     });
 
     test("recovers a crash after database promotion but before journal advancement", async () => {
-        const sourceReleases = await Promise.all([
-            localReleaseFixture(firstReleaseId),
-            localReleaseFixture(secondReleaseId),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } = await createProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {

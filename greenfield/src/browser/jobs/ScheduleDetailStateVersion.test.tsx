@@ -19,7 +19,8 @@ describe("schedule detail interaction state", () => {
         const user = userEvent.setup();
 
         await user.click(screen.getByRole("button", { name: "Disable" }));
-        fireEvent.change(screen.getByLabelText("Reason"), {
+        await user.click(screen.getByRole("radio", { name: /Indefinitely/u }));
+        fireEvent.change(screen.getByLabelText("Comment"), {
             target: { value: "  Planned maintenance  " },
         });
         view.rerender(

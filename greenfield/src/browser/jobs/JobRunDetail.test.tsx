@@ -119,7 +119,7 @@ describe("job run detail", () => {
         });
         expect(busyControl).toBeDisabled();
         expect(busyControl).toHaveAttribute("aria-busy", "true");
-        expect(busyControl).toHaveTextContent("Requesting cancellation…");
+        expect(busyControl).toHaveTextContent("Requesting cancellation...");
     });
 
     test("keeps unsupported or already-requested cancellation unavailable", () => {

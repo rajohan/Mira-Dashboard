@@ -1,0 +1,17 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "useDefineForClassFields": true,
+        "lib": ["ESNext", "DOM", "DOM.Iterable"],
+        "types": ["vite/client"],
+        "jsx": "react-jsx"
+    },
+    "include": [
+        ".storybook/manager.ts",
+        ".storybook/preview.tsx",
+        "src/browser/**/*.stories.tsx",
+        "src/browser/**/storySupport/**/*.ts",
+        "src/browser/**/storySupport/**/*.tsx"
+    ],
+    "exclude": ["node_modules"]
+}

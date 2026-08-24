@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { pruneMissingTestTimings } from "./runTestSuite.ts";
+
 const projectRoot = path.resolve(import.meta.dir, "..");
 const runnerPath = path.join(import.meta.dir, "runTestSuite.ts");
 const temporaryDirectories: string[] = [];
@@ -41,6 +43,33 @@ async function runFixture(source: string): Promise<RunnerResult> {
 }
 
 describe("test suite runner", () => {
+    test("prunes deleted files from Bun's merged timing inventory", async () => {
+        const directory = await mkdtemp(path.join(tmpdir(), "mira-test-timings-"));
+        temporaryDirectories.push(directory);
+        const existingTestPath = path.join(directory, "existing.test.ts");
+        const deletedTestPath = path.join(directory, "deleted.test.ts");
+        const timingsPath = path.join(directory, "timings.json");
+        await writeFile(existingTestPath, "", { encoding: "utf8", mode: 0o600 });
+        await writeFile(
+            timingsPath,
+            JSON.stringify({
+                files: {
+                    [existingTestPath]: 12,
+                    [deletedTestPath]: 9,
+                },
+                version: 1,
+            }),
+            { encoding: "utf8", mode: 0o600 }
+        );
+
+        await pruneMissingTestTimings(timingsPath, projectRoot);
+
+        expect(await Bun.file(timingsPath).json()).toEqual({
+            files: { [existingTestPath]: 12 },
+            version: 1,
+        });
+    });
+
     test("preserves a passing test result", async () => {
         const result = await runFixture(`
             import { expect, test } from "bun:test";

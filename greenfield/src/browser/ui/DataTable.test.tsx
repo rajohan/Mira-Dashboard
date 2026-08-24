@@ -5,7 +5,7 @@ import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-tab
 import { DataTable } from "./DataTable.tsx";
 import { Virtualizer } from "./Virtualizer.tsx";
 
-const { render, screen } = await import("@testing-library/react");
+const { render, screen, within } = await import("@testing-library/react");
 
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -116,10 +116,31 @@ describe("Dashboard data table and virtualizer", () => {
         expect(screen.getByText("First row")).toBeTruthy();
         expect(screen.getByText("Second row")).toBeTruthy();
         const scrollRegion = screen.getByRole("region", { name: "Fixture rows" });
-        expect(scrollRegion).toHaveAttribute("tabindex", "0");
-        scrollRegion.focus();
-        expect(scrollRegion).toHaveFocus();
-        expect(scrollRegion).toHaveClass("focus-visible:ring-2");
+        expect(scrollRegion).not.toHaveAttribute("tabindex");
+        expect(scrollRegion.parentElement).toHaveClass(
+            "dashboard-data-table-query-container",
+            "w-full",
+            "max-w-full",
+            "min-w-0"
+        );
+        expect(scrollRegion).toHaveClass(
+            "dashboard-data-table-container",
+            "w-full",
+            "min-w-0",
+            "max-w-full"
+        );
+        expect(scrollRegion).not.toHaveAttribute("data-virtualized");
+        const table = screen.getByRole("table", { name: "Fixture rows" });
+        expect(table).toHaveClass("dashboard-data-table", "w-full", "min-w-full");
+        const firstCell = within(table).getByText("First row").closest("td");
+        expect(firstCell).not.toBeNull();
+        const mobileLabel = firstCell?.querySelector(".dashboard-data-table-label");
+        expect(mobileLabel).toHaveTextContent("Label");
+        expect(mobileLabel).toHaveAttribute("aria-hidden", "true");
+        expect(firstCell?.querySelector(".dashboard-data-table-value")).toHaveTextContent(
+            "First row"
+        );
+        expect(scrollRegion).not.toHaveClass("max-h-128", "overflow-auto");
     });
 
     test("composes the table with a bounded virtual row window", () => {
@@ -127,9 +148,23 @@ describe("Dashboard data table and virtualizer", () => {
 
         expect(screen.getByText("Virtual row 0")).toBeTruthy();
         expect(screen.queryByText("Virtual row 99")).toBeNull();
+        const scrollRegion = screen.getByRole("region", { name: "Fixture rows" });
+        expect(scrollRegion).toHaveAttribute("tabindex", "0");
+        expect(scrollRegion).toHaveClass(
+            "max-h-128",
+            "overflow-auto",
+            "overscroll-x-contain",
+            "[-webkit-overflow-scrolling:touch]",
+            "focus-visible:ring-2"
+        );
+        expect(scrollRegion).toHaveAttribute("data-virtualized", "true");
+        scrollRegion.focus();
+        expect(scrollRegion).toHaveFocus();
         const table = screen.getByRole("table");
         expect(table.querySelector("[style]")).toBeNull();
-        expect(table.querySelector("td[height]")).toBeTruthy();
+        expect(table.querySelector("td[height]")).toHaveClass(
+            "dashboard-data-table-spacer-cell"
+        );
     });
 
     test("virtualizes non-table content independently", () => {

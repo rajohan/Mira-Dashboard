@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
     chmod,
     mkdir,
@@ -35,11 +35,33 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "b".repeat(40),
     version: "1.4.0",
 });
+const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
+let sharedSourceRelease: string | undefined;
+
+beforeAll(async () => {
+    sharedSourceRelease = await createLocalReleaseFixture(
+        sourceProjectRoot,
+        releaseId,
+        runtimeIdentity,
+        releaseFixtureDirectories
+    );
+});
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
+
+afterAll(async () => {
+    await removeProductionDeliveryFixtures(releaseFixtureDirectories);
+});
+
+function sourceReleaseFixture(): string {
+    if (sharedSourceRelease === undefined) {
+        throw new Error("Production release fixture is not initialized");
+    }
+    return sharedSourceRelease;
+}
 
 function successfulSystemctl(): SystemctlProcessResult {
     return Object.freeze({
@@ -54,12 +76,7 @@ async function installationFixture() {
     temporaryDirectories.push(homeDirectory);
     const projectRoot = path.join(homeDirectory, "projects/mira-dashboard");
     await mkdir(projectRoot, { recursive: true, mode: 0o700 });
-    const sourceRelease = await createLocalReleaseFixture(
-        sourceProjectRoot,
-        releaseId,
-        runtimeIdentity,
-        temporaryDirectories
-    );
+    const sourceRelease = sourceReleaseFixture();
     const runtimeRoot = await mkdtemp(path.join(tmpdir(), "mira-systemd-runtime-"));
     temporaryDirectories.push(runtimeRoot);
     const runtimeSource = path.join(runtimeRoot, "bun");

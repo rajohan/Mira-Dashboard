@@ -20,6 +20,21 @@ describe("test output policy", () => {
             "Headless UI Web Animations test shim is missing",
         ],
         [
+            "Storybook unhandled browser error",
+            "[vite] (client) [Unhandled error] Error: render failed",
+            "Storybook reported an unhandled browser error",
+        ],
+        [
+            "Storybook browser console error",
+            "[vite] (client) [console.error] Error: render failed",
+            "Storybook logged a browser console error",
+        ],
+        [
+            "Storybook unexpected stderr marker",
+            "[Storybook unexpected stderr]",
+            "Storybook test emitted unexpected stderr",
+        ],
+        [
             "Bun main-thread panic",
             "panic(main thread): assertion failed",
             "Bun main thread panicked",

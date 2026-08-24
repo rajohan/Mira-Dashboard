@@ -8,6 +8,14 @@ import path from "node:path";
  */
 export async function temporaryProject(): Promise<string> {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "mira-source-boundary-"));
+    await mkdir(path.join(projectRoot, ".storybook"));
+    await writeFile(path.join(projectRoot, ".storybook", "main.ts"), "export {};\n");
+    await writeFile(path.join(projectRoot, ".storybook", "manager.ts"), "export {};\n");
+    await writeFile(path.join(projectRoot, ".storybook", "preview.tsx"), "export {};\n");
+    await writeFile(
+        path.join(projectRoot, ".storybook", "vitest.config.ts"),
+        "export {};\n"
+    );
     await mkdir(path.join(projectRoot, "scripts"));
     await mkdir(path.join(projectRoot, "src", "test", "integration"), {
         recursive: true,

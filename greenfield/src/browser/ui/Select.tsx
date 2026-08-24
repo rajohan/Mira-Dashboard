@@ -31,7 +31,7 @@ interface SelectProps<TValue extends string> {
 export function Select<TValue extends string>({
     ariaLabel,
     className,
-    disabled = false,
+    disabled,
     invalid,
     name,
     onChange,
@@ -52,19 +52,19 @@ export function Select<TValue extends string>({
             <ListboxButton
                 aria-label={ariaLabel}
                 className={cn(
-                    "border-primary-600 bg-primary-950 text-primary-50 relative flex min-h-10 w-full items-center rounded-lg border py-2 pr-9 pl-3 text-left shadow-sm",
-                    "data-hover:border-primary-500 data-focus:border-accent-400 data-focus:ring-accent-400/30 data-focus:ring-2 data-focus:outline-none",
-                    "data-disabled:cursor-not-allowed data-disabled:opacity-60 data-invalid:border-red-500 data-invalid:ring-red-500/25",
+                    "border-primary-500 bg-primary-950 text-primary-50 relative flex min-h-10 w-full max-w-full min-w-0 items-center rounded-lg border py-2 pr-9 pl-3 text-left shadow-sm transition-colors",
+                    "data-hover:border-accent-400 data-focus:border-accent-400 data-focus:ring-accent-400 data-focus:ring-2 data-focus:outline-none",
+                    "data-disabled:cursor-not-allowed data-disabled:opacity-60 data-invalid:border-red-500 data-invalid:ring-red-500",
                     className
                 )}
             >
                 <span className="min-w-0 flex-1 truncate">{selected?.label}</span>
-                <Icon
-                    className="text-primary-400 pointer-events-none absolute right-3"
-                    icon={ChevronsUpDown}
-                    size="sm"
-                    tone="inherit"
-                />
+                <span
+                    aria-hidden="true"
+                    className="text-primary-400 hover:bg-primary-800 hover:text-primary-50 active:bg-primary-700 absolute inset-y-px right-px flex w-9 items-center justify-center rounded-r-lg transition-colors"
+                >
+                    <Icon icon={ChevronsUpDown} size="sm" tone="inherit" />
+                </span>
             </ListboxButton>
             <ListboxOptions
                 anchor="bottom start"

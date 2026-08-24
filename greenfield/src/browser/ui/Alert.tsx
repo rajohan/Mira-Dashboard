@@ -1,8 +1,9 @@
-import { CircleAlert, CircleCheck, Info } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
+import { IconOnlyButton } from "./IconOnlyButton.tsx";
 
 const alertStyle = Object.freeze({
     error: {
@@ -21,8 +22,10 @@ const alertStyle = Object.freeze({
 
 interface AlertProps {
     readonly className?: string;
+    readonly dismissLabel?: string;
     readonly focusOnError?: boolean;
     readonly message: string | undefined;
+    readonly onDismiss?: () => void;
     readonly variant?: keyof typeof alertStyle;
 }
 
@@ -32,8 +35,10 @@ interface AlertProps {
  */
 export function Alert({
     className,
+    dismissLabel = "Dismiss message",
     focusOnError = true,
     message,
+    onDismiss,
     variant = "error",
 }: AlertProps) {
     const element = useRef<HTMLDivElement>(null);
@@ -61,7 +66,17 @@ export function Alert({
                 size="sm"
                 tone="inherit"
             />
-            <span>{message}</span>
+            <span className="min-w-0 flex-1">{message}</span>
+            {onDismiss !== undefined && (
+                <IconOnlyButton
+                    className="-my-1 -mr-1 ml-auto shrink-0 text-current"
+                    icon={X}
+                    label={dismissLabel}
+                    onClick={onDismiss}
+                    size="sm"
+                    variant="ghost"
+                />
+            )}
         </div>
     );
 }

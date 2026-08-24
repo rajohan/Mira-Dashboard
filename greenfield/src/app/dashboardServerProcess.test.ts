@@ -36,7 +36,7 @@ const release = Object.freeze({
                 snapshotSha256: checksum,
             },
         ],
-        packages: [{ name: "effect", scope: "dependency", version: "4.0.0-beta.104" }],
+        packages: [{ name: "effect", scope: "dependency", version: "4.0.0-beta.106" }],
         processRoles: [...releaseProcessRoles],
         runtime: { revision, version: "1.4.0" },
         source: { commitSha: releaseId, treeState: "clean" },

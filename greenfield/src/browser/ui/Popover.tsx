@@ -33,6 +33,7 @@ interface PopoverContentProps extends HTMLAttributes<HTMLDivElement> {
     readonly children: ReactNode;
     readonly gap?: number;
     readonly transition?: boolean;
+    readonly viewportPadding?: number;
 }
 
 /**
@@ -46,12 +47,17 @@ export function PopoverContent({
     className,
     gap = 8,
     transition = true,
+    viewportPadding = 8,
     ...properties
 }: PopoverContentProps) {
     return (
         <HeadlessPopoverPanel
             {...properties}
-            anchor={anchored ? { gap, to: `bottom ${align}` } : false}
+            anchor={
+                anchored
+                    ? { gap, padding: viewportPadding, to: `bottom ${align}` }
+                    : false
+            }
             className={cn(
                 "border-primary-700 bg-primary-950 z-60 w-[min(24rem,calc(100vw-1rem))] rounded-xl border p-4 shadow-2xl shadow-black/50",
                 "transition duration-150 data-closed:scale-95 data-closed:opacity-0 motion-reduce:transition-none",

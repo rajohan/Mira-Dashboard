@@ -41,6 +41,7 @@ package/runtime identity, and the reviewed systemd units; it does not mutate pro
 - [Rewrite blueprint](docs/architecture/greenfield-rewrite.md)
 - [Generated reference](docs/generated/README.md)
 - [Testing and pull requests](docs/development/testing-and-prs.md)
+- [Storybook](docs/development/storybook.md)
 
 ## Cutover
 

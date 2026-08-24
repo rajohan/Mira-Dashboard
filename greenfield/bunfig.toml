@@ -7,6 +7,8 @@ coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
     "scripts/**",
     "src/**/*.d.ts",
+    "src/**/*.stories.tsx",
+    "src/**/storySupport/**",
     "src/**/test/**",
     "src/**/testSupport/**",
     "src/server/test/**",

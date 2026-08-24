@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, readFile, readlink, unlink } from "node:fs/promises";
 import path from "node:path";
 
@@ -26,11 +26,41 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "c".repeat(40),
     version: "1.4.0",
 });
+const releaseFixtureDirectories: string[] = [];
 const temporaryDirectories: string[] = [];
+let sharedSourceReleases: readonly [string, string] | undefined;
+
+beforeAll(async () => {
+    sharedSourceReleases = await Promise.all([
+        createLocalReleaseFixture(
+            sourceProjectRoot,
+            firstReleaseId,
+            runtimeIdentity,
+            releaseFixtureDirectories
+        ),
+        createLocalReleaseFixture(
+            sourceProjectRoot,
+            secondReleaseId,
+            runtimeIdentity,
+            releaseFixtureDirectories
+        ),
+    ]);
+});
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
 });
+
+afterAll(async () => {
+    await removeProductionDeliveryFixtures(releaseFixtureDirectories);
+});
+
+function sourceReleaseFixtures(): readonly [string, string] {
+    if (sharedSourceReleases === undefined) {
+        throw new Error("Production release fixtures are not initialized");
+    }
+    return sharedSourceReleases;
+}
 
 function successfulProcessResult(): SystemctlProcessResult {
     return Object.freeze({
@@ -50,20 +80,7 @@ function inactiveProcessResult(): SystemctlProcessResult {
 
 describe("production user-systemd service control", () => {
     test("points at exact artifacts and controls worker/web in safe order", async () => {
-        const sourceReleases = await Promise.all([
-            createLocalReleaseFixture(
-                sourceProjectRoot,
-                firstReleaseId,
-                runtimeIdentity,
-                temporaryDirectories
-            ),
-            createLocalReleaseFixture(
-                sourceProjectRoot,
-                secondReleaseId,
-                runtimeIdentity,
-                temporaryDirectories
-            ),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } =
             await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
@@ -204,20 +221,7 @@ describe("production user-systemd service control", () => {
     });
 
     test("refuses to replace an untrusted current entry", async () => {
-        const sourceReleases = await Promise.all([
-            createLocalReleaseFixture(
-                sourceProjectRoot,
-                firstReleaseId,
-                runtimeIdentity,
-                temporaryDirectories
-            ),
-            createLocalReleaseFixture(
-                sourceProjectRoot,
-                secondReleaseId,
-                runtimeIdentity,
-                temporaryDirectories
-            ),
-        ]);
+        const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } =
             await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);

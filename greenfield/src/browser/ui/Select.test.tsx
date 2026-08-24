@@ -31,6 +31,15 @@ describe("Select", () => {
         await user.click(screen.getByRole("option", { name: "Raymond" }));
 
         expect(selected).toBe("raymond");
+        expect(screen.getByRole("button", { name: "Task assignee" })).toHaveClass(
+            "w-full",
+            "max-w-full",
+            "min-w-0"
+        );
+        expect(
+            screen.getByRole("button", { name: "Task assignee" }).querySelector("svg")
+                ?.parentElement
+        ).toHaveClass("hover:bg-primary-800", "active:bg-primary-700");
     });
 
     test("inherits its accessible name from a shared form field", () => {
@@ -41,5 +50,15 @@ describe("Select", () => {
         );
 
         expect(screen.getByRole("button", { name: "Assignee" })).toBeTruthy();
+    });
+
+    test("inherits disabled state from a shared form field", () => {
+        render(
+            <FormField disabled label="Assignee">
+                <Select onChange={() => {}} options={options} value="mira" />
+            </FormField>
+        );
+
+        expect(screen.getByRole("button", { name: "Assignee" })).toBeDisabled();
     });
 });

@@ -65,6 +65,11 @@ describe("Dashboard browser artifact", () => {
         };
         const files = await relativeFiles(outputDirectory);
         const html = await readFile(path.join(outputDirectory, "index.html"), "utf8");
+        const stylesheet = files.find((file) => file.endsWith(".css"));
+        if (stylesheet === undefined) {
+            throw new Error("Browser build did not emit a stylesheet.");
+        }
+        const css = await readFile(path.join(outputDirectory, stylesheet), "utf8");
         const metrics = JSON.parse(
             await readFile(path.join(outputDirectory, "bundle-metrics.json"), "utf8")
         ) as { formatVersion: number };
@@ -74,6 +79,22 @@ describe("Dashboard browser artifact", () => {
         expect(result.compressedFileCount).toBeGreaterThan(0);
         expect(metrics.formatVersion).toBe(1);
         expect(html).toContain("<title>Mira Dashboard</title>");
+        expect(css).toContain(
+            "input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}"
+        );
+        expect(css).toMatch(
+            /\.loading-state-dot:nth-child\(2\)\{[^}]*animation:[^}]*loading-state-second-dot[^}]*\}/u
+        );
+        expect(css).toMatch(
+            /\.loading-state-dot:nth-child\(3\)\{[^}]*animation:[^}]*loading-state-third-dot[^}]*\}/u
+        );
+        expect(css).toContain("@keyframes loading-state-second-dot");
+        expect(css).toContain("@keyframes loading-state-third-dot");
+        expect(css).toContain(
+            "@media (prefers-reduced-motion:reduce){.loading-state-dot:nth-child(2),.loading-state-dot:nth-child(3){animation:none;opacity:1}}"
+        );
+        expect(css).toContain("-webkit-overflow-scrolling:touch");
+        expect(css).not.toContain("scroll-margin-top:123.456px");
         expect(html).toMatch(
             /<script\b[^>]*\bsrc="\/assets\/.+-[a-z\d]{8}\.js"[^>]*><\/script>/u
         );

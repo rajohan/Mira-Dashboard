@@ -2,7 +2,6 @@ import typography from "@tailwindcss/typography";
 import type { Config } from "tailwindcss";
 
 export default {
-    content: ["./src/browser/**/*.{js,ts,jsx,tsx}"],
     theme: {
         extend: {
             colors: {

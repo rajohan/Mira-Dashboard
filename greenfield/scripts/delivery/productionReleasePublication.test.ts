@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
     chmod,
     cp,
@@ -33,6 +33,8 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     revision: "a".repeat(40),
     version: "1.4.0",
 });
+const releaseFixtureDirectories: string[] = [];
+let sharedSourceReleaseRoot: string | undefined;
 
 async function restoreOwnerWrite(directory: string): Promise<void> {
     const status = await stat(directory).catch(() => null);
@@ -49,17 +51,36 @@ async function restoreOwnerWrite(directory: string): Promise<void> {
 }
 
 afterEach(async () => {
-    for (const directory of temporaryDirectories.splice(0)) {
+    await removeDirectories(temporaryDirectories);
+});
+
+beforeAll(async () => {
+    sharedSourceReleaseRoot = await localReleaseFixture();
+});
+
+afterAll(async () => {
+    await removeDirectories(releaseFixtureDirectories);
+});
+
+async function removeDirectories(directories: string[]): Promise<void> {
+    for (const directory of directories.splice(0)) {
         await restoreOwnerWrite(directory);
         await rm(directory, { force: true, recursive: true });
     }
-});
+}
+
+function sourceReleaseFixture(): string {
+    if (sharedSourceReleaseRoot === undefined) {
+        throw new Error("Production release fixture is not initialized");
+    }
+    return sharedSourceReleaseRoot;
+}
 
 async function repositoryFixture(): Promise<string> {
     const repositoryRoot = await mkdtemp(
         path.join(tmpdir(), "mira-production-release-source-")
     );
-    temporaryDirectories.push(repositoryRoot);
+    releaseFixtureDirectories.push(repositoryRoot);
     await Promise.all([
         cp(
             path.join(sourceProjectRoot, "docs/generated"),
@@ -146,7 +167,7 @@ async function productionProjectFixture(): Promise<string> {
 
 describe("production release publication", () => {
     test("publishes one immutable commit release idempotently under the project root", async () => {
-        const sourceReleaseRoot = await localReleaseFixture();
+        const sourceReleaseRoot = sourceReleaseFixture();
         const projectRoot = await productionProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         const first = await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -183,7 +204,7 @@ describe("production release publication", () => {
     });
 
     test("rejects staged tampering and removes only its owned candidate", async () => {
-        const sourceReleaseRoot = await localReleaseFixture();
+        const sourceReleaseRoot = sourceReleaseFixture();
         const projectRoot = await productionProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         const result = await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -211,7 +232,7 @@ describe("production release publication", () => {
     });
 
     test("never overwrites or removes a pre-existing commit path", async () => {
-        const sourceReleaseRoot = await localReleaseFixture();
+        const sourceReleaseRoot = sourceReleaseFixture();
         const projectRoot = await productionProjectFixture();
         const state = await prepareProtectedProductionStatePath(projectRoot);
         const result = await withDeploymentLease(state.stateDirectory, async (lease) => {

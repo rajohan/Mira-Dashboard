@@ -265,11 +265,14 @@ export function validateExternalImport(
             "Only scripts and worker source may import child-process APIs"
         );
     }
-    if (importerRole === "browser" && isForbiddenBrowserPackage(specifier)) {
+    if (
+        (importerRole === "browser" || importerRole === "story") &&
+        isForbiddenBrowserPackage(specifier)
+    ) {
         return violation(
             importer,
             sourceImport,
-            "Browser source may not import Bun, Node, database, or server transport packages"
+            "Browser and story source may not import Bun, Node, database, or server transport packages"
         );
     }
     if (

@@ -54,6 +54,7 @@ const runId = "019fdf70-0000-7000-8000-000000000002";
 const olderRunId = "019fdf60-0000-7000-8000-000000000001";
 const manualRunId = "019fdf80-0000-7000-8000-000000000003";
 const timestampMs = 1_800_000_000_000;
+const deepLinkReadinessWait = { timeout: 3000 } as const;
 
 function authenticatedStatus(): Extract<AuthStatus, { state: "authenticated" }> {
     return {
@@ -571,16 +572,24 @@ describe("Dashboard jobs route", () => {
         );
 
         expect(
-            await screen.findByRole("heading", {
-                level: 2,
-                name: "Deep-linked durable run",
-            })
+            await screen.findByRole(
+                "heading",
+                {
+                    level: 2,
+                    name: "Deep-linked durable run",
+                },
+                deepLinkReadinessWait
+            )
         ).toBeTruthy();
         expect(
-            await screen.findByRole("heading", {
-                level: 2,
-                name: "Deep-linked schedule",
-            })
+            await screen.findByRole(
+                "heading",
+                {
+                    level: 2,
+                    name: "Deep-linked schedule",
+                },
+                deepLinkReadinessWait
+            )
         ).toBeTruthy();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
         expect(transport.runs).toEqual([]);
@@ -1206,7 +1215,8 @@ describe("Dashboard jobs route", () => {
             await screen.findByRole("heading", { level: 2, name: "Worker smoke" })
         ).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "Disable" }));
-        await user.type(screen.getByLabelText("Reason"), "Planned maintenance");
+        await user.click(screen.getByRole("radio", { name: /Indefinitely/u }));
+        await user.type(screen.getByLabelText("Comment"), "Planned maintenance");
         await user.click(screen.getByRole("button", { name: "Disable schedule" }));
         await waitFor(() =>
             expect(transport.callsFor("schedules.update")).toHaveLength(1)
@@ -1221,11 +1231,11 @@ describe("Dashboard jobs route", () => {
         });
         expect(await screen.findByText("Planned maintenance")).toBeTruthy();
 
-        await user.click(screen.getByRole("button", { name: "Update disable intent" }));
-        const reason = screen.getByLabelText("Reason");
+        await user.click(screen.getByRole("button", { name: "Edit disabled state" }));
+        const reason = screen.getByLabelText("Comment");
         await user.clear(reason);
         await user.type(reason, "Extended maintenance");
-        await user.click(screen.getByRole("button", { name: "Save intent" }));
+        await user.click(screen.getByRole("button", { name: "Save disabled state" }));
         await waitFor(() =>
             expect(transport.callsFor("schedules.update")).toHaveLength(2)
         );
@@ -1257,9 +1267,7 @@ describe("Dashboard jobs route", () => {
             ).toHaveFocus()
         );
         expect(screen.queryByText("Extended maintenance")).toBeNull();
-        expect(
-            screen.queryByRole("button", { name: "Update disable intent" })
-        ).toBeNull();
+        expect(screen.queryByRole("button", { name: "Edit disabled state" })).toBeNull();
     });
 
     test("opens a lost-response-safe manual schedule run", async () => {

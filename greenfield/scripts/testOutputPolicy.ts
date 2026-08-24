@@ -21,6 +21,18 @@ const testOutputRules: readonly TestOutputRule[] = Object.freeze([
         pattern: /Headless UI has polyfilled `Element\.prototype\.getAnimations`/i,
     },
     {
+        description: "Storybook reported an unhandled browser error",
+        pattern: /\[Unhandled error\]/i,
+    },
+    {
+        description: "Storybook logged a browser console error",
+        pattern: /\[console\.error\]/i,
+    },
+    {
+        description: "Storybook test emitted unexpected stderr",
+        pattern: /\[Storybook unexpected stderr\]/i,
+    },
+    {
         description: "Bun main thread panicked",
         pattern: /panic\(main thread\):/i,
     },

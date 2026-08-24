@@ -6,5 +6,14 @@ import { format } from "date-fns";
  * @returns Stable human-readable local date and time.
  */
 export function formatDashboardDateTime(timestampMs: number): string {
-    return format(new Date(timestampMs), "yyyy-MM-dd HH:mm:ss");
+    return format(new Date(timestampMs), "dd.MM.yyyy · HH:mm:ss");
+}
+
+/**
+ * Formats a timestamp to minute precision for schedule configuration summaries.
+ * @param timestampMs Unix epoch milliseconds.
+ * @returns Human-readable local date and 24-hour time without operational seconds.
+ */
+export function formatDashboardDateTimeToMinute(timestampMs: number): string {
+    return format(new Date(timestampMs), "dd.MM.yyyy · HH:mm");
 }
