@@ -93,16 +93,11 @@ function sameDirectoryIdentity(status: BigIntStats, directory: OpenedDirectory):
     return status.dev === directory.device && status.ino === directory.inode;
 }
 
-function validOwnedDirectory(
-    status: BigIntStats,
-    userId: number,
-    groupId: number
-): boolean {
+function validOwnedDirectory(status: BigIntStats, userId: number): boolean {
     return (
         status.isDirectory() &&
         !status.isSymbolicLink() &&
         status.uid === BigInt(userId) &&
-        status.gid === BigInt(groupId) &&
         (status.mode & 0o022n) === 0n
     );
 }
@@ -134,8 +129,8 @@ async function openOwnedDirectory(
         ]);
         if (
             canonical !== expectedPath ||
-            !validOwnedDirectory(held, userId, groupId) ||
-            !validOwnedDirectory(atPath, userId, groupId) ||
+            !validOwnedDirectory(held, userId) ||
+            !validOwnedDirectory(atPath, userId) ||
             atPath.dev !== held.dev ||
             atPath.ino !== held.ino
         ) {
@@ -166,8 +161,8 @@ async function validateOpenedDirectory(directory: OpenedDirectory): Promise<void
         canonical !== directory.path ||
         !sameDirectoryIdentity(held, directory) ||
         !sameDirectoryIdentity(atPath, directory) ||
-        !validOwnedDirectory(held, directory.userId, directory.groupId) ||
-        !validOwnedDirectory(atPath, directory.userId, directory.groupId)
+        !validOwnedDirectory(held, directory.userId) ||
+        !validOwnedDirectory(atPath, directory.userId)
     ) {
         throw installationFailure();
     }

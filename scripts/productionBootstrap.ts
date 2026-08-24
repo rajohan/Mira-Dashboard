@@ -12,6 +12,8 @@ import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
 const failureMessage = "Production bootstrap failed";
 const projectRoot = path.resolve(import.meta.dir, "..");
 const projectHome = "/home/ubuntu/projects/mira-dashboard";
+const canonicalRepository = "rajohan/Mira-Dashboard";
+const canonicalRepositoryUrl = "https://github.com/rajohan/Mira-Dashboard.git";
 const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
 const maximumOutputBytes = 1024 * 1024;
 const dopplerConfigurationNames = applicationConfigurationRegistry
@@ -128,7 +130,7 @@ export async function resolveProductionBootstrapSourceIdentity(
     if ((await realpath(repositoryRoot)) !== expectedCheckout) {
         throw new Error(`Production bootstrap checkout must be ${expectedCheckout}`);
     }
-    const [branch, head, upstream, status] = await Promise.all([
+    const [branch, head, upstream, status, origin] = await Promise.all([
         requireSuccess(
             dependencies,
             ["/usr/bin/git", "branch", "--show-current"],
@@ -149,12 +151,18 @@ export async function resolveProductionBootstrapSourceIdentity(
             ["/usr/bin/git", "status", "--porcelain=v1"],
             repositoryRoot
         ),
+        requireSuccess(
+            dependencies,
+            ["/usr/bin/git", "remote", "get-url", "origin"],
+            repositoryRoot
+        ),
     ]);
     if (
         branch !== "main" ||
         !/^[a-f\d]{40}$/u.test(head) ||
         head !== upstream ||
-        status !== ""
+        status !== "" ||
+        origin !== canonicalRepositoryUrl
     ) {
         throw new Error("Production bootstrap requires clean main at exact origin/main");
     }
@@ -219,6 +227,7 @@ export async function downloadProductionBootstrapRelease(
         "/usr/bin/gh",
         "release",
         "view",
+        `--repo=${canonicalRepository}`,
         "--json=tagName",
     ]);
     const unverifiedRelease = v.parse(
@@ -250,6 +259,7 @@ export async function downloadProductionBootstrapRelease(
         "release",
         "download",
         tagName,
+        `--repo=${canonicalRepository}`,
         "--pattern=release.tar",
         "--pattern=receipt.json",
         `--dir=${temporaryRoot}`,

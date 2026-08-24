@@ -95,6 +95,9 @@ describe("production bootstrap admission", () => {
                 let stdout = `${releaseId}\n`;
                 if (invocation.endsWith("branch --show-current")) stdout = "main\n";
                 if (invocation.endsWith("status --porcelain=v1")) stdout = "";
+                if (invocation.endsWith("remote get-url origin")) {
+                    stdout = "https://github.com/rajohan/Mira-Dashboard.git\n";
+                }
                 return Promise.resolve({ exitCode: 0, stdout });
             },
         };
@@ -106,7 +109,7 @@ describe("production bootstrap admission", () => {
                 1000
             )
         ).toBe(releaseId);
-        expect(commands).toHaveLength(4);
+        expect(commands).toHaveLength(5);
         expect(
             resolveProductionBootstrapSourceIdentity(
                 dependencies,
@@ -499,6 +502,12 @@ describe("production bootstrap admission", () => {
                 }
                 if (invocation.includes(" status --porcelain")) {
                     return { exitCode: 0, stdout: "" };
+                }
+                if (invocation.includes(" remote get-url origin")) {
+                    return {
+                        exitCode: 0,
+                        stdout: "https://github.com/rajohan/Mira-Dashboard.git\n",
+                    };
                 }
                 if (invocation.includes(" release view ")) {
                     return { exitCode: 0, stdout: '{"tagName":"v0.2.0"}\n' };
