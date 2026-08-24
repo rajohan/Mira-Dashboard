@@ -159,9 +159,16 @@ describe("Dashboard release build", () => {
         const manifestStatus = await stat(
             path.join(result.releaseRoot, "release-manifest.json")
         );
+        const runtimeStatus = await stat(path.join(result.releaseRoot, "runtime/bun"));
         const releaseEntries = await readdir(path.dirname(result.releaseRoot));
         expect(releaseStatus.mode & 0o777).toBe(0o500);
         expect(manifestStatus.mode & 0o777).toBe(0o400);
+        expect(runtimeStatus.mode & 0o777).toBe(0o500);
+        expect(
+            result.manifest.artifacts.some(
+                ({ path: artifactPath }) => artifactPath === "runtime/bun"
+            )
+        ).toBe(true);
         expect(releaseEntries).toEqual([commitSha]);
     });
 

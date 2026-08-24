@@ -245,9 +245,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
         checkout.checkout.safeForDeploy &&
         releases.releases.current !== undefined &&
         releases.releases.candidate !== undefined &&
-        releases.releases.candidate.releaseId === checkout.checkout.remoteHeadSha &&
-        releases.releases.candidate.runtime.revision ===
-            releases.releases.current.runtimeRevision;
+        releases.releases.candidate.releaseId === checkout.checkout.remoteHeadSha;
     let deployReason: string | undefined;
     if (!checkoutFresh || !releasesFresh) {
         deployReason = "Fresh checkout and activation revisions are required.";
@@ -264,11 +262,6 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
         releases.releases.candidate.releaseId !== checkout.checkout.remoteHeadSha
     ) {
         deployReason = "The published release must match the exact main head.";
-    } else if (
-        releases.releases.candidate.runtime.revision !==
-        releases.releases.current.runtimeRevision
-    ) {
-        deployReason = "Bootstrap must install the published Bun runtime first.";
     }
 
     function requestDeploy(): void {

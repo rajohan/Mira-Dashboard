@@ -49,6 +49,7 @@ const allowedArtifactRoots = new Set([
     "docs",
     "metadata",
     "migrations",
+    "runtime",
     "scripts",
     "server",
     "systemd",
@@ -250,6 +251,7 @@ function assertArtifactShape(
         "server/productionProvisioning.js",
         "server/web.js",
         "server/worker.js",
+        "runtime/bun",
     ]) {
         artifactByPath(artifacts, requiredPath);
     }

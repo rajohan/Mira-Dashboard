@@ -658,9 +658,16 @@ describe("production bootstrap admission", () => {
         };
         const commands: string[] = [];
         let prerequisitesInspected = false;
+        let manualDeployDelivered = false;
         let groupLookupCount = 0;
         let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
+            deliverPublishedRelease: async (prepare) => {
+                const admitted = await prepare();
+                expect(admitted.releaseId).toBe(releaseId);
+                expect(admitted.authority.runtime).toEqual(runtime);
+                manualDeployDelivered = true;
+            },
             inspectPrerequisites: () => {
                 prerequisitesInspected = true;
                 return Promise.resolve({ runtimeSha256: "e".repeat(64) });
@@ -759,8 +766,6 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) => command.includes("systemctl daemon-reload"))
         ).toBe(false);
-        expect(commands.at(-1)).toContain("delivery activate");
-        expect(commands.at(-1)).toContain("--release-authority-json=");
-        expect(commands.at(-1)).not.toContain("--activation-mode=greenfield");
+        expect(manualDeployDelivered).toBe(true);
     });
 });

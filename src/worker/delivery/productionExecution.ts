@@ -365,9 +365,7 @@ export function createDeliveryProductionExecutionPort(
                 (current.releases.candidate === undefined ||
                     current.releases.current === undefined ||
                     JSON.stringify(current.releases.candidate) !==
-                        JSON.stringify(payload.release) ||
-                    payload.release.runtime.revision !==
-                        current.releases.current.runtimeRevision)
+                        JSON.stringify(payload.release))
             ) {
                 throw failure();
             }

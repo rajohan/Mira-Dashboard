@@ -263,11 +263,7 @@ async function verifyInstalledBoundary(): Promise<void> {
 async function verifyStagedRelease(releaseId: string): Promise<string> {
     const releaseRoot = path.join(releasesRoot, releaseId);
     const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
-    if (
-        manifest.source.commitSha !== releaseId ||
-        manifest.runtime.version !== Bun.version ||
-        manifest.runtime.revision !== Bun.revision
-    ) {
+    if (manifest.source.commitSha !== releaseId) {
         throw failure();
     }
     return releaseRoot;
@@ -302,8 +298,6 @@ async function downloadAndStageRelease(
     );
     if (
         receipt.releaseId !== releaseId ||
-        receipt.runtime.version !== Bun.version ||
-        receipt.runtime.revision !== Bun.revision ||
         receipt.archive.bytes !== archiveAsset.size ||
         `sha256:${receipt.archive.sha256}` !== archiveAsset.digest
     ) {

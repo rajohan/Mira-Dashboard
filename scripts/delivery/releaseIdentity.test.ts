@@ -58,6 +58,7 @@ async function releaseFixture(): Promise<{
         mkdir(path.join(releaseRoot, "browser/assets"), { recursive: true }),
         mkdir(path.join(releaseRoot, "docs"), { recursive: true }),
         mkdir(path.join(releaseRoot, "metadata"), { recursive: true }),
+        mkdir(path.join(releaseRoot, "runtime"), { recursive: true }),
         mkdir(path.join(releaseRoot, "scripts/delivery/provisioning"), {
             recursive: true,
         }),
@@ -90,6 +91,7 @@ async function releaseFixture(): Promise<{
         writeFile(path.join(releaseRoot, "metadata/.bun-version"), "1.4.0\n"),
         writeFile(path.join(releaseRoot, "metadata/package.json"), packageJson),
         writeFile(path.join(releaseRoot, "metadata/bun.lock"), lockfile),
+        writeFile(path.join(releaseRoot, "runtime/bun"), "runtime"),
         writeFile(path.join(releaseRoot, "browser/index.html"), "dashboard"),
         writeFile(path.join(releaseRoot, "browser/assets/app-a1b2c3d4.js"), "app"),
         writeFile(

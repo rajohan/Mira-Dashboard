@@ -746,7 +746,13 @@ describe("production Delivery executor", () => {
                 current,
                 {
                     capacityAdmission: () => Promise.resolve(),
-                    installRuntime: () => Promise.resolve(target.runtime),
+                    installRuntime: (_lease, _paths, identity, dependencies) => {
+                        expect(identity).toEqual(target.runtime.identity);
+                        expect(dependencies.sourceExecutable).toBe(
+                            `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`
+                        );
+                        return Promise.resolve(target.runtime);
+                    },
                     preparePublishedRelease: (releaseId, checkoutRoot) => {
                         expect(releaseId).toBe(targetReleaseId);
                         expect(checkoutRoot).toEndWith("/production/checkout");

@@ -13,9 +13,14 @@ import {
     publishedReleaseAuthoritySchema,
     type PublishedReleaseAuthority,
 } from "../src/shared/publishedReleaseAuthority.ts";
+import { deliverProductionReleaseUnderLease } from "./delivery/activateProductionRelease.ts";
+import { withDeploymentLease } from "./delivery/deploymentLease.ts";
+import { prepareProductionDeliveryDirectories } from "./delivery/productionDeliveryFilesystem.ts";
 import { assertProductionReleaseArchiveListing } from "./delivery/productionReleaseArchive.ts";
 import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
+import { prepareProtectedProductionStatePath } from "./delivery/productionStateFilesystem.ts";
 import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
+import { createSystemdProductionServiceController } from "./delivery/systemdProductionServices.ts";
 
 const failureMessage = "Production bootstrap failed";
 const projectRoot = path.resolve(import.meta.dir, "..");
@@ -54,8 +59,38 @@ const tailscaleStatusSchema = v.object({
 });
 
 export interface ProductionBootstrapDependencies {
+    readonly deliverPublishedRelease?: (
+        prepare: () => Promise<PreparedPublishedProductionRelease>
+    ) => Promise<void>;
     readonly inspectPrerequisites?: () => Promise<Readonly<{ runtimeSha256: string }>>;
     readonly run: (command: readonly string[], cwd?: string) => Promise<CommandResult>;
+}
+
+async function deliverPreparedPublishedRelease(
+    prepare: () => Promise<PreparedPublishedProductionRelease>
+): Promise<void> {
+    const state = await prepareProtectedProductionStatePath(projectHome);
+    await withDeploymentLease(state.stateDirectory, async (lease) => {
+        const admitted = await prepare();
+        const paths = await prepareProductionDeliveryDirectories(state);
+        const services = createSystemdProductionServiceController(lease, paths, {
+            readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+            releaseAuthority: admitted.authority,
+        });
+        await deliverProductionReleaseUnderLease(
+            lease,
+            paths,
+            {
+                projectRoot: projectHome,
+                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                releaseAuthority: admitted.authority,
+                releaseRoot: admitted.releaseRoot,
+                runtimeSource: path.join(admitted.releaseRoot, "runtime/bun"),
+            },
+            await verifyReleaseArtifactIdentity(admitted.releaseRoot),
+            services
+        );
+    });
 }
 
 export interface ProductionBootstrapOptions {
@@ -872,26 +907,17 @@ export async function deployProduction(
     if (Bun.version !== selectedVersion) {
         throw new Error(`Production deploy requires Bun ${selectedVersion}`);
     }
-    const admitted = await preparePublishedProductionRelease(
-        releaseId,
-        repositoryRoot,
-        dependencies,
-        userId,
-        options.createTemporaryRoot,
-        undefined,
-        { stageRootAuthority: false }
+    await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(() =>
+        preparePublishedProductionRelease(
+            releaseId,
+            repositoryRoot,
+            dependencies,
+            userId,
+            options.createTemporaryRoot,
+            undefined,
+            { stageRootAuthority: false }
+        )
     );
-    await requireSuccess(dependencies, [
-        process.execPath,
-        "run",
-        "delivery",
-        "activate",
-        `--project-root=${projectHome}`,
-        `--release-root=${admitted.releaseRoot}`,
-        `--runtime-source=${process.execPath}`,
-        `--release-authority-json=${JSON.stringify(admitted.authority)}`,
-        "--readiness-url=http://127.0.0.1:3100/api/health/ready",
-    ]);
 }
 
 if (import.meta.main) {

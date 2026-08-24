@@ -61,7 +61,10 @@ import {
 } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import { verifyPreviewTailscaleOperator } from "./provisioning/preview-tailscale/operator.ts";
-import { verifyReleaseIdentity } from "./releaseIdentity.ts";
+import {
+    verifyReleaseArtifactIdentity,
+    verifyReleaseIdentity,
+} from "./releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./systemdProductionServices.ts";
 
 const executorFailureMessage = "Production Delivery executor failed";
@@ -506,10 +509,15 @@ export async function prepareProductionDeliveryTargetUnderLease(
     const localReleaseRoot = path.join(checkoutRoot, "dist/releases", target.releaseId);
     let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
     if (admittedPublishedRelease !== undefined) {
-        const manifest = await (dependencies.verifyLocalRelease ?? verifyReleaseIdentity)(
-            admittedPublishedRelease.releaseRoot,
-            current.runtime.identity
-        );
+        const manifest =
+            dependencies.verifyLocalRelease === undefined
+                ? await verifyReleaseArtifactIdentity(
+                      admittedPublishedRelease.releaseRoot
+                  )
+                : await dependencies.verifyLocalRelease(
+                      admittedPublishedRelease.releaseRoot,
+                      admittedPublishedRelease.authority.runtime
+                  );
         sourceRelease = Object.freeze({
             manifest,
             releaseRoot: admittedPublishedRelease.releaseRoot,
@@ -549,7 +557,7 @@ export async function prepareProductionDeliveryTargetUnderLease(
         lease,
         paths,
         sourceRelease.manifest.runtime,
-        { sourceExecutable: current.runtime.executable }
+        { sourceExecutable: path.join(sourceRelease.releaseRoot, "runtime/bun") }
     );
     const release = await (dependencies.publishRelease ?? publishProductionRelease)(
         lease,

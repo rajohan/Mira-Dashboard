@@ -6,6 +6,7 @@ import { readBoundedRegularFile } from "../files/boundedFile.ts";
 
 const invalidArtifactTreeMessage = "Release artifact tree is invalid";
 export const maximumReleaseArtifactBytes = 64 * 1024 * 1024;
+export const maximumReleaseRuntimeBytes = 256 * 1024 * 1024;
 const maximumArtifactCount = 4096;
 const maximumArtifactDirectoryCount = 512;
 const maximumArtifactDepth = 16;
@@ -156,20 +157,24 @@ export async function inventoryReleaseArtifactTree(
                 }
 
                 const beforeRead = await lstat(absolutePath, { bigint: true });
+                const maximumBytes =
+                    relativePath === "runtime/bun"
+                        ? maximumReleaseRuntimeBytes
+                        : maximumReleaseArtifactBytes;
                 if (
                     !beforeRead.isFile() ||
                     beforeRead.isSymbolicLink() ||
                     beforeRead.nlink !== 1n ||
                     beforeRead.dev !== rootSnapshot.status.dev ||
                     beforeRead.size <= 0n ||
-                    beforeRead.size > BigInt(maximumReleaseArtifactBytes)
+                    beforeRead.size > BigInt(maximumBytes)
                 ) {
                     throw invalidArtifactTree();
                 }
                 const contents = await readBoundedRegularFile(
                     absolutePath,
                     releaseRoot,
-                    maximumReleaseArtifactBytes,
+                    maximumBytes,
                     invalidArtifactTreeMessage
                 );
                 await testHooks.afterFileRead?.(relativePath);

@@ -18,6 +18,7 @@ const mergedMainHead = "2".repeat(40);
 const laterMainHead = "3".repeat(40);
 const currentReleaseId = "4".repeat(40);
 const currentRuntimeRevision = "5".repeat(40);
+const candidateRuntimeRevision = "c".repeat(40);
 const previousReleaseId = "6".repeat(40);
 const previousRuntimeRevision = "7".repeat(40);
 const activationRevision = "8".repeat(64);
@@ -100,7 +101,7 @@ function identity(input: DeliveryProductionJobPayload): JobExecutionRunIdentity 
     };
 }
 
-function currentAuthority() {
+function currentAuthority(runtimeRevision = currentRuntimeRevision) {
     return projectDeliveryOperationAuthority({
         checkoutInspection: {
             branch: "main",
@@ -118,7 +119,7 @@ function currentAuthority() {
                 candidate: publishedReleaseAuthority(
                     mergedMainHead,
                     "v1.2.3",
-                    currentRuntimeRevision
+                    runtimeRevision
                 ),
                 current: {
                     builtAtMs: nowMs - 1000,
@@ -211,7 +212,7 @@ describe("Delivery production execution", () => {
             release: publishedReleaseAuthority(
                 mergedMainHead,
                 "v1.2.3",
-                currentRuntimeRevision
+                candidateRuntimeRevision
             ),
             sourceRevision,
         };
@@ -227,7 +228,7 @@ describe("Delivery production execution", () => {
                 target: {
                     databaseSnapshotTransitionId: null,
                     releaseId: mergedMainHead,
-                    runtimeRevision: currentRuntimeRevision,
+                    runtimeRevision: candidateRuntimeRevision,
                 },
             },
             enqueue: {
@@ -262,7 +263,7 @@ describe("Delivery production execution", () => {
                 activation: {
                     current: {
                         releaseId: mergedMainHead,
-                        runtimeRevision: currentRuntimeRevision,
+                        runtimeRevision: candidateRuntimeRevision,
                     },
                     formatVersion: 1,
                     previous: {
@@ -281,7 +282,13 @@ describe("Delivery production execution", () => {
         const cleared: string[] = [];
         const port = terminalExecutionPort(record, cleared);
 
-        expect(await port.execute(input, currentAuthority(), runIdentity)).toEqual({
+        expect(
+            await port.execute(
+                input,
+                currentAuthority(candidateRuntimeRevision),
+                runIdentity
+            )
+        ).toEqual({
             operation: "deploy",
             outcome: "completed",
             releaseId: mergedMainHead,

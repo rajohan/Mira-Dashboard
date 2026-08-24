@@ -20752,19 +20752,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "receipt.json"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               },
@@ -20775,19 +20775,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "release.tar"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               }
@@ -20804,19 +20804,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "release.tar"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               },
@@ -20827,19 +20827,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "receipt.json"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               }
@@ -21150,19 +21150,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "receipt.json"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               },
@@ -21173,19 +21173,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "release.tar"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               }
@@ -21202,19 +21202,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "release.tar"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               },
@@ -21225,19 +21225,19 @@
                                     "type": "string",
                                     "pattern": "^sha256:[a-f\\d]{64}$"
                                   },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": 9007199254740991
-                                  },
-                                  "name": {
-                                    "const": "receipt.json"
                                   }
                                 },
                                 "required": [
                                   "digest",
-                                  "size",
-                                  "name"
+                                  "name",
+                                  "size"
                                 ],
                                 "additionalProperties": false
                               }
@@ -22102,19 +22102,19 @@
                             "type": "string",
                             "pattern": "^sha256:[a-f\\d]{64}$"
                           },
+                          "name": {
+                            "const": "receipt.json"
+                          },
                           "size": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 9007199254740991
-                          },
-                          "name": {
-                            "const": "receipt.json"
                           }
                         },
                         "required": [
                           "digest",
-                          "size",
-                          "name"
+                          "name",
+                          "size"
                         ],
                         "additionalProperties": false
                       },
@@ -22125,19 +22125,19 @@
                             "type": "string",
                             "pattern": "^sha256:[a-f\\d]{64}$"
                           },
+                          "name": {
+                            "const": "release.tar"
+                          },
                           "size": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 9007199254740991
-                          },
-                          "name": {
-                            "const": "release.tar"
                           }
                         },
                         "required": [
                           "digest",
-                          "size",
-                          "name"
+                          "name",
+                          "size"
                         ],
                         "additionalProperties": false
                       }
@@ -22154,19 +22154,19 @@
                             "type": "string",
                             "pattern": "^sha256:[a-f\\d]{64}$"
                           },
+                          "name": {
+                            "const": "release.tar"
+                          },
                           "size": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 9007199254740991
-                          },
-                          "name": {
-                            "const": "release.tar"
                           }
                         },
                         "required": [
                           "digest",
-                          "size",
-                          "name"
+                          "name",
+                          "size"
                         ],
                         "additionalProperties": false
                       },
@@ -22177,19 +22177,19 @@
                             "type": "string",
                             "pattern": "^sha256:[a-f\\d]{64}$"
                           },
+                          "name": {
+                            "const": "receipt.json"
+                          },
                           "size": {
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 9007199254740991
-                          },
-                          "name": {
-                            "const": "receipt.json"
                           }
                         },
                         "required": [
                           "digest",
-                          "size",
-                          "name"
+                          "name",
+                          "size"
                         ],
                         "additionalProperties": false
                       }

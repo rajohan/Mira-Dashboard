@@ -161,6 +161,7 @@ export async function buildDashboardRelease(
             browserRoot: path.join(repositoryRoot, "dist/browser"),
             processRoot: path.join(repositoryRoot, "dist/processes"),
             repositoryRoot,
+            runtimeExecutable: process.execPath,
             stagingRoot: paths.stagingRoot,
         });
         requireSameCleanSource(source, await sourceResolver(repositoryRoot));

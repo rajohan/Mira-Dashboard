@@ -19,6 +19,7 @@ const receiptName = "receipt.json";
 export interface PackageProductionReleaseArtifactOptions {
     readonly projectRoot?: string;
     readonly releaseId?: string;
+    readonly requireProductionArchitecture?: boolean;
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -75,6 +76,12 @@ async function runTar(
 export async function packageProductionReleaseArtifact(
     options: PackageProductionReleaseArtifactOptions = {}
 ): Promise<ProductionReleaseArtifactReceipt> {
+    if (
+        options.requireProductionArchitecture === true &&
+        (process.platform !== "linux" || process.arch !== "arm64")
+    ) {
+        throw new Error(failureMessage);
+    }
     const repositoryRoot = options.projectRoot ?? projectRoot;
     const outputRoot = path.join(repositoryRoot, "dist/production-release-artifact");
     const releaseId = options.releaseId ?? (await resolveReleaseId(repositoryRoot));
@@ -126,7 +133,9 @@ export async function packageProductionReleaseArtifact(
 
 if (import.meta.main) {
     try {
-        const receipt = await packageProductionReleaseArtifact();
+        const receipt = await packageProductionReleaseArtifact({
+            requireProductionArchitecture: true,
+        });
         process.stdout.write(`${JSON.stringify(receipt)}\n`);
     } catch {
         process.stderr.write(`${failureMessage}\n`);
