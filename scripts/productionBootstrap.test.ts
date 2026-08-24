@@ -151,27 +151,84 @@ describe("production bootstrap admission", () => {
             "/srv/dashboard",
             1000,
             {
-                canonical: (target) =>
-                    Promise.resolve(
-                        target === "/home/ubuntu/.openclaw"
-                            ? target
-                            : "/usr/local/bin/bun"
-                    ),
+                canonical: (target) => {
+                    if (
+                        target === "/home/ubuntu/.openclaw" ||
+                        target.startsWith("/home/ubuntu/.doppler")
+                    ) {
+                        return Promise.resolve(target);
+                    }
+                    return Promise.resolve("/usr/local/bin/bun");
+                },
                 read: () => Promise.resolve(runtimeBytes),
-                status: (target) =>
-                    Promise.resolve({
+                status: (target) => {
+                    let mode = 0o700;
+                    if (target === "/usr/local/bin/bun") mode = 0o755;
+                    if (target.endsWith(".doppler.yaml")) mode = 0o600;
+                    return Promise.resolve({
                         gid: target === "/usr/local/bin/bun" ? 0 : 1000,
-                        isDirectory: () => target === "/home/ubuntu/.openclaw",
-                        isFile: () => target === "/usr/local/bin/bun",
-                        mode: target === "/usr/local/bin/bun" ? 0o755 : 0o700,
+                        isDirectory: () =>
+                            target === "/home/ubuntu/.openclaw" ||
+                            target === "/home/ubuntu/.doppler",
+                        isFile: () =>
+                            target === "/usr/local/bin/bun" ||
+                            target === "/home/ubuntu/.doppler/.doppler.yaml",
+                        mode,
+                        nlink: 1,
                         uid: target === "/usr/local/bin/bun" ? 0 : 1000,
-                    }),
-            }
+                    });
+                },
+            },
+            1000
         );
 
         expect(result.runtimeSha256).toBe(
             new Bun.CryptoHasher("sha256").update(runtimeBytes).digest("hex")
         );
+    });
+
+    test("rejects invalid Doppler state before root provisioning", async () => {
+        const commands: string[][] = [];
+        const failure = await captureFailure(
+            verifyProductionBootstrapPrerequisites(
+                {
+                    run: (command) => {
+                        commands.push([...command]);
+                        return Promise.resolve({ exitCode: 0, stdout: "ready\n" });
+                    },
+                },
+                "/srv/dashboard",
+                1000,
+                {
+                    canonical: (target) =>
+                        Promise.resolve(
+                            target === process.execPath ? "/usr/local/bin/bun" : target
+                        ),
+                    read: () => Promise.resolve(new Uint8Array([1])),
+                    status: (target) => {
+                        let mode = 0o700;
+                        if (target === "/usr/local/bin/bun") mode = 0o755;
+                        if (target.endsWith(".doppler.yaml")) mode = 0o640;
+                        return Promise.resolve({
+                            gid: target === "/usr/local/bin/bun" ? 0 : 1000,
+                            isDirectory: () =>
+                                target === "/home/ubuntu/.openclaw" ||
+                                target === "/home/ubuntu/.doppler",
+                            isFile: () =>
+                                target === "/usr/local/bin/bun" ||
+                                target === "/home/ubuntu/.doppler/.doppler.yaml",
+                            mode,
+                            nlink: 1,
+                            uid: target === "/usr/local/bin/bun" ? 0 : 1000,
+                        });
+                    },
+                },
+                1000
+            )
+        );
+
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(commands.some((command) => command[0] === "/usr/bin/sudo")).toBe(false);
     });
 
     test("admits a real packaged release and extracts it immutably", async () => {

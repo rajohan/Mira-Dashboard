@@ -41,6 +41,7 @@ export interface ProductionBootstrapOptions {
 interface ProductionBootstrapPathStatus {
     readonly gid: number;
     readonly mode: number;
+    readonly nlink: number;
     readonly uid: number;
     isDirectory(): boolean;
     isFile(): boolean;
@@ -442,7 +443,8 @@ export async function verifyProductionBootstrapPrerequisites(
     dependencies: ProductionBootstrapDependencies,
     repositoryRoot: string,
     userId: number,
-    filesystem: ProductionBootstrapPrerequisiteFilesystem = productionBootstrapPrerequisiteFilesystem
+    filesystem: ProductionBootstrapPrerequisiteFilesystem = productionBootstrapPrerequisiteFilesystem,
+    userGroupId = typeof process.getgid === "function" ? process.getgid() : 0
 ): Promise<Readonly<{ runtimeSha256: string }>> {
     await requireSuccess(
         dependencies,
@@ -454,13 +456,32 @@ export async function verifyProductionBootstrapPrerequisites(
         ["/usr/bin/docker", "version", "--format={{.Server.Version}}"],
         repositoryRoot
     );
-    const [runtimePath, openClawPath] = await Promise.all([
-        filesystem.canonical(process.execPath),
-        filesystem.canonical("/home/ubuntu/.openclaw"),
-    ]);
-    const [runtimeStatus, openClawStatus, runtimeBytes] = await Promise.all([
+    await requireSuccess(
+        dependencies,
+        ["/usr/local/bin/doppler", "--version"],
+        repositoryRoot
+    );
+    const dopplerRoot = "/home/ubuntu/.doppler";
+    const dopplerConfig = `${dopplerRoot}/.doppler.yaml`;
+    const [runtimePath, openClawPath, dopplerPath, dopplerConfigPath] = await Promise.all(
+        [
+            filesystem.canonical(process.execPath),
+            filesystem.canonical("/home/ubuntu/.openclaw"),
+            filesystem.canonical(dopplerRoot),
+            filesystem.canonical(dopplerConfig),
+        ]
+    );
+    const [
+        runtimeStatus,
+        openClawStatus,
+        dopplerStatus,
+        dopplerConfigStatus,
+        runtimeBytes,
+    ] = await Promise.all([
         filesystem.status(runtimePath),
         filesystem.status(openClawPath),
+        filesystem.status(dopplerPath),
+        filesystem.status(dopplerConfigPath),
         filesystem.read(runtimePath),
     ]);
     if (
@@ -472,7 +493,19 @@ export async function verifyProductionBootstrapPrerequisites(
         openClawPath !== "/home/ubuntu/.openclaw" ||
         !openClawStatus.isDirectory() ||
         openClawStatus.uid !== userId ||
-        (openClawStatus.mode & 0o7777) !== 0o700
+        openClawStatus.gid !== userGroupId ||
+        (openClawStatus.mode & 0o7777) !== 0o700 ||
+        dopplerPath !== dopplerRoot ||
+        !dopplerStatus.isDirectory() ||
+        dopplerStatus.uid !== userId ||
+        dopplerStatus.gid !== userGroupId ||
+        (dopplerStatus.mode & 0o7777) !== 0o700 ||
+        dopplerConfigPath !== dopplerConfig ||
+        !dopplerConfigStatus.isFile() ||
+        dopplerConfigStatus.uid !== userId ||
+        dopplerConfigStatus.gid !== userGroupId ||
+        (dopplerConfigStatus.mode & 0o7777) !== 0o600 ||
+        dopplerConfigStatus.nlink !== 1
     ) {
         throw new Error(failureMessage);
     }
