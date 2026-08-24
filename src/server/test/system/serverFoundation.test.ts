@@ -26,7 +26,7 @@ async function startServer(): Promise<{
     const readiness = createReadinessController();
     const server = await createServer({
         applicationRuntime: createTestApplicationRuntime(),
-        authenticateRequest: () => ({ kind: "anonymous" }),
+        authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
         hostname: "127.0.0.1",
         port: 0,
         readiness,
@@ -117,6 +117,48 @@ describe("system foundation", () => {
         expect(response.status).toBe(413);
     });
 
+    test("rejects untrusted browser requests before authentication", async () => {
+        let authenticationCalls = 0;
+        const server = await createServer({
+            applicationRuntime: createTestApplicationRuntime(),
+            authenticateRequest: () => {
+                authenticationCalls += 1;
+                return { authentication: { kind: "anonymous" } };
+            },
+            hostname: "127.0.0.1",
+            port: 0,
+            readiness: createReadinessController(),
+        });
+        servers.push(server);
+
+        const mutationResponse = await fetch(
+            new URL("/trpc/system.runtimeIdentity", server.url),
+            {
+                body: "{}",
+                headers: {
+                    "content-type": "application/json",
+                    origin: "https://attacker.example",
+                    "sec-fetch-site": "cross-site",
+                },
+                method: "POST",
+            }
+        );
+        const queryResponse = await fetch(
+            new URL("/trpc/system.runtimeIdentity", server.url),
+            {
+                headers: {
+                    origin: "https://attacker.example",
+                    "sec-fetch-site": "cross-site",
+                },
+                method: "GET",
+            }
+        );
+
+        expect(mutationResponse.status).toBe(403);
+        expect(queryResponse.status).toBe(403);
+        expect(authenticationCalls).toBe(0);
+    });
+
     test("prewarms and disposes the process runtime exactly once", async () => {
         let disposals = 0;
         let initializations = 0;
@@ -131,7 +173,7 @@ describe("system foundation", () => {
                     return Promise.resolve();
                 },
             }),
-            authenticateRequest: () => ({ kind: "anonymous" }),
+            authenticateRequest: () => ({ authentication: { kind: "anonymous" } }),
             hostname: "127.0.0.1",
             port: 0,
             readiness: createReadinessController(),
@@ -169,7 +211,9 @@ describe("system foundation", () => {
                             return Promise.resolve();
                         },
                     }),
-                    authenticateRequest: () => ({ kind: "anonymous" }),
+                    authenticateRequest: () => ({
+                        authentication: { kind: "anonymous" },
+                    }),
                     port: 0,
                     readiness: createReadinessController(),
                 });
@@ -236,7 +280,9 @@ describe("system foundation", () => {
                             return Promise.resolve();
                         },
                     }),
-                    authenticateRequest: () => ({ kind: "anonymous" }),
+                    authenticateRequest: () => ({
+                        authentication: { kind: "anonymous" },
+                    }),
                     port: 0,
                     readiness,
                 });

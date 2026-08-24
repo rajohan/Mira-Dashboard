@@ -5,21 +5,20 @@ import { isTrackedEnvelope, TRPCError } from "@trpc/server";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
 import type { RequestAuthentication } from "../../../contracts/security.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
-import { RealtimeEventStoreStreamError } from "../../platform/realtime/eventPumpService.ts";
 import {
+    RealtimeEventStoreStreamError,
+    type RealtimeEventStreamOptions,
+} from "../../platform/realtime/eventPumpService.ts";
+import type { RenewableStreamLease } from "../../platform/realtime/renewableStreamLease.ts";
+import { captureFailure } from "../../test/support/promise.ts";
+import {
+    createTestAutomationAuthentication,
     createTestApplicationRuntime,
     createTestRequestContext,
 } from "../../test/support/requestContext.ts";
 import { appRouter } from "../../trpc/appRouter.ts";
 
-const authenticatedReportsReader: RequestAuthentication = {
-    kind: "authenticated",
-    principal: {
-        capabilities: ["reports:read"],
-        id: "reports-reader",
-        kind: "automation",
-    },
-};
+const authenticatedReportsReader = createTestAutomationAuthentication(["reports:read"]);
 
 const delivery: RealtimeEventDelivery = {
     event: {
@@ -33,15 +32,6 @@ const delivery: RealtimeEventDelivery = {
     id: "1",
     kind: "change",
 };
-
-async function captureFailure(work: () => Promise<unknown>): Promise<unknown> {
-    try {
-        await work();
-    } catch (error) {
-        return error;
-    }
-    throw new Error("Expected realtime procedure to fail");
-}
 
 function oneValueAsyncIterable<TValue>(value: TValue): AsyncIterable<TValue> {
     return {
@@ -75,10 +65,14 @@ function rejectedAsyncIterable<TValue>(error: Error): AsyncIterable<TValue> {
 describe("events.stream procedure", () => {
     test("authorizes before opening one tracked runtime stream", async () => {
         const controller = new AbortController();
-        let observedOptions: unknown;
+        let observedOptions: RealtimeEventStreamOptions | undefined;
+        let observedLease: RenewableStreamLease | undefined;
+        let signalWasAbortedWhenOpened: boolean | undefined;
         const runtime = createTestApplicationRuntime({
-            stream(options) {
+            stream(options, lease) {
                 observedOptions = options;
+                observedLease = lease;
+                signalWasAbortedWhenOpened = options.signal?.aborted;
                 return Promise.resolve(oneValueAsyncIterable(delivery));
             },
         });
@@ -86,6 +80,9 @@ describe("events.stream procedure", () => {
             authenticatedReportsReader,
             runtime
         );
+        if (context.authenticationLease === undefined) {
+            throw new Error("Expected an authenticated test context lease");
+        }
         const caller = appRouter.createCaller(context, { signal: controller.signal });
 
         const results = await Array.fromAsync(
@@ -94,11 +91,16 @@ describe("events.stream procedure", () => {
             })
         );
 
-        expect(observedOptions).toEqual({
-            afterId: "0",
-            signal: controller.signal,
-            topics: [monitoringRealtimeTopics.reports],
-        });
+        const observedSignal = observedOptions?.signal;
+        expect(observedOptions?.afterId).toBe("0");
+        expect(observedOptions?.topics).toEqual([monitoringRealtimeTopics.reports]);
+        expect(observedSignal).toBeDefined();
+        expect(observedSignal).toBe(controller.signal);
+        expect(signalWasAbortedWhenOpened).toBe(false);
+        expect(observedSignal?.aborted).toBe(false);
+        expect(observedLease).toBeDefined();
+        expect(observedLease?.expiresAtMs).toBe(context.authenticationLease.expiresAtMs);
+        expect(typeof observedLease?.renew).toBe("function");
         expect(results).toHaveLength(1);
         expect(isTrackedEnvelope(results[0])).toBe(true);
         if (isTrackedEnvelope(results[0])) {
@@ -124,12 +126,7 @@ describe("events.stream procedure", () => {
             { kind: "anonymous" },
             { kind: "invalid" },
             {
-                kind: "authenticated",
-                principal: {
-                    capabilities: ["notifications:read"],
-                    id: "notifications-reader",
-                    kind: "automation",
-                },
+                ...createTestAutomationAuthentication(["notifications:read"]),
             },
         ];
 

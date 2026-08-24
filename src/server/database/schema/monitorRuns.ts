@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { lowercaseHexTextCheck } from "./checks.ts";
 import { reports } from "./reports.ts";
 
 /** One complete or partial observation run from a named monitor. */
@@ -37,7 +38,7 @@ export const monitorRuns = sqliteTable(
         ),
         check(
             "monitor_runs_submission_sha256_check",
-            sql`length(${table.submissionSha256}) = 64 AND ${table.submissionSha256} NOT GLOB '*[^0-9a-f]*'`
+            lowercaseHexTextCheck(table.submissionSha256, 64)
         ),
         index("monitor_runs_monitor_completed_id_idx")
             .on(table.monitorKey, table.completedAt, table.id)

@@ -6,15 +6,8 @@ import {
 } from "../../../contracts/monitoring.ts";
 import { nonnegativeDateAction } from "../../../shared/dateTime.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
+import { parseJsonText } from "../../../shared/json.ts";
 import { lowercaseUuidV7Action } from "../../../shared/validation.ts";
-
-function parseJson(value: string): unknown {
-    try {
-        return JSON.parse(value) as unknown;
-    } catch {
-        return undefined;
-    }
-}
 
 /** Restricts a Drizzle text identifier to the canonical lowercase UUIDv7 form. */
 export const uuidV7Action = lowercaseUuidV7Action();
@@ -30,7 +23,7 @@ export function uuidV7TextSchema(schema: v.StringSchema<undefined>) {
 
 /** Requires a Drizzle text column to contain syntactically valid JSON. */
 export const validJsonTextAction = v.check(
-    (value: string) => parseJson(value) !== undefined,
+    (value: string) => parseJsonText(value) !== undefined,
     "Expected valid JSON text."
 );
 
@@ -39,7 +32,7 @@ export const jsonObjectTextAction = v.check((value: string) => {
     if (utf8ByteLength(value) > monitoringJsonObjectMaximumBytes) {
         return false;
     }
-    const parsed = parseJson(value);
+    const parsed = parseJsonText(value);
     return v.safeParse(monitoringJsonObjectSchema, parsed).success;
 }, "Expected bounded monitoring JSON text with an object root.");
 

@@ -14,11 +14,19 @@ describe("tRPC request context", () => {
             authenticateRequest(candidate) {
                 observedRequest = candidate;
                 return {
-                    kind: "authenticated",
-                    principal: {
-                        capabilities: ["reports:read", "notifications:read"],
-                        id: "operator-session",
-                        kind: "session",
+                    authentication: {
+                        kind: "authenticated",
+                        principal: {
+                            authorizationVersion: 1,
+                            capabilities: ["reports:read", "notifications:read"],
+                            authenticatorId: "a".repeat(32),
+                            id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+                            kind: "session",
+                        },
+                    },
+                    lease: {
+                        expiresAtMs: 1_800_000_000_000,
+                        revalidate: () => Promise.resolve({ kind: "invalid" }),
                     },
                 };
             },
@@ -29,13 +37,16 @@ describe("tRPC request context", () => {
         expect(context.authentication).toEqual({
             kind: "authenticated",
             principal: {
+                authorizationVersion: 1,
                 capabilities: ["notifications:read", "reports:read"],
-                id: "operator-session",
+                authenticatorId: "a".repeat(32),
+                id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
                 kind: "session",
             },
         });
         expect(Object.isFrozen(context)).toBe(true);
         expect(Object.isFrozen(context.authentication)).toBe(true);
+        expect(Object.isFrozen(context.authenticationLease)).toBe(true);
         expect(context.services).toBe(applicationRuntime.services);
         expect("dispose" in context.services).toBe(false);
         if (context.authentication.kind === "authenticated") {
@@ -52,11 +63,15 @@ describe("tRPC request context", () => {
             await createRequestContext({
                 applicationRuntime: createTestApplicationRuntime(),
                 authenticateRequest: () => ({
-                    kind: "authenticated",
-                    principal: {
-                        capabilities: ["unknown:admin"],
-                        id: "operator-session",
-                        kind: "session",
+                    authentication: {
+                        kind: "authenticated",
+                        principal: {
+                            authorizationVersion: 1,
+                            capabilities: ["unknown:admin"],
+                            authenticatorId: "a".repeat(32),
+                            id: "019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
+                            kind: "session",
+                        },
                     },
                 }),
                 request: new Request("http://localhost/trpc/events.stream"),

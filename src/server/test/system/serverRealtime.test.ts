@@ -5,15 +5,22 @@ import { secondsToMilliseconds } from "date-fns";
 import { EventSource, type EventSourceFetchInit } from "eventsource";
 import superjson from "superjson";
 
+import { createDashboardServer } from "../../../app/dashboardServer.ts";
 import { type ApplicationServer, createServer } from "../../../app/server.ts";
 import type { RealtimeStreamOutput } from "../../../contracts/events.ts";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
+import { dashboardSessionCookieName } from "../../domains/security/requestAuthentication.ts";
+import { openAuthenticationTestDatabase } from "../../domains/security/testSupport/authentication.ts";
 import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
 import type { ApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
 import { withTestTimeout } from "../support/promise.ts";
-import { createTestApplicationRuntime } from "../support/requestContext.ts";
+import {
+    createTestApplicationRuntime,
+    createTestAuthenticationResolution,
+    createTestSessionAuthentication,
+} from "../support/requestContext.ts";
 
 const sessionCookie = "mira_session=valid-test-session";
 const testWaitTimeoutMs = secondsToMilliseconds(2);
@@ -38,22 +45,25 @@ afterEach(async () => {
     }
 });
 
-function authenticatedEventSourceFetch(
-    url: string | URL,
-    init: EventSourceFetchInit
-): Promise<Response> {
-    const headers = new Headers(init.headers);
-    headers.set("cookie", sessionCookie);
-    return fetch(url, { ...init, headers });
+function eventSourceFetchWithCookie(cookie: string) {
+    return (url: string | URL, init: EventSourceFetchInit): Promise<Response> => {
+        const headers = new Headers(init.headers);
+        headers.set("cookie", cookie);
+        return fetch(url, { ...init, headers });
+    };
 }
 
-function createEventsClient(server: ApplicationServer, authenticated: boolean) {
+function createEventsClient(server: ApplicationServer, cookie?: string) {
     return createTRPCClient<AppRouter>({
         links: [
             httpSubscriptionLink({
                 EventSource,
-                ...(authenticated
-                    ? { eventSourceOptions: { fetch: authenticatedEventSourceFetch } }
+                ...(cookie
+                    ? {
+                          eventSourceOptions: {
+                              fetch: eventSourceFetchWithCookie(cookie),
+                          },
+                      }
                     : {}),
                 transformer: superjson,
                 url: new URL("/trpc", server.url).toString(),
@@ -69,15 +79,10 @@ async function startRealtimeServer(
         applicationRuntime,
         authenticateRequest: (request) =>
             request.headers.get("cookie") === sessionCookie
-                ? {
-                      kind: "authenticated" as const,
-                      principal: {
-                          capabilities: ["reports:read"] as const,
-                          id: "test-session",
-                          kind: "session" as const,
-                      },
-                  }
-                : { kind: "anonymous" as const },
+                ? createTestAuthenticationResolution(
+                      createTestSessionAuthentication(["reports:read"])
+                  )
+                : createTestAuthenticationResolution({ kind: "anonymous" }),
         hostname: "127.0.0.1",
         port: 0,
         readiness: createReadinessController(),
@@ -121,7 +126,7 @@ describe("application server realtime transport", () => {
         });
         const server = await startRealtimeServer(runtime);
 
-        const authenticatedClient = createEventsClient(server, true);
+        const authenticatedClient = createEventsClient(server, sessionCookie);
         const firstEvent = Promise.withResolvers<RealtimeStreamOutput>();
         const authenticatedSubscription = authenticatedClient.events.stream.subscribe(
             { topics: [monitoringRealtimeTopics.reports] },
@@ -172,7 +177,7 @@ describe("application server realtime transport", () => {
         });
         const server = await startRealtimeServer(runtime);
 
-        const anonymousClient = createEventsClient(server, false);
+        const anonymousClient = createEventsClient(server);
         const anonymousFailure = Promise.withResolvers<Error>();
         const anonymousSubscription = anonymousClient.events.stream.subscribe(
             { topics: [monitoringRealtimeTopics.reports] },
@@ -191,5 +196,58 @@ describe("application server realtime transport", () => {
         expect(authenticationError.message).toBe("Authentication required");
         anonymousSubscription.unsubscribe();
         expect(streamCalls).toBe(0);
+    });
+
+    test("wires a migrated session through the real server composition", async () => {
+        const fixture = await openAuthenticationTestDatabase(new Date());
+        let server: ApplicationServer | undefined;
+
+        try {
+            const runtime = createTestApplicationRuntime({
+                stream: () =>
+                    Promise.resolve(
+                        (async function* () {
+                            yield await Promise.resolve(reportDelivery);
+                        })()
+                    ),
+            });
+            server = await createDashboardServer({
+                applicationRuntime: runtime,
+                browserOrigin: "https://dashboard.example",
+                database: fixture.database.orm,
+                hostname: "127.0.0.1",
+                port: 0,
+                readiness: createReadinessController(),
+            });
+            servers.push(server);
+            const client = createEventsClient(
+                server,
+                `${dashboardSessionCookieName}=${fixture.session.token}`
+            );
+            const firstEvent = Promise.withResolvers<RealtimeStreamOutput>();
+            const subscription = client.events.stream.subscribe(
+                { topics: [monitoringRealtimeTopics.reports] },
+                { onData: firstEvent.resolve, onError: firstEvent.reject }
+            );
+
+            expect(
+                await withTestTimeout(
+                    firstEvent.promise,
+                    testWaitTimeoutMs,
+                    "Persisted session did not authenticate the realtime stream"
+                )
+            ).toMatchObject({
+                data: { kind: "change" },
+                id: "1",
+            });
+            subscription.unsubscribe();
+        } finally {
+            if (server !== undefined) {
+                await server.stop(true);
+                const index = servers.indexOf(server);
+                if (index !== -1) servers.splice(index, 1);
+            }
+            fixture.database.sqlite.close(true);
+        }
     });
 });

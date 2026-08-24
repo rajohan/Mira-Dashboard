@@ -1,9 +1,51 @@
 import * as v from "valibot";
 
 import {
-    boundedNonBlankStringSchema,
     hasUniqueArrayItems,
+    lowercaseUuidV7Schema,
+    positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
+
+/** Authentication methods represented by durable browser sessions. */
+export const authenticationMethods = [
+    "password",
+    "recovery",
+    "totp",
+    "webauthn",
+] as const;
+
+export const authenticationMethodSchema = v.picklist(
+    authenticationMethods,
+    "Authentication method is invalid"
+);
+
+/** Canonical sole-operator username used at login and persistence boundaries. */
+export const securityUsernameSchema = v.pipe(
+    v.string("Username is invalid"),
+    v.minLength(3, "Username is invalid"),
+    v.maxLength(32, "Username is invalid"),
+    v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "Username is invalid")
+);
+
+/** Stable identifier for a named automation caller, independent of its credentials. */
+export const automationPrincipalIdSchema = v.pipe(
+    v.string("Automation principal id is invalid"),
+    v.minLength(1, "Automation principal id is invalid"),
+    v.maxLength(64, "Automation principal id is invalid"),
+    v.regex(/^[a-z0-9][a-z0-9._-]*$/u, "Automation principal id is invalid")
+);
+
+/** Non-secret 128-bit selector used to identify an opaque token. */
+export const opaqueSelectorSchema = v.pipe(
+    v.string("Opaque selector is invalid"),
+    v.length(32, "Opaque selector is invalid"),
+    v.regex(/^[0-9a-f]{32}$/u, "Opaque selector is invalid")
+);
+
+/** Canonical UUIDv7 identity for users and managed security records. */
+export const securityRecordIdSchema = lowercaseUuidV7Schema(
+    "Security record id is invalid"
+);
 
 /** Capabilities referenced by currently implemented authenticated contracts. */
 export const applicationCapabilities = ["notifications:read", "reports:read"] as const;
@@ -29,12 +71,32 @@ const principalCapabilitiesSchema = v.pipe(
     v.transform((capabilities) => Object.freeze(capabilities.toSorted()))
 );
 
+const authenticatedPrincipalBaseEntries = {
+    authorizationVersion: positiveSafeIntegerSchema(
+        "Principal authorization version is invalid"
+    ),
+    capabilities: principalCapabilitiesSchema,
+};
+
+const automationAuthenticatedPrincipalSchema = v.strictObject({
+    ...authenticatedPrincipalBaseEntries,
+    authenticatorId: securityRecordIdSchema,
+    id: automationPrincipalIdSchema,
+    kind: v.literal("automation"),
+});
+
+const sessionAuthenticatedPrincipalSchema = v.strictObject({
+    ...authenticatedPrincipalBaseEntries,
+    authenticatorId: opaqueSelectorSchema,
+    id: securityRecordIdSchema,
+    kind: v.literal("session"),
+});
+
 export const authenticatedPrincipalSchema = v.pipe(
-    v.strictObject({
-        capabilities: principalCapabilitiesSchema,
-        id: boundedNonBlankStringSchema(128, "Principal id is invalid"),
-        kind: v.picklist(["automation", "session"]),
-    }),
+    v.variant("kind", [
+        automationAuthenticatedPrincipalSchema,
+        sessionAuthenticatedPrincipalSchema,
+    ]),
     v.transform((principal) => Object.freeze(principal))
 );
 
