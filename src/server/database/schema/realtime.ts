@@ -7,6 +7,7 @@ export const realtimeEvents = sqliteTable(
     {
         entityId: text("entity_id").notNull(),
         entityType: text("entity_type").notNull(),
+        expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
         id: integer("id").primaryKey({ autoIncrement: true }),
         occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
         operation: text("operation", {
@@ -24,6 +25,11 @@ export const realtimeEvents = sqliteTable(
             "realtime_events_operation_check",
             sql`${table.operation} IN ('created', 'deleted', 'snapshot-required', 'updated')`
         ),
+        check(
+            "realtime_events_expiry_order_check",
+            sql`${table.expiresAt} > ${table.occurredAt}`
+        ),
+        index("realtime_events_expires_id_idx").on(table.expiresAt, table.id),
         index("realtime_events_topic_id_idx").on(table.topic, table.id),
     ]
 );

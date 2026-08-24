@@ -55,7 +55,7 @@
   both readiness outcomes.
 - These focused gates currently pass on the exact candidate: qualification and server
   TypeScript, deterministic documentation generation, Drizzle migration-graph validation, 65/65
-  qualification tests, 32/32 server/database tests, 4/4 documentation tests, and 4/4
+  qualification tests, 50/50 server/database tests, 4/4 documentation tests, and 4/4
   database-gate tooling tests.
   Direct event-feed tests also prove gap-free replay to live handoff, a stable replay snapshot
   while retention advances, explicit rejection of a cursor ahead of the feed tail, acceptance at
@@ -81,7 +81,7 @@
   non-object JSON, SQL/snapshot tampering, manifest shape/order, strict tables, enforcement and
   integrity failures, transactional rollback, unknown-schema rejection, mandatory realtime-event
   entity identity, Valibot round-trips, and query plans; the migration/database subset passes
-  27/27 tests. Because this baseline is unpublished and targets an empty database, the identity
+  29/29 tests. Because this baseline is unpublished and targets an empty database, the identity
   constraint regenerates the single initial migration instead of adding compatibility history.
 - Migration graph validation runs through the read-only `drizzle-kit check` CLI in the foundation
   job. A non-writing `drizzle-kit generate --explain` pass must also report `no_changes`, so a
@@ -217,6 +217,41 @@
 - These measurements qualify this exact runtime, topology, and fixed workload. They do not claim a
   universal maximum for Bun, Fetch, TLS, tRPC, or kernel buffers, and they do not replace the
   broader production resource budget for builds, workers, tests, and privileged jobs.
+
+### 2026-08-04 — Monitoring incident lifecycle implemented
+
+- A transport-independent monitoring domain now accepts one Valibot-validated complete snapshot
+  per monitor run. It normalizes stable ASCII monitor/problem identity, derives a versioned
+  SHA-256 fingerprint from kind, entity, and condition, sorts problems deterministically, and
+  hashes canonical JSON for immutable run idempotency. Bounded JSON objects reject cycles,
+  non-JSON values, sparse arrays, excessive depth, and payloads over 64 KiB; report
+  bodies and problem counts have separate explicit limits.
+- The synchronous service and narrow Drizzle repository execute every accepted snapshot inside one
+  SQLite `IMMEDIATE` transaction. The transaction inserts the immutable report and monitor run,
+  creates or updates incidents, records one immutable observation per run and incident, resolves
+  absent active incidents, increments the generation on recurrence, creates exactly one dashboard
+  notification per opened generation, marks its unread notification read on resolution, and writes
+  compact transactional realtime invalidation events for each changed report, incident, and
+  notification.
+- Retry behavior is explicit. An identical run ID and canonical submission checksum is a no-op; the
+  same run ID with different content is a conflict. Older runs remain queryable as reports but do
+  not mutate lifecycle state. Equal completion times use the lowercase UUIDv7 run ID as a stable
+  tie-breaker. A completed timestamp more than five minutes ahead of the server clock is rejected
+  before repository entry, preventing an accidental epoch-microseconds value from poisoning that
+  monitor's ordering watermark.
+- The unpublished fresh-database migration was regenerated in place. Monitor runs now persist the
+  immutable submission checksum and enforce completion ordering; incidents enforce seen/resolution
+  ordering; observations preserve kind, severity, and title with one row per run/incident; and
+  realtime events carry an enforced expiry with an indexed `(expires_at, id)` retention scan. The
+  migration SQL, Drizzle snapshot, and explicit manifest checksums remain aligned.
+- Realtime events use a compact `{id}` payload below the qualified 8 KiB event ceiling, share one
+  seven-day expiry horizon per transaction, and wake the event pump only after commit. A wakeup
+  failure cannot invalidate durable state because adaptive polling is the recovery path. Expired-row
+  deletion is intentionally not performed in the request transaction: the approved architecture
+  assigns bounded batch deletion and checkpoint work to the later resource-scoped maintenance job.
+- Focused normalization, lifecycle, rollback, stale-order, schema-invariant, and query-plan coverage
+  passes 21/21 tests. The complete server/database suite passes 50/50, server TypeScript passes,
+  Drizzle reports both `check: ok` and schema `no_changes`, and Oxfmt/Oxlint pass on the slice.
 
 ## Executive Decision
 

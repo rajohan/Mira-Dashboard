@@ -16,6 +16,7 @@ export const monitorRuns = sqliteTable(
         }),
         startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
         state: text("state", { enum: ["failed", "running", "succeeded"] }).notNull(),
+        submissionSha256: text("submission_sha256").notNull(),
     },
     (table) => [
         check(
@@ -30,6 +31,16 @@ export const monitorRuns = sqliteTable(
             "monitor_runs_completion_check",
             sql`(${table.state} = 'running' AND ${table.completedAt} IS NULL) OR (${table.state} IN ('failed', 'succeeded') AND ${table.completedAt} IS NOT NULL)`
         ),
-        index("monitor_runs_monitor_started_idx").on(table.monitorKey, table.startedAt),
+        check(
+            "monitor_runs_completion_order_check",
+            sql`${table.completedAt} IS NULL OR ${table.completedAt} >= ${table.startedAt}`
+        ),
+        check(
+            "monitor_runs_submission_sha256_check",
+            sql`length(${table.submissionSha256}) = 64 AND ${table.submissionSha256} NOT GLOB '*[^0-9a-f]*'`
+        ),
+        index("monitor_runs_monitor_completed_id_idx")
+            .on(table.monitorKey, table.completedAt, table.id)
+            .where(sql`${table.completeSnapshot} = 1 AND ${table.state} = 'succeeded'`),
     ]
 );
