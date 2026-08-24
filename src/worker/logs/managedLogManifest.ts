@@ -62,7 +62,7 @@ function resolveMaintenanceGroupId(): number | undefined {
             status.nlink !== 1 ||
             status.uid !== 0 ||
             (status.mode & 0o022) !== 0 ||
-            status.size < 1 ||
+            status.size === 0 ||
             status.size > 1024 * 1024
         ) {
             return undefined;
@@ -240,15 +240,15 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
             target.trustedOwnerIds.length > 16 ||
             target.trustedOwnerIds.some(
                 (ownerId) => !Number.isSafeInteger(ownerId) || ownerId < 0
-            ) ||
-            (target.trustedWritableGroupId !== undefined &&
-                (!Number.isSafeInteger(target.trustedWritableGroupId) ||
-                    target.trustedWritableGroupId < 0))
+            )
         ) {
             throw new TypeError("Managed log manifest is invalid");
         }
         if ("filePath" in target) {
             if (
+                (target.trustedWritableGroupId !== undefined &&
+                    (!Number.isSafeInteger(target.trustedWritableGroupId) ||
+                        target.trustedWritableGroupId < 0)) ||
                 target.maximumSizeBytes < 1 ||
                 target.maximumSizeBytes > target.maximumSourceBytes ||
                 !Number.isSafeInteger(target.maximumSizeBytes) ||
