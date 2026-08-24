@@ -708,13 +708,10 @@ describe("production bootstrap admission", () => {
                     if (groupLookupCount === 1) {
                         return { exitCode: 2, stdout: "" };
                     }
-                    if (groupLookupCount === 2) {
-                        maintenanceGroupLine =
-                            "mira-dashboard-log-maintenance:x:986:\n";
-                    } else {
-                        maintenanceGroupLine =
-                            "mira-dashboard-log-maintenance:x:986:ubuntu\n";
-                    }
+                    maintenanceGroupLine =
+                        groupLookupCount === 2
+                            ? "mira-dashboard-log-maintenance:x:986:\n"
+                            : "mira-dashboard-log-maintenance:x:986:ubuntu\n";
                     return { exitCode: 0, stdout: maintenanceGroupLine };
                 }
                 if (
