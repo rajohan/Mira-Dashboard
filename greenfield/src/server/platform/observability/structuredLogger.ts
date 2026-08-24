@@ -94,6 +94,7 @@ export interface StructuredLoggerOptions {
     readonly fallbackWrite?: (line: string) => void;
     readonly identity: StructuredLoggerIdentity;
     readonly limits?: StructuredLogLimits;
+    readonly minimumLevel?: StructuredLogLevel;
     readonly now?: () => Date;
     readonly sink: StructuredLogSink;
 }
@@ -112,7 +113,9 @@ const structuredEventComponents = Object.freeze({
     "http.response.created": "http",
     "realtime.runner.failed": "realtime-event-pump",
     "runtime.logger.connected": "application-runtime",
+    "runtime.start_failed": "runtime",
     "runtime.started": "runtime",
+    "runtime.stopped": "runtime",
     "trpc.request.defect": "trpc",
 } as const);
 
@@ -126,6 +129,8 @@ const structuredLogLevels = new Set<StructuredLogLevel>([
     "info",
     "warn",
 ]);
+const structuredLogLevelPriorities: Readonly<Record<StructuredLogLevel, number>> =
+    Object.freeze({ debug: 0, error: 3, fatal: 4, info: 1, warn: 2 });
 
 function validStructuredName(value: string): boolean {
     return value.length <= 128 && structuredNamePattern.test(value);
@@ -340,6 +345,10 @@ export function createStructuredLogger(
     });
     validateLoggerLimits(limits);
     const now = options.now ?? (() => new Date());
+    const minimumLevel = options.minimumLevel ?? "debug";
+    if (!structuredLogLevels.has(minimumLevel)) {
+        throw new TypeError("Structured logger minimum level is invalid");
+    }
     const sinkWrite = options.sink.write.bind(options.sink);
     const sinkFlush = options.sink.flush?.bind(options.sink);
     let fallbackWritten = false;
@@ -360,8 +369,14 @@ export function createStructuredLogger(
         }
     };
     const log = (level: StructuredLogLevel, event: StructuredLogEvent): void => {
+        const safeLevel = normalizedLogLevel(level);
+        if (
+            structuredLogLevelPriorities[safeLevel] <
+            structuredLogLevelPriorities[minimumLevel]
+        ) {
+            return;
+        }
         try {
-            const safeLevel = normalizedLogLevel(level);
             const result: unknown = sinkWrite(
                 serializeRecord(makeRecord(identity, now, safeLevel, event), limits),
                 safeLevel

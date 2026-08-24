@@ -10,6 +10,24 @@ const lcovPath = path.join(coverageDirectory, "lcov.info");
 const coveredSourceRoots = Object.freeze(["src"]);
 const coverageTestTargets = Object.freeze(["scripts", "src"]);
 
+/**
+ * Builds the exact Bun test arguments used by the coverage gate.
+ * @param outputDirectory Directory where Bun writes coverage artifacts.
+ * @returns Complete arguments after `bun test`.
+ */
+export function createCoverageTestArguments(outputDirectory: string): readonly string[] {
+    return Object.freeze([
+        "--coverage",
+        "--coverage-reporter",
+        "text",
+        "--coverage-reporter",
+        "lcov",
+        "--coverage-dir",
+        outputDirectory,
+        ...coverageTestTargets,
+    ]);
+}
+
 /** @returns Completion after the exact stale LCOV artifact is absent. */
 async function removeStaleLcov(): Promise<void> {
     try {
@@ -30,16 +48,7 @@ export async function runCoverage(): Promise<number> {
     await removeStaleLcov();
 
     const testExitCode = await runTestSuite(
-        [
-            "--coverage",
-            "--coverage-reporter",
-            "text",
-            "--coverage-reporter",
-            "lcov",
-            "--coverage-dir",
-            coverageDirectory,
-            ...coverageTestTargets,
-        ],
+        createCoverageTestArguments(coverageDirectory),
         projectRoot
     );
     if (testExitCode !== 0) return testExitCode;

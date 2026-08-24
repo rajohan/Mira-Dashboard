@@ -286,6 +286,38 @@ test("accepts the exact Bun canary version-with-revision identity", () => {
     });
 });
 
+test("filters below the configured process log level", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        minimumLevel: "warn",
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.debug({ component: "runtime", event: "runtime.started" });
+    logger.info({ component: "runtime", event: "runtime.started" });
+    logger.warn({ component: "runtime", event: "runtime.started" });
+    logger.error({ component: "runtime", event: "runtime.start_failed" });
+
+    expect(
+        lines.map((line) => {
+            const record = JSON.parse(line) as { readonly level?: unknown };
+            return record.level;
+        })
+    ).toEqual(["warn", "error"]);
+    expect(() =>
+        createStructuredLogger({
+            identity,
+            minimumLevel: "trace" as never,
+            sink: { write() {} },
+        })
+    ).toThrow("Structured logger minimum level is invalid");
+});
+
 test("snapshots limits and bound sink methods at construction", () => {
     const fallbacks: string[] = [];
     const limits = { maximumSerializedBytes: 1 };

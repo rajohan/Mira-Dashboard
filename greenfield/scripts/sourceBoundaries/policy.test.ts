@@ -45,6 +45,26 @@ describe("source-boundary policy", () => {
                 staticImport("../../shared/dateTime.ts")
             )
         ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "src/app/worker.ts",
+                staticImport("../server/database/runtime/databaseRuntimeOwner.ts")
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "src/app/databaseMaintenance.ts",
+                staticImport(
+                    "../server/database/runtime/databaseCandidateMigrationOwner.ts"
+                )
+            )
+        ).toBeUndefined();
+        expect(
+            validateSourceImport(
+                "src/app/databaseMaintenance.ts",
+                staticImport("../server/database/runtime/databaseService.ts")
+            )
+        ).toBeUndefined();
         expect(validateSourceFile("tailwind.config.ts")).toBeUndefined();
         expect(validateSourceFile("drizzle.config.ts")).toBeUndefined();
         expect(
@@ -74,6 +94,12 @@ describe("source-boundary policy", () => {
                 staticImport("../worker/adapters/systemd.ts")
             )?.message
         ).toContain("web-app may not import worker");
+        expect(
+            validateSourceImport(
+                "src/worker/jobs/run.ts",
+                staticImport("../../server/domains/security/authenticationLifecycle.ts")
+            )?.message
+        ).toContain("worker may not import server");
         expect(
             validateSourceImport("src/contracts/auth.ts", staticImport("./auth.test.ts"))
                 ?.message

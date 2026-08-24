@@ -1,12 +1,12 @@
 /** Reviewed file identity for one ordered Drizzle migration node. */
 export interface MigrationManifestEntry {
-    id: string;
-    migrationSha256: string;
-    snapshotSha256: string;
+    readonly id: string;
+    readonly migrationSha256: string;
+    readonly snapshotSha256: string;
 }
 
 /**
- * Reviewed migration files accepted by the application runtime.
+ * Reviewed migration files accepted by runtime and release tooling.
  * The unpublished rewrite keeps one evolving fresh-database baseline until cutover.
  */
 export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]>([

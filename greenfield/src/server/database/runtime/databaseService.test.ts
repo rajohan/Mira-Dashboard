@@ -22,6 +22,7 @@ import {
 } from "./databasePolicy.ts";
 import {
     DatabaseRuntimeService,
+    databaseCandidateMigrationLayer,
     databaseRuntimeLayer,
     type DatabaseRuntimeLayerOptions,
 } from "./databaseService.ts";
@@ -77,6 +78,22 @@ async function buildRuntime(runtimeOptions: DatabaseRuntimeLayerOptions) {
     return { runtime, service };
 }
 
+async function migrateCandidate(
+    stateDirectory: string,
+    candidateReleaseId = releaseId
+): Promise<void> {
+    const runtime = ManagedRuntime.make(
+        databaseCandidateMigrationLayer({
+            migrationsDirectory,
+            releaseId: candidateReleaseId,
+            stateDirectory,
+        })
+    );
+    runtimes.push(runtime);
+    await runtime.context();
+    await runtime.dispose();
+}
+
 afterEach(async () => {
     await Promise.allSettled(runtimes.splice(0).map((runtime) => runtime.dispose()));
     await Promise.all(
@@ -87,6 +104,54 @@ afterEach(async () => {
 });
 
 describe("database runtime service", () => {
+    test("initializes and revalidates an isolated delivery candidate without rewriting history", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        await migrateCandidate(stateDirectory);
+
+        const databasePath = path.join(stateDirectory, "mira-dashboard.db");
+        let database = new Database(databasePath, { strict: true });
+        expect(
+            database
+                .query<{ count: number; releaseId: string }, []>(`
+                    SELECT COUNT(*) AS count, MIN(release_id) AS releaseId
+                    FROM schema_migrations
+                `)
+                .get()
+        ).toEqual({ count: 1, releaseId });
+        database.close(true);
+
+        await migrateCandidate(stateDirectory, "1".repeat(40));
+        database = new Database(databasePath, { strict: true });
+        expect(
+            database
+                .query<{ count: number; releaseId: string }, []>(`
+                    SELECT COUNT(*) AS count, MIN(release_id) AS releaseId
+                    FROM schema_migrations
+                `)
+                .get()
+        ).toEqual({ count: 1, releaseId });
+        database.close(true);
+    });
+
+    test("rejects a drifted delivery candidate without changing normal startup modes", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        const databasePath = path.join(stateDirectory, "mira-dashboard.db");
+        const database = new Database(databasePath, { create: true, strict: true });
+        database.run("CREATE TABLE unreviewed (id INTEGER PRIMARY KEY) STRICT");
+        database.close(true);
+        await chmod(databasePath, 0o600);
+
+        expect(await rejectionOf(migrateCandidate(stateDirectory))).toBeInstanceOf(
+            DatabaseRuntimeStartupError
+        );
+        expect(() =>
+            normalizeDatabaseRuntimeOptions({
+                ...options(stateDirectory),
+                startupMode: "migrate-candidate" as never,
+            })
+        ).toThrow(DatabaseRuntimeStartupError);
+    });
+
     test("initializes a fresh strict WAL database through one native Drizzle handle", async () => {
         const stateDirectory = await privateTemporaryDirectory();
         const { service } = await buildRuntime(options(stateDirectory));

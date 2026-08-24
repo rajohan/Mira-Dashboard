@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import { constants as sqliteConstants, type Database } from "bun:sqlite";
 
 import { Data, Duration, Effect, Predicate, Schedule } from "effect";
 import * as v from "valibot";
@@ -357,6 +357,43 @@ export function checkpointDatabasePassive(
             );
             if (row.log < 0 || row.checkpointed < 0 || row.checkpointed > row.log) {
                 throw new Error("Invalid checkpoint diagnostics");
+            }
+            return Object.freeze({
+                busy: row.busy,
+                checkpointedFrames: row.checkpointed,
+                logFrames: row.log,
+            });
+        },
+    });
+}
+
+/**
+ * Disables persistent WAL and requires one complete truncating checkpoint.
+ * Reserved for stopped, delivery-owned candidate/snapshot database scopes.
+ * @param database Retained native connection with no concurrent writers.
+ * @returns Validated zero-busy WAL checkpoint counters.
+ */
+export function checkpointDatabaseTruncate(
+    database: Database
+): Effect.Effect<DatabaseCheckpointDiagnostics, DatabaseRuntimeCheckpointError> {
+    return Effect.try({
+        catch: () =>
+            new DatabaseRuntimeCheckpointError({
+                message: "Database truncating checkpoint failed",
+            }),
+        try: () => {
+            database.fileControl(sqliteConstants.SQLITE_FCNTL_PERSIST_WAL, 0);
+            const row = parsePolicyRow(
+                checkpointRowSchema,
+                database.query("PRAGMA wal_checkpoint(TRUNCATE)").get()
+            );
+            if (
+                row.busy !== 0 ||
+                row.log < 0 ||
+                row.checkpointed < 0 ||
+                row.checkpointed !== row.log
+            ) {
+                throw new Error("Invalid truncating checkpoint diagnostics");
             }
             return Object.freeze({
                 busy: row.busy,

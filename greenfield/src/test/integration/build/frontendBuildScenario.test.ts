@@ -3,8 +3,8 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { assertSelfHostedFrontendHtml } from "../../../../scripts/frontendBuildArtifacts.ts";
 import {
-    assertSelfHostedFrontendHtml,
     buildFrontendScenario,
     frontendBuildPluginOrder,
 } from "./frontendBuildScenario.ts";

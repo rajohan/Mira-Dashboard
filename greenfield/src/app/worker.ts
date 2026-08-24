@@ -1,0 +1,176 @@
+import { realpath } from "node:fs/promises";
+import path from "node:path";
+
+import { createDatabaseRuntimeOwner } from "../server/database/runtime/databaseRuntimeOwner.ts";
+import {
+    parseWorkerConfiguration,
+    type WorkerConfiguration,
+} from "../server/platform/configuration/workerConfiguration.ts";
+import {
+    type DashboardProjectLayout,
+    resolveDashboardProjectLayout,
+} from "../server/platform/filesystem/projectLayout.ts";
+import {
+    createProjectFileLogDestination,
+    type ProjectFileLogDestination,
+} from "../server/platform/observability/projectFileLogSink.ts";
+import {
+    createStructuredLogger,
+    type StructuredLogger,
+} from "../server/platform/observability/structuredLogger.ts";
+import {
+    loadRuntimeRelease,
+    type RuntimeRelease,
+} from "../server/platform/release/runtimeRelease.ts";
+import {
+    createProcessTerminationController,
+    type ProcessTerminationController,
+} from "../server/platform/runtime/processSignals.ts";
+import { type DashboardWorkerRuntime } from "../worker/runtime.ts";
+import { environmentSource } from "./environmentSource.ts";
+
+/** Explicit inputs owned by the executable worker composition root. */
+export interface DashboardWorkerProcessOptions {
+    readonly configurationSource: Readonly<Record<string, unknown>>;
+    readonly releaseRoot: string;
+}
+
+/** Injectable process boundaries used by deterministic composition tests. */
+export interface DashboardWorkerProcessDependencies {
+    readonly createLogDestination: (
+        logsDirectory: string,
+        processRole: "worker"
+    ) => ProjectFileLogDestination;
+    readonly createRuntime: (
+        configuration: WorkerConfiguration,
+        layout: DashboardProjectLayout,
+        release: RuntimeRelease,
+        logger: StructuredLogger
+    ) => DashboardWorkerRuntime;
+    readonly createTerminationController: () => ProcessTerminationController;
+    readonly loadRelease: (
+        releasesDirectory: string,
+        releaseRoot: string,
+        processRole: "worker"
+    ) => Promise<RuntimeRelease>;
+    readonly resolveProjectLayout: (
+        projectRoot: string
+    ) => Promise<DashboardProjectLayout>;
+}
+
+const defaultDependencies = Object.freeze({
+    createLogDestination: (logsDirectory, processRole) =>
+        createProjectFileLogDestination(logsDirectory, processRole),
+    createRuntime: (_configuration, layout, release) =>
+        createDatabaseRuntimeOwner({
+            migrationsDirectory: path.join(release.releaseRoot, "migrations"),
+            releaseId: release.manifest.source.commitSha,
+            startupMode: "validate-only",
+            stateDirectory: layout.production.state.root,
+        }),
+    createTerminationController: createProcessTerminationController,
+    loadRelease: (releasesDirectory, releaseRoot, processRole) =>
+        loadRuntimeRelease(releasesDirectory, releaseRoot, processRole),
+    resolveProjectLayout: resolveDashboardProjectLayout,
+} satisfies DashboardWorkerProcessDependencies);
+
+function createWorkerLogger(
+    configuration: WorkerConfiguration,
+    release: RuntimeRelease,
+    destination: ProjectFileLogDestination
+): StructuredLogger {
+    const runtime = release.manifest.runtime;
+    return createStructuredLogger({
+        fallbackWrite: destination.fallbackWrite,
+        identity: {
+            bun: `${runtime.version}+${runtime.revision.slice(0, 9)}`,
+            pid: process.pid,
+            processRole: "worker",
+            release: release.manifest.source.commitSha,
+            service: "mira-dashboard",
+        },
+        minimumLevel: configuration.logLevel,
+        sink: destination.sink,
+    });
+}
+
+function normalizeWorkerProcessFailure(error: unknown): Error {
+    return error instanceof Error
+        ? error
+        : new Error("Dashboard worker process failed", { cause: error });
+}
+
+/**
+ * Runs the database-validating worker lifecycle until a process signal requests shutdown.
+ * Job capabilities are intentionally absent until their Phase 3 ports are composed.
+ * @param options Typed environment source and exact immutable release root.
+ * @param dependencies Injectable host/runtime boundaries.
+ */
+export async function runDashboardWorkerProcess(
+    options: DashboardWorkerProcessOptions,
+    dependencies: DashboardWorkerProcessDependencies = defaultDependencies
+): Promise<void> {
+    const configuration = parseWorkerConfiguration(options.configurationSource);
+    const layout = await dependencies.resolveProjectLayout(configuration.projectRoot);
+    const release = await dependencies.loadRelease(
+        layout.production.releases,
+        options.releaseRoot,
+        "worker"
+    );
+    const destination = dependencies.createLogDestination(
+        layout.production.state.logs,
+        "worker"
+    );
+    const logger = createWorkerLogger(configuration, release, destination);
+    const termination = dependencies.createTerminationController();
+    let runtime: DashboardWorkerRuntime | undefined;
+    let failure: Error | undefined;
+    try {
+        runtime = dependencies.createRuntime(configuration, layout, release, logger);
+        await runtime.initialize();
+        logger.info({
+            component: "runtime",
+            event: "runtime.started",
+            outcome: "success",
+        });
+        await termination.termination;
+        await runtime.dispose();
+        logger.info({
+            component: "runtime",
+            event: "runtime.stopped",
+            outcome: "success",
+        });
+    } catch (error) {
+        failure = normalizeWorkerProcessFailure(error);
+        if (runtime) {
+            try {
+                await runtime.dispose();
+            } catch {
+                // Preserve the initiating process failure.
+            }
+        }
+        logger.fatal({
+            component: "runtime",
+            event: "runtime.start_failed",
+            failure,
+            outcome: "server-error",
+        });
+    } finally {
+        termination.dispose();
+        logger.flush();
+    }
+    if (failure !== undefined) throw failure;
+}
+
+if (import.meta.main) {
+    try {
+        const releaseRoot = await realpath(path.resolve(import.meta.dir, ".."));
+        await runDashboardWorkerProcess({
+            configurationSource: environmentSource("worker"),
+            releaseRoot,
+        });
+    } catch {
+        process.stderr.write("Mira Dashboard worker startup failed\n");
+        process.exitCode = 1;
+    }
+}
