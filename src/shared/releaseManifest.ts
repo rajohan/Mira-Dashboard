@@ -1,6 +1,5 @@
 import * as v from "valibot";
 
-import { bunRuntimePolicy } from "./bunRuntimePolicy.ts";
 import { timestampMillisecondsSchema } from "./dateTime.ts";
 import {
     boundedControlSafeTextSchema,
@@ -149,7 +148,11 @@ const sharedManifestEntries = {
     ),
     runtime: v.strictObject({
         revision: fullCommitShaSchema(invalidReleaseManifest),
-        version: v.literal(bunRuntimePolicy.version, invalidReleaseManifest),
+        version: v.pipe(
+            v.string(),
+            v.maxLength(128, invalidReleaseManifest),
+            v.regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, invalidReleaseManifest)
+        ),
     }),
     source: v.strictObject({
         commitSha: fullCommitShaSchema(invalidReleaseManifest),

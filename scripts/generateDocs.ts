@@ -32,13 +32,26 @@ export async function synchronizeGeneratedDocumentation(
         packageManifestSchema,
         await Bun.file(path.join(projectRoot, "package.json")).json()
     );
+    const [lockfile, runtimeVersionFile, sourceDocuments] = await Promise.all([
+        Bun.file(path.join(projectRoot, "bun.lock")).text(),
+        Bun.file(path.join(projectRoot, ".bun-version")).text(),
+        readDocumentationSources(path.join(projectRoot, "docs")),
+    ]);
     const resolvedVersions = resolveDirectPackageVersions(
         [packageManifest.dependencies, packageManifest.devDependencies],
-        await Bun.file(path.join(projectRoot, "bun.lock")).text()
+        lockfile
     );
+    const runtimeVersion = runtimeVersionFile.trim();
+    if (resolvedVersions["bun-types"] !== runtimeVersion) {
+        throw new Error("Locked bun-types must match .bun-version");
+    }
     const artifacts = buildDocumentationArtifacts(
-        { ...packageManifest, resolvedVersions },
-        await readDocumentationSources(path.join(projectRoot, "docs"))
+        {
+            ...packageManifest,
+            resolvedVersions,
+            runtimeVersion,
+        },
+        sourceDocuments
     );
     const synchronizeDocumentation =
         mode === "check" ? checkDocumentationArtifacts : writeDocumentationArtifacts;

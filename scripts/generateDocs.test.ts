@@ -24,9 +24,13 @@ async function repositoryFixture(): Promise<string> {
         mkdir(path.join(root, "docs", "generated"), { recursive: true }),
         writeFile(
             path.join(root, "package.json"),
-            `${JSON.stringify({ dependencies: {}, devDependencies: {} }, null, 2)}\n`
+            `${JSON.stringify({ dependencies: {}, devDependencies: { "bun-types": "*" } }, null, 2)}\n`
         ),
-        writeFile(path.join(root, "bun.lock"), '{"packages":{}}\n'),
+        writeFile(
+            path.join(root, "bun.lock"),
+            '{"packages":{"bun-types":["bun-types@1.4.0","",{}]}}\n'
+        ),
+        writeFile(path.join(root, ".bun-version"), "1.4.0\n"),
         writeFile(path.join(root, "docs", "operations", "runbook.md"), "# Runbook\n"),
     ]);
     return root;
@@ -65,6 +69,15 @@ describe("generated documentation synchronization", () => {
 
         expect(failure.message).toBe(
             "Generated documentation file set is stale; run bun run generate docs"
+        );
+    });
+
+    test("rejects bun-types drift from the sole runtime pin", async () => {
+        const projectRoot = await repositoryFixture();
+        await writeFile(path.join(projectRoot, ".bun-version"), "1.4.1\n");
+
+        expect(synchronizeGeneratedDocumentation(projectRoot, "write")).rejects.toThrow(
+            "Locked bun-types must match .bun-version"
         );
     });
 });

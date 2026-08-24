@@ -32,6 +32,10 @@ const sourceProjectRoot = path.resolve(import.meta.dir, "../..");
 const temporaryRoots: string[] = [];
 const currentUserId = typeof process.getuid === "function" ? process.getuid() : -1;
 const currentGroupId = typeof process.getgid === "function" ? process.getgid() : -1;
+const supplementaryGroupId =
+    typeof process.getgroups === "function"
+        ? process.getgroups().find((groupId) => groupId !== currentGroupId)
+        : undefined;
 const fixtureSourceIdentity = Object.freeze({
     groupId: BigInt(currentGroupId),
     userId: BigInt(currentUserId),
@@ -282,6 +286,22 @@ describe("root host-operations provisioning installer", () => {
                 typeof process.getgid === "function" ? process.getgid() : -1
             );
         }
+    });
+
+    test("accepts a root-owned non-writable system directory with a service group", async () => {
+        if (supplementaryGroupId === undefined) return;
+        const releaseRoot = await releaseFixture();
+        const destinationRoot = await destinationFixture();
+        const rulesDirectory = path.join(destinationRoot, "etc/polkit-1/rules.d");
+        await chown(rulesDirectory, currentUserId, supplementaryGroupId);
+        await chmod(rulesDirectory, 0o750);
+
+        expect(
+            await runInstallHostOperationsProvisioningCli(
+                await argumentsFor(releaseRoot),
+                await installerTestHooks(releaseRoot, destinationRoot)
+            )
+        ).toEqual({ releaseId, status: "INSTALLED" });
     });
 
     test("creates and validates the reviewed libexec target on a fresh host", async () => {

@@ -1,21 +1,31 @@
 # Operator runbooks
 
-## Fresh checkout and local first start
+## Fresh production host
 
-Install the exact Bun version in `.bun-version`, clone the repository, and enter its root. Then run:
+Install the exact Bun version in `.bun-version`, Git, GitHub CLI, Doppler CLI, Tailscale, and sudo.
+Authenticate those host-owned tools outside chat. Clone GitHub `main` into
+`/home/ubuntu/projects/mira-dashboard/production/checkout`, ensure `origin/main` is current, then run
+as `ubuntu`:
 
 ```bash
 bun run bootstrap
 ```
 
-The command verifies Bun, performs a frozen install, checks generated documentation and the
-database schema, prepares isolated development state, and starts the loopback Dashboard. It does
-not use sudo, install system units, read Doppler, mutate production, or create credentials. Use
-`bun run bootstrap --no-start` for preparation only, `--with-browser` when the host will run
-Storybook browser tests, or `--doppler` to start through the fixed allowlist on a configured host.
+The command verifies a clean exact `main`, installs the frozen graph, downloads the permanent
+assets from the GitHub release for that commit, verifies their receipt and immutable manifest, stages the release and
+the `.bun-version` runtime under root ownership, installs systemd/polkit provisioning, creates the
+log-maintenance group grant, applies the preview Tailscale operator, prepares fresh production
+state, and activates the release through readiness. It is greenfield-only and contains no legacy
+discovery, migration, stopping, removal, or cleanup behavior.
 
 If bootstrap fails, fix the first reported prerequisite and rerun it. Resolve frozen-install
-failures in the lockfile on a development branch; never weaken the target-host install.
+failures in the lockfile on a development branch; never weaken the target-host install. Missing
+assets mean the exact `main` commit has not been published as a completed semantic release yet.
+
+## Fresh checkout and local first start
+
+For development, run `bun run bootstrap development`. Add `--no-start`, `--with-browser`, or
+`--doppler` as documented in the local-development guide.
 
 ## Production candidate preflight
 

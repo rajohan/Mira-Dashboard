@@ -4,7 +4,8 @@ import path from "node:path";
 import { runCommandProcess } from "./commandProcess.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "..");
-const usage = "Usage: bun run bootstrap [--doppler] [--no-start] [--with-browser]";
+const usage =
+    "Usage: bun run bootstrap [production] | bun run bootstrap development [--doppler] [--no-start] [--with-browser]";
 
 export interface BootstrapArguments {
     readonly doppler: boolean;
@@ -62,19 +63,25 @@ function defaultDependencies(root: string): BootstrapDependencies {
 }
 
 /**
- * Installs one fresh checkout reproducibly, prepares isolated development state, and optionally
- * starts the Dashboard. Privileged production provisioning and credential mutation are excluded.
- * @param arguments_ Explicit bootstrap flags.
+ * Routes bare/production bootstrap to the complete clean-host installer and keeps the former
+ * isolated local workflow behind the explicit development mode.
+ * @param arguments_ Explicit bootstrap mode and development-only flags.
  * @param root Canonical repository package root.
  * @param dependencies Injectable runtime, filesystem, and process boundaries.
- * @returns Bootstrap or development child exit code.
+ * @returns Production installer or development child exit code.
  */
 export async function runBootstrap(
     arguments_: readonly string[],
     root = projectRoot,
     dependencies = defaultDependencies(root)
 ): Promise<number> {
-    const options = parseBootstrapArguments(arguments_);
+    const [mode, ...modeArguments] = arguments_;
+    if (mode === undefined || mode === "production") {
+        if (modeArguments.length > 0) throw new TypeError(usage);
+        return dependencies.run([process.execPath, "scripts/productionBootstrap.ts"]);
+    }
+    if (mode !== "development") throw new TypeError(usage);
+    const options = parseBootstrapArguments(modeArguments);
     const requiredVersion = await dependencies.readRuntimeVersion(root);
     if (dependencies.runtimeVersion !== requiredVersion) {
         throw new Error(

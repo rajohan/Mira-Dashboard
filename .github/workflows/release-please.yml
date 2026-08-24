@@ -1,0 +1,70 @@
+name: Release Please
+
+on:
+    push:
+        branches: [main]
+
+permissions:
+    actions: write
+    contents: write
+    pull-requests: write
+
+jobs:
+    release-please:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - name: Create or update release PR
+              id: release
+              uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+
+            - name: Dispatch checks for the release PR
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              shell: bash
+              run: |
+                  branch="$(gh pr list --state open --label 'autorelease: pending' --json headRefName --jq '.[0].headRefName // ""')"
+                  if [[ -n "$branch" ]]; then
+                      gh workflow run dashboard-checks.yml --ref "$branch"
+                  fi
+
+            - name: Checkout main commit
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Resolve release for this commit
+              id: artifact-release
+              shell: bash
+              run: |
+                  tag="$(git tag --points-at HEAD --sort=-version:refname | head -n 1)"
+                  if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+                      printf 'tag_name=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Set up Bun
+              if: ${{ steps.artifact-release.outputs.tag_name != '' }}
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version-file: .bun-version
+
+            - name: Build permanent production artifact
+              if: ${{ steps.artifact-release.outputs.tag_name != '' }}
+              run: |
+                  bun install --frozen-lockfile
+                  bun run build release
+                  bun scripts/delivery/packageProductionReleaseArtifact.ts
+
+            - name: Attach production artifact to GitHub release
+              if: ${{ steps.artifact-release.outputs.tag_name != '' }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              shell: bash
+              run: |
+                  tag="${{ steps.artifact-release.outputs.tag_name }}"
+                  for asset in release.tar receipt.json; do
+                      if ! gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+                          gh release upload "$tag" "dist/production-release-artifact/$asset" --repo "${{ github.repository }}"
+                      fi
+                  done

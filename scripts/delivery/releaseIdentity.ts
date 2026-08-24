@@ -3,7 +3,6 @@ import path from "node:path";
 
 import * as v from "valibot";
 
-import { bunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
 import {
     databaseSchemaTarget,
     migrationManifest,
@@ -202,6 +201,12 @@ function sameArtifactRecords(
     );
 }
 
+function selectedBunTypesVersion(
+    packages: readonly Readonly<{ name: string; version: string }>[]
+): string | undefined {
+    return packages.find(({ name }) => name === "bun-types")?.version;
+}
+
 function documentationRecords(
     artifacts: readonly ReleaseArtifactInventoryRecord[]
 ): readonly ReleaseArtifactInventoryRecord[] {
@@ -315,11 +320,11 @@ async function sourceDocumentationIdentity(repositoryRoot: string): Promise<stri
     );
 }
 
-function assertRuntimeIdentity(runtime: ReleaseRuntimeIdentity): void {
-    if (
-        runtime.version !== bunRuntimePolicy.version ||
-        !/^[a-f\d]{40}$/u.test(runtime.revision)
-    ) {
+function assertRuntimeIdentity(
+    runtime: ReleaseRuntimeIdentity,
+    expectedVersion: string
+): void {
+    if (runtime.version !== expectedVersion || !/^[a-f\d]{40}$/u.test(runtime.revision)) {
         throw invalidReleaseIdentity();
     }
 }
@@ -338,7 +343,6 @@ export async function createReleaseIdentity(
         (await resolveBuildSourceIdentity(options.repositoryRoot));
     if (source.state !== "clean") throw invalidReleaseIdentity();
     const runtime = options.runtimeIdentity ?? currentRuntimeIdentity();
-    assertRuntimeIdentity(runtime);
 
     const artifacts = await inventoryReleaseArtifactTree(options.releaseRoot);
     if (
@@ -360,8 +364,12 @@ export async function createReleaseIdentity(
                 128
             ),
         ]);
+    const selectedRuntimeVersion = sourceBunVersion.text.trim();
+    assertRuntimeIdentity(runtime, selectedRuntimeVersion);
     if (
-        sourceBunVersion.text !== `${bunRuntimePolicy.channel}\n` ||
+        sourceBunVersion.text !== `${selectedRuntimeVersion}\n` ||
+        !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(selectedRuntimeVersion) ||
+        selectedBunTypesVersion(sourcePackages.packages) !== selectedRuntimeVersion ||
         sha256(sourceBunVersion.bytes) !==
             artifactByPath(artifacts, "metadata/.bun-version").sha256 ||
         sha256(sourcePackages.lockfile.bytes) !==
@@ -420,8 +428,6 @@ async function reconstructReleaseArtifactIdentity(
     } catch {
         throw invalidReleaseIdentity();
     }
-    assertRuntimeIdentity(manifest.runtime);
-
     const completeInventory = await inventoryReleaseArtifactTree(releaseRoot);
     const artifacts = completeInventory.filter(
         ({ path: artifactPath }) => artifactPath !== releaseManifestFileName
@@ -439,8 +445,12 @@ async function reconstructReleaseArtifactIdentity(
         releaseRoot,
         128
     );
+    const selectedRuntimeVersion = stagedBunVersion.text.trim();
+    assertRuntimeIdentity(manifest.runtime, selectedRuntimeVersion);
     if (
-        stagedBunVersion.text !== `${bunRuntimePolicy.channel}\n` ||
+        stagedBunVersion.text !== `${selectedRuntimeVersion}\n` ||
+        !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(selectedRuntimeVersion) ||
+        selectedBunTypesVersion(stagedPackages.packages) !== selectedRuntimeVersion ||
         sha256(stagedBunVersion.bytes) !==
             artifactByPath(artifacts, "metadata/.bun-version").sha256 ||
         manifest.lockfileSha256 !==
@@ -477,8 +487,8 @@ export async function verifyReleaseIdentity(
     releaseRoot: string,
     runtimeIdentity: ReleaseRuntimeIdentity
 ): Promise<ReleaseManifest> {
-    assertRuntimeIdentity(runtimeIdentity);
     const manifest = await reconstructReleaseArtifactIdentity(releaseRoot);
+    assertRuntimeIdentity(runtimeIdentity, manifest.runtime.version);
     if (
         manifest.runtime.version !== runtimeIdentity.version ||
         manifest.runtime.revision !== runtimeIdentity.revision

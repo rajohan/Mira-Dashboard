@@ -1,4 +1,6 @@
-export { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
+import { createBunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
+
+export const bunRuntimePolicy = createBunRuntimePolicy(Bun.version);
 
 /** Runtime properties relevant to the integration suite. */
 export interface RuntimeIdentity {

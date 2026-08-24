@@ -101,7 +101,8 @@ production-shaped load, restore, and cutover evidence.
 `.bun-version` and the greenfield GitHub jobs select stable `1.4.0`. The serving process enforces
 that version, while the exact runtime revision remains diagnostic until release creation records
 it as part of the immutable build identity. `bun-types` is pinned to the matching stable `1.4.0`
-declarations.
+declarations by the lockfile; its package constraint deliberately does not duplicate the version
+selected in `.bun-version`.
 
 ### Server and build shape
 
@@ -486,7 +487,8 @@ mechanisms run through the ordinary Bun test graph. Product and cross-process in
 live under `src/`; a focused test of a repository script may remain colocated with that script.
 
 ```text
-bootstrap               frozen first install, generated checks, state preparation, local start
+bootstrap               complete greenfield production installation from exact main/CI artifact
+bootstrap development   frozen local install, generated checks, isolated state, local start
 dev [subcommand]         local stack, isolated state, and remote-route lifecycle
 check                    format, lint, typecheck, boundaries, docs, and database
 build [subcommand]       deterministic browser, process, Storybook, and release artifacts

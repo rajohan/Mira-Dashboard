@@ -68,7 +68,7 @@ async function releaseFixture(): Promise<{
     const packageJson = `${JSON.stringify(
         {
             dependencies: { react: "^19.2.8" },
-            devDependencies: { typescript: "^7.0.2" },
+            devDependencies: { "bun-types": "*", typescript: "^7.0.2" },
             name: "mira-dashboard",
             private: true,
             version: "0.0.0",
@@ -78,6 +78,7 @@ async function releaseFixture(): Promise<{
     )}\n`;
     const lockfile = `{
         "packages": {
+            "bun-types": ["bun-types@1.4.0", "", {}],
             "react": ["react@19.2.8", "", {}],
             "typescript": ["typescript@7.0.2", "", {}],
         },
@@ -192,6 +193,7 @@ describe("release identity", () => {
         });
         expect(created.runtime).toEqual(runtimeIdentity);
         expect(created.packages).toEqual([
+            { name: "bun-types", scope: "devDependency", version: "1.4.0" },
             { name: "react", scope: "dependency", version: "19.2.8" },
             { name: "typescript", scope: "devDependency", version: "7.0.2" },
         ]);
