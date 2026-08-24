@@ -179,6 +179,7 @@ describe("Dashboard browser application", () => {
                     state: "authenticated",
                     user: {
                         id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                        email: "operator@example.com",
                         username: "operator",
                     },
                 });
@@ -198,11 +199,10 @@ describe("Dashboard browser application", () => {
         );
 
         try {
-            const heading = await screen.findByRole("heading", {
-                level: 1,
-                name: "Mira Dashboard",
+            await screen.findByRole("heading", {
+                level: 3,
+                name: "No saved data yet",
             });
-            expect(heading.textContent).toBe("Mira Dashboard");
             expect(
                 screen
                     .getByText("Dashboard", { selector: "header > p" })
@@ -216,12 +216,6 @@ describe("Dashboard browser application", () => {
             expect(
                 screen.getByRole("link", { name: "Skip to content" }).getAttribute("href")
             ).toBe("#dashboard-content");
-            expect(
-                screen.getByRole("heading", {
-                    level: 2,
-                    name: "Saved system data",
-                })
-            ).toBeTruthy();
             expect(
                 screen.getByRole("heading", { level: 3, name: "No saved data yet" })
             ).toBeTruthy();
@@ -319,6 +313,7 @@ describe("Dashboard browser application", () => {
             state: "authenticated",
             user: {
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                email: "operator@example.com",
                 username: "operator",
             },
         };

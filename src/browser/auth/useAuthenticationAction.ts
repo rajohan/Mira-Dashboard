@@ -1,8 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
+import type { DashboardActionFailureMessage } from "../hooks/useExclusiveDashboardAction.ts";
 import { publishAuthenticationStatus } from "./authQueries.ts";
 
 /**
@@ -21,7 +23,11 @@ export function useAuthenticationAction() {
         return status;
     }
 
-    async function run(operation: () => Promise<unknown>): Promise<void> {
+    async function run(
+        operation: () => Promise<unknown>,
+        knownStatus?: AuthStatus,
+        failureMessage?: DashboardActionFailureMessage
+    ): Promise<boolean> {
         const result = await action.run(async () => {
             try {
                 await operation();
@@ -39,11 +45,16 @@ export function useAuthenticationAction() {
                 }
                 throw error;
             }
+            if (knownStatus !== undefined) {
+                await publishAuthenticationStatus(queryClient, knownStatus);
+                return knownStatus;
+            }
             return refreshAuthenticationStatus();
-        });
+        }, failureMessage);
         if (result.status === "success" && result.value.state === "authenticated") {
             await navigate({ replace: true, to: "/" });
         }
+        return result.status === "success";
     }
 
     return { ...action, client, run };

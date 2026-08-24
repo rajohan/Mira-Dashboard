@@ -12,6 +12,7 @@ const sourceExtensionPattern = /\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u;
 const nestedResolverMetadataPattern =
     /^(?:bunfig\.toml|(?:js|ts)config(?:\.[A-Za-z0-9_-]+)*\.json|package\.json)$/u;
 const reviewedRootDirectories: ReadonlySet<string> = new Set([
+    ".crabbox",
     ".git",
     ".githooks",
     ".github",

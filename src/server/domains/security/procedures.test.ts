@@ -31,6 +31,7 @@ const authSession = Object.freeze({
     lastSeenAtMs: 1_800_000_000_000,
 });
 const authUser = Object.freeze({
+    email: "operator@example.com",
     id: testSecurityUserId,
     username: "operator",
 });
@@ -62,6 +63,185 @@ function createTestMfaLoginLifecycleService(
 }
 
 describe("authentication procedures", () => {
+    const emailToken = `${"a".repeat(32)}.${"b".repeat(64)}`;
+
+    test("maps email verification outcomes without exposing lifecycle details", async () => {
+        const verifiedContext = await createTestRequestContext(
+            undefined,
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    verifyEmail: () =>
+                        Promise.resolve({
+                            email: "operator@example.com",
+                            status: "verified",
+                        }),
+                }),
+            }
+        );
+        expect(
+            await appRouter.createCaller(verifiedContext).auth.verifyEmail({
+                token: emailToken,
+            })
+        ).toEqual({ email: "operator@example.com" });
+
+        for (const testCase of [
+            { code: "CONFLICT", status: "conflict" },
+            { code: "UNAUTHORIZED", status: "invalid-token" },
+        ] as const) {
+            const context = await createTestRequestContext(
+                undefined,
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService({
+                        verifyEmail: () => Promise.resolve({ status: testCase.status }),
+                    }),
+                }
+            );
+            const failure = await captureFailure(() =>
+                appRouter.createCaller(context).auth.verifyEmail({ token: emailToken })
+            );
+            expect(failure).toBeInstanceOf(TRPCError);
+            expect((failure as TRPCError).code).toBe(testCase.code);
+        }
+    });
+
+    test("maps public password recovery outcomes and preserves generic acceptance", async () => {
+        const acceptedContext = await createTestRequestContext(
+            undefined,
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    requestPasswordReset: () => Promise.resolve({ status: "accepted" }),
+                }),
+            }
+        );
+        expect(
+            await appRouter
+                .createCaller(acceptedContext)
+                .auth.requestPasswordReset({ username: "operator" })
+        ).toEqual({ isOk: true });
+
+        for (const testCase of [
+            { code: "SERVICE_UNAVAILABLE", status: "service-unavailable" },
+            { code: "TOO_MANY_REQUESTS", status: "rate-limited" },
+        ] as const) {
+            const responseHeaders = new Headers();
+            const context = await createTestRequestContext(
+                undefined,
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService({
+                        requestPasswordReset: () =>
+                            Promise.resolve(
+                                testCase.status === "rate-limited"
+                                    ? { retryAfterSeconds: 30, status: testCase.status }
+                                    : { status: testCase.status }
+                            ),
+                    }),
+                    responseHeaders,
+                }
+            );
+            const failure = await captureFailure(() =>
+                appRouter.createCaller(context).auth.requestPasswordReset({
+                    username: "operator",
+                })
+            );
+            expect(failure).toBeInstanceOf(TRPCError);
+            expect((failure as TRPCError).code).toBe(testCase.code);
+            if (testCase.status === "rate-limited") {
+                expect(responseHeaders.get("retry-after")).toBe("30");
+            }
+        }
+
+        for (const testCase of [
+            { code: undefined, status: "reset" },
+            { code: "UNAUTHORIZED", status: "invalid-token" },
+            { code: "TOO_MANY_REQUESTS", status: "rate-limited" },
+        ] as const) {
+            const context = await createTestRequestContext(
+                undefined,
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService({
+                        resetPassword: () =>
+                            Promise.resolve(
+                                testCase.status === "rate-limited"
+                                    ? { retryAfterSeconds: 20, status: testCase.status }
+                                    : { status: testCase.status }
+                            ),
+                    }),
+                }
+            );
+            const operation = () =>
+                appRouter.createCaller(context).auth.resetPassword({
+                    password: "replacement-password-2",
+                    token: emailToken,
+                });
+            if (testCase.code === undefined) {
+                expect(await operation()).toEqual({ reset: true });
+                expect(context.responseHeaders.getSetCookie()).toEqual([
+                    expect.stringContaining(`${dashboardSessionCookieName}=`),
+                    expect.stringContaining(`${dashboardPendingLoginCookieName}=`),
+                ]);
+            } else {
+                const failure = await captureFailure(operation);
+                expect(failure).toBeInstanceOf(TRPCError);
+                expect((failure as TRPCError).code).toBe(testCase.code);
+            }
+        }
+    });
+
+    test("maps authenticated email change outcomes and clears stale sessions", async () => {
+        const changedContext = await createTestRequestContext(
+            createTestSessionAuthentication([]),
+            createTestApplicationRuntime(),
+            {
+                authenticationLifecycle: createTestAuthenticationLifecycleService({
+                    changeEmail: () =>
+                        Promise.resolve({
+                            email: "replacement@example.com",
+                            status: "changed",
+                        }),
+                }),
+            }
+        );
+        expect(
+            await appRouter.createCaller(changedContext).auth.changeEmail({
+                email: "replacement@example.com",
+            })
+        ).toEqual({ email: "replacement@example.com" });
+
+        for (const testCase of [
+            { code: "CONFLICT", status: "already-verified" },
+            { code: "FORBIDDEN", status: "step-up-required" },
+            { code: "SERVICE_UNAVAILABLE", status: "service-unavailable" },
+            { code: "UNAUTHORIZED", status: "session-changed" },
+        ] as const) {
+            const responseHeaders = new Headers();
+            const context = await createTestRequestContext(
+                createTestSessionAuthentication([]),
+                createTestApplicationRuntime(),
+                {
+                    authenticationLifecycle: createTestAuthenticationLifecycleService({
+                        changeEmail: () => Promise.resolve({ status: testCase.status }),
+                    }),
+                    responseHeaders,
+                }
+            );
+            const failure = await captureFailure(() =>
+                appRouter.createCaller(context).auth.changeEmail({
+                    email: "replacement@example.com",
+                })
+            );
+            expect(failure).toBeInstanceOf(TRPCError);
+            expect((failure as TRPCError).code).toBe(testCase.code);
+            expect(
+                responseHeaders.get("set-cookie")?.includes("Max-Age=0") ?? false
+            ).toBe(testCase.status === "session-changed");
+        }
+    });
+
     test("sets a hardened cookie while keeping the one-time token out of bootstrap output", async () => {
         const generated = generateOpaqueToken("session");
         const responseHeaders = new Headers();
@@ -83,6 +263,7 @@ describe("authentication procedures", () => {
         );
 
         const result = await appRouter.createCaller(context).auth.bootstrap({
+            email: "operator@example.com",
             gatewayCredential: "gateway-token",
             password: "current-password-1",
             username: "operator",

@@ -17,11 +17,19 @@
       },
       "path": {
         "type": "string"
+      },
+      "source": {
+        "enum": [
+          "generated",
+          "maintained"
+        ],
+        "type": "string"
       }
     },
     "required": [
       "kind",
-      "path"
+      "path",
+      "source"
     ],
     "additionalProperties": false
   },

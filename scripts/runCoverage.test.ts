@@ -64,9 +64,9 @@ describe("coverage runner", () => {
 
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
-        expect(inventories.bun).toHaveLength(510);
-        expect(inventories.browser).toHaveLength(193);
-        expect(inventories.storybook).toHaveLength(90);
+        expect(inventories.bun).toHaveLength(509);
+        expect(inventories.browser).toHaveLength(190);
+        expect(inventories.storybook).toHaveLength(87);
 
         const plans = createCoveragePartitionPlan("/tmp/coverage", inventories);
         expect(plans.map(({ name }) => name)).toEqual([
@@ -91,21 +91,21 @@ describe("coverage runner", () => {
                     .filter(({ partition }) => partition === "bun")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(510);
+        ).toBe(inventories.bun.length);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "browser")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(193);
+        ).toBe(inventories.browser.length);
         expect(
             new Set(
                 plans
                     .filter(({ partition }) => partition === "storybook")
                     .flatMap(({ testFiles }) => testFiles)
             ).size
-        ).toBe(90);
+        ).toBe(inventories.storybook.length);
     });
 
     test("keeps timing scheduling and exact parallel-3 in every child", () => {

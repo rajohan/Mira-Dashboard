@@ -76,12 +76,12 @@ function metric(label: string): HTMLElement {
 
 describe("OverviewIncidentsCard", () => {
     test("discloses persisted active generations without claiming current health", async () => {
-        renderCard({ hasMore: true, incidents });
+        renderCard({ incidents });
 
         expect(
             await screen.findByRole("heading", { level: 2, name: "Active incidents" })
         ).toBeTruthy();
-        expect(within(metric("Shown")).getByText("2")).toBeTruthy();
+        expect(within(metric("Incidents")).getByText("2")).toBeTruthy();
         expect(within(metric("Critical")).getByText("1")).toBeTruthy();
         expect(within(metric("Error")).getByText("0")).toBeTruthy();
         expect(screen.getByText("Disk capacity remains critical")).toBeTruthy();
@@ -90,10 +90,6 @@ describe("OverviewIncidentsCard", () => {
         expect(
             screen.getByText(`Last seen ${formatDashboardDateTime(timestampMs)}`)
         ).toHaveAttribute("dateTime", new Date(timestampMs).toISOString());
-        expect(screen.getByText(/Some checks may still be unavailable/u)).toBeTruthy();
-        expect(
-            screen.getByText("Open Incidents to see older active incidents.")
-        ).toBeTruthy();
         expect(screen.getByRole("link", { name: "View incidents" })).toHaveAttribute(
             "href",
             "/incidents"
@@ -101,12 +97,18 @@ describe("OverviewIncidentsCard", () => {
     });
 
     test("renders an explicit empty active-generation result", async () => {
-        renderCard({ hasMore: false, incidents: [] });
+        renderCard({ incidents: [] });
 
         expect(await screen.findByText("No active incidents.")).toBeTruthy();
-        expect(within(metric("Shown")).getByText("0")).toBeTruthy();
-        expect(
-            screen.queryByText(/Open Incidents to see older active incidents/u)
-        ).toBeNull();
+        expect(within(metric("Incidents")).getByText("0")).toBeTruthy();
+    });
+
+    test("marks every bounded count as a lower bound when more incidents exist", async () => {
+        renderCard({ incidents, truncated: true });
+        await screen.findByText("Incidents");
+
+        expect(within(metric("Incidents")).getByText("2+")).toBeTruthy();
+        expect(within(metric("Critical")).getByText("1+")).toBeTruthy();
+        expect(within(metric("Error")).getByText("0+")).toBeTruthy();
     });
 });

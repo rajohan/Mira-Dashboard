@@ -10,6 +10,7 @@ import { MfaManagementSection } from "./MfaManagementSection.tsx";
 import { SecurityAuditSection } from "./SecurityAuditSection.tsx";
 import { accountSecuritySummaryQueryOptions } from "./securityQueries.ts";
 import {
+    AccountEmailSection,
     DashboardPasswordSection,
     SecurityVerificationSection,
 } from "./SecurityVerificationSection.tsx";
@@ -47,6 +48,7 @@ export function AccountSecurityRoute() {
                 <SecurityVerificationSection summary={summary.data} />
                 <MfaManagementSection summary={summary.data} />
                 <DashboardPasswordSection />
+                <AccountEmailSection />
                 <SessionManagementSection />
                 <MfaDisableSection summary={summary.data} />
                 <AutomationSecuritySection />

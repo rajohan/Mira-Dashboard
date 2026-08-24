@@ -6,6 +6,7 @@ import { userInsertSchema, userSelectSchema } from "../../database/validation/us
 import type {
     SecurityPersistenceDatabase,
     SecurityUserInsert,
+    SecurityUserEmailUpdateInput,
     SecurityUserMfaStateUpdateInput,
     SecurityUserPasswordResetInput,
     SecurityUserPasswordUpdateInput,
@@ -104,6 +105,27 @@ export class DrizzleSecurityUserStore {
                     eq(users.id, input.userId),
                     eq(users.authenticationVersion, input.expectedAuthenticationVersion),
                     eq(users.passwordHash, input.expectedPasswordHash),
+                    isNull(users.disabledAt)
+                )
+            )
+            .returning()
+            .get();
+        return row === undefined ? undefined : parseSecurityUser(row);
+    }
+
+    updateEmail(input: SecurityUserEmailUpdateInput): SecurityUserRecord | undefined {
+        const row = this.#database
+            .update(users)
+            .set({
+                email: input.email,
+                emailVerifiedAt: input.emailVerifiedAt,
+                updatedAt: input.updatedAt,
+            })
+            .where(
+                and(
+                    eq(users.id, input.userId),
+                    eq(users.authenticationVersion, input.expectedAuthenticationVersion),
+                    eq(users.email, input.expectedEmail),
                     isNull(users.disabledAt)
                 )
             )

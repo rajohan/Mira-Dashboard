@@ -45,7 +45,7 @@ const incidentsRoute = createRoute({
 rootRoute.addChildren([overviewRoute, incidentsRoute]);
 
 const meta = {
-    args: { hasMore: true, incidents },
+    args: { incidents },
     component: OverviewIncidentsCard,
     parameters: {
         layout: "padded",
@@ -70,14 +70,11 @@ export const ActiveWindow: Story = {
         await expect(
             canvas.getByRole("link", { name: "View incidents" })
         ).toHaveAttribute("href", "/incidents");
-        await expect(
-            canvas.getByText(/Open Incidents to see older active incidents/u)
-        ).toBeVisible();
     },
 };
 
 export const Empty: Story = {
-    args: { hasMore: false, incidents: [] },
+    args: { incidents: [] },
     play: async ({ canvasElement }) => {
         await expect(
             within(canvasElement).getByText("No active incidents.")

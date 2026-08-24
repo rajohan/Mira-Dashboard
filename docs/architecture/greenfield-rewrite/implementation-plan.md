@@ -51,7 +51,7 @@ and terminal disablement affect new requests and renewable leases without a proc
 
 The server-side Phase 2 exit is now evidenced by the automation lifecycle, native one-shot Gateway
 credential verifier, authenticated resumable SSE, and the consolidated
-[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md). The Gateway verifier
+[security threat model](../../security/security-threat-model.md). The Gateway verifier
 uses a protocol-v4 handshake audited against installed OpenClaw `2026.7.2-beta.7 (dabe191)` and is
 restricted to the installed protocol's direct-loopback backend path. It requires token-mode proof
 in the authenticated hello and is bounded by the process-owned authentication Effect service. This
@@ -193,7 +193,7 @@ including restart during streaming.
   that preserves package cleanup, bounded journald retention, and age-filtered Docker pruning
   without deleting volumes. The implemented parity row is gated by root-unit manifest verification
   and the live production identity smoke.
-- expose the six fixed Service Action intents in contract/UI, but advertise only exact executors
+- expose the nine fixed Service Action intents in contract/UI, but advertise only exact executors
   owned by a fresh worker on the current release. OpenClaw cleanup/update use reviewed worker-only
   Gateway methods, while OpenClaw restart reuses the existing fixed restart executor/provider also
   exposed in Settings. Host cleanup/restart/update use only exact root-owned systemd units through

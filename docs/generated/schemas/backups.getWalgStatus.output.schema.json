@@ -488,6 +488,18 @@
                   "minimum": 0,
                   "maximum": 8640000000000000
                 },
+                "latestBackupName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "latestWalFileName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^\\u0000]*$"
+                },
                 "type": {
                   "const": "walg"
                 }
@@ -761,6 +773,18 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 8640000000000000
+                },
+                "latestBackupName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^\\u0000]*$"
+                },
+                "latestWalFileName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^\\u0000]*$"
                 },
                 "type": {
                   "const": "walg"

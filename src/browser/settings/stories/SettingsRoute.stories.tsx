@@ -161,6 +161,10 @@ async function openOpenClawSettings(canvasElement: HTMLElement) {
     await expect(
         await canvas.findByRole("button", { name: "Restart OpenClaw Gateway" })
     ).toBeVisible();
+    await expect(
+        await canvas.findByRole("heading", { name: "Configuration status" })
+    ).toBeVisible();
+    await expect(await canvas.findByRole("heading", { name: "Skills" })).toBeVisible();
     return canvas;
 }
 

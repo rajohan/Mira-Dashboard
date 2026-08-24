@@ -13,7 +13,7 @@ import { useDashboardWebAuthnClient } from "../security/webauthn/webauthnContext
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -35,23 +35,21 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
         useState<MultiFactorAuthenticationMethod>();
     const totpForm = useForm({
         defaultValues: { code: "" },
-        onSubmit: async ({ formApi, value }) => {
+        onSubmit: async ({ value }) => {
             await run(async () => {
                 await client.mutation("auth.loginTotp", value);
-                formApi.setFieldValue("code", "");
             });
         },
-        validators: { onSubmit: totpLoginInputSchema },
+        validators: progressiveFormValidators(totpLoginInputSchema),
     });
     const recoveryForm = useForm({
         defaultValues: { code: "" },
-        onSubmit: async ({ formApi, value }) => {
+        onSubmit: async ({ value }) => {
             await run(async () => {
                 await client.mutation("auth.loginRecovery", value);
-                formApi.setFieldValue("code", "");
             });
         },
-        validators: { onSubmit: recoveryLoginInputSchema },
+        validators: progressiveFormValidators(recoveryLoginInputSchema),
     });
     const methods = status.pendingLogin.methods;
     const activeMethod =
@@ -99,7 +97,7 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Authenticator code"
                             >
                                 <Input
@@ -145,7 +143,7 @@ export function PendingMfaForm({ status }: PendingMfaFormProps) {
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Recovery code"
                             >
                                 <Input

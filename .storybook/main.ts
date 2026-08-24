@@ -7,6 +7,9 @@ import { loadEnv } from "vite";
 
 const storybookAllowedHostEnvironmentName = "MIRA_DASHBOARD_STORYBOOK_ALLOWED_HOST";
 const storybookPortEnvironmentName = "MIRA_DASHBOARD_STORYBOOK_PORT";
+// Storybook's generated docs runtime is intentionally self-contained and is not
+// shipped with the Dashboard browser bundle. Keep its build budget explicit.
+const storybookChunkSizeWarningLimitKiB = 3600;
 const dnsLabelPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const storybookEnvironment = loadEnv(
     "storybook",
@@ -60,6 +63,10 @@ const config: StorybookConfig = {
     viteFinal(viteConfiguration) {
         return {
             ...viteConfiguration,
+            build: {
+                ...viteConfiguration.build,
+                chunkSizeWarningLimit: storybookChunkSizeWarningLimitKiB,
+            },
             optimizeDeps: {
                 ...viteConfiguration.optimizeDeps,
                 include: [

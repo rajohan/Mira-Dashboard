@@ -1,0 +1,16 @@
+{
+  "$id": "urn:mira-dashboard:auth.changeEmail.output",
+  "type": "object",
+  "properties": {
+    "email": {
+      "type": "string",
+      "maxLength": 254,
+      "format": "email"
+    }
+  },
+  "required": [
+    "email"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -6,21 +6,13 @@ import {
 } from "../../contracts/auth.ts";
 
 const passwordChangeFormObjectSchema = v.strictObject({
-    confirmPassword: authPasswordInputSchema,
     currentPassword: authPasswordInputSchema,
     newPassword: authPasswordInputSchema,
 });
 
-/** Browser-only password form validation, including confirmation checks. */
+/** Browser-only password form validation. */
 export const passwordChangeFormSchema = v.pipe(
     passwordChangeFormObjectSchema,
-    v.forward(
-        v.check(
-            (value) => value.newPassword === value.confirmPassword,
-            "New passwords do not match."
-        ),
-        ["confirmPassword"]
-    ),
     v.forward(
         v.check(
             (value) => value.currentPassword !== value.newPassword,
@@ -32,7 +24,7 @@ export const passwordChangeFormSchema = v.pipe(
 
 export type PasswordChangeFormValues = v.InferOutput<typeof passwordChangeFormSchema>;
 
-/** @returns The transport-safe subset without the browser-only confirmation value. */
+/** @returns The validated transport-safe password-change input. */
 export function passwordChangeInput(
     values: PasswordChangeFormValues
 ): PasswordChangeInput {

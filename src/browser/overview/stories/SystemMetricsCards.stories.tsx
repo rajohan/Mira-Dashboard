@@ -52,7 +52,6 @@ export const Fresh: Story = {
         const canvas = within(canvasElement);
         await expect(canvas.getByRole("heading", { name: "CPU" })).toBeVisible();
         await expect(canvas.getByText("12.3 Mbit/s")).toBeVisible();
-        await expect(canvas.getByText("All observed")).toBeVisible();
         await expect(canvas.getByText("3 subscribers")).toBeVisible();
         await expect(
             canvas.getByRole("heading", { name: "Durable operations" })

@@ -310,6 +310,7 @@ export async function openEnrolledMfaHttpSystem(): Promise<EnrolledMfaHttpSystem
             server.url,
             "auth.bootstrap",
             {
+                email: "operator@example.com",
                 gatewayCredential: "gateway-token",
                 password: mfaHttpSystemPassword,
                 username: mfaHttpSystemUsername,

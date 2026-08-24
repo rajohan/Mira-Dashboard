@@ -33,8 +33,10 @@ modules. Stories, Storybook support and configuration, tests, and test support a
 the production denominator. The gate requires at least 85% aggregate production line coverage,
 rejects executable `scripts/` or `src/` modules missing entirely from LCOV, and publishes the same
 report for Codecov's 85% patch gate. The local merge also calculates executable changed-line
-coverage from Git and requires 85%: GitHub uses the PR base, while local stacked work can set
-`MIRA_DASHBOARD_COVERAGE_BASE` to the exact parent branch (otherwise `origin/main` is used).
+coverage from Git and requires 85%. GitHub uses the PR base. Local branches use their
+`branch.<name>.vscode-merge-base` Git setting, while `MIRA_DASHBOARD_COVERAGE_BASE` is an explicit
+one-run override. Feature branches without either base fail closed instead of silently comparing
+the whole stack with `origin/main`; `main` itself uses `origin/main`.
 
 After adding, removing, or materially changing tests, refresh all three timing inventories before
 push with:

@@ -48,17 +48,26 @@ function quotaProviderResponse(
                     invalidProvider === "openrouter" ? Number.MAX_SAFE_INTEGER + 1 : 10,
                 limit_remaining: 8,
                 usage: 2,
+                usage_monthly: 0.1344,
             },
         });
     }
     if (url.endsWith("/api/v1/credits")) {
-        return jsonResponse({ data: { total_credits: 10 } });
+        return jsonResponse({ data: { total_credits: 10, total_usage: 4 } });
     }
     if (url.endsWith("/v2/quotas")) {
         return jsonResponse({
             rollingFiveHourLimit: {
                 max: invalidProvider === "synthetic" ? Number.MAX_SAFE_INTEGER + 1 : 10,
+                nextTickAt: "2026-08-23T13:16:00.000Z",
                 remaining: 8,
+                tickPercent: 0.05,
+            },
+            weeklyTokenLimit: {
+                maxCredits: "$100",
+                nextRegenAt: "2026-08-23T14:39:00.000Z",
+                nextRegenCredits: "$2",
+                percentRemaining: 72,
             },
         });
     }
@@ -281,9 +290,9 @@ describe("overview collectors", () => {
 
         expect(payload.providers).toEqual([
             { id: "elevenlabs", label: "ElevenLabs", status: "unavailable" },
-            { id: "openai", label: "OpenAI", status: "unavailable" },
+            { id: "openai", label: "OpenAI / Codex", status: "unavailable" },
             { id: "openrouter", label: "OpenRouter", status: "not-configured" },
-            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+            { id: "synthetic", label: "Synthetic.new", status: "not-configured" },
         ]);
     });
 
@@ -378,11 +387,64 @@ describe("overview collectors", () => {
 
         expect(payload.providers).toEqual([
             expect.objectContaining({ id: "elevenlabs", status: "available" }),
-            { id: "openai", label: "OpenAI", status: "unavailable" },
+            { id: "openai", label: "OpenAI / Codex", status: "unavailable" },
             expect.objectContaining({ id: "openrouter", status: "available" }),
             expect.objectContaining({ id: "synthetic", status: "available" }),
         ]);
+        expect(payload.providers[3]?.windows).toEqual([
+            {
+                regenerationPercent: 5,
+                resetsAtMs: Date.parse("2026-08-23T13:16:00.000Z"),
+                usedPercent: 20,
+                windowDurationMinutes: 300,
+            },
+            {
+                regenerationPercent: 2,
+                resetsAtMs: Date.parse("2026-08-23T14:39:00.000Z"),
+                usedPercent: 28,
+                windowDurationMinutes: 10_080,
+            },
+        ]);
+        expect(payload.providers[2]).toMatchObject({
+            balance: 6,
+            periodUsage: 0.1344,
+        });
         expect(JSON.stringify(payload)).not.toContain("private synchronous");
+    });
+
+    test("uses account-wide OpenRouter usage when the key has no limit", async () => {
+        const payload = await collectQuotaPayload(
+            { openRouter: Redacted.make("router-secret") },
+            undefined,
+            {
+                fetch: ((input) => {
+                    const url = inputUrl(input);
+                    if (url.endsWith("/api/v1/key")) {
+                        return Promise.resolve(
+                            jsonResponse({
+                                data: {
+                                    limit: null,
+                                    limit_remaining: null,
+                                    usage: 2,
+                                    usage_monthly: 1,
+                                },
+                            })
+                        );
+                    }
+                    return Promise.resolve(
+                        jsonResponse({ data: { total_credits: 10, total_usage: 4 } })
+                    );
+                }) as typeof fetch,
+                nowMs: () => 5000,
+            }
+        );
+
+        expect(payload.providers.find(({ id }) => id === "openrouter")).toMatchObject({
+            balance: 6,
+            limit: 10,
+            remaining: 6,
+            remainingPercent: 60,
+        });
     });
 
     for (const invalidProvider of [
@@ -554,7 +616,7 @@ describe("overview collectors", () => {
                     }
                     if (url.endsWith("/api/v1/credits")) {
                         return Promise.resolve(
-                            jsonResponse({ data: { total_credits: 10 } })
+                            jsonResponse({ data: { total_credits: 10, total_usage: 4 } })
                         );
                     }
                     throw new Error("unexpected provider");
@@ -590,11 +652,12 @@ describe("overview collectors", () => {
                 ],
             }),
             expect.objectContaining({
+                balance: 6,
                 id: "openrouter",
                 remaining: 8,
                 status: "available",
             }),
-            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+            { id: "synthetic", label: "Synthetic.new", status: "not-configured" },
         ]);
         expect(appServerInput.join("\n")).toContain('"account/rateLimits/read"');
         expect(appServerInput.join("\n")).not.toContain("/status");

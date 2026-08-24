@@ -1,5 +1,4 @@
 import {
-    Activity,
     ArrowDown,
     ArrowUp,
     Clock,
@@ -15,6 +14,7 @@ import {
     Server,
     Workflow,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { SystemMetrics } from "../../contracts/system.ts";
 import {
@@ -24,16 +24,17 @@ import {
     formatPercent,
     formatUptime,
 } from "../lib/formatMeasurements.ts";
-import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { MetricCard } from "../ui/MetricCard.tsx";
 import { Text } from "../ui/Text.tsx";
 
 function capacityDescription(capacity: SystemMetrics["memory"]): string {
-    return `${formatByteCount(capacity.usedBytes)} / ${formatByteCount(
-        capacity.totalBytes
-    )} · ${formatByteCount(capacity.freeBytes)} free`;
+    return `${formatByteCount(capacity.usedBytes)} of ${formatByteCount(capacity.totalBytes)}`;
+}
+
+function loadAverageDescription(cpu: SystemMetrics["cpu"]): string {
+    return cpu.loadAverage.map((load) => formatLoadValue(load)).join(", ");
 }
 
 function networkValue(
@@ -44,36 +45,10 @@ function networkValue(
 }
 
 interface SystemMetricsCardsProps {
-    readonly metrics: SystemMetrics;
-}
-
-function applicationRuntimeStatus(application: SystemMetrics["application"]): Readonly<{
-    readonly label: string;
-    readonly variant: "danger" | "success" | "warning";
-}> {
-    const runtimeComponents = [
-        application.web,
-        application.jobs,
-        application.sqlite,
-        application.gateway,
-        application.realtime,
-        application.cache,
-        application.chat,
-        application.operations,
-    ];
-    const observedCount = runtimeComponents.filter(
-        ({ state }) => state === "observed"
-    ).length;
-    if (observedCount === runtimeComponents.length) {
-        return { label: "All observed", variant: "success" };
-    }
-    if (observedCount === 0) {
-        return { label: "Runtime unavailable", variant: "danger" };
-    }
-    return {
-        label: `${observedCount} of ${runtimeComponents.length} observed`,
-        variant: "warning",
-    };
+    readonly fallback?: ReactNode;
+    readonly intermediateContent?: ReactNode;
+    readonly leadingCard?: ReactNode;
+    readonly metrics?: SystemMetrics;
 }
 
 function averageDuration(metric: {
@@ -108,18 +83,38 @@ function httpMetricTotals(
 }
 
 /** @returns Host gauges and independently degradable application observations. */
-export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
-    const coreLabel = metrics.cpu.logicalCoreCount === 1 ? "CPU core" : "CPU cores";
-    const applicationStatus = applicationRuntimeStatus(metrics.application);
+export function SystemMetricsCards({
+    fallback,
+    intermediateContent,
+    leadingCard,
+    metrics,
+}: SystemMetricsCardsProps) {
+    if (metrics === undefined) {
+        return (
+            <div className="space-y-4">
+                <div
+                    aria-label="Host metrics"
+                    className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                >
+                    {leadingCard}
+                    {fallback}
+                </div>
+                {intermediateContent}
+            </div>
+        );
+    }
     const httpTotals = httpMetricTotals(metrics.application.http.procedures);
     return (
-        <div className="space-y-8">
+        <div className="space-y-4">
             <div
                 aria-label="Host metrics"
-                className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             >
+                {leadingCard}
                 <MetricCard
-                    description={`Average load over 1 minute: ${formatLoadValue(metrics.cpu.loadAverage[0])} · ${metrics.cpu.logicalCoreCount} ${coreLabel}`}
+                    compact
+                    compactSummary
+                    description={loadAverageDescription(metrics.cpu)}
                     icon={Cpu}
                     meter={{
                         label: "CPU load",
@@ -130,6 +125,8 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                     value={formatPercent(metrics.cpu.loadPercent)}
                 />
                 <MetricCard
+                    compact
+                    compactSummary
                     description={capacityDescription(metrics.memory)}
                     icon={MemoryStick}
                     meter={{
@@ -141,6 +138,8 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                     value={formatPercent(metrics.memory.usedPercent)}
                 />
                 <MetricCard
+                    compact
+                    compactSummary
                     description={capacityDescription(metrics.disk)}
                     icon={HardDrive}
                     meter={{
@@ -152,13 +151,13 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                     value={formatPercent(metrics.disk.usedPercent)}
                 />
                 <MetricCard
-                    description="Host uptime"
+                    compact
                     icon={Clock}
                     title="Uptime"
                     value={formatUptime(metrics.uptimeSeconds)}
                 />
                 <MetricCard
-                    description="Current total download speed"
+                    compact
                     icon={ArrowDown}
                     title="Download"
                     value={networkValue(
@@ -167,7 +166,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                     )}
                 />
                 <MetricCard
-                    description="Current total upload speed"
+                    compact
                     icon={ArrowUp}
                     title="Upload"
                     value={networkValue(
@@ -176,22 +175,11 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                     )}
                 />
             </div>
+            {intermediateContent}
             <div>
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <Heading level={3}>Application observability</Heading>
-                        <Text className="mt-1" tone="muted">
-                            Each runtime reader remains visible when another component is
-                            unavailable.
-                        </Text>
-                    </div>
-                    <Badge variant={applicationStatus.variant}>
-                        {applicationStatus.label}
-                    </Badge>
-                </div>
                 <div
                     aria-label="Application metrics"
-                    className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                    className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
                 >
                     <MetricCard
                         description={
@@ -200,6 +188,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "Web-process metrics could not be observed."
                         }
                         icon={Server}
+                        iconPosition="leading"
                         title="Web runtime"
                         value={
                             metrics.application.web.state === "observed"
@@ -214,6 +203,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "Durable external-operation metrics could not be observed."
                         }
                         icon={Workflow}
+                        iconPosition="leading"
                         title="Durable operations"
                         value={
                             metrics.application.operations.state === "observed"
@@ -227,7 +217,8 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 ? `${metrics.application.jobs.queuedRuns.toLocaleString()} queued · ${metrics.application.jobs.workers.online.toLocaleString()} / ${metrics.application.jobs.workers.capacity.toLocaleString()} workers online · ${formatMilliseconds(metrics.application.jobs.scheduleLagMs)} schedule lag${metrics.application.jobs.claimingPaused ? " · claims paused" : ""}.`
                                 : "Queue and worker metrics could not be observed."
                         }
-                        icon={Activity}
+                        icon={Server}
+                        iconPosition="leading"
                         title="Jobs"
                         value={
                             metrics.application.jobs.state === "observed"
@@ -242,6 +233,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "Durable chat-runtime metrics could not be observed."
                         }
                         icon={MessagesSquare}
+                        iconPosition="leading"
                         title="Chat runtime"
                         value={
                             metrics.application.chat.state === "observed"
@@ -256,6 +248,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "SQLite storage and latency metrics could not be observed."
                         }
                         icon={Database}
+                        iconPosition="leading"
                         title="SQLite runtime"
                         value={
                             metrics.application.sqlite.state === "observed"
@@ -270,6 +263,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "Gateway connection metrics could not be observed."
                         }
                         icon={RadioTower}
+                        iconPosition="leading"
                         title="Gateway"
                         value={
                             metrics.application.gateway.state === "observed"
@@ -284,6 +278,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "Realtime pump metrics could not be observed."
                         }
                         icon={Gauge}
+                        iconPosition="leading"
                         title="Realtime"
                         value={
                             metrics.application.realtime.state === "observed"
@@ -298,6 +293,7 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                                 : "Cache refresh metrics could not be observed."
                         }
                         icon={RefreshCw}
+                        iconPosition="leading"
                         title="Cache"
                         value={
                             metrics.application.cache.state === "observed"
@@ -308,15 +304,22 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                     <MetricCard
                         description={`${httpTotals.errors.toLocaleString()} errors · ${formatMilliseconds(httpTotals.maximumDurationMs)} maximum duration across fixed procedure buckets.`}
                         icon={Globe2}
+                        iconPosition="leading"
                         title="HTTP requests"
                         value={httpTotals.requests.toLocaleString()}
                     />
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
                     <Card aria-labelledby="cache-snapshot-metrics-heading">
-                        <Heading id="cache-snapshot-metrics-heading" level={3}>
-                            Cache snapshots
-                        </Heading>
+                        <div className="flex items-center gap-2">
+                            <RefreshCw
+                                aria-hidden="true"
+                                className="text-accent-300 size-5"
+                            />
+                            <Heading id="cache-snapshot-metrics-heading" level={3}>
+                                Cache snapshots
+                            </Heading>
+                        </div>
                         <Text className="mt-1" tone="muted">
                             Payload-free state for each registered cache projection.
                         </Text>
@@ -378,9 +381,15 @@ export function SystemMetricsCards({ metrics }: SystemMetricsCardsProps) {
                         )}
                     </Card>
                     <Card aria-labelledby="http-procedure-metrics-heading">
-                        <Heading id="http-procedure-metrics-heading" level={3}>
-                            HTTP procedures
-                        </Heading>
+                        <div className="flex items-center gap-2">
+                            <Globe2
+                                aria-hidden="true"
+                                className="text-accent-300 size-5"
+                            />
+                            <Heading id="http-procedure-metrics-heading" level={3}>
+                                HTTP procedures
+                            </Heading>
+                        </div>
                         <Text className="mt-1" tone="muted">
                             Fixed procedure buckets; arbitrary routes remain in overflow.
                         </Text>

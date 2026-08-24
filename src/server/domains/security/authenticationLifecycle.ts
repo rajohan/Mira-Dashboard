@@ -2,6 +2,7 @@ import { createAuthenticationBootstrapOperation } from "./authenticationLifecycl
 import { createAuthenticationLifecycleContext } from "./authenticationLifecycleContext.ts";
 import { createAuthenticationLoginOperation } from "./authenticationLifecycleLogin.ts";
 import { createAuthenticationPasswordOperation } from "./authenticationLifecyclePassword.ts";
+import { createAuthenticationPasswordRecoveryOperations } from "./authenticationLifecyclePasswordRecovery.ts";
 import { createAuthenticationSessionOperations } from "./authenticationLifecycleSessions.ts";
 import type {
     AuthenticationLifecycleDependencies,
@@ -19,6 +20,10 @@ export type {
     RecentMfaAuthorization,
     VerifyGatewayCredential,
 } from "./authenticationLifecycleTypes.ts";
+
+export interface ManagedAuthenticationLifecycleService extends AuthenticationLifecycleService {
+    drainPasswordResetDeliveries(): Promise<void>;
+}
 export type {
     AuthenticatedBrowserIdentity,
     AuthenticationRequestMetadata,
@@ -31,12 +36,13 @@ export type {
  */
 export function createAuthenticationLifecycleService(
     dependencies: AuthenticationLifecycleDependencies
-): AuthenticationLifecycleService {
+): ManagedAuthenticationLifecycleService {
     const context = createAuthenticationLifecycleContext(dependencies);
     return Object.freeze({
         ...createAuthenticationBootstrapOperation(context),
         ...createAuthenticationLoginOperation(context),
         ...createAuthenticationPasswordOperation(context),
+        ...createAuthenticationPasswordRecoveryOperations(context),
         ...createAuthenticationSessionOperations(context),
     });
 }

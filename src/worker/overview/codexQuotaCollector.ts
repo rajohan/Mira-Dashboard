@@ -285,7 +285,7 @@ export async function collectCodexQuota(
         const usedPercent = Math.max(...windows.map((window) => window.usedPercent));
         projection = v.parse(quotaProviderProjectionSchema, {
             id: "openai",
-            label: "OpenAI",
+            label: "OpenAI / Codex",
             remainingPercent: 100 - usedPercent,
             status: "available",
             usedPercent,
@@ -295,7 +295,7 @@ export async function collectCodexQuota(
         parentSignal?.throwIfAborted();
         projection = v.parse(quotaProviderProjectionSchema, {
             id: "openai",
-            label: "OpenAI",
+            label: "OpenAI / Codex",
             status: "unavailable",
         });
     } finally {

@@ -2,6 +2,7 @@ import { compareAsc } from "date-fns";
 import { createInsertSchema, createSelectSchema } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
+import { authEmailInputSchema } from "../../../contracts/auth.ts";
 import { positiveSafeIntegerSchema } from "../../../shared/validation.ts";
 import { users } from "../schema/users.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
@@ -12,6 +13,8 @@ const userRefinements = {
         positiveSafeIntegerSchema("User authentication version is invalid"),
     createdAt: nonnegativeDateSchema,
     disabledAt: nonnegativeDateSchema,
+    email: () => authEmailInputSchema,
+    emailVerifiedAt: nonnegativeDateSchema,
     id: uuidV7TextSchema,
     mfaEnabledAt: nonnegativeDateSchema,
     passwordHash: () => argon2idPasswordHashSchema,
@@ -22,6 +25,7 @@ const userRefinements = {
 function userTimesAreOrdered(user: {
     readonly createdAt: Date;
     readonly disabledAt?: Date | null;
+    readonly emailVerifiedAt?: Date | null;
     readonly mfaEnabledAt?: Date | null;
     readonly updatedAt: Date;
 }): boolean {
@@ -30,6 +34,9 @@ function userTimesAreOrdered(user: {
         (user.disabledAt == null ||
             (compareAsc(user.disabledAt, user.createdAt) >= 0 &&
                 compareAsc(user.disabledAt, user.updatedAt) <= 0)) &&
+        (user.emailVerifiedAt == null ||
+            (compareAsc(user.emailVerifiedAt, user.createdAt) >= 0 &&
+                compareAsc(user.emailVerifiedAt, user.updatedAt) <= 0)) &&
         (user.mfaEnabledAt == null ||
             (compareAsc(user.mfaEnabledAt, user.createdAt) >= 0 &&
                 compareAsc(user.mfaEnabledAt, user.updatedAt) <= 0))
@@ -51,6 +58,8 @@ export const userInsertSchema = v.pipe(
     v.strictObject({
         createdAt: generatedUserInsertSchema.entries.createdAt,
         disabledAt: generatedUserInsertSchema.entries.disabledAt,
+        email: generatedUserInsertSchema.entries.email,
+        emailVerifiedAt: generatedUserInsertSchema.entries.emailVerifiedAt,
         id: generatedUserInsertSchema.entries.id,
         mfaEnabledAt: generatedUserInsertSchema.entries.mfaEnabledAt,
         passwordHash: generatedUserInsertSchema.entries.passwordHash,

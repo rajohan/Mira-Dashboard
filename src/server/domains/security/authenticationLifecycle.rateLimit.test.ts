@@ -52,6 +52,7 @@ describe("authentication lifecycle rate limits", () => {
             const attempts = Array.from({ length: 6 }, (_, index) =>
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "invalid-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -117,6 +118,7 @@ describe("authentication lifecycle rate limits", () => {
             const attempts = Array.from({ length: 6 }, (_, index) =>
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "unavailable-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -172,6 +174,7 @@ describe("authentication lifecycle rate limits", () => {
                 expect(
                     await harness.service.bootstrap(
                         {
+                            email: "operator@example.com",
                             gatewayCredential: "invalid-gateway",
                             password: "current-password-1",
                             username: "operator",
@@ -188,6 +191,7 @@ describe("authentication lifecycle rate limits", () => {
             const concurrent = ["request-race-a", "request-race-b"].map((requestId) =>
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "invalid-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -432,6 +436,7 @@ describe("authentication lifecycle rate limits", () => {
             for (let index = 0; index < 4; index += 1) {
                 const result = await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "current-password-1",
                         username: "operator",

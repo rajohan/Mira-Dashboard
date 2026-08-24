@@ -18,6 +18,7 @@ import {
     authPasswordMaximumLength,
     authPasswordMinimumLength,
     browserSessionUserAgentMaximumLength,
+    canonicalizeAuthEmail,
     hasValidAuthPasswordLength,
     isValidBrowserSessionUserAgent,
 } from "../../src/contracts/auth.ts";
@@ -565,7 +566,7 @@ const runtimeCheckComments = new Map<unknown, string>([
     ],
     [
         serviceActionStatusesAreCanonical,
-        "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered.",
+        "Live Valibot validation additionally requires the nine fixed service-action rows to be complete, unique, and canonically ordered.",
     ],
     [
         workspaceFileContentTicketIsConsistent,
@@ -1517,6 +1518,7 @@ export function convertContractSchema(
                 if (
                     valibotAction.type === "transform" &&
                     (operation === sortWebAuthnTransports ||
+                        operation === canonicalizeAuthEmail ||
                         operation === sortApplicationCapabilities ||
                         operation === canonicalAgentDefinitions ||
                         operation === canonicalizeTaskStrings ||

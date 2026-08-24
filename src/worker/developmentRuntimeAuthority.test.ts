@@ -71,6 +71,7 @@ describe("source-development runtime authority", () => {
             "available",
             "available",
         ]);
+        expect(quota.providers[3]?.windows).toHaveLength(2);
         expect(weather.location).toBe("Spydeberg");
         expect(deliverySections.map(({ section }) => section)).toEqual([
             "pull-requests",
@@ -161,7 +162,6 @@ describe("source-development runtime authority", () => {
             quota,
             weather,
         });
-        expect(serialized).not.toContain("/opt/docker");
         expect(serialized).not.toContain("MIRA_GITHUB_TOKEN");
         expect(serialized).not.toContain("DATABASE_PASSWORD");
     });

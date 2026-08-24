@@ -49,6 +49,7 @@ const authSession = Object.freeze({
     lastSeenAtMs: verifiedAtMs,
 });
 const authUser = Object.freeze({
+    email: "operator@example.com",
     id: testSecurityUserId,
     username: "operator",
 });

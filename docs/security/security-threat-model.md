@@ -1,6 +1,8 @@
-# Greenfield Phase Two Threat Model
+# Dashboard Security Threat Model
 
-> **Status:** Phase 2 exit evidence for the greenfield server implementation.
+> **Status:** maintained trust-and-transport threat model. The executable controls remain current;
+> version-specific Gateway observations below are explicitly retained as dated qualification
+> evidence and are requalified by release/preflight gates.
 >
 > **Audit date:** 2026-08-06.
 >
@@ -9,7 +11,7 @@
 > probe. It does **not** claim that the browser UI, a persistent OpenClaw Gateway client, chat,
 > privileged worker adapters, production cutover, or the complete rewrite is qualified.
 
-## Protocol Authority
+## Protocol Authority Snapshot
 
 The Gateway probe was designed after inspecting the OpenClaw version installed on the target
 host: `OpenClaw 2026.7.2-beta.7 (dabe191)`. The point-in-time audit covered the installed
@@ -126,6 +128,12 @@ request constructs its own runtime.
 
 ## Residual Risks And Deferred Work
 
+- Uploaded files are bounded by path, size, and authorization controls, but are not currently
+  malware-scanned. If uploads later cross an untrusted-user boundary, introduce one central,
+  fail-closed quarantine/scanning service backed by a monitored ClamAV daemon. A JavaScript client
+  package such as `pompelmi` alone is not a security control when the scanner daemon, signature
+  freshness, health behavior, and release policy are absent.
+
 - The one-shot v4 Gateway credential probe does not qualify a persistent connection, reconnect,
   event ordering, snapshot/resync, session operations, chat streaming, or OpenClaw cron behavior.
   Those remain Phase 4 or later work.
@@ -149,7 +157,7 @@ request constructs its own runtime.
 - Browser UI behavior, accessibility, full parity, production credential cutover, worker-owned
   privileged actions, backup/restore, and release rollback remain later phase gates.
 
-## Phase 2 Exit Evidence
+## Foundational Exit Evidence
 
 Phase 2 is closed only for the server-side scope stated above. The evidence consists of:
 

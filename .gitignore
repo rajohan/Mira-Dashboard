@@ -7,6 +7,7 @@
 .env.local
 
 # Dependencies and generated output
+/.crabbox/
 /node_modules/
 /dist/
 /coverage/

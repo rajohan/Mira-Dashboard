@@ -92,6 +92,10 @@
         },
         {
             "kind": "mutation",
+            "name": "auth.changeEmail"
+        },
+        {
+            "kind": "mutation",
             "name": "auth.changePassword"
         },
         {
@@ -116,6 +120,14 @@
         },
         {
             "kind": "mutation",
+            "name": "auth.requestPasswordReset"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.resetPassword"
+        },
+        {
+            "kind": "mutation",
             "name": "auth.revokeAllSessions"
         },
         {
@@ -137,6 +149,10 @@
         {
             "kind": "mutation",
             "name": "auth.touch"
+        },
+        {
+            "kind": "mutation",
+            "name": "auth.verifyEmail"
         },
         {
             "kind": "mutation",

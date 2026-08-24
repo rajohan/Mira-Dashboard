@@ -127,6 +127,7 @@ describe("authenticated route boundary", () => {
             state: "authenticated",
             user: {
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                email: "operator@example.com",
                 username: "operator",
             },
         } satisfies AuthStatus);
@@ -239,6 +240,7 @@ describe("authenticated route boundary", () => {
             state: "authenticated",
             user: {
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                email: "operator@example.com",
                 username: "operator",
             },
         } satisfies AuthStatus);
@@ -345,6 +347,7 @@ describe("authenticated route boundary", () => {
             state: "authenticated",
             user: {
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+                email: "operator@example.com",
                 username: "operator",
             },
         } satisfies AuthStatus);
@@ -376,20 +379,16 @@ describe("authenticated route boundary", () => {
                 transport.resolveStatus(cachedAuthenticatedStatus);
                 await Promise.resolve();
             });
-            expect(
-                await screen.findByRole("heading", {
-                    level: 1,
-                    name: "Mira Dashboard",
-                })
-            ).toBeTruthy();
-            const routeMarker = screen.getByRole("heading", {
-                level: 1,
-                name: "Mira Dashboard",
-            });
+            await waitFor(() =>
+                expect(screen.queryByLabelText("Authentication status")).toBeNull()
+            );
             const dashboardContent =
                 document.querySelector<HTMLElement>("#dashboard-content");
             expect(dashboardContent).not.toBeNull();
             if (dashboardContent === null) throw new Error("Missing Dashboard scroller");
+            const routeMarker = dashboardContent.firstElementChild;
+            expect(routeMarker).not.toBeNull();
+            if (routeMarker === null) throw new Error("Missing Dashboard route content");
             dashboardContent.scrollTop = 640;
             const routePath = router.history.location.pathname;
             const statusQueryCount = transport.statusQueryCount;
@@ -408,9 +407,7 @@ describe("authenticated route boundary", () => {
             );
             expect(transport.statusQueryCount).toBe(statusQueryCount + 1);
             expect(screen.queryByLabelText("Authentication status")).toBeNull();
-            expect(
-                screen.getByRole("heading", { level: 1, name: "Mira Dashboard" })
-            ).toBe(routeMarker);
+            expect(dashboardContent.firstElementChild).toBe(routeMarker);
             expect(routeMarker.isConnected).toBeTrue();
             expect(document.querySelector("#dashboard-content")).toBe(dashboardContent);
             expect(dashboardContent.scrollTop).toBe(640);

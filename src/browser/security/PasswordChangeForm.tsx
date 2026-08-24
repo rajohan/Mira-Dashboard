@@ -15,7 +15,7 @@ import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboard
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -47,7 +47,6 @@ export function PasswordChangeForm({
     const queryClient = mutationBoundary.queryClient;
     const form = useForm({
         defaultValues: {
-            confirmPassword: "",
             currentPassword: "",
             newPassword: "",
         },
@@ -77,13 +76,13 @@ export function PasswordChangeForm({
                     mutation.isActive
                 );
                 if (!published) throw new AuthenticatedMutationExpiredError();
-            }, "Password changed. Your other browsers were signed out.");
+            }, "Password changed. Your other sessions were signed out.");
             if (succeeded) {
                 formApi.reset();
                 onClose();
             }
         },
-        validators: { onSubmit: passwordChangeFormSchema },
+        validators: progressiveFormValidators(passwordChangeFormSchema),
     });
 
     function close(): void {
@@ -94,12 +93,12 @@ export function PasswordChangeForm({
 
     return (
         <Modal
-            description="Changing it signs every other browser out. Forgotten passwords require the host-local recovery command."
+            description="Changing it signs every other browser out. Forgotten passwords use a short-lived email link."
             dismissible={!action.busy}
             onClose={close}
             open={open}
             size="sm"
-            title="Change Dashboard password"
+            title="Change password"
         >
             <Alert className="mb-4" message={action.error} />
             <Form className="space-y-4" onSubmit={() => void form.handleSubmit()}>
@@ -107,7 +106,7 @@ export function PasswordChangeForm({
                     {(field) => (
                         <FormField
                             disabled={action.busy}
-                            error={firstFormFieldError(field.state.meta.errors)}
+                            error={touchedFormFieldError(field.state.meta)}
                             label="Current password"
                         >
                             <Input
@@ -132,7 +131,7 @@ export function PasswordChangeForm({
                         <FormField
                             disabled={action.busy}
                             description="Use 8–256 characters."
-                            error={firstFormFieldError(field.state.meta.errors)}
+                            error={touchedFormFieldError(field.state.meta)}
                             label="New password"
                         >
                             <Input
@@ -144,29 +143,6 @@ export function PasswordChangeForm({
                                     field.handleChange(event.currentTarget.value)
                                 }
                                 placeholder="Use at least 8 characters"
-                                required
-                                type="password"
-                                value={field.state.value}
-                            />
-                        </FormField>
-                    )}
-                </form.Field>
-                <form.Field name="confirmPassword">
-                    {(field) => (
-                        <FormField
-                            disabled={action.busy}
-                            error={firstFormFieldError(field.state.meta.errors)}
-                            label="Confirm new password"
-                        >
-                            <Input
-                                autoComplete="new-password"
-                                className="mt-2"
-                                name={field.name}
-                                onBlur={field.handleBlur}
-                                onChange={(event) =>
-                                    field.handleChange(event.currentTarget.value)
-                                }
-                                placeholder="Re-enter your new password"
                                 required
                                 type="password"
                                 value={field.state.value}

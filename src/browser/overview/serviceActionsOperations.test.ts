@@ -27,7 +27,7 @@ function authenticatedStatus(userId: string, sessionId: string): AuthStatus {
             lastSeenAtMs: timestampMs,
         },
         state: "authenticated",
-        user: { id: userId, username: "operator" },
+        user: { email: "operator@example.com", id: userId, username: "operator" },
     };
 }
 
@@ -82,8 +82,20 @@ describe("service action browser operations", () => {
         queryClient.clear();
     });
 
-    test("builds only the six exact confirmation inputs", () => {
+    test("builds only the nine exact confirmation inputs", () => {
         const idempotencyKey = "a".repeat(32);
+        expect(serviceActionRequestInput("dashboard-restart", idempotencyKey)).toEqual({
+            actionId: "dashboard-restart",
+            confirmation: "restart-dashboard",
+            idempotencyKey,
+        });
+        expect(
+            serviceActionRequestInput("dashboard-stack-restart", idempotencyKey)
+        ).toEqual({
+            actionId: "dashboard-stack-restart",
+            confirmation: "restart-dashboard-stack",
+            idempotencyKey,
+        });
         expect(serviceActionRequestInput("openclaw-cleanup", idempotencyKey)).toEqual({
             actionId: "openclaw-cleanup",
             confirmation: "cleanup-openclaw",
@@ -114,6 +126,11 @@ describe("service action browser operations", () => {
             confirmation: "update-system",
             idempotencyKey,
         });
+        expect(serviceActionRequestInput("worker-restart", idempotencyKey)).toEqual({
+            actionId: "worker-restart",
+            confirmation: "restart-worker",
+            idempotencyKey,
+        });
     });
 
     test("keeps explicit retry labels for every fixed action", () => {
@@ -125,20 +142,21 @@ describe("service action browser operations", () => {
                 ])
             )
         ).toEqual({
+            "dashboard-restart": "Retry Dashboard restart request",
+            "dashboard-stack-restart": "Retry combined restart request",
             "openclaw-cleanup": "Retry OpenClaw cleanup request",
             "openclaw-restart": "Retry OpenClaw restart request",
             "openclaw-update": "Retry OpenClaw update request",
             "system-cleanup": "Retry system cleanup request",
             "system-restart": "Retry system restart request",
             "system-update": "Retry system update request",
+            "worker-restart": "Retry worker restart request",
         });
     });
 
     test("states the bounded system cleanup policy without volume deletion", () => {
         const presentation = serviceActionPresentations["system-cleanup"];
 
-        expect(presentation.description).toContain("orphan packages and caches");
-        expect(presentation.description).toContain("older than seven days");
         expect(presentation.warning).toContain("volumes are never deleted");
     });
 

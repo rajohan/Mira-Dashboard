@@ -8,7 +8,11 @@ import {
     discoverExecutableCoverageSources,
     summarizeLineCoverage,
 } from "./checkCoverage.ts";
-import { parseChangedLines, summarizePatchCoverage } from "./checkPatchCoverage.ts";
+import {
+    parseChangedLines,
+    selectPatchCoverageBase,
+    summarizePatchCoverage,
+} from "./checkPatchCoverage.ts";
 import { temporaryProject } from "./sourceBoundaries/testSupport.ts";
 
 function record(source: string, foundLines: number, hitLines: number): string {
@@ -22,6 +26,29 @@ function record(source: string, foundLines: number, hitLines: number): string {
 }
 
 describe("coverage threshold", () => {
+    test("selects explicit, GitHub, and stacked local bases without flattening features", () => {
+        expect(
+            selectPatchCoverageBase(
+                { MIRA_DASHBOARD_COVERAGE_BASE: "refs/heads/review-base" },
+                "feature",
+                "origin/stack-parent"
+            )
+        ).toBe("refs/heads/review-base");
+        expect(
+            selectPatchCoverageBase(
+                { GITHUB_BASE_REF: "stack-parent" },
+                "feature",
+                undefined
+            )
+        ).toBe("origin/stack-parent");
+        expect(selectPatchCoverageBase({}, "feature", "origin/stack-parent")).toBe(
+            "origin/stack-parent"
+        );
+        expect(selectPatchCoverageBase({}, "main", undefined)).toBe("origin/main");
+        expect(() => selectPatchCoverageBase({}, "feature", undefined)).toThrow(
+            "Coverage base is unknown"
+        );
+    });
     test("aggregates only exact selected source roots", () => {
         const summary = summarizeLineCoverage(
             [

@@ -33,7 +33,7 @@ const meta = {
             </div>
         ),
         description: "Sign in with the local Dashboard operator account.",
-        footer: "Forgotten passwords are reset with the host-local recovery command.",
+        footer: "Password recovery links are sent to the account email.",
         icon: ShieldCheck,
         title: "Welcome back",
     },
@@ -47,7 +47,7 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const PasswordLogin: Story = {};
+export const FormLayout: Story = {};
 
 export const VerificationStep: Story = {
     args: {

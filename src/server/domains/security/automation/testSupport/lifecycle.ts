@@ -146,6 +146,7 @@ export async function openAutomationLifecycleFixture(): Promise<AutomationLifecy
                 v.parse(userInsertSchema, {
                     createdAt: automationLifecycleBaseTime,
                     disabledAt: null,
+                    email: "operator@example.com",
                     id: automationLifecycleUserId,
                     mfaEnabledAt: automationLifecycleMfaEnabledAt,
                     passwordHash: testDashboardPasswordHash,

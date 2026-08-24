@@ -303,17 +303,11 @@ export function SelectedJobRun({
 }
 
 interface JobRunBrowserProps {
-    readonly focusRunId?: string;
     readonly onRequestRunFocus: (id: string) => void;
-    readonly onRunFocusHandled: (id: string) => void;
 }
 
 /** @returns Queue state, recent runs, and one exact durable run. */
-export function JobRunBrowser({
-    focusRunId,
-    onRequestRunFocus,
-    onRunFocusHandled,
-}: JobRunBrowserProps) {
+export function JobRunBrowser({ onRequestRunFocus }: JobRunBrowserProps) {
     const client = useDashboardTrpcClient();
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
@@ -397,35 +391,10 @@ export function JobRunBrowser({
                     }
                     runs={runs}
                     runsLoadingMore={query.isFetchingNextPage}
-                    selectedRunDetail={
-                        search.runId === undefined ||
-                        search.scheduleId !== undefined ? undefined : (
-                            <SelectedJobRun
-                                embedded
-                                focusRequested={focusRunId === search.runId}
-                                id={search.runId}
-                                key={search.runId}
-                                onFocusHandled={onRunFocusHandled}
-                            />
-                        )
-                    }
                     selectedRunId={search.runId}
                     summary={summary}
                 />
             )}
-            {summary === undefined &&
-                summaryQuery.error !== null &&
-                query.error !== null &&
-                liveHead.error !== null &&
-                search.runId !== undefined &&
-                search.scheduleId === undefined && (
-                    <SelectedJobRun
-                        focusRequested={focusRunId === search.runId}
-                        id={search.runId}
-                        key={search.runId}
-                        onFocusHandled={onRunFocusHandled}
-                    />
-                )}
             {summary !== undefined && historyNeedsInitialFill ? (
                 <InfiniteScrollTrigger
                     {...(historyPageFailed

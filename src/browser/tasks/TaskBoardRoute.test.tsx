@@ -75,6 +75,7 @@ const authenticatedStatus: AuthStatus = Object.freeze({
     },
     state: "authenticated",
     user: {
+        email: "operator@example.com",
         id: operatorUserId,
         username: "operator",
     },
@@ -760,5 +761,31 @@ describe("Dashboard task route", () => {
                 (call) => call.kind === "mutation" && call.path === "tasks.delete"
             )?.input
         ).toEqual({ expectedVersion: 2, id: initialTask.id });
+    });
+
+    test("shows progress validation after an untouched empty submission", async () => {
+        const transport = new TaskTransport();
+        renderTaskRoute(transport);
+        const user = userEvent.setup();
+
+        await screen.findByRole("heading", { level: 1, name: "Tasks" });
+        await user.click(
+            screen.getByRole("button", {
+                name: "Open task #232: Build task domain",
+            })
+        );
+        await screen.findByRole("heading", { level: 2, name: "Progress" });
+        await user.click(screen.getByRole("button", { name: "Add update" }));
+
+        expect(
+            await screen.findByText(
+                "Enter a progress update of no more than 20,000 characters."
+            )
+        ).toBeTruthy();
+        expect(
+            transport.calls.filter(
+                (call) => call.kind === "mutation" && call.path === "tasks.addProgress"
+            )
+        ).toHaveLength(0);
     });
 });

@@ -223,12 +223,15 @@
           },
           "id": {
             "enum": [
+              "dashboard-restart",
+              "dashboard-stack-restart",
               "openclaw-cleanup",
               "openclaw-restart",
               "openclaw-update",
               "system-cleanup",
               "system-restart",
-              "system-update"
+              "system-update",
+              "worker-restart"
             ],
             "type": "string"
           },
@@ -446,8 +449,8 @@
         ],
         "additionalProperties": false
       },
-      "maxItems": 6,
-      "$comment": "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered."
+      "maxItems": 9,
+      "$comment": "Live Valibot validation additionally requires the nine fixed service-action rows to be complete, unique, and canonically ordered."
     },
     "observedAtMs": {
       "type": "integer",

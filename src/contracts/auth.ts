@@ -27,6 +27,7 @@ export const browserSessionUserAgentMaximumLength = 512;
 export const authPasswordMinimumLength = 8;
 export const authPasswordMaximumLength = 256;
 export const recoveryCodeLength = 65;
+export const authEmailMaximumLength = 254;
 
 function hasUnicodeCodePointLengthBetween(
     value: string,
@@ -86,6 +87,22 @@ export const authUsernameInputSchema = v.pipe(
     v.transform((username) => username.toLowerCase())
 );
 
+/** Canonical account email used only for security notifications and recovery. */
+/**
+ * @param email Validated account email.
+ * @returns Canonical lowercase account email.
+ */
+export function canonicalizeAuthEmail(email: string): string {
+    return email.toLowerCase();
+}
+
+export const authEmailInputSchema = v.pipe(
+    v.string("Enter an email address."),
+    v.maxLength(authEmailMaximumLength, "Enter a valid email address."),
+    v.email("Enter a valid email address."),
+    v.transform(canonicalizeAuthEmail)
+);
+
 /** Shared password input budget for bootstrap, login, and password change. */
 export const authPasswordInputSchema = v.pipe(
     v.string("Enter a password."),
@@ -142,6 +159,7 @@ const authSessionUserAgentSchema = v.pipe(
 );
 
 export const firstUserBootstrapInputSchema = v.strictObject({
+    email: authEmailInputSchema,
     gatewayCredential: gatewayCredentialInputSchema,
     password: authPasswordInputSchema,
     username: authUsernameInputSchema,
@@ -172,12 +190,57 @@ export const passwordChangeInputSchema = v.strictObject({
     newPassword: authPasswordInputSchema,
 });
 
+export const emailChangeInputSchema = v.strictObject({
+    email: authEmailInputSchema,
+});
+
+export const emailChangeResultSchema = v.strictObject({
+    email: authEmailInputSchema,
+});
+
+export const emailVerificationInputSchema = v.strictObject({
+    token: v.pipe(
+        v.string("Email-verification link is invalid or expired."),
+        v.length(97, "Email-verification link is invalid or expired."),
+        v.regex(
+            /^[0-9a-f]{32}\.[0-9a-f]{64}$/u,
+            "Email-verification link is invalid or expired."
+        )
+    ),
+});
+
+export const emailVerificationResultSchema = v.strictObject({
+    email: authEmailInputSchema,
+});
+
+const passwordResetTokenSchema = v.pipe(
+    v.string("Password reset link is invalid or expired."),
+    v.length(97, "Password reset link is invalid or expired."),
+    v.regex(/^[0-9a-f]{32}\.[0-9a-f]{64}$/u, "Password reset link is invalid or expired.")
+);
+
+export const passwordResetRequestInputSchema = v.strictObject({
+    username: authUsernameInputSchema,
+});
+
+export const passwordResetInputSchema = v.strictObject({
+    password: authPasswordInputSchema,
+    token: passwordResetTokenSchema,
+});
+
+export const passwordResetResultSchema = v.strictObject({
+    reset: v.literal(true),
+});
+
 export const sessionRevokeInputSchema = v.strictObject({
     sessionId: opaqueSelectorSchema,
 });
 
 export const authUserSchema = v.strictObject({
+    email: authEmailInputSchema,
+    emailVerified: v.optional(v.boolean()),
     id: securityRecordIdSchema,
+    pendingEmail: v.optional(authEmailInputSchema),
     username: securityUsernameSchema,
 });
 
@@ -357,6 +420,45 @@ export const authProcedureContracts = [
         transport: authenticationMutationTransport,
     },
     {
+        access: publicAccess,
+        domain: "auth",
+        errors: ["CONFLICT", "UNAUTHORIZED"],
+        input: emailVerificationInputSchema,
+        inputSchemaId: "auth.verifyEmail.input",
+        kind: "mutation",
+        name: "auth.verifyEmail",
+        output: emailVerificationResultSchema,
+        outputSchemaId: "auth.verifyEmail.output",
+        summary: "Consumes a short-lived link before activating an account email.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: publicAccess,
+        domain: "auth",
+        errors: ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS"],
+        input: passwordResetRequestInputSchema,
+        inputSchemaId: "auth.requestPasswordReset.input",
+        kind: "mutation",
+        name: "auth.requestPasswordReset",
+        output: okResultSchema,
+        outputSchemaId: "auth.requestPasswordReset.output",
+        summary: "Requests one generic, rate-limited account recovery email.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: publicAccess,
+        domain: "auth",
+        errors: ["TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+        input: passwordResetInputSchema,
+        inputSchemaId: "auth.resetPassword.input",
+        kind: "mutation",
+        name: "auth.resetPassword",
+        output: passwordResetResultSchema,
+        outputSchemaId: "auth.resetPassword.output",
+        summary: "Consumes one short-lived recovery token and revokes every session.",
+        transport: authenticationMutationTransport,
+    },
+    {
         access: pendingLoginAccess,
         domain: "auth",
         errors: ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
@@ -494,6 +596,20 @@ export const authProcedureContracts = [
         transport: authenticationMutationTransport,
     },
     {
+        access: sessionMutationAccess,
+        domain: "auth",
+        errorReasons: ["step_up_required"],
+        errors: ["CONFLICT", "FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+        input: emailChangeInputSchema,
+        inputSchemaId: "auth.changeEmail.input",
+        kind: "mutation",
+        name: "auth.changeEmail",
+        output: emailChangeResultSchema,
+        outputSchemaId: "auth.changeEmail.output",
+        summary: "Changes the account email used for password recovery.",
+        transport: authenticationMutationTransport,
+    },
+    {
         access: passwordChangeAccess,
         domain: "auth",
         errorReasons: ["step_up_required"],
@@ -519,6 +635,12 @@ export const authProcedureContracts = [
 export type AuthSessionSummary = v.InferOutput<typeof authSessionSummarySchema>;
 export type AuthStatus = v.InferOutput<typeof authStatusSchema>;
 export type AuthUser = v.InferOutput<typeof authUserSchema>;
+export type EmailVerificationInput = v.InferOutput<typeof emailVerificationInputSchema>;
+export type EmailChangeInput = v.InferOutput<typeof emailChangeInputSchema>;
+export type PasswordResetInput = v.InferOutput<typeof passwordResetInputSchema>;
+export type PasswordResetRequestInput = v.InferOutput<
+    typeof passwordResetRequestInputSchema
+>;
 export type BeginWebAuthnLoginResult = v.InferOutput<
     typeof beginWebAuthnLoginResultSchema
 >;

@@ -15,10 +15,12 @@ const userEvent = userEventModule.default;
 const timestampMs = Date.now();
 const currentUser = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+    email: "operator@example.com",
     username: "operator",
 });
 const otherUser = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8829",
+    email: "operator@example.com",
     username: "other-operator",
 });
 const codes = Object.freeze([

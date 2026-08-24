@@ -4,6 +4,11 @@ import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWr
 import type { AuthenticationRateLimitKind } from "../../database/schema/authRateLimitBuckets.ts";
 import { DrizzleAuthenticationRateLimitStore } from "./authenticationRateLimitStore.ts";
 import { DrizzleBrowserSessionStore } from "./browserSessionStore.ts";
+import {
+    DrizzlePasswordResetTokenStore,
+    type PasswordResetTokenInsert,
+    type PasswordResetTokenRecord,
+} from "./passwordResetTokenStore.ts";
 import { DrizzlePendingLoginStore } from "./pendingLoginStore.ts";
 import {
     DrizzleSecurityAuditStore,
@@ -21,7 +26,9 @@ import type {
     PruneBrowserSessionsInput,
     SecurityTransaction,
     SecurityUserInsert,
+    SecurityUserEmailUpdateInput,
     SecurityUserPasswordUpdateInput,
+    SecurityUserPasswordResetInput,
     SecurityUserRecord,
     SynchronousResult,
 } from "./securityPersistenceTypes.ts";
@@ -40,6 +47,12 @@ export type {
 export interface AuthenticationLifecycleReader {
     findSession(userId: string, sessionId: string): BrowserSessionRecord | undefined;
     findUserById(userId: string): SecurityUserRecord | undefined;
+    findUserByUsername(username: string): SecurityUserRecord | undefined;
+    findPasswordResetToken(prefix: string): PasswordResetTokenRecord | undefined;
+    findPasswordResetTokenForUserPurpose(
+        userId: string,
+        purpose: PasswordResetTokenRecord["purpose"]
+    ): PasswordResetTokenRecord | undefined;
     listSessions(input: AuthenticationSessionListInput): BrowserSessionRecord[];
 }
 
@@ -55,6 +68,13 @@ export interface AuthenticationLifecycleUnitOfWork
     deletePendingLoginsForUser(userId: string): number;
     deleteRateLimitBuckets(kind: AuthenticationRateLimitKind): number;
     deleteSession(userId: string, sessionId: string): boolean;
+    deletePasswordResetTokensForUser(userId: string): number;
+    deletePasswordResetTokensForUserPurpose(
+        userId: string,
+        purpose: PasswordResetTokenRecord["purpose"]
+    ): number;
+    deletePasswordResetToken(prefix: string): number;
+    insertPasswordResetToken(input: PasswordResetTokenInsert): PasswordResetTokenRecord;
     insertUser(input: SecurityUserInsert): SecurityUserRecord;
     pruneUserSessions(input: PruneBrowserSessionsInput): number;
     touchSession(
@@ -66,6 +86,10 @@ export interface AuthenticationLifecycleUnitOfWork
     updateUserPassword(
         input: SecurityUserPasswordUpdateInput
     ): SecurityUserRecord | undefined;
+    resetUserPassword(
+        input: SecurityUserPasswordResetInput
+    ): SecurityUserRecord | undefined;
+    updateUserEmail(input: SecurityUserEmailUpdateInput): SecurityUserRecord | undefined;
 }
 
 export interface AuthenticationLifecycleRepository {
@@ -74,6 +98,11 @@ export interface AuthenticationLifecycleRepository {
     findSession(userId: string, sessionId: string): BrowserSessionRecord | undefined;
     findUserById(userId: string): SecurityUserRecord | undefined;
     findUserByUsername(username: string): SecurityUserRecord | undefined;
+    findPasswordResetToken(prefix: string): PasswordResetTokenRecord | undefined;
+    findPasswordResetTokenForUserPurpose(
+        userId: string,
+        purpose: PasswordResetTokenRecord["purpose"]
+    ): PasswordResetTokenRecord | undefined;
     listSessions(input: AuthenticationSessionListInput): BrowserSessionRecord[];
     withReadTransaction<T>(
         callback: (reader: AuthenticationLifecycleReader) => SynchronousResult<T>
@@ -86,6 +115,7 @@ export interface AuthenticationLifecycleRepository {
 class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycleUnitOfWork {
     readonly #auditEvents: DrizzleSecurityAuditStore;
     readonly #pendingLogins: DrizzlePendingLoginStore;
+    readonly #passwordResetTokens: DrizzlePasswordResetTokenStore;
     readonly #rateLimits: DrizzleAuthenticationRateLimitStore;
     readonly #sessions: DrizzleBrowserSessionStore;
     readonly #users: DrizzleSecurityUserStore;
@@ -93,6 +123,7 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
     constructor(transaction: SecurityTransaction) {
         this.#auditEvents = new DrizzleSecurityAuditStore(transaction);
         this.#pendingLogins = new DrizzlePendingLoginStore(transaction);
+        this.#passwordResetTokens = new DrizzlePasswordResetTokenStore(transaction);
         this.#rateLimits = new DrizzleAuthenticationRateLimitStore(transaction);
         this.#sessions = new DrizzleBrowserSessionStore(transaction);
         this.#users = new DrizzleSecurityUserStore(transaction);
@@ -108,6 +139,21 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
 
     deleteOtherSessions(userId: string, retainedSessionId: string): number {
         return this.#sessions.deleteOtherSessions(userId, retainedSessionId);
+    }
+
+    deletePasswordResetTokensForUser(userId: string): number {
+        return this.#passwordResetTokens.deleteForUser(userId);
+    }
+
+    deletePasswordResetTokensForUserPurpose(
+        userId: string,
+        purpose: PasswordResetTokenRecord["purpose"]
+    ): number {
+        return this.#passwordResetTokens.deleteForUserPurpose(userId, purpose);
+    }
+
+    deletePasswordResetToken(prefix: string): number {
+        return this.#passwordResetTokens.deleteByPrefix(prefix);
     }
 
     deletePendingLoginsForUser(userId: string): number {
@@ -134,8 +180,23 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
         return this.#sessions.findSession(userId, sessionId);
     }
 
+    findPasswordResetToken(prefix: string): PasswordResetTokenRecord | undefined {
+        return this.#passwordResetTokens.findByPrefix(prefix);
+    }
+
+    findPasswordResetTokenForUserPurpose(
+        userId: string,
+        purpose: PasswordResetTokenRecord["purpose"]
+    ): PasswordResetTokenRecord | undefined {
+        return this.#passwordResetTokens.findByUserPurpose(userId, purpose);
+    }
+
     findUserById(userId: string): SecurityUserRecord | undefined {
         return this.#users.findUserById(userId);
+    }
+
+    findUserByUsername(username: string): SecurityUserRecord | undefined {
+        return this.#users.findUserByUsername(username);
     }
 
     insertAuditEvent(
@@ -146,6 +207,10 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
 
     insertSession(input: BrowserSessionInsert): BrowserSessionRecord {
         return this.#sessions.insertSession(input);
+    }
+
+    insertPasswordResetToken(input: PasswordResetTokenInsert): PasswordResetTokenRecord {
+        return this.#passwordResetTokens.insert(input);
     }
 
     insertUser(input: SecurityUserInsert): SecurityUserRecord {
@@ -179,6 +244,16 @@ class DrizzleAuthenticationLifecycleUnitOfWork implements AuthenticationLifecycl
         return this.#users.updatePassword(input);
     }
 
+    resetUserPassword(
+        input: SecurityUserPasswordResetInput
+    ): SecurityUserRecord | undefined {
+        return this.#users.resetPassword(input);
+    }
+
+    updateUserEmail(input: SecurityUserEmailUpdateInput): SecurityUserRecord | undefined {
+        return this.#users.updateEmail(input);
+    }
+
     upsertRateLimitBucket(input: AuthRateLimitBucketInsert): AuthRateLimitBucket {
         return this.#rateLimits.upsertRateLimitBucket(input);
     }
@@ -201,6 +276,7 @@ export function createAuthenticationLifecycleRepository(
         config: { behavior: "deferred" | "immediate" }
     ) => T;
     const rateLimits = new DrizzleAuthenticationRateLimitStore(database);
+    const passwordResetTokens = new DrizzlePasswordResetTokenStore(database);
     const sessions = new DrizzleBrowserSessionStore(database);
     const users = new DrizzleSecurityUserStore(database);
 
@@ -208,6 +284,10 @@ export function createAuthenticationLifecycleRepository(
         countUsers: users.countUsers.bind(users),
         findRateLimitBucket: rateLimits.findRateLimitBucket.bind(rateLimits),
         findSession: sessions.findSession.bind(sessions),
+        findPasswordResetToken:
+            passwordResetTokens.findByPrefix.bind(passwordResetTokens),
+        findPasswordResetTokenForUserPurpose:
+            passwordResetTokens.findByUserPurpose.bind(passwordResetTokens),
         findUserById: users.findUserById.bind(users),
         findUserByUsername: users.findUserByUsername.bind(users),
         listSessions: sessions.listSessions.bind(sessions),

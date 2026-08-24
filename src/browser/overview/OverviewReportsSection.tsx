@@ -45,8 +45,8 @@ export function OverviewReportsSection() {
                 />
             )}
             <OverviewReportsCard
-                hasMore={query.data.nextCursor !== undefined}
                 reports={query.data.reports}
+                truncated={query.data.nextCursor !== undefined}
             />
         </div>
     );

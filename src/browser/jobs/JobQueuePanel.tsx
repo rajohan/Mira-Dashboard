@@ -1,6 +1,5 @@
 import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { History, ListTodo, PauseCircle, PlayCircle, Server } from "lucide-react";
-import type { ReactNode } from "react";
 
 import type {
     JobRunState,
@@ -107,7 +106,6 @@ export interface JobQueuePanelProps {
     readonly runs: readonly JobRunSummary[];
     readonly runsLoadingMore?: boolean;
     readonly selectedRunId?: string;
-    readonly selectedRunDetail?: ReactNode;
     readonly onSetClaimingPaused: (paused: boolean) => void;
     readonly summary: JobQueueSummary;
 }
@@ -122,7 +120,6 @@ export function JobQueuePanel({
     runs,
     runsLoadingMore,
     selectedRunId,
-    selectedRunDetail,
     summary,
 }: JobQueuePanelProps) {
     const workerTable = useTable({
@@ -287,12 +284,6 @@ export function JobQueuePanel({
                     )}
                 </div>
             </div>
-
-            {selectedRunDetail === undefined ? null : (
-                <div className="border-primary-700 mt-5 border-t pt-5">
-                    {selectedRunDetail}
-                </div>
-            )}
 
             <div className="mt-6">
                 <div className="mb-3 flex items-center gap-2">

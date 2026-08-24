@@ -22,6 +22,7 @@ import {
     jobRealtimeFallbackRefreshIntervalMs,
     jobRealtimeRefreshDelayMs,
 } from "../jobs/useJobRealtimeInvalidation.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Card } from "../ui/Card.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -152,14 +153,8 @@ function useServiceActionRequest() {
     };
 }
 
-export interface OverviewServiceActionsSectionProps {
-    readonly showJobsLink?: boolean;
-}
-
 /** @returns Fixed service-action status, requests, and partial-read handling. */
-export function OverviewServiceActionsSection({
-    showJobsLink = true,
-}: OverviewServiceActionsSectionProps = {}) {
+export function OverviewServiceActionsSection() {
     useServiceActionsRealtimeInvalidation();
     const client = useDashboardTrpcClient();
     const query = useQuery(serviceActionsStatusQueryOptions(client));
@@ -191,14 +186,13 @@ export function OverviewServiceActionsSection({
                 <Alert
                     className="mb-4"
                     focusOnError={false}
-                    message={dashboardBrowserFailureMessage(query.error)}
+                    message={`${dashboardBrowserFailureMessage(query.error)} Status observed: ${formatDashboardDateTime(query.data.observedAtMs)}.`}
                 />
             )}
             <OverviewServiceActionsCard
                 actions={query.data.actions}
                 error={request.error}
                 notice={request.notice}
-                observedAtMs={query.data.observedAtMs}
                 onClearError={request.clearError}
                 onClearNotice={request.clearNotice}
                 onRequest={(actionId, onConfirmed) =>
@@ -207,7 +201,6 @@ export function OverviewServiceActionsSection({
                 recoveryPending={request.recoveryPending}
                 requestActionId={request.variables}
                 requestBusy={request.isPending}
-                showJobsLink={showJobsLink}
             />
         </div>
     );

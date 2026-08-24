@@ -33,6 +33,7 @@ const expectedTables: string[] = [
     "agent_task_runs",
     "audit_events",
     "auth_challenges",
+    "auth_password_reset_tokens",
     "auth_pending_logins",
     "auth_rate_limit_buckets",
     "auth_sessions",

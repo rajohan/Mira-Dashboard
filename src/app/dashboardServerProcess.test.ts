@@ -70,6 +70,7 @@ const processOptions = Object.freeze({
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
         MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "10",
+        MIRA_DASHBOARD_RESEND_FROM_EMAIL: "no-reply@example.com",
         MIRA_DASHBOARD_SESSION_IDLE_MINUTES: "30",
         MIRA_DASHBOARD_TOTP_KEYRING: serializedKeyring,
         MIRA_DASHBOARD_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
@@ -81,6 +82,7 @@ const processOptions = Object.freeze({
         OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
         PORT: "3100",
+        RESEND_API_KEY: "resend-dashboard-process-test-value",
     },
     releaseRoot: release.releaseRoot,
 });

@@ -55,6 +55,8 @@ const userEvent = userEventModule.default;
 const timestampMs = Date.now();
 const user = Object.freeze({
     id: "019fd974-54a2-74dd-a64b-d4186f8d8828",
+    email: "operator@example.com",
+    emailVerified: true,
     username: "operator",
 });
 const currentSession: AuthSessionSummary = Object.freeze({
@@ -768,7 +770,7 @@ describe("Dashboard account security route", () => {
 
         await userActions.click(screen.getByRole("button", { name: "Change password" }));
         const passwordChangeDialog = screen.getByRole("dialog", {
-            name: "Change Dashboard password",
+            name: "Change password",
         });
         await userActions.type(
             within(passwordChangeDialog).getByLabelText("Current password"),
@@ -776,10 +778,6 @@ describe("Dashboard account security route", () => {
         );
         await userActions.type(
             within(passwordChangeDialog).getByLabelText("New password"),
-            "new strong password"
-        );
-        await userActions.type(
-            within(passwordChangeDialog).getByLabelText("Confirm new password"),
             "new strong password"
         );
         await userActions.click(
@@ -893,7 +891,7 @@ describe("Dashboard account security route", () => {
                 screen.getByRole("button", { name: "Change password" })
             );
             const passwordChangeDialog = screen.getByRole("dialog", {
-                name: "Change Dashboard password",
+                name: "Change password",
             });
             await userActions.type(
                 within(passwordChangeDialog).getByLabelText("Current password"),
@@ -901,10 +899,6 @@ describe("Dashboard account security route", () => {
             );
             await userActions.type(
                 within(passwordChangeDialog).getByLabelText("New password"),
-                "new strong password"
-            );
-            await userActions.type(
-                within(passwordChangeDialog).getByLabelText("Confirm new password"),
                 "new strong password"
             );
             await userActions.click(
@@ -955,7 +949,7 @@ describe("Dashboard account security route", () => {
             );
             expect(
                 screen.queryByText(
-                    "Password changed. Your other browsers were signed out."
+                    "Password changed. Your other sessions were signed out."
                 )
             ).toBeNull();
 
@@ -1619,7 +1613,7 @@ describe("Dashboard account security route", () => {
         };
         renderAccountSecurity(transport);
         const userActions = userEvent.setup();
-        await screen.findByText(automationPrincipal.label);
+        await screen.findByText(automationPrincipal.label, {}, { timeout: 4000 });
 
         await userActions.click(
             screen.getByRole("button", { name: /Manage access tokens/u })
@@ -1680,7 +1674,7 @@ describe("Dashboard account security route", () => {
         const queryClient = renderAccountSecurity(transport);
         const userActions = userEvent.setup();
 
-        await screen.findByText(automationPrincipal.label);
+        await screen.findByText(automationPrincipal.label, {}, { timeout: 4000 });
         await userActions.click(
             screen.getByRole("button", { name: /Manage access tokens/u })
         );

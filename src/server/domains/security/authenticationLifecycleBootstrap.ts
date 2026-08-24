@@ -23,11 +23,14 @@ type BootstrapContext = Pick<
     | "audit"
     | "bootstrapRateLimitTargets"
     | "generateId"
+    | "generateEmailVerificationToken"
     | "hashPassword"
     | "newSession"
     | "now"
     | "passwordWorkBudget"
     | "passwordWorkGate"
+    | "passwordRecoveryEmailSender"
+    | "publicOrigin"
     | "pruneUserSessions"
     | "repository"
     | "verifyGatewayCredential"
@@ -224,6 +227,8 @@ export function createAuthenticationBootstrapOperation(
                     const user = unit.insertUser({
                         createdAt,
                         disabledAt: null,
+                        email: input.email,
+                        emailVerifiedAt: null,
                         id: context.generateId(),
                         mfaEnabledAt: null,
                         passwordHash,
@@ -237,6 +242,18 @@ export function createAuthenticationBootstrapOperation(
                         metadata.userAgent
                     );
                     context.pruneUserSessions(unit, user, issued.record.id, createdAt);
+                    const verificationToken = context.generateEmailVerificationToken();
+                    unit.insertPasswordResetToken({
+                        authenticationVersion: user.authenticationVersion,
+                        createdAt,
+                        expiresAt: addMinutes(createdAt, 15),
+                        pendingEmail: user.email,
+                        prefix: verificationToken.prefix,
+                        purpose: "email-verification",
+                        userId: user.id,
+                        validatorHash: verificationToken.validatorHash,
+                        validatorVersion: verificationToken.validatorVersion,
+                    });
                     unit.deleteRateLimitBuckets("bootstrap-gateway-source");
                     unit.deleteRateLimitBuckets("bootstrap-gateway-global");
                     context.audit(unit, {
@@ -257,6 +274,7 @@ export function createAuthenticationBootstrapOperation(
                         status: "created" as const,
                         token: issued.token,
                         user: authUser(user),
+                        verificationToken,
                     };
                 });
             }, metadata.signal);
@@ -266,7 +284,32 @@ export function createAuthenticationBootstrapOperation(
                     status: "rate-limited",
                 };
             }
-            return passwordAdmission.value;
+            const result = passwordAdmission.value;
+            if (
+                result.status === "created" &&
+                context.passwordRecoveryEmailSender !== undefined &&
+                context.publicOrigin !== undefined
+            ) {
+                const verificationUrl = new URL("/login", context.publicOrigin);
+                verificationUrl.searchParams.set(
+                    "verifyEmailToken",
+                    result.verificationToken.token
+                );
+                try {
+                    await context.passwordRecoveryEmailSender.sendVerification({
+                        idempotencyKey: `email-verification/${result.verificationToken.prefix}`,
+                        signal: metadata.signal,
+                        to: result.user.email,
+                        verificationUrl: verificationUrl.href,
+                    });
+                } catch {
+                    await context.repository.withImmediateTransaction((unit) => {
+                        unit.deletePasswordResetToken(result.verificationToken.prefix);
+                    });
+                }
+            }
+            return result;
         },
     };
 }
+import { addMinutes } from "date-fns";

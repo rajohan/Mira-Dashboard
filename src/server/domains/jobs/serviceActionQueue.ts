@@ -9,9 +9,12 @@ import { parseJsonText } from "../../../shared/json.ts";
 import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
+    hostDashboardRestartJobActionKey,
+    hostDashboardStackRestartJobActionKey,
     hostSystemCleanupJobActionKey,
     hostSystemRestartJobActionKey,
     hostSystemUpdateJobActionKey,
+    hostWorkerRestartJobActionKey,
     openClawGatewayRestartJobActionKey,
     openClawInstallationUpdateJobActionKey,
     openClawSessionsCleanupJobActionKey,
@@ -29,12 +32,15 @@ const emptyPayloadSchema = v.strictObject({});
 
 /** Exact worker action selected by each browser-visible Service Action. */
 export const serviceActionJobActionKeys = Object.freeze({
+    "dashboard-restart": hostDashboardRestartJobActionKey,
+    "dashboard-stack-restart": hostDashboardStackRestartJobActionKey,
     "openclaw-cleanup": openClawSessionsCleanupJobActionKey,
     "openclaw-restart": openClawGatewayRestartJobActionKey,
     "openclaw-update": openClawInstallationUpdateJobActionKey,
     "system-cleanup": hostSystemCleanupJobActionKey,
     "system-restart": hostSystemRestartJobActionKey,
     "system-update": hostSystemUpdateJobActionKey,
+    "worker-restart": hostWorkerRestartJobActionKey,
 } as const satisfies Readonly<Record<ServiceActionId, string>>);
 
 export type ServiceActionQueueErrorReason =
@@ -157,7 +163,7 @@ function result(
 }
 
 /**
- * Creates the actor- and authenticator-bound durable queue for six exact Service Actions.
+ * Creates the actor- and authenticator-bound durable queue for nine exact Service Actions.
  * The queue returns after durable admission and never waits for worker settlement.
  * @returns The purpose-built fixed-action enqueue boundary.
  */

@@ -1,0 +1,17 @@
+{
+  "$id": "urn:mira-dashboard:auth.verifyEmail.input",
+  "type": "object",
+  "properties": {
+    "token": {
+      "type": "string",
+      "minLength": 97,
+      "maxLength": 97,
+      "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "token"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

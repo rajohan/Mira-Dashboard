@@ -5,7 +5,7 @@ import { firstUserBootstrapInputSchema } from "../../contracts/auth.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -20,18 +20,17 @@ export function BootstrapForm() {
     const { busy, client, error, run } = useAuthenticationAction();
     const form = useForm({
         defaultValues: {
+            email: "",
             gatewayCredential: "",
             password: "",
             username: "",
         },
-        onSubmit: async ({ formApi, value }) => {
+        onSubmit: async ({ value }) => {
             await run(async () => {
                 await client.mutation("auth.bootstrap", value);
-                formApi.setFieldValue("gatewayCredential", "");
-                formApi.setFieldValue("password", "");
             });
         },
-        validators: { onSubmit: firstUserBootstrapInputSchema },
+        validators: progressiveFormValidators(firstUserBootstrapInputSchema),
     });
 
     return (
@@ -49,7 +48,7 @@ export function BootstrapForm() {
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Username"
                             >
                                 <Input
@@ -69,11 +68,36 @@ export function BootstrapForm() {
                             </FormField>
                         )}
                     </form.Field>
+                    <form.Field name="email">
+                        {(field) => (
+                            <FormField
+                                disabled={busy}
+                                error={touchedFormFieldError(field.state.meta)}
+                                label="Account email"
+                            >
+                                <Input
+                                    autoCapitalize="none"
+                                    autoComplete="email"
+                                    className="mt-2"
+                                    name={field.name}
+                                    onBlur={field.handleBlur}
+                                    onChange={(event) =>
+                                        field.handleChange(event.currentTarget.value)
+                                    }
+                                    placeholder="you@example.com"
+                                    required
+                                    spellCheck={false}
+                                    type="email"
+                                    value={field.state.value}
+                                />
+                            </FormField>
+                        )}
+                    </form.Field>
                     <form.Field name="password">
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Dashboard password"
                             >
                                 <Input
@@ -96,7 +120,7 @@ export function BootstrapForm() {
                         {(field) => (
                             <FormField
                                 disabled={busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="OpenClaw Gateway credential"
                             >
                                 <Input

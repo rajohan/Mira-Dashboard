@@ -60,7 +60,11 @@ function authenticatedStatus(
             lastSeenAtMs: timestampMs,
         },
         state: "authenticated",
-        user: { id: userId, username: `operator-${sessionMarker}` },
+        user: {
+            email: "operator@example.com",
+            id: userId,
+            username: `operator-${sessionMarker}`,
+        },
     };
 }
 

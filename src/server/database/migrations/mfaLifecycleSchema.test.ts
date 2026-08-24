@@ -19,12 +19,13 @@ function insertMfaUser(database: FreshDatabase): void {
     database.sqlite.run(
         `INSERT INTO users (
             created_at,
+            email,
             id,
             mfa_enabled_at,
             password_hash,
             updated_at,
             username
-        ) VALUES (1000, ?, 2000, ?, 2000, 'raymond')`,
+        ) VALUES (1000, lower(hex(randomblob(16))) || '@example.com', ?, 2000, ?, 2000, 'raymond')`,
         [userId, testDashboardPasswordHash]
     );
 }

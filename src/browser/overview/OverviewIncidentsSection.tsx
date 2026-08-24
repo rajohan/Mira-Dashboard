@@ -47,8 +47,8 @@ export function OverviewIncidentsSection() {
                 />
             )}
             <OverviewIncidentsCard
-                hasMore={query.data.nextCursor !== undefined}
                 incidents={query.data.incidents}
+                truncated={query.data.nextCursor !== undefined}
             />
         </div>
     );

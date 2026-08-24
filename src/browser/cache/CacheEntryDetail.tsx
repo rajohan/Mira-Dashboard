@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { DatabaseZap, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 
-import type { CacheEntry } from "../../contracts/cache.ts";
+import type { CacheEntry, CacheEntryStatus } from "../../contracts/cache.ts";
 import type { JobRunState } from "../../contracts/jobModel.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
@@ -14,7 +14,7 @@ import { Card } from "../ui/Card.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { PageState } from "../ui/PageState.tsx";
+import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { useRefreshCacheEntryMutation } from "./cacheMutations.ts";
 import {
@@ -26,7 +26,6 @@ import {
     formatCacheDuration,
 } from "./cachePresentation.ts";
 import { cacheEntryQueryOptions } from "./cacheQueries.ts";
-import { SystemHostCard } from "./SystemHostCard.tsx";
 
 interface CacheTimestampProps {
     readonly label: string;
@@ -63,20 +62,25 @@ function CacheProjection({ entry }: { readonly entry: CacheEntry }) {
             />
         );
     }
-    if (entry.key === "system.host") return <SystemHostCard entry={entry} />;
     return (
-        <Card>
-            <Heading level={3}>Saved data available</Heading>
-            <Text className="mt-2" tone="muted">
-                This data source does not have a Dashboard viewer yet. The saved data
-                remains on the server and is not shown here.
-            </Text>
+        <Card aria-label={`${entry.key} saved payload`}>
+            <div className="flex items-center gap-2">
+                <Icon icon={DatabaseZap} size="md" tone="accent" />
+                <Heading level={3}>Saved payload</Heading>
+            </div>
+            <textarea
+                aria-label="Saved payload JSON"
+                className="border-primary-700 bg-primary-900/35 text-primary-100 mt-4 h-112 w-full resize-none overflow-auto rounded-lg border p-3 font-mono text-xs leading-5"
+                readOnly
+                value={JSON.stringify(entry.payload, null, 2)}
+            />
         </Card>
     );
 }
 
 interface CacheEntryDetailProps {
     readonly cacheKey: string;
+    readonly fallbackStatus: CacheEntryStatus;
 }
 
 function cacheRefreshRunFeedback(state: JobRunState): {
@@ -128,7 +132,7 @@ function cacheRefreshRunFeedback(state: JobRunState): {
 }
 
 /** @returns One exact cache entry, reviewed payload projection, and refresh-run control. */
-export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
+export function CacheEntryDetail({ cacheKey, fallbackStatus }: CacheEntryDetailProps) {
     const client = useDashboardTrpcClient();
     const detail = useQuery(cacheEntryQueryOptions(client, cacheKey));
     const refresh = useRefreshCacheEntryMutation();
@@ -148,27 +152,17 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
         }
     }, [detailKey, detailRunId, refreshKey, refreshRunId, resetRefresh]);
 
-    if (detail.isPending && detail.data === undefined) {
+    if (detail.data === undefined && detail.error === null) {
         return (
-            <Card className="min-w-0">
-                <PageState label="Loading saved data…" status="loading" />
-            </Card>
-        );
-    }
-    if (detail.data === undefined) {
-        return (
-            <PageState
-                headingLevel={3}
-                message={cacheBrowserFailureMessage(detail.error)}
-                onRetry={() => void detail.refetch()}
-                retryBusy={detail.isFetching}
-                status="error"
-                title="Saved data unavailable"
-            />
+            <section aria-label={`${cacheKey} saved data detail`} className="min-w-0">
+                <Card>
+                    <LoadingState label={`Loading ${cacheKey} saved data…`} />
+                </Card>
+            </section>
         );
     }
 
-    const entry = detail.data;
+    const entry: CacheEntry = detail.data ?? { ...fallbackStatus, payload: undefined };
     const refreshRun =
         refresh.variables?.key === entry.key &&
         refresh.data?.id !== entry.lastAttemptRunId
@@ -214,6 +208,17 @@ export function CacheEntryDetail({ cacheKey }: CacheEntryDetailProps) {
                             : cacheBrowserFailureMessage(detail.error)
                     }
                 />
+                {detail.error !== null && (
+                    <Button
+                        className="mt-3"
+                        disabled={detail.isFetching}
+                        onClick={() => void detail.refetch()}
+                        size="sm"
+                        variant="secondary"
+                    >
+                        Retry detail
+                    </Button>
+                )}
                 <Alert
                     className="mt-4"
                     focusOnError={false}

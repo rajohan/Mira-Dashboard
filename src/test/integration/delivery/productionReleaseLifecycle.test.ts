@@ -156,6 +156,7 @@ function webEnvironment(projectRoot: string, port: number): Record<string, strin
         MIRA_DASHBOARD_PROJECT_ROOT: projectRoot,
         MIRA_DASHBOARD_PUBLIC_ORIGIN: "https://dashboard.example.com",
         MIRA_DASHBOARD_RECENT_AUTH_MINUTES: "10",
+        MIRA_DASHBOARD_RESEND_FROM_EMAIL: "no-reply@example.com",
         MIRA_DASHBOARD_SESSION_IDLE_MINUTES: "30",
         MIRA_DASHBOARD_TOTP_KEYRING: JSON.stringify({
             activeKeyId: "primary",
@@ -169,6 +170,7 @@ function webEnvironment(projectRoot: string, port: number): Record<string, strin
         NODE_ENV: "production",
         ...gatewayTestEnvironment,
         PORT: String(port),
+        RESEND_API_KEY: "resend-production-lifecycle-test-value",
     };
 }
 

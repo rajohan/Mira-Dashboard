@@ -121,6 +121,5 @@ describe("OverviewTasksCard", () => {
 
         expect(await screen.findByText("No unfinished tasks.")).toBeTruthy();
         expect(within(metric("To do")).getByText("0")).toBeTruthy();
-        expect(screen.queryByText(/Older unfinished tasks/u)).toBeNull();
     });
 });

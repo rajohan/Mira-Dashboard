@@ -35,7 +35,7 @@ describe("DocsRoute", () => {
             "tagName",
             "MARK"
         );
-        expect(screen.getByText("README.md", { selector: "p" })).toBeVisible();
+        expect(screen.getByText("generated/README.md", { selector: "p" })).toBeVisible();
     });
 
     test("groups schema documents into collapsible domain menus", () => {
@@ -59,11 +59,42 @@ describe("DocsRoute", () => {
         expect(authMenu).toHaveAttribute("aria-expanded", "false");
     });
 
+    test("orders every maintained group, including reference, before generated docs", () => {
+        renderDocsRoute();
+
+        const navigation = screen.getByRole("navigation", {
+            name: "Generated documentation",
+        });
+        const groupNames = within(navigation)
+            .getAllByRole("button")
+            .filter((button) => button.hasAttribute("aria-expanded"))
+            .map((button) => button.textContent ?? "");
+        const architectureIndex = groupNames.findIndex((name) =>
+            name.startsWith("Architecture")
+        );
+        const generatedIndex = groupNames.findIndex((name) =>
+            name.startsWith("Generated")
+        );
+        const securityIndex = groupNames.findIndex((name) => name.startsWith("Security"));
+        const schemaIndex = groupNames.findIndex((name) => name.startsWith("Auth"));
+        const referenceIndex = groupNames.findIndex((name) =>
+            name.startsWith("Reference")
+        );
+
+        expect(architectureIndex).toBeGreaterThanOrEqual(0);
+        expect(securityIndex).toBe(architectureIndex + 1);
+        expect(referenceIndex).toBeGreaterThan(architectureIndex);
+        expect(generatedIndex).toBeGreaterThan(referenceIndex);
+        expect(schemaIndex).toBeGreaterThan(generatedIndex);
+    });
+
     test("lets the fixed viewer own horizontal scrolling for wide tables", () => {
         renderDocsRoute();
 
         fireEvent.click(
-            screen.getByRole("button", { name: /packages and runtime packages/u })
+            screen.getByRole("button", {
+                name: /packages and runtime generated\/packages/u,
+            })
         );
 
         const table = screen.getAllByRole("table")[0]!;
@@ -88,7 +119,7 @@ describe("DocsRoute", () => {
         try {
             renderDocsRoute();
 
-            const path = screen.getByText("README.md", { selector: "p" });
+            const path = screen.getByText("generated/README.md", { selector: "p" });
             const viewerCard = path.closest("section")!;
             expect(viewerCard).toHaveClass("h-[78vh]", "overflow-hidden");
             expect(viewerCard.lastElementChild).toHaveClass(
@@ -143,7 +174,7 @@ describe("DocsRoute", () => {
 
         fireEvent.click(
             screen.getByRole("button", {
-                name: /routes and features routes-and-features\.md/u,
+                name: /routes and features generated\/routes-and-features\.md/u,
             })
         );
         fireEvent.change(
@@ -152,7 +183,7 @@ describe("DocsRoute", () => {
         );
 
         const viewerCard = screen
-            .getByText("routes-and-features.md", { selector: "p" })
+            .getByText("generated/routes-and-features.md", { selector: "p" })
             .closest("section")!;
         const matchCount = viewerCard.querySelectorAll("mark").length;
         expect(matchCount).toBeGreaterThan(1);
@@ -184,11 +215,13 @@ describe("DocsRoute", () => {
                             "[Visible label](hidden-target.md)\n\n```text\nfenced-only\n```\n",
                         kind: "markdown",
                         path: "README.md",
+                        source: "generated",
                     },
                     {
                         content: "{}\n",
                         kind: "json",
                         path: "openapi.raw-http.json",
+                        source: "generated",
                     },
                 ]}
             />
@@ -216,11 +249,13 @@ describe("DocsRoute", () => {
                         content: `${"match ".repeat(1200)}\n`,
                         kind: "markdown",
                         path: "README.md",
+                        source: "generated",
                     },
                     {
                         content: "{}\n",
                         kind: "json",
                         path: "openapi.raw-http.json",
+                        source: "generated",
                     },
                 ]}
             />
@@ -247,16 +282,19 @@ describe("DocsRoute", () => {
                         content: "[Search needle](target.md)\n",
                         kind: "markdown",
                         path: "README.md",
+                        source: "generated",
                     },
                     {
                         content: "Target content\n",
                         kind: "markdown",
                         path: "target.md",
+                        source: "generated",
                     },
                     {
                         content: "{}\n",
                         kind: "json",
                         path: "openapi.raw-http.json",
+                        source: "generated",
                     },
                 ]}
             />
@@ -277,7 +315,9 @@ describe("DocsRoute", () => {
         renderDocsRoute();
 
         fireEvent.click(screen.getByRole("link", { name: "tRPC procedures" }));
-        expect(screen.getByText("procedures.md", { selector: "p" })).toBeVisible();
+        expect(
+            screen.getByText("generated/procedures.md", { selector: "p" })
+        ).toBeVisible();
 
         fireEvent.click(screen.getAllByRole("link", { name: "input" })[0]!);
         expect(screen.getByTestId("source-viewer-toolbar")).toHaveTextContent("JSON");

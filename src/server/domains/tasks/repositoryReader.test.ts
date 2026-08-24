@@ -172,6 +172,7 @@ describe("task repository cron projection", () => {
                 .insert(users)
                 .values({
                     createdAt: new Date(1000),
+                    email: "operator@example.com",
                     id: userId,
                     passwordHash: testDashboardPasswordHash,
                     updatedAt: new Date(1000),

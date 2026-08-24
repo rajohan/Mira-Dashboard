@@ -7,6 +7,8 @@ import {
     backupCountMaximum,
     backupKopiaSourceIdSchema,
     backupKopiaSourceMaximum,
+    backupKopiaSnapshotMaximum,
+    backupRetentionReasonMaximum,
     backupSourceRevisionSchema,
     backupTypeSchema,
 } from "./backups.ts";
@@ -28,17 +30,45 @@ const wrapperByteCountSchema = v.pipe(
     v.safeInteger("Backup wrapper byte count is invalid"),
     v.minValue(0, "Backup wrapper byte count is invalid")
 );
+const wrapperDisplayTextSchema = v.pipe(
+    v.string("Backup wrapper display text is invalid"),
+    v.minLength(1, "Backup wrapper display text is invalid"),
+    v.maxLength(256, "Backup wrapper display text is outside its budget"),
+    v.check((value) => !value.includes("\0"), "Backup wrapper display text is invalid")
+);
 
 export const backupWrapperProtocol = "mira-dashboard-backup.v1" as const;
 const backupWrapperBaseEntries = {
     idle: v.boolean("Backup wrapper idle state is invalid"),
     protocol: v.literal(backupWrapperProtocol),
 };
+const backupWrapperKopiaSnapshotSchema = v.strictObject({
+    completedAtMs: wrapperTimestampSchema,
+    description: v.optional(wrapperDisplayTextSchema),
+    fileCount: v.optional(wrapperCountSchema),
+    retentionReasons: v.pipe(
+        v.array(wrapperDisplayTextSchema),
+        v.maxLength(
+            backupRetentionReasonMaximum,
+            "Backup wrapper retention reasons are outside their budget"
+        )
+    ),
+    sizeBytes: v.optional(wrapperByteCountSchema),
+});
 const backupWrapperKopiaSourceSchema = v.strictObject({
     id: backupKopiaSourceIdSchema,
     latestCompletedAtMs: v.optional(wrapperTimestampSchema),
     latestFileCount: v.optional(wrapperCountSchema),
     latestSizeBytes: v.optional(wrapperByteCountSchema),
+    snapshots: v.optional(
+        v.pipe(
+            v.array(backupWrapperKopiaSnapshotSchema),
+            v.maxLength(
+                backupKopiaSnapshotMaximum,
+                "Backup wrapper snapshots are outside their budget"
+            )
+        )
+    ),
     snapshotCount: wrapperCountSchema,
 });
 const backupWrapperKopiaStatusSchema = v.strictObject({
@@ -64,6 +94,8 @@ const backupWrapperWalgStatusSchema = v.strictObject({
     ...backupWrapperBaseEntries,
     backupCount: wrapperCountSchema,
     latestCompletedAtMs: v.optional(wrapperTimestampSchema),
+    latestBackupName: v.optional(wrapperDisplayTextSchema),
+    latestWalFileName: v.optional(wrapperDisplayTextSchema),
     type: v.literal("walg"),
 });
 
@@ -248,6 +280,7 @@ export function backupKopiaSourceSummaryFromWrapper(
         ...(source.latestSizeBytes === undefined
             ? {}
             : { latestSizeBytes: source.latestSizeBytes }),
+        ...(source.snapshots === undefined ? {} : { snapshots: source.snapshots }),
         snapshotCount: source.snapshotCount,
     });
 }

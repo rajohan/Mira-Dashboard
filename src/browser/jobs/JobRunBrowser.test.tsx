@@ -7,6 +7,7 @@ import {
     createRoute,
     createRouter,
     RouterProvider,
+    useSearch,
 } from "@tanstack/react-router";
 import type { TRPCRequestOptions } from "@trpc/client";
 import { act, Activity } from "react";
@@ -33,7 +34,7 @@ import {
     jobRunEventHistoryQueryKey,
 } from "./jobQueries.ts";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
-import { JobRunBrowser } from "./JobRunBrowser.tsx";
+import { SelectedJobRun } from "./JobRunBrowser.tsx";
 
 const { render, screen, waitFor } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -225,12 +226,22 @@ function eventCursors(transport: EventGapTransport): (number | undefined)[] {
         .map(({ input }) => (input as GetJobRunInput).eventCursor?.sequence);
 }
 
+function SelectedRunFromSearch() {
+    const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
+    return search.runId === undefined ? null : (
+        <SelectedJobRun
+            focusRequested={false}
+            id={search.runId}
+            key={search.runId}
+            onFocusHandled={() => {}}
+        />
+    );
+}
+
 function createJobsTestRouter() {
     const rootRoute = createRootRoute();
     const jobsRoute = createRoute({
-        component: () => (
-            <JobRunBrowser onRequestRunFocus={() => {}} onRunFocusHandled={() => {}} />
-        ),
+        component: SelectedRunFromSearch,
         getParentRoute: () => rootRoute,
         path: "/jobs",
         validateSearch: parseJobsRouteSearch,

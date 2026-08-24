@@ -23,6 +23,7 @@ import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
 import { useRunScheduleMutation, useUpdateScheduleMutation } from "./jobMutations.ts";
 import {
     scheduleDetailQueryOptions,
+    jobRunDetailQueryOptions,
     scheduleListQueryOptions,
     scheduleRunLiveHeadQueryOptions,
     scheduleRunListQueryOptions,
@@ -42,6 +43,55 @@ interface SelectedScheduleProps {
     readonly onSelectRun: (id: string) => void;
     readonly selectedRunId?: string;
     readonly runFocusRequested?: string;
+}
+
+function SelectedScheduleRunCard({
+    focusRequested,
+    id,
+    onFocusHandled,
+    onSelectRun,
+    preserveSelectionOnClose = false,
+}: {
+    readonly focusRequested: boolean;
+    readonly id: string;
+    readonly onFocusHandled: (id: string) => void;
+    readonly onSelectRun: (id: string) => void;
+    readonly preserveSelectionOnClose?: boolean;
+}) {
+    const client = useDashboardTrpcClient();
+    const detail = useQuery(jobRunDetailQueryOptions(client, id));
+    const selectedRun = detail.data?.run;
+    const [standaloneOpen, setStandaloneOpen] = useState(true);
+    return (
+        <div className="mt-2">
+            <ExpandableCard
+                compact
+                onOpenChange={(open) => {
+                    if (preserveSelectionOnClose) {
+                        setStandaloneOpen(open);
+                        return;
+                    }
+                    onSelectRun(open ? id : "");
+                }}
+                open={preserveSelectionOnClose ? standaloneOpen : true}
+                title={selectedRun?.displayName ?? "Loading run details…"}
+                trailing={
+                    selectedRun === undefined ? undefined : (
+                        <Badge variant={jobRunStateBadgeVariant(selectedRun.state)}>
+                            {jobRunStateLabel(selectedRun.state)}
+                        </Badge>
+                    )
+                }
+            >
+                <SelectedJobRun
+                    embedded
+                    focusRequested={focusRequested}
+                    id={id}
+                    onFocusHandled={onFocusHandled}
+                />
+            </ExpandableCard>
+        </div>
+    );
 }
 
 function SelectedSchedule({
@@ -119,21 +169,12 @@ function SelectedSchedule({
         </Button>
     );
     const selectedRunDetail = selectedRunId !== undefined && (
-        <div className="mt-2">
-            <ExpandableCard
-                compact
-                onOpenChange={(open) => onSelectRun(open ? selectedRunId : "")}
-                open
-                title="Run details"
-            >
-                <SelectedJobRun
-                    embedded
-                    focusRequested={selectedRunId === runFocusRequested}
-                    id={selectedRunId}
-                    onFocusHandled={onRunFocusHandled}
-                />
-            </ExpandableCard>
-        </div>
+        <SelectedScheduleRunCard
+            focusRequested={selectedRunId === runFocusRequested}
+            id={selectedRunId}
+            onFocusHandled={onRunFocusHandled}
+            onSelectRun={onSelectRun}
+        />
     );
     let historyContent;
     if (history.isPending && liveHead.isPending && !historyHasData) {
@@ -466,7 +507,21 @@ export function ScheduleBrowser({
                 </Card>
                 <div className="min-w-0">
                     {selectedScheduleId === undefined ? (
-                        <PageState status="empty" title="Select a schedule" />
+                        search.runId === undefined ? (
+                            <PageState status="empty" title="Select a schedule" />
+                        ) : (
+                            <Card aria-label="Selected job run" className="min-w-0">
+                                <Heading level={2}>Job run</Heading>
+                                <SelectedScheduleRunCard
+                                    focusRequested={focusRunId === search.runId}
+                                    id={search.runId}
+                                    key={search.runId}
+                                    onFocusHandled={onRunFocusHandled}
+                                    onSelectRun={selectRun}
+                                    preserveSelectionOnClose
+                                />
+                            </Card>
+                        )
                     ) : (
                         <SelectedSchedule
                             focusRequested={focusScheduleId === selectedScheduleId}

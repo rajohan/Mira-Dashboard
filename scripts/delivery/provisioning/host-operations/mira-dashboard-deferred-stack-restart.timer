@@ -1,0 +1,7 @@
+[Unit]
+Description=Mira Dashboard deferred stack restart timer
+
+[Timer]
+OnActiveSec=10s
+AccuracySec=1s
+Unit=mira-dashboard-deferred-stack-restart.service

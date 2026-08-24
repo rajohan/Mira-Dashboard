@@ -28,6 +28,7 @@ import { DashboardCollectionsProvider } from "./data/dashboardCollectionsContext
 import { createDashboardRouter, type DashboardRouter } from "./router.tsx";
 import { AutomationTokenPresentationProvider } from "./security/AutomationTokenPresentationContext.tsx";
 import { RecoveryCodesPresentationProvider } from "./security/RecoveryCodesPresentationContext.tsx";
+import { SecurityActionNoticeProvider } from "./security/SecurityActionNoticeContext.tsx";
 import { SecurityVerificationProvider } from "./security/SecurityVerificationContext.tsx";
 import {
     createSecurityVerificationCoordinator,
@@ -123,28 +124,32 @@ export function DashboardBrowserApplication({
                                     coordinator={securityVerification}
                                 >
                                     <RecoveryCodesPresentationProvider>
-                                        <AutomationTokenPresentationProvider>
-                                            <AuthenticatedBrowserCacheBoundary
-                                                onCacheReset={
-                                                    finishAuthenticatedCacheReset
-                                                }
-                                            >
-                                                <AuthenticatedSessionActivity
-                                                    suspended={verificationActive}
-                                                />
-                                                <ChatRuntimeStoreProvider>
-                                                    <RouterProvider router={router} />
-                                                </ChatRuntimeStoreProvider>
-                                            </AuthenticatedBrowserCacheBoundary>
-                                            {securityVerification !== undefined && (
-                                                <Suspense fallback={null}>
-                                                    <LazyGlobalSecurityVerification
-                                                        coordinator={securityVerification}
-                                                        router={router}
+                                        <SecurityActionNoticeProvider>
+                                            <AutomationTokenPresentationProvider>
+                                                <AuthenticatedBrowserCacheBoundary
+                                                    onCacheReset={
+                                                        finishAuthenticatedCacheReset
+                                                    }
+                                                >
+                                                    <AuthenticatedSessionActivity
+                                                        suspended={verificationActive}
                                                     />
-                                                </Suspense>
-                                            )}
-                                        </AutomationTokenPresentationProvider>
+                                                    <ChatRuntimeStoreProvider>
+                                                        <RouterProvider router={router} />
+                                                    </ChatRuntimeStoreProvider>
+                                                </AuthenticatedBrowserCacheBoundary>
+                                                {securityVerification !== undefined && (
+                                                    <Suspense fallback={null}>
+                                                        <LazyGlobalSecurityVerification
+                                                            coordinator={
+                                                                securityVerification
+                                                            }
+                                                            router={router}
+                                                        />
+                                                    </Suspense>
+                                                )}
+                                            </AutomationTokenPresentationProvider>
+                                        </SecurityActionNoticeProvider>
                                     </RecoveryCodesPresentationProvider>
                                 </SecurityVerificationProvider>
                             </DashboardWebAuthnProvider>

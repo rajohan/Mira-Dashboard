@@ -4,11 +4,18 @@ import type { ReactNode } from "react";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
-import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
-import { Heading } from "../ui/Heading.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Text } from "../ui/Text.tsx";
+import { BackupOverviewSection } from "./BackupOverviewSection.tsx";
+import { OverviewDomainSection } from "./OverviewDomainSection.tsx";
+import {
+    OverviewEnvironmentCards,
+    WeatherOverviewCard,
+} from "./OverviewEnvironmentSection.tsx";
+import { OverviewIncidentsSection } from "./OverviewIncidentsSection.tsx";
+import { OverviewJobsSection } from "./OverviewJobsSection.tsx";
+import { OverviewReportsSection } from "./OverviewReportsSection.tsx";
+import { OverviewTasksSection } from "./OverviewTasksSection.tsx";
 import { SystemMetricsCards } from "./SystemMetricsCards.tsx";
 import { systemMetricsFailureMessage } from "./systemMetricsPresentation.ts";
 import { systemMetricsQueryOptions } from "./systemMetricsQueries.ts";
@@ -21,59 +28,37 @@ export function SystemMetricsSection() {
 
     if (query.isPending && query.data === undefined) {
         content = (
-            <Card>
+            <Card className="sm:col-span-2 lg:col-span-3">
                 <PageState label="Loading system usage…" status="loading" />
             </Card>
         );
     } else if (query.data === undefined) {
         content = (
-            <PageState
-                headingLevel={3}
-                message={systemMetricsFailureMessage(query.error)}
-                onRetry={() => void query.refetch()}
-                retryBusy={query.isFetching}
-                status="error"
-                title="System usage unavailable"
-            />
+            <div className="sm:col-span-2 lg:col-span-3">
+                <PageState
+                    headingLevel={3}
+                    message={systemMetricsFailureMessage(query.error)}
+                    onRetry={() => void query.refetch()}
+                    retryBusy={query.isFetching}
+                    status="error"
+                    title="System usage unavailable"
+                />
+            </div>
         );
     } else {
-        content = <SystemMetricsCards metrics={query.data} />;
+        content = null;
     }
 
     return (
-        <section aria-labelledby="system-metrics-heading">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <Heading id="system-metrics-heading" level={2}>
-                        System usage
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        Current host gauges and independently available application
-                        runtime observations.
-                    </Text>
-                </div>
-                {query.data !== undefined && (
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Badge
-                            variant={
-                                query.data.freshness === "fresh" ? "success" : "warning"
-                            }
-                        >
-                            {query.data.freshness === "fresh"
-                                ? "Up to date"
-                                : "Out of date"}
-                        </Badge>
-                        <Text size="sm" tone="muted">
-                            Measured {formatDashboardDateTime(query.data.sampledAtMs)}
-                        </Text>
-                    </div>
-                )}
-            </div>
+        <section>
+            <h2 className="sr-only" id="host-metrics-heading">
+                Host metrics
+            </h2>
             {query.error !== null && query.data !== undefined && (
                 <Alert
                     className="mt-4"
                     focusOnError={false}
-                    message={systemMetricsFailureMessage(query.error)}
+                    message={`${systemMetricsFailureMessage(query.error)} Last sample: ${formatDashboardDateTime(query.data.sampledAtMs)}.`}
                 />
             )}
             {query.data?.freshness === "stale" && query.error === null && (
@@ -83,7 +68,37 @@ export function SystemMetricsSection() {
                     variant="info"
                 />
             )}
-            <div className="mt-5">{content}</div>
+            <SystemMetricsCards
+                fallback={content}
+                intermediateContent={
+                    <section aria-labelledby="operational-summaries-heading">
+                        <h2 className="sr-only" id="operational-summaries-heading">
+                            Operational summaries
+                        </h2>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                            <OverviewEnvironmentCards />
+                            <OverviewIncidentsSection />
+                            <OverviewReportsSection />
+                            <div className="lg:col-span-2">
+                                <OverviewTasksSection />
+                            </div>
+                            <div className="lg:col-span-2">
+                                <OverviewJobsSection />
+                            </div>
+                        </div>
+                        <div className="mt-4">
+                            <OverviewDomainSection />
+                        </div>
+                        <div className="mt-4">
+                            <BackupOverviewSection />
+                        </div>
+                    </section>
+                }
+                leadingCard={
+                    <WeatherOverviewCard className="sm:col-span-2 lg:col-span-3 xl:col-span-1 xl:row-span-2" />
+                }
+                metrics={query.data}
+            />
         </section>
     );
 }

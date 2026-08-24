@@ -8,12 +8,10 @@ import {
     taskPriorityBadgeVariant,
     taskStatusDefinitions,
 } from "../tasks/taskPresentation.ts";
-import { taskOverviewPageSize } from "../tasks/taskQueries.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 
 const activeTaskDefinitions = taskStatusDefinitions.filter(
@@ -45,19 +43,11 @@ export function OverviewTasksCard({ hasMore, tasks }: OverviewTasksCardProps) {
     return (
         <Card aria-labelledby={headingId} className="h-full">
             <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex min-w-0 items-start gap-3">
-                    <span className="bg-accent-500/10 shrink-0 rounded-lg p-2.5">
-                        <Icon icon={ListTodo} tone="accent" />
-                    </span>
-                    <div className="min-w-0">
-                        <Heading id={headingId} level={2} size="subsection">
-                            Unfinished tasks
-                        </Heading>
-                        <Text className="mt-1" size="sm" tone="muted">
-                            These counts include the newest {taskOverviewPageSize}
-                            unfinished Dashboard tasks.
-                        </Text>
-                    </div>
+                <div className="flex min-w-0 items-center gap-2">
+                    <ListTodo aria-hidden="true" className="text-accent-300 size-5" />
+                    <Heading id={headingId} level={2} size="subsection">
+                        Unfinished tasks
+                    </Heading>
                 </div>
                 <ActionLink size="sm" to="/tasks" variant="secondary">
                     View tasks

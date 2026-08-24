@@ -31,7 +31,7 @@ import type { DashboardRouter } from "../router.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -106,7 +106,7 @@ function PasswordProofForm({ busy, onVerify }: PasswordProofFormProps) {
                 formApi.reset();
             }
         },
-        validators: { onSubmit: passwordReauthenticationInputSchema },
+        validators: progressiveFormValidators(passwordReauthenticationInputSchema),
     });
 
     return (
@@ -115,7 +115,7 @@ function PasswordProofForm({ busy, onVerify }: PasswordProofFormProps) {
                 {(field) => (
                     <FormField
                         disabled={busy}
-                        error={firstFormFieldError(field.state.meta.errors)}
+                        error={touchedFormFieldError(field.state.meta)}
                         label="Current password"
                     >
                         <Input
@@ -175,7 +175,7 @@ function CodeProofForm({
                 formApi.reset();
             }
         },
-        validators: { onSubmit: validationSchema },
+        validators: progressiveFormValidators(validationSchema),
     });
     const authenticator = method === "totp";
 
@@ -185,7 +185,7 @@ function CodeProofForm({
                 {(field) => (
                     <FormField
                         disabled={busy}
-                        error={firstFormFieldError(field.state.meta.errors)}
+                        error={touchedFormFieldError(field.state.meta)}
                         label={authenticator ? "Authenticator code" : "Recovery code"}
                     >
                         <Input

@@ -8,15 +8,25 @@ import {
 } from "./dashboardShellLayout.ts";
 
 describe("Dashboard shell layout", () => {
-    test("keeps Database before Moltbook in reviewed navigation order", () => {
-        const paths = dashboardNavigationItems.map(({ to }) => to);
-        expect(paths.indexOf("/database")).toBeGreaterThan(-1);
-        expect(paths.indexOf("/database")).toBeLessThan(paths.indexOf("/moltbook"));
-    });
-
-    test("keeps Delivery directly after Jobs in reviewed navigation order", () => {
-        const paths = dashboardNavigationItems.map(({ to }) => to);
-        expect(paths.indexOf("/delivery")).toBe(paths.indexOf("/jobs") + 1);
+    test("keeps the reviewed navigation order", () => {
+        expect(dashboardNavigationItems.map(({ label }) => label)).toEqual([
+            "Dashboard",
+            "Tasks",
+            "Agents",
+            "Sessions",
+            "Chat",
+            "Reports",
+            "Jobs",
+            "Delivery",
+            "Files",
+            "Docker",
+            "Database",
+            "Moltbook",
+            "Terminal",
+            "Logs",
+            "Settings",
+            "Docs",
+        ]);
     });
 
     test("keeps the Terminal workspace scrollable with the standard responsive gutter", () => {

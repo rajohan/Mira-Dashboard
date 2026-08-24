@@ -137,31 +137,62 @@ const quotaEntry = {
                 id: "elevenlabs",
                 label: "ElevenLabs",
                 remainingPercent: 72,
+                resetsAtMs: observedAtMs + 24 * 60 * 60_000,
                 status: "available",
             },
             {
                 id: "openai",
-                label: "OpenAI Codex",
+                label: "OpenAI / Codex",
                 status: "available",
+                usedPercent: 34,
                 windows: [
                     {
                         resetsAtMs: observedAtMs + 60_000,
-                        usedPercent: 24,
+                        usedPercent: 0,
                         windowDurationMinutes: 300,
+                    },
+                    {
+                        resetsAtMs: observedAtMs + 4 * 24 * 60 * 60_000,
+                        usedPercent: 34,
+                        windowDurationMinutes: 10_080,
                     },
                 ],
             },
             {
+                balance: 4.26,
                 id: "openrouter",
                 label: "OpenRouter",
-                remaining: 12,
+                limit: 1,
+                periodUsage: 0.1344,
+                remaining: 0.866,
                 status: "available",
+                usedPercent: 13.4,
                 unit: "currency-usd",
             },
-            { id: "synthetic", label: "Synthetic", status: "not-configured" },
+            {
+                id: "synthetic",
+                label: "Synthetic.new",
+                remainingPercent: 64,
+                status: "available",
+                usedPercent: 36,
+                windows: [
+                    {
+                        regenerationPercent: 5,
+                        resetsAtMs: observedAtMs + 2 * 60_000,
+                        usedPercent: 36,
+                        windowDurationMinutes: 300,
+                    },
+                    {
+                        regenerationPercent: 2,
+                        resetsAtMs: observedAtMs + 7 * 24 * 60 * 60_000,
+                        usedPercent: 28,
+                        windowDurationMinutes: 10_080,
+                    },
+                ],
+            },
         ],
     },
-    schemaId: "quotas.summary.v1",
+    schemaId: "quotas.summary.v2",
     source: "quota.providers",
 } as const satisfies CacheEntry;
 
@@ -517,12 +548,15 @@ const jobs = { runs: [], summary: queueSummary } satisfies ListJobRunsResult;
 
 const serviceActions = {
     actions: [
+        { availability: "unavailable", id: "dashboard-restart" },
+        { availability: "unavailable", id: "dashboard-stack-restart" },
         { availability: "unavailable", id: "openclaw-cleanup" },
         { availability: "unavailable", id: "openclaw-restart" },
         { availability: "unavailable", id: "openclaw-update" },
         { availability: "unavailable", id: "system-cleanup" },
         { availability: "unavailable", id: "system-restart" },
         { availability: "unavailable", id: "system-update" },
+        { availability: "unavailable", id: "worker-restart" },
     ],
     observedAtMs,
 } as const satisfies GetServiceActionsStatusResult;
@@ -732,10 +766,11 @@ export const FreshPopulated: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(
-            await canvas.findByText("All observed", {}, { timeout: 5000 })
-        ).toBeVisible();
-        await expect(
-            canvas.getByRole("heading", { name: "Durable operations" })
+            await canvas.findByRole(
+                "heading",
+                { name: "Durable operations" },
+                { timeout: 5000 }
+            )
         ).toBeVisible();
         await expect(canvas.getByRole("heading", { name: "Chat runtime" })).toBeVisible();
         await expect(
@@ -888,7 +923,9 @@ export const RefreshQueued: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await userEvent.click(await canvas.findByRole("button", { name: "system.host" }));
+        await userEvent.click(
+            await canvas.findByRole("button", { name: "View system.host" })
+        );
         await userEvent.click(await canvas.findByRole("button", { name: "Refresh now" }));
         await expect(
             await canvas.findByText(/Refresh requested. Saved data updates/u)

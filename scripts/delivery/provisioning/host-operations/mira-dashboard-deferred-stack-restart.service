@@ -1,0 +1,23 @@
+[Unit]
+Description=Mira Dashboard deferred stack restart
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/systemctl restart mira-dashboard-web.service mira-dashboard-worker.service
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
+StandardOutput=null
+StandardError=null
+TimeoutStartSec=2min

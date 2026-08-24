@@ -13,7 +13,7 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Button } from "../ui/Button.tsx";
 import { CopyTextButton } from "../ui/CopyTextButton.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
@@ -70,7 +70,7 @@ export function TotpFactorManagement({
                 onEnrollmentFlowComplete();
             }
         },
-        validators: { onSubmit: totpStepUpInputSchema },
+        validators: progressiveFormValidators(totpStepUpInputSchema),
     });
 
     function dismissEnrollment() {
@@ -186,9 +186,7 @@ export function TotpFactorManagement({
                                 {(field) => (
                                     <FormField
                                         disabled={action.busy}
-                                        error={firstFormFieldError(
-                                            field.state.meta.errors
-                                        )}
+                                        error={touchedFormFieldError(field.state.meta)}
                                         label="Confirmation code"
                                     >
                                         <Input

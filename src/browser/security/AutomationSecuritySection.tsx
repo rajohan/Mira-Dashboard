@@ -21,7 +21,7 @@ import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -98,7 +98,7 @@ export function AutomationSecuritySection() {
                 formApi.reset();
             }
         },
-        validators: { onSubmit: createAutomationPrincipalInputSchema },
+        validators: progressiveFormValidators(createAutomationPrincipalInputSchema),
     });
 
     return (
@@ -119,7 +119,7 @@ export function AutomationSecuritySection() {
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 description="A stable ID used by scripts and configuration."
                                 label="Account ID"
                             >
@@ -143,7 +143,7 @@ export function AutomationSecuritySection() {
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Account name"
                             >
                                 <Input
@@ -164,7 +164,7 @@ export function AutomationSecuritySection() {
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="First token name"
                             >
                                 <Input

@@ -203,6 +203,7 @@ const lifecycleOverview = {
                     {
                         finishedAtMs: 172_100_000,
                         queuedAtMs: 172_000_000,
+                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c0",
                         startedAtMs: 172_050_000,
                         state: "succeeded",
                     },
@@ -447,6 +448,7 @@ describe("DatabaseRoute", () => {
                                 runs: [
                                     {
                                         queuedAtMs: 172_700_000,
+                                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c1",
                                         state: "queued" as const,
                                     },
                                 ],
@@ -508,12 +510,14 @@ describe("DatabaseRoute", () => {
                                 runs: [
                                     {
                                         queuedAtMs: 172_700_000,
+                                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c2",
                                         startedAtMs: 172_750_000,
                                         state: "running" as const,
                                     },
                                     {
                                         finishedAtMs: 172_100_000,
                                         queuedAtMs: 172_000_000,
+                                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c3",
                                         startedAtMs: 172_050_000,
                                         state: "failed" as const,
                                     },
@@ -539,6 +543,7 @@ describe("DatabaseRoute", () => {
                                 runs: [
                                     {
                                         queuedAtMs: 172_700_000,
+                                        runId: "019fc968-1a9b-7765-8f1b-d5b863b0e7c4",
                                         state: "queued" as const,
                                     },
                                 ],

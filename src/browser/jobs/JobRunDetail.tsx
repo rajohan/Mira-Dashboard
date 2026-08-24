@@ -121,7 +121,7 @@ interface DetailValueProps {
 
 function DetailValue({ children, label }: DetailValueProps) {
     return (
-        <div className="border-primary-700 rounded-lg border p-3">
+        <div className="border-primary-600 bg-primary-800 rounded-lg border p-3">
             <dt className="text-primary-400 text-xs font-semibold tracking-wide uppercase">
                 {label}
             </dt>
@@ -162,7 +162,7 @@ function JobRunEventItem({ event }: JobRunEventItemProps) {
     return (
         <article
             aria-label={`Event ${event.sequence}: ${eventLabel}`}
-            className="border-primary-700 bg-primary-900/55 rounded-lg border p-3"
+            className="border-primary-600 bg-primary-800 rounded-lg border p-3"
         >
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -407,7 +407,7 @@ export function JobRunDetail({
             {run.terminalCode !== undefined && run.terminalMessage !== undefined && (
                 <section
                     aria-labelledby={`${headingId}-terminal`}
-                    className="border-primary-700 mt-5 rounded-lg border p-4"
+                    className="border-primary-600 bg-primary-800 mt-5 rounded-lg border p-4"
                 >
                     <div className="flex items-center gap-2">
                         <Icon icon={SquareTerminal} tone="accent" />
@@ -438,7 +438,7 @@ export function JobRunDetail({
                     </div>
                     <section
                         aria-label={`Result for job run ${run.id}`}
-                        className="bg-primary-950 text-primary-200 focus-visible:ring-accent-400/30 mt-2 max-h-96 overflow-auto rounded-lg p-3 text-xs wrap-anywhere whitespace-pre-wrap outline-none focus-visible:ring-2"
+                        className="border-primary-600 bg-primary-800 text-primary-200 focus-visible:ring-accent-400/30 mt-2 max-h-96 overflow-auto rounded-lg border p-3 text-xs wrap-anywhere whitespace-pre-wrap outline-none focus-visible:ring-2"
                         tabIndex={0}
                     >
                         <pre className="wrap-anywhere whitespace-pre-wrap">

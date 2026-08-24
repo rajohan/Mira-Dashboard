@@ -78,8 +78,27 @@ CREATE TABLE `auth_rate_limit_buckets` (
 	CONSTRAINT "auth_rate_limit_buckets_blocked_until_check" CHECK("blocked_until" IS NULL OR ("blocked_until" BETWEEN 0 AND 8640000000000000 AND "blocked_until" > "updated_at")),
 	CONSTRAINT "auth_rate_limit_buckets_bucket_key_check" CHECK(length("bucket_key") = 64 AND instr("bucket_key", char(0)) = 0 AND "bucket_key" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "auth_rate_limit_buckets_failure_count_check" CHECK("failure_count" BETWEEN 1 AND 9007199254740991),
-	CONSTRAINT "auth_rate_limit_buckets_kind_check" CHECK("kind" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source')),
+	CONSTRAINT "auth_rate_limit_buckets_kind_check" CHECK("kind" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source', 'password-reset-global', 'password-reset-source')),
 	CONSTRAINT "auth_rate_limit_buckets_timestamps_check" CHECK("first_failed_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "first_failed_at")
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `auth_password_reset_tokens` (
+	`authentication_version` integer NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`pending_email` text,
+	`prefix` text PRIMARY KEY,
+	`purpose` text NOT NULL,
+	`user_id` text NOT NULL,
+	`validator_hash` text NOT NULL,
+	`validator_version` integer NOT NULL,
+	CONSTRAINT `fk_auth_password_reset_tokens_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "auth_password_reset_tokens_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "auth_password_reset_tokens_pending_email_check" CHECK(("purpose" = 'password-reset' AND "pending_email" IS NULL) OR ("purpose" = 'email-verification' AND length("pending_email") BETWEEN 3 AND 254 AND instr("pending_email", char(0)) = 0 AND "pending_email" = lower("pending_email") AND instr("pending_email", '@') BETWEEN 2 AND length("pending_email") - 2 AND instr("pending_email", ' ') = 0)),
+	CONSTRAINT "auth_password_reset_tokens_prefix_check" CHECK(length("prefix") = 32 AND instr("prefix", char(0)) = 0 AND "prefix" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_password_reset_tokens_validator_hash_check" CHECK(length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_password_reset_tokens_validator_version_check" CHECK("validator_version" = 1),
+	CONSTRAINT "auth_password_reset_tokens_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at" AND "expires_at" <= "created_at" + 900000)
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `auth_sessions` (
@@ -507,6 +526,8 @@ CREATE TABLE `users` (
 	`authentication_version` integer DEFAULT 1 NOT NULL,
 	`created_at` integer NOT NULL,
 	`disabled_at` integer,
+	`email` text NOT NULL,
+	`email_verified_at` integer,
 	`id` text PRIMARY KEY,
 	`mfa_enabled_at` integer,
 	`password_hash` text NOT NULL,
@@ -515,6 +536,8 @@ CREATE TABLE `users` (
 	CONSTRAINT "users_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "users_created_at_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
 	CONSTRAINT "users_disabled_at_check" CHECK("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")),
+	CONSTRAINT "users_email_check" CHECK(length("email") BETWEEN 3 AND 254 AND instr("email", char(0)) = 0 AND "email" = lower("email") AND instr("email", '@') BETWEEN 2 AND length("email") - 2 AND instr("email", ' ') = 0),
+	CONSTRAINT "users_email_verified_at_check" CHECK("email_verified_at" IS NULL OR ("email_verified_at" BETWEEN 0 AND 8640000000000000 AND "email_verified_at" >= "created_at" AND "email_verified_at" <= "updated_at")),
 	CONSTRAINT "users_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
 	CONSTRAINT "users_mfa_enabled_at_check" CHECK("mfa_enabled_at" IS NULL OR ("mfa_enabled_at" BETWEEN 0 AND 8640000000000000 AND "mfa_enabled_at" >= "created_at" AND "mfa_enabled_at" <= "updated_at")),
 	CONSTRAINT "users_password_hash_check" CHECK(length("password_hash") = 118 AND instr("password_hash", char(0)) = 0 AND substr("password_hash", 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr("password_hash", 75, 1) = '$' AND substr("password_hash", 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr("password_hash", 118, 1) GLOB '[AEIMQUYcgkosw048]'),
@@ -531,6 +554,8 @@ CREATE INDEX `auth_pending_logins_expires_at_idx` ON `auth_pending_logins` (`exp
 CREATE INDEX `auth_pending_logins_replaced_session_id_idx` ON `auth_pending_logins` (`replaced_session_id`);--> statement-breakpoint
 CREATE INDEX `auth_pending_logins_user_expires_at_idx` ON `auth_pending_logins` (`user_id`,`expires_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `auth_pending_logins_validator_hash_unique` ON `auth_pending_logins` (`validator_hash`);--> statement-breakpoint
+CREATE INDEX `auth_password_reset_tokens_expires_idx` ON `auth_password_reset_tokens` (`expires_at`,`prefix`);--> statement-breakpoint
+CREATE INDEX `auth_password_reset_tokens_user_purpose_idx` ON `auth_password_reset_tokens` (`user_id`,`purpose`);--> statement-breakpoint
 CREATE INDEX `auth_rate_limit_buckets_kind_updated_at_idx` ON `auth_rate_limit_buckets` (`kind`,`updated_at`,`bucket_key`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_expires_at_idx` ON `auth_sessions` (`expires_at`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_user_last_seen_idx` ON `auth_sessions` (`user_id`,`last_seen_at`,`created_at`,`id`);--> statement-breakpoint
@@ -2489,6 +2514,7 @@ CREATE INDEX `user_totp_factors_pending_expiry_idx` ON `user_totp_factors` (`enr
 CREATE UNIQUE INDEX `user_webauthn_credentials_credential_id_unique` ON `user_webauthn_credentials` (`credential_id`);--> statement-breakpoint
 CREATE INDEX `user_webauthn_credentials_user_created_idx` ON `user_webauthn_credentials` (`user_id`,`created_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`);--> statement-breakpoint
+CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);--> statement-breakpoint
 CREATE TRIGGER reports_validate_metadata_insert
 BEFORE INSERT ON reports
 WHEN CASE WHEN json_valid(NEW.metadata_json) THEN EXISTS (

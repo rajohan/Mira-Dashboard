@@ -11,12 +11,15 @@ import type { ProcedureContract } from "./registry.ts";
 
 /** Fixed privileged operations accepted by the purpose-built service-actions boundary. */
 export const serviceActionIds = [
+    "dashboard-restart",
+    "dashboard-stack-restart",
     "openclaw-cleanup",
     "openclaw-restart",
     "openclaw-update",
     "system-cleanup",
     "system-restart",
     "system-update",
+    "worker-restart",
 ] as const;
 
 export const serviceActionIdSchema = v.picklist(
@@ -79,6 +82,22 @@ const serviceActionRequestBase = {
 
 export const requestServiceActionInputSchema = v.variant("actionId", [
     v.strictObject({
+        actionId: v.literal("dashboard-restart"),
+        confirmation: v.literal(
+            "restart-dashboard",
+            "Dashboard restart confirmation is invalid"
+        ),
+        ...serviceActionRequestBase,
+    }),
+    v.strictObject({
+        actionId: v.literal("dashboard-stack-restart"),
+        confirmation: v.literal(
+            "restart-dashboard-stack",
+            "Dashboard stack restart confirmation is invalid"
+        ),
+        ...serviceActionRequestBase,
+    }),
+    v.strictObject({
         actionId: v.literal("openclaw-cleanup"),
         confirmation: v.literal(
             "cleanup-openclaw",
@@ -121,6 +140,14 @@ export const requestServiceActionInputSchema = v.variant("actionId", [
     v.strictObject({
         actionId: v.literal("system-update"),
         confirmation: v.literal("update-system", "System update confirmation is invalid"),
+        ...serviceActionRequestBase,
+    }),
+    v.strictObject({
+        actionId: v.literal("worker-restart"),
+        confirmation: v.literal(
+            "restart-worker",
+            "Worker restart confirmation is invalid"
+        ),
         ...serviceActionRequestBase,
     }),
 ]);

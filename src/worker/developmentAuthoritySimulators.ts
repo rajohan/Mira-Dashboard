@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import type { HostOperationId } from "../shared/hostOperations.ts";
+import { hostOperationIds, type HostOperationId } from "../shared/hostOperations.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type {
     OpenClawInstallationUpdateSummary,
@@ -201,11 +201,6 @@ export function createDevelopmentAuthoritySimulators(input: {
             closeSync(descriptor);
         }
     };
-    const hostOperationIds = Object.freeze([
-        "system-cleanup",
-        "system-restart",
-        "system-update",
-    ] as const);
     const hostOperations: DevelopmentHostOperationsExecutionPort = Object.freeze({
         availableOperations: () => Promise.resolve(hostOperationIds),
         request: (operationId: HostOperationId, signal?: AbortSignal) =>
@@ -214,7 +209,12 @@ export function createDevelopmentAuthoritySimulators(input: {
                 appendReceipt(operationId);
                 signal?.throwIfAborted();
                 return Object.freeze({
-                    status: operationId === "system-restart" ? "accepted" : "completed",
+                    status:
+                        operationId === "system-restart" ||
+                        operationId === "dashboard-stack-restart" ||
+                        operationId === "worker-restart"
+                            ? "accepted"
+                            : "completed",
                 });
             }),
     });

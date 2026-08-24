@@ -72,11 +72,18 @@ export interface AuthenticationLifecycleContext {
         clientSourceId: string
     ) => readonly AuthenticationRateLimitTarget[];
     readonly generateId: () => string;
+    readonly generateEmailVerificationToken: () => GeneratedOpaqueToken;
+    readonly generatePasswordResetToken: () => GeneratedOpaqueToken;
     readonly generateSessionToken: () => GeneratedOpaqueToken;
     readonly hashPassword: (password: string) => Promise<string>;
     readonly loginRateLimitTargets: (
         clientSourceId: string
     ) => readonly AuthenticationRateLimitTarget[];
+    readonly passwordResetRateLimitTargets: (
+        clientSourceId: string
+    ) => readonly AuthenticationRateLimitTarget[];
+    readonly passwordRecoveryEmailSender: AuthenticationLifecycleDependencies["passwordRecoveryEmailSender"];
+    readonly publicOrigin: string | undefined;
     readonly mfaLoginLifecycle: PendingLoginLifecyclePort;
     readonly newSession: (
         unit: AuthenticationLifecycleUnitOfWork,
@@ -113,8 +120,14 @@ export function createAuthenticationLifecycleContext(
     dependencies: AuthenticationLifecycleDependencies
 ): AuthenticationLifecycleContext {
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
+    const generateEmailVerificationToken =
+        dependencies.generateEmailVerificationToken ??
+        (() => generateOpaqueToken("email-verification"));
     const generateSessionToken =
         dependencies.generateSessionToken ?? (() => generateOpaqueToken("session"));
+    const generatePasswordResetToken =
+        dependencies.generatePasswordResetToken ??
+        (() => generateOpaqueToken("password-reset"));
     const hashPassword = dependencies.hashPassword ?? hashDashboardPassword;
     const verifyPassword = dependencies.verifyPassword ?? verifyDashboardPassword;
     const clock = dependencies.now ?? (() => new Date());
@@ -180,6 +193,8 @@ export function createAuthenticationLifecycleContext(
             },
         ],
         generateId,
+        generateEmailVerificationToken,
+        generatePasswordResetToken,
         generateSessionToken,
         hashPassword,
         loginRateLimitTargets: (clientSourceId) => [
@@ -195,6 +210,21 @@ export function createAuthenticationLifecycleContext(
                 subject: "all-sources",
             },
         ],
+        passwordResetRateLimitTargets: (clientSourceId) => [
+            {
+                blockDurations: sourceRateLimitBlockDurations,
+                kind: "password-reset-source",
+                sourceScoped: true,
+                subject: clientSourceId,
+            },
+            {
+                blockDurations: globalRateLimitBlockDurations,
+                kind: "password-reset-global",
+                subject: "all-sources",
+            },
+        ],
+        passwordRecoveryEmailSender: dependencies.passwordRecoveryEmailSender,
+        publicOrigin: dependencies.publicOrigin,
         mfaLoginLifecycle: dependencies.mfaLoginLifecycle,
         newSession(unit, user, createdAt, userAgent, method = "password") {
             const token = generateSessionToken();

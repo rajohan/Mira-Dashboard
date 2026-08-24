@@ -6,6 +6,7 @@ import {
     type RouterHistory,
 } from "@tanstack/react-router";
 
+import { parseLoginRouteSearch } from "./auth/loginRouteSearch.ts";
 import { parseChatRouteSearch } from "./chat/chatRouteSearch.ts";
 import { normalizeDatabaseSearch } from "./database/databaseRouteSearch.ts";
 import { parseJobsRouteSearch } from "./jobs/jobRouteSearch.ts";
@@ -26,6 +27,7 @@ const overviewRoute = createRoute({
 const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/login",
+    validateSearch: parseLoginRouteSearch,
 }).lazy(() => import("./routes/login.lazy.tsx").then((module) => module.Route));
 const accountSecurityRoute = createRoute({
     getParentRoute: () => rootRoute,

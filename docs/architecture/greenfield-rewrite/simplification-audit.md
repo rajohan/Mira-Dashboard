@@ -52,7 +52,6 @@ counts so fixture volume does not obscure the runtime decision.
 | `node:net`         |           6 | Retain. Canonical IP validation and raw socket/proxy evidence use capabilities not replaced more safely by Bun's HTTP server API.                                                                                                                                  |
 | `node:crypto`      |           2 | Retain. Constant-time byte comparison is required at security-sensitive filesystem/log boundaries; Bun's hashing APIs do not replace `timingSafeEqual`.                                                                                                            |
 | `node:url`         |           2 | Retain. Storybook/Vite configuration needs standards-based file-URL conversion in tooling loaded across Bun and Vite.                                                                                                                                              |
-| `node:readline`    |           1 | Retain. Break-glass password recovery requires controlled interactive TTY input with echo suppression; a generic prompt is not equivalent.                                                                                                                         |
 | `node:zlib`        |           1 | Retain. Browser artifact generation requires deterministic Brotli compression and exact Brotli parameters; Bun's convenience compression APIs do not expose the same contract.                                                                                     |
 
 No `node:child_process`, `node:cluster`, `node:inspector`, `node:module`, `node:repl`, `node:test`,
@@ -74,9 +73,11 @@ Child processes use the reviewed Bun process boundary.
   source-presence gate correctly rejected it as untested.
 
 Patch coverage is also a local merge gate. It compares executable changed lines from the Git diff
-with merged LCOV and requires at least 85%. GitHub uses the pull request base; local runs use
-`origin/main` unless `MIRA_DASHBOARD_COVERAGE_BASE` selects a nearer stacked-PR base. Codecov remains
-the independent hosted enforcement.
+with merged LCOV and requires at least 85%. GitHub uses the pull request base. Local feature
+branches use their configured `branch.<name>.vscode-merge-base`, with
+`MIRA_DASHBOARD_COVERAGE_BASE` reserved as an explicit override; an unknown feature base now fails
+closed rather than flattening the stack against `origin/main`. Codecov remains the independent
+hosted enforcement.
 
 ## Suppression and ignore audit
 

@@ -5,6 +5,7 @@ import * as v from "valibot";
 import { buildDocumentationArtifacts } from "./documentation/artifacts.ts";
 import {
     checkDocumentationArtifacts,
+    readDocumentationSources,
     writeDocumentationArtifacts,
 } from "./documentation/files.ts";
 import { resolveDirectPackageVersions } from "./packageIdentity.ts";
@@ -35,10 +36,10 @@ export async function synchronizeGeneratedDocumentation(
         [packageManifest.dependencies, packageManifest.devDependencies],
         await Bun.file(path.join(projectRoot, "bun.lock")).text()
     );
-    const artifacts = buildDocumentationArtifacts({
-        ...packageManifest,
-        resolvedVersions,
-    });
+    const artifacts = buildDocumentationArtifacts(
+        { ...packageManifest, resolvedVersions },
+        await readDocumentationSources(path.join(projectRoot, "docs"))
+    );
     const synchronizeDocumentation =
         mode === "check" ? checkDocumentationArtifacts : writeDocumentationArtifacts;
     await synchronizeDocumentation(

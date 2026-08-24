@@ -29,12 +29,18 @@ const jobRunId = "018f6f50-6a9e-7b88-8000-000000000001";
 
 const statusResult = Object.freeze({
     actions: [
+        { availability: "available" as const, id: "dashboard-restart" as const },
+        {
+            availability: "available" as const,
+            id: "dashboard-stack-restart" as const,
+        },
         { availability: "available" as const, id: "openclaw-cleanup" as const },
         { availability: "available" as const, id: "openclaw-restart" as const },
         { availability: "available" as const, id: "openclaw-update" as const },
         { availability: "available" as const, id: "system-cleanup" as const },
         { availability: "available" as const, id: "system-restart" as const },
         { availability: "unavailable" as const, id: "system-update" as const },
+        { availability: "available" as const, id: "worker-restart" as const },
     ],
     observedAtMs: 1_800_000_000_000,
 }) satisfies GetServiceActionsStatusResult;

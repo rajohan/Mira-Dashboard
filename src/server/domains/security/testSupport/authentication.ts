@@ -51,6 +51,7 @@ export function seedAuthenticationTestDatabase(
             v.parse(userInsertSchema, {
                 createdAt: now,
                 disabledAt: null,
+                email: "operator@example.com",
                 id: authenticationTestUserId,
                 passwordHash: testDashboardPasswordHash,
                 updatedAt: now,

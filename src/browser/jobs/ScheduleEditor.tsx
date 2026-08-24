@@ -12,7 +12,7 @@ import { canonicalScheduleTimeZones } from "../../contracts/scheduleTimeZones.ts
 import { Button } from "../ui/Button.tsx";
 import { Combobox, type ComboboxOption } from "../ui/Combobox.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -77,7 +77,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
             if (scheduleConfigurationsMatch(configuration, schedule.schedule)) return;
             await onSave(configuration);
         },
-        validators: { onSubmit: scheduleEditorFormSchema },
+        validators: progressiveFormValidators(scheduleEditorFormSchema),
     });
 
     async function submitEditor(): Promise<void> {
@@ -105,7 +105,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                 {(field) => (
                     <FormField
                         disabled={busy}
-                        error={firstFormFieldError(field.state.meta.errors)}
+                        error={touchedFormFieldError(field.state.meta)}
                         label="Schedule type"
                     >
                         <Select
@@ -127,9 +127,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                 {(field) => (
                                     <FormField
                                         disabled={busy}
-                                        error={firstFormFieldError(
-                                            field.state.meta.errors
-                                        )}
+                                        error={touchedFormFieldError(field.state.meta)}
                                         label="Interval (seconds)"
                                     >
                                         <Input
@@ -159,9 +157,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                 {(field) => (
                                     <TimePicker
                                         disabled={busy}
-                                        error={firstFormFieldError(
-                                            field.state.meta.errors
-                                        )}
+                                        error={touchedFormFieldError(field.state.meta)}
                                         label="Time of day (24-hour)"
                                         onChange={field.handleChange}
                                         value={field.state.value}
@@ -175,9 +171,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                     <FormField
                                         description="Order: minute, hour, day, month, weekday."
                                         disabled={busy}
-                                        error={firstFormFieldError(
-                                            field.state.meta.errors
-                                        )}
+                                        error={touchedFormFieldError(field.state.meta)}
                                         label="Cron expression"
                                     >
                                         <Input
@@ -203,9 +197,7 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                                     <FormField
                                         description="Use UTC or a region such as Europe/Oslo."
                                         disabled={busy}
-                                        error={firstFormFieldError(
-                                            field.state.meta.errors
-                                        )}
+                                        error={touchedFormFieldError(field.state.meta)}
                                         label="Time zone"
                                     >
                                         <Combobox

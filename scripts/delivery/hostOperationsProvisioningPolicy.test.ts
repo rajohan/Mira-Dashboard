@@ -41,6 +41,34 @@ describe("host-operations provisioning artifact policy", () => {
             },
             {
                 artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.service",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-deferred-stack-restart.service",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.timer",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-deferred-stack-restart.timer",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.service",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-deferred-worker-restart.service",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.timer",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-deferred-worker-restart.timer",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
                     "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-reboot.service",
@@ -94,6 +122,10 @@ describe("host-operations provisioning artifact policy", () => {
             "installHostOperationsProvisioning.ts",
             "mira-dashboard-deferred-reboot.service",
             "mira-dashboard-deferred-reboot.timer",
+            "mira-dashboard-deferred-stack-restart.service",
+            "mira-dashboard-deferred-stack-restart.timer",
+            "mira-dashboard-deferred-worker-restart.service",
+            "mira-dashboard-deferred-worker-restart.timer",
             "mira-dashboard-host-operation",
             "mira-dashboard-host-system-cleanup.service",
             "mira-dashboard-host-system-restart.service",

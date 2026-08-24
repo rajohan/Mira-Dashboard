@@ -8,12 +8,11 @@ import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 
 export interface OverviewIncidentsCardProps {
-    readonly hasMore: boolean;
     readonly incidents: readonly IncidentSummary[];
+    readonly truncated?: boolean;
 }
 
 /**
@@ -22,8 +21,8 @@ export interface OverviewIncidentsCardProps {
  * @returns Read-only active-incident overview with exact incident navigation.
  */
 export function OverviewIncidentsCard({
-    hasMore,
     incidents,
+    truncated = false,
 }: OverviewIncidentsCardProps) {
     const headingId = useId();
     const latestHeadingId = useId();
@@ -36,28 +35,25 @@ export function OverviewIncidentsCard({
     return (
         <Card aria-labelledby={headingId} className="h-full">
             <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="flex min-w-0 items-start gap-3">
-                    <span className="bg-accent-500/10 shrink-0 rounded-lg p-2.5">
-                        <Icon icon={ShieldAlert} tone="accent" />
-                    </span>
-                    <div className="min-w-0">
-                        <Heading id={headingId} level={2} size="subsection">
-                            Active incidents
-                        </Heading>
-                        <Text className="mt-1" size="sm" tone="muted">
-                            Open incidents saved by the Dashboard. Some checks may still
-                            be unavailable.
-                        </Text>
-                    </div>
+                <div className="flex min-w-0 items-center gap-2">
+                    <ShieldAlert aria-hidden="true" className="text-accent-300 size-5" />
+                    <Heading id={headingId} level={2} size="subsection">
+                        Active incidents
+                    </Heading>
                 </div>
-                <ActionLink size="sm" to="/incidents" variant="secondary">
+                <ActionLink
+                    className="ml-auto shrink-0"
+                    size="sm"
+                    to="/incidents"
+                    variant="secondary"
+                >
                     View incidents
                 </ActionLink>
             </div>
 
             <dl className="mt-5 grid grid-cols-3 gap-3">
                 {[
-                    ["Shown", incidents.length],
+                    ["Incidents", incidents.length],
                     ["Critical", criticalCount],
                     ["Error", errorCount],
                 ].map(([label, value]) => (
@@ -68,6 +64,7 @@ export function OverviewIncidentsCard({
                         <dt className="text-primary-400 text-xs">{label}</dt>
                         <dd className="text-primary-50 mt-2 text-2xl font-semibold tabular-nums">
                             {value}
+                            {truncated ? "+" : ""}
                         </dd>
                     </div>
                 ))}
@@ -109,12 +106,6 @@ export function OverviewIncidentsCard({
                         Last seen {formatDashboardDateTime(latest.lastSeenAtMs)}
                     </time>
                 </section>
-            )}
-
-            {hasMore && (
-                <Text className="mt-3" size="sm" tone="muted">
-                    Open Incidents to see older active incidents.
-                </Text>
             )}
         </Card>
     );

@@ -16,6 +16,7 @@ interface GeneratedDocument {
     readonly content?: string;
     readonly kind: "json" | "markdown" | "schema";
     readonly path: string;
+    readonly source: "generated" | "maintained";
 }
 
 interface DocumentGroup {
@@ -24,7 +25,7 @@ interface DocumentGroup {
     readonly label: string;
 }
 
-const initialDocumentPath = "README.md";
+const initialDocumentPath = "generated/README.md";
 const maximumMarkdownHighlights = 1000;
 const maximumNavigationHighlights = 250;
 const visibleScrollbarClassName =
@@ -37,14 +38,15 @@ function documentContent(
 ): string {
     if (document.kind !== "schema") return document.content ?? "";
     const schemaId = document.path
-        .replace(/^schemas\//u, "")
+        .replace(/^(?:generated\/)?schemas\//u, "")
         .replace(/\.schema\.json$/u, "");
     return `${JSON.stringify(openApiDocument.components?.schemas?.[schemaId] ?? {}, null, 2)}\n`;
 }
 
 function documentLabel(path: string): string {
     return path
-        .replace(/^schemas\//u, "")
+        .replace(/^generated\//u, "")
+        .replace(/^(?:generated\/)?schemas\//u, "")
         .replace(/\.(?:md|json)$/u, "")
         .replaceAll("-", " ");
 }
@@ -54,8 +56,55 @@ function titleCase(value: string): string {
 }
 
 function documentGroupId(document: GeneratedDocument): string {
-    if (document.kind !== "schema") return "reference";
-    return document.path.replace(/^schemas\//u, "").split(".")[0] ?? "other";
+    if (document.source === "generated" && document.kind !== "schema") {
+        return "generated";
+    }
+    if (document.kind !== "schema") {
+        return document.path.includes("/") ? document.path.split("/")[0]! : "reference";
+    }
+    const namespace =
+        document.path.replace(/^(?:generated\/)?schemas\//u, "").split(".")[0] ?? "other";
+    const normalizedNamespace = namespace.toLowerCase().startsWith("openclaw")
+        ? "openClaw"
+        : namespace;
+    return document.source === "generated"
+        ? `generated:${normalizedNamespace}`
+        : normalizedNamespace;
+}
+
+function documentGroupLabel(id: string): string {
+    if (id === "reference") return "Reference";
+    if (id === "generated") return "Generated";
+    const visibleId = id.replace(/^generated:/u, "");
+    if (visibleId === "openClaw") return "OpenClaw";
+    return titleCase(
+        visibleId.replaceAll(/([a-z])([A-Z])/gu, "$1 $2").replaceAll("-", " ")
+    );
+}
+
+function documentGroupRank(id: string): number {
+    if (id === "generated" || id.startsWith("generated:")) return 1;
+    return 0;
+}
+
+const maintainedGroupOrder = new Map([
+    ["architecture", 0],
+    ["security", 1],
+    ["development", 2],
+    ["operations", 3],
+    ["reference", 4],
+]);
+
+function compareDocumentGroups(left: DocumentGroup, right: DocumentGroup): number {
+    const rankDifference = documentGroupRank(left.id) - documentGroupRank(right.id);
+    if (rankDifference !== 0) return rankDifference;
+    if (documentGroupRank(left.id) === 0) {
+        return (
+            (maintainedGroupOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+            (maintainedGroupOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+        );
+    }
+    return 0;
 }
 
 function groupDocuments(source: readonly GeneratedDocument[]): readonly DocumentGroup[] {
@@ -66,16 +115,13 @@ function groupDocuments(source: readonly GeneratedDocument[]): readonly Document
         group.push(document);
         grouped.set(id, group);
     }
-    return [...grouped].map(([id, groupedDocuments]) => ({
-        documents: groupedDocuments,
-        id,
-        label:
-            id === "reference"
-                ? "Reference"
-                : titleCase(
-                      id.replaceAll(/([a-z])([A-Z])/gu, "$1 $2").replaceAll("-", " ")
-                  ),
-    }));
+    return [...grouped]
+        .map(([id, groupedDocuments]) => ({
+            documents: groupedDocuments,
+            id,
+            label: documentGroupLabel(id),
+        }))
+        .toSorted(compareDocumentGroups);
 }
 
 interface HighlightBudget {
@@ -221,8 +267,8 @@ export function DocsRoute({
     const [openApiDocument] = useState(
         () =>
             JSON.parse(
-                documents.find(({ path }) => path === "openapi.raw-http.json")?.content ??
-                    "{}"
+                documents.find(({ path }) => path === "generated/openapi.raw-http.json")
+                    ?.content ?? "{}"
             ) as {
                 readonly components?: {
                     readonly schemas?: Readonly<Record<string, unknown>>;
@@ -318,7 +364,7 @@ export function DocsRoute({
                                                     navigationHighlightBudget
                                                 )}
                                             </span>
-                                            <span className="text-primary-400 block truncate text-xs">
+                                            <span className="text-primary-300 block truncate text-xs">
                                                 {highlightedText(
                                                     document.path,
                                                     normalizedQuery,

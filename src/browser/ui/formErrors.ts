@@ -22,3 +22,31 @@ export function firstFormFieldError(errors: readonly unknown[]): string | undefi
     }
     return undefined;
 }
+
+/**
+ * Hides whole-form validation findings until the field was edited or submit validation ran.
+ * @param metadata TanStack field interaction and error metadata.
+ * @returns The first presentable error for a touched field.
+ */
+export function touchedFormFieldError(metadata: {
+    readonly errorMap?: { readonly onSubmit?: unknown };
+    readonly errors: readonly unknown[];
+    readonly isTouched: boolean;
+}): string | undefined {
+    return metadata.isTouched
+        ? firstFormFieldError(metadata.errors)
+        : firstFormFieldError([metadata.errorMap?.onSubmit]);
+}
+
+/**
+ * Applies one schema while the user edits and again at the authoritative submit gate.
+ * Change validation starts only after the first edit, avoiding untouched-field noise.
+ * @param schema TanStack Form-compatible Standard Schema validator.
+ * @returns Shared progressive form-validation policy.
+ */
+export function progressiveFormValidators<TSchema>(schema: TSchema): {
+    readonly onChange: TSchema;
+    readonly onSubmit: TSchema;
+} {
+    return Object.freeze({ onChange: schema, onSubmit: schema });
+}

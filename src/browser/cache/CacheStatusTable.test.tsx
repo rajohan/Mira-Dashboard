@@ -1,6 +1,12 @@
 import { describe, expect, jest, test } from "bun:test";
 
+import { QueryClientProvider } from "@tanstack/react-query";
+
 import type { CacheEntryStatus } from "../../contracts/cache.ts";
+import { createDashboardQueryClient } from "../api/queryClient.ts";
+import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
+import { CacheEntryDetail } from "./CacheEntryDetail.tsx";
 import { CacheStatusTable } from "./CacheStatusTable.tsx";
 
 const { render, screen } = await import("@testing-library/react");
@@ -34,6 +40,39 @@ function status(
 }
 
 describe("CacheStatusTable", () => {
+    test("keeps detail loading until the exact payload query settles", () => {
+        const pending = Promise.withResolvers<unknown>();
+        const client = {
+            mutation: () => Promise.reject(new Error("Unexpected mutation")),
+            query: () => pending.promise,
+        } as unknown as DashboardTrpcClient;
+        const queryClient = createDashboardQueryClient();
+        const fallbackStatus = status("system.host");
+
+        try {
+            render(
+                <QueryClientProvider client={queryClient}>
+                    <DashboardTrpcProvider client={client}>
+                        <CacheEntryDetail
+                            cacheKey={fallbackStatus.key}
+                            fallbackStatus={fallbackStatus}
+                        />
+                    </DashboardTrpcProvider>
+                </QueryClientProvider>
+            );
+
+            expect(
+                screen.getByRole("status", {
+                    name: "Loading system.host saved data…",
+                })
+            ).toBeVisible();
+            expect(screen.queryByText("No saved data")).toBeNull();
+        } finally {
+            pending.resolve(undefined);
+            queryClient.clear();
+        }
+    });
+
     test("shows freshness separately from the latest failed attempt", async () => {
         const selected: string[] = [];
         render(
@@ -51,11 +90,10 @@ describe("CacheStatusTable", () => {
         );
         expect(screen.getByText("Up to date")).toBeTruthy();
         expect(screen.getByText("Failed")).toBeTruthy();
-        expect(screen.getByText("Available")).toBeTruthy();
 
         await userEvent
             .setup()
-            .click(screen.getByRole("button", { name: "system.host" }));
+            .click(screen.getByRole("button", { name: "View system.host" }));
         expect(selected).toEqual(["system.host"]);
     });
 
@@ -85,20 +123,20 @@ describe("CacheStatusTable", () => {
         );
         expect(
             screen
-                .getByRole("button", { name: "system.host" })
+                .getByRole("button", { name: "View system.host" })
                 .getAttribute("aria-current")
         ).toBe("true");
-        expect(screen.getByRole("button", { name: "system.host" })).toHaveClass(
-            "min-h-8",
-            "underline"
+        expect(screen.getByRole("button", { name: "View system.host" })).toHaveClass(
+            "border-accent-500/60",
+            "bg-primary-800/70"
         );
         expect(
-            screen.getByRole("region", { name: "Saved data sources" })
-        ).not.toHaveAttribute("tabindex");
+            screen.getByRole("navigation", { name: "Saved data sources" })
+        ).toBeTruthy();
         expect(screen.queryAllByText("Unavailable")).toHaveLength(0);
     });
 
-    test("keeps a large bounded snapshot accessible before viewport measurement", () => {
+    test("keeps a large bounded snapshot in one compact scrollable list", () => {
         render(
             <CacheStatusTable
                 entries={Array.from({ length: 50 }, (_, index) =>
@@ -107,13 +145,11 @@ describe("CacheStatusTable", () => {
                 onSelect={jest.fn()}
             />
         );
-        const table = screen.getByRole("table", { name: "Saved data sources" });
-        expect(table.getAttribute("aria-rowcount")).toBe("51");
-        expect(table.querySelector("tbody")?.style.height).not.toBe("");
-        expect(table.querySelector("td[height]")).toBeNull();
-        expect(screen.getByRole("region", { name: "Saved data sources" }).tabIndex).toBe(
-            0
+        expect(
+            screen.getByRole("region", { name: "Saved data sources scroll area" })
+        ).toHaveClass("max-h-176", "overflow-y-auto");
+        expect(screen.getAllByRole("button", { name: /^View provider\./u })).toHaveLength(
+            50
         );
-        expect(screen.getAllByRole("button", { name: /^provider\./u })).toHaveLength(50);
     });
 });

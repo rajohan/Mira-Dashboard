@@ -14,15 +14,23 @@ import {
 } from "./codexQuotaCollector.ts";
 
 const nonnegativeFiniteSchema = v.pipe(v.number(), v.finite(), v.minValue(0));
+const boundedCurrencySchema = v.union([
+    nonnegativeFiniteSchema,
+    v.pipe(v.string(), v.maxLength(64)),
+]);
 const openRouterKeySchema = v.object({
     data: v.object({
         limit: v.nullable(nonnegativeFiniteSchema),
         limit_remaining: v.nullable(nonnegativeFiniteSchema),
         usage: nonnegativeFiniteSchema,
+        usage_monthly: v.optional(nonnegativeFiniteSchema),
     }),
 });
 const openRouterCreditsSchema = v.object({
-    data: v.object({ total_credits: nonnegativeFiniteSchema }),
+    data: v.object({
+        total_credits: nonnegativeFiniteSchema,
+        total_usage: nonnegativeFiniteSchema,
+    }),
 });
 const elevenLabsSchema = v.object({
     subscription: v.object({
@@ -35,9 +43,82 @@ const elevenLabsSchema = v.object({
 const syntheticSchema = v.object({
     rollingFiveHourLimit: v.object({
         max: nonnegativeFiniteSchema,
+        nextTickAt: v.optional(v.string()),
         remaining: nonnegativeFiniteSchema,
+        tickPercent: v.optional(nonnegativeFiniteSchema),
     }),
+    weeklyTokenLimit: v.optional(
+        v.object({
+            maxCredits: v.optional(boundedCurrencySchema),
+            nextRegenAt: v.optional(v.string()),
+            nextRegenCredits: v.optional(boundedCurrencySchema),
+            nextRegenPercent: v.optional(nonnegativeFiniteSchema),
+            percentRemaining: nonnegativeFiniteSchema,
+        })
+    ),
 });
+
+function currencyNumber(value: string | number | undefined): number | undefined {
+    if (typeof value === "number") return value;
+    if (value === undefined) return undefined;
+    const parsed = Number(value.replaceAll(/[,$\s]/gu, ""));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function timestampMilliseconds(value: string | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function normalizedRegenerationPercent(value: number | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    return Math.min(100, value > 0 && value <= 1 ? value * 100 : value);
+}
+
+function syntheticWindows(
+    quota: v.InferOutput<typeof syntheticSchema>,
+    fiveHourUsedPercent: number
+): QuotaProviderProjection["windows"] {
+    const windows = [];
+    const fiveHourResetAtMs = timestampMilliseconds(
+        quota.rollingFiveHourLimit.nextTickAt
+    );
+    if (fiveHourResetAtMs !== undefined) {
+        windows.push({
+            regenerationPercent: normalizedRegenerationPercent(
+                quota.rollingFiveHourLimit.tickPercent
+            ),
+            resetsAtMs: fiveHourResetAtMs,
+            usedPercent: fiveHourUsedPercent,
+            windowDurationMinutes: 300,
+        });
+    }
+    const weeklyResetAtMs = timestampMilliseconds(quota.weeklyTokenLimit?.nextRegenAt);
+    if (weeklyResetAtMs !== undefined && quota.weeklyTokenLimit !== undefined) {
+        const maximumCredits = currencyNumber(quota.weeklyTokenLimit.maxCredits);
+        const regenerationCredits = currencyNumber(
+            quota.weeklyTokenLimit.nextRegenCredits
+        );
+        const regenerationPercent =
+            quota.weeklyTokenLimit.nextRegenPercent ??
+            (maximumCredits === undefined ||
+            maximumCredits <= 0 ||
+            regenerationCredits === undefined
+                ? undefined
+                : (regenerationCredits / maximumCredits) * 100);
+        windows.push({
+            regenerationPercent: normalizedRegenerationPercent(regenerationPercent),
+            resetsAtMs: weeklyResetAtMs,
+            usedPercent: Math.max(
+                0,
+                Math.min(100, 100 - quota.weeklyTokenLimit.percentRemaining)
+            ),
+            windowDurationMinutes: 10_080,
+        });
+    }
+    return windows.length === 0 ? undefined : windows;
+}
 
 export interface QuotaCollectorCredentials {
     readonly elevenLabs?: Redacted.Redacted<string>;
@@ -101,16 +182,22 @@ async function collectOpenRouter(
             }),
         ]);
         const keyProjection = v.parse(openRouterKeySchema, key).data;
-        const total = v.parse(openRouterCreditsSchema, credits).data.total_credits;
+        const creditsProjection = v.parse(openRouterCreditsSchema, credits).data;
+        const total = creditsProjection.total_credits;
         const limit = keyProjection.limit ?? total;
         const remaining =
-            keyProjection.limit_remaining ?? Math.max(total - keyProjection.usage, 0);
+            keyProjection.limit_remaining ??
+            Math.max(total - creditsProjection.total_usage, 0);
         return v.parse(quotaProviderProjectionSchema, {
+            balance: Math.max(total - creditsProjection.total_usage, 0),
             id: "openrouter",
             label: "OpenRouter",
             limit,
             remaining,
             remainingPercent: percentage(remaining, limit),
+            ...(keyProjection.usage_monthly === undefined
+                ? {}
+                : { periodUsage: keyProjection.usage_monthly }),
             status: "available",
             unit: "currency-usd",
             used: keyProjection.usage,
@@ -175,7 +262,7 @@ async function collectSynthetic(
     fetchImplementation: typeof globalThis.fetch | undefined,
     signal: AbortSignal | undefined
 ): Promise<QuotaProviderProjection> {
-    if (token === undefined) return missingProvider("synthetic", "Synthetic");
+    if (token === undefined) return missingProvider("synthetic", "Synthetic.new");
     try {
         const quota = v.parse(
             syntheticSchema,
@@ -185,23 +272,30 @@ async function collectSynthetic(
                 signal,
                 url: new URL("https://api.synthetic.new/v2/quotas"),
             })
-        ).rollingFiveHourLimit;
-        const remaining = Math.min(quota.remaining, quota.max);
-        const used = Math.max(quota.max - remaining, 0);
+        );
+        const remaining = Math.min(
+            quota.rollingFiveHourLimit.remaining,
+            quota.rollingFiveHourLimit.max
+        );
+        const used = Math.max(quota.rollingFiveHourLimit.max - remaining, 0);
+        const usedPercent = percentage(used, quota.rollingFiveHourLimit.max);
         return v.parse(quotaProviderProjectionSchema, {
             id: "synthetic",
-            label: "Synthetic",
-            limit: quota.max,
+            label: "Synthetic.new",
+            limit: quota.rollingFiveHourLimit.max,
             remaining,
-            remainingPercent: percentage(remaining, quota.max),
+            remainingPercent: percentage(remaining, quota.rollingFiveHourLimit.max),
             status: "available",
             unit: "credits",
             used,
-            usedPercent: percentage(used, quota.max),
+            usedPercent,
+            ...(usedPercent === undefined
+                ? {}
+                : { windows: syntheticWindows(quota, usedPercent) }),
         });
     } catch {
         signal?.throwIfAborted();
-        return unavailableProvider("synthetic", "Synthetic");
+        return unavailableProvider("synthetic", "Synthetic.new");
     }
 }
 
@@ -219,7 +313,7 @@ export async function collectQuotaPayload(
         collectElevenLabs(credentials.elevenLabs, options.fetch, signal),
         (async () => {
             if (options.codex === undefined) {
-                return unavailableProvider("openai", "OpenAI");
+                return unavailableProvider("openai", "OpenAI / Codex");
             }
             try {
                 return v.parse(
@@ -228,7 +322,7 @@ export async function collectQuotaPayload(
                 );
             } catch {
                 signal?.throwIfAborted();
-                return unavailableProvider("openai", "OpenAI");
+                return unavailableProvider("openai", "OpenAI / Codex");
             }
         })(),
         collectOpenRouter(credentials.openRouter, options.fetch, signal),

@@ -23,6 +23,41 @@ async function generatedFiles(directory: string, prefix = ""): Promise<string[]>
 }
 
 /**
+ * Reads checked-in Markdown outside the generated artifact tree for the browser reference.
+ * @param documentationRoot Absolute documentation root.
+ * @param prefix Current relative directory during recursion.
+ * @returns Source path to Markdown-content map.
+ */
+export async function readDocumentationSources(
+    documentationRoot: string,
+    prefix = ""
+): Promise<ReadonlyMap<string, string>> {
+    const entries = await readdir(path.join(documentationRoot, prefix), {
+        withFileTypes: true,
+    });
+    const documents = new Map<string, string>();
+    for (const entry of entries) {
+        const relativePath = path.join(prefix, entry.name);
+        if (entry.isDirectory() && relativePath !== "generated") {
+            for (const [sourcePath, content] of await readDocumentationSources(
+                documentationRoot,
+                relativePath
+            )) {
+                documents.set(sourcePath, content);
+            }
+        } else if (entry.isFile() && entry.name.endsWith(".md")) {
+            documents.set(
+                relativePath.split(path.sep).join("/"),
+                await Bun.file(path.join(documentationRoot, relativePath)).text()
+            );
+        }
+    }
+    return new Map(
+        [...documents].toSorted(([left], [right]) => left.localeCompare(right))
+    );
+}
+
+/**
  * Writes generated docs and removes stale generated files.
  * @param outputDirectory Generated documentation root.
  * @param artifacts Expected path/content pairs.

@@ -6,7 +6,7 @@ import * as v from "valibot";
 import { taskProgressMarkdownSchema } from "../../contracts/taskModel.ts";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
@@ -41,7 +41,7 @@ export function TaskProgressForm({
             submitted.current = true;
             formApi.setFieldValue("messageMarkdown", "");
         },
-        validators: { onSubmit: taskProgressFormSchema },
+        validators: progressiveFormValidators(taskProgressFormSchema),
     });
     const editing = onCancel !== undefined;
 
@@ -61,7 +61,7 @@ export function TaskProgressForm({
                 {(field) => (
                     <FormField
                         disabled={busy}
-                        error={firstFormFieldError(field.state.meta.errors)}
+                        error={touchedFormFieldError(field.state.meta)}
                         label={editing ? "Edit progress update" : "New progress update"}
                     >
                         <Textarea

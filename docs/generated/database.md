@@ -31,7 +31,7 @@ This reference is generated from the exact Drizzle schema used by migrations and
 
 | Name | Columns | Unique | Predicate |
 | --- | --- | --- | --- |
-| `agent_task_runs_one_active_agent_idx` | `agent_id` | Yes | `"agent_task_runs"."completed_at" IS NULL` |
+| `agent_task_runs_one_active_agent_idx` | `agent_id` | No | `"agent_task_runs"."completed_at" IS NULL` |
 | `agent_task_runs_started_id_idx` | `started_at, id` | No | — |
 | `agent_task_runs_agent_started_id_idx` | `agent_id, started_at, id` | No | — |
 
@@ -131,6 +131,44 @@ This reference is generated from the exact Drizzle schema used by migrations and
 | `auth_challenges_binding_check` | `("purpose" = 'login' AND "pending_login_id" IS NOT NULL AND "session_id" IS NULL) OR ("purpose" IN ('registration', 'step-up') AND "session_id" IS NOT NULL AND "pending_login_id" IS NULL)` |
 | `auth_challenges_time_check` | `"created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at" AND "expires_at" <= "created_at" + 300000` |
 
+## `auth_password_reset_tokens`
+
+| Column | SQLite type | Nullable | Primary key | Default |
+| --- | --- | --- | --- | --- |
+| `authentication_version` | `integer` | No | No | — |
+| `created_at` | `integer` | No | No | — |
+| `expires_at` | `integer` | No | No | — |
+| `pending_email` | `text` | Yes | No | — |
+| `prefix` | `text` | Yes | Yes | — |
+| `purpose` | `text` | No | No | — |
+| `user_id` | `text` | No | No | — |
+| `validator_hash` | `text` | No | No | — |
+| `validator_version` | `integer` | No | No | — |
+
+### Foreign keys
+
+| Name | Columns | References | On update | On delete |
+| --- | --- | --- | --- | --- |
+| `fk_auth_password_reset_tokens_user_id_users_id_fk` | `user_id` | `users(id)` | `NO ACTION` | `CASCADE` |
+
+### Indexes
+
+| Name | Columns | Unique | Predicate |
+| --- | --- | --- | --- |
+| `auth_password_reset_tokens_expires_idx` | `expires_at, prefix` | No | — |
+| `auth_password_reset_tokens_user_purpose_idx` | `user_id, purpose` | Yes | — |
+
+### Checks
+
+| Name | Expression |
+| --- | --- |
+| `auth_password_reset_tokens_authentication_version_check` | `"authentication_version" BETWEEN 1 AND 9007199254740991` |
+| `auth_password_reset_tokens_pending_email_check` | `("purpose" = 'password-reset' AND "pending_email" IS NULL) OR ("purpose" = 'email-verification' AND length("pending_email") BETWEEN 3 AND 254 AND instr("pending_email", char(0)) = 0 AND "pending_email" = lower("pending_email") AND instr("pending_email", '@') BETWEEN 2 AND length("pending_email") - 2 AND instr("pending_email", ' ') = 0)` |
+| `auth_password_reset_tokens_prefix_check` | `length("prefix") = 32 AND instr("prefix", char(0)) = 0 AND "prefix" NOT GLOB '*[^0-9a-f]*'` |
+| `auth_password_reset_tokens_validator_hash_check` | `length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'` |
+| `auth_password_reset_tokens_validator_version_check` | `"validator_version" = ?` |
+| `auth_password_reset_tokens_time_check` | `"created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at" AND "expires_at" <= "created_at" + ?` |
+
 ## `auth_pending_logins`
 
 | Column | SQLite type | Nullable | Primary key | Default |
@@ -209,7 +247,7 @@ This reference is generated from the exact Drizzle schema used by migrations and
 | `auth_rate_limit_buckets_blocked_until_check` | `"blocked_until" IS NULL OR ("blocked_until" BETWEEN 0 AND 8640000000000000 AND "blocked_until" > "updated_at")` |
 | `auth_rate_limit_buckets_bucket_key_check` | `length("bucket_key") = 64 AND instr("bucket_key", char(0)) = 0 AND "bucket_key" NOT GLOB '*[^0-9a-f]*'` |
 | `auth_rate_limit_buckets_failure_count_check` | `"failure_count" BETWEEN 1 AND 9007199254740991` |
-| `auth_rate_limit_buckets_kind_check` | `"kind" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source')` |
+| `auth_rate_limit_buckets_kind_check` | `"kind" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source', 'password-reset-global', 'password-reset-source')` |
 | `auth_rate_limit_buckets_timestamps_check` | `"first_failed_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "first_failed_at"` |
 
 ## `auth_sessions`
@@ -1603,6 +1641,8 @@ This reference is generated from the exact Drizzle schema used by migrations and
 | `authentication_version` | `integer` | No | No | `1` |
 | `created_at` | `integer` | No | No | — |
 | `disabled_at` | `integer` | Yes | No | — |
+| `email` | `text` | No | No | — |
+| `email_verified_at` | `integer` | Yes | No | — |
 | `id` | `text` | Yes | Yes | — |
 | `mfa_enabled_at` | `integer` | Yes | No | — |
 | `password_hash` | `text` | No | No | — |
@@ -1620,6 +1660,7 @@ This reference is generated from the exact Drizzle schema used by migrations and
 | Name | Columns | Unique | Predicate |
 | --- | --- | --- | --- |
 | `users_username_unique` | `username` | Yes | — |
+| `users_email_unique` | `email` | Yes | — |
 
 ### Checks
 
@@ -1629,6 +1670,8 @@ This reference is generated from the exact Drizzle schema used by migrations and
 | `users_created_at_check` | `"created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"` |
 | `users_disabled_at_check` | `"disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")` |
 | `users_id_check` | `length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'` |
+| `users_email_check` | `length("email") BETWEEN 3 AND 254 AND instr("email", char(0)) = 0 AND "email" = lower("email") AND instr("email", '@') BETWEEN 2 AND length("email") - 2 AND instr("email", ' ') = 0` |
+| `users_email_verified_at_check` | `"email_verified_at" IS NULL OR ("email_verified_at" BETWEEN 0 AND 8640000000000000 AND "email_verified_at" >= "created_at" AND "email_verified_at" <= "updated_at")` |
 | `users_mfa_enabled_at_check` | `"mfa_enabled_at" IS NULL OR ("mfa_enabled_at" BETWEEN 0 AND 8640000000000000 AND "mfa_enabled_at" >= "created_at" AND "mfa_enabled_at" <= "updated_at")` |
 | `users_password_hash_check` | `length("password_hash") = 118 AND instr("password_hash", char(0)) = 0 AND substr("password_hash", 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr("password_hash", 75, 1) = '$' AND substr("password_hash", 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr("password_hash", 118, 1) GLOB '[AEIMQUYcgkosw048]'` |
 | `users_username_check` | `length("username") BETWEEN 3 AND 32 AND instr("username", char(0)) = 0 AND "username" = lower("username") AND substr("username", 1, 1) GLOB '[a-z0-9]' AND "username" NOT GLOB '*[^a-z0-9._-]*'` |

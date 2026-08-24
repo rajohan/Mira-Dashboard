@@ -357,7 +357,7 @@ The action-status indexes intentionally mirror the repository's literal predicat
   `action_key = 'maintenance.rotate-logs'`, `length(CAST(payload_json AS BLOB)) <= 128`,
   and `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
 - `job_runs_service_action_terminal_idx` indexes
-  `(action_key, queued_at DESC, id DESC)` where `action_key` is one of the six fixed
+  `(action_key, queued_at DESC, id DESC)` where `action_key` is one of the nine fixed
   Service Action keys, `payload_json = '{}'`, and
   `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
 
@@ -478,9 +478,9 @@ snapshot so a restored database can rehydrate and settle the exact original Job 
 the external effect.
 
 Service Actions are a separate fixed-intent boundary, not a generic exec facade. The contract
-contains exactly `openclaw-cleanup`, `openclaw-restart`, `openclaw-update`, `system-cleanup`,
-`system-restart`, and `system-update`; a caller can supply only one of those IDs plus an actor-bound
-idempotency key.
+contains exactly `dashboard-restart`, `dashboard-stack-restart`, `worker-restart`,
+`openclaw-cleanup`, `openclaw-restart`, `openclaw-update`, `system-cleanup`, `system-restart`, and
+`system-update`; a caller can supply only one of those IDs plus an actor-bound idempotency key.
 Reads and requests are session-only under dedicated capabilities, requests require recent MFA, and
 audit attempt must commit before the durable enqueue handoff. That handoff rechecks exact-release
 worker availability, the current browser session, and recent MFA. Enqueue uncertainty is
@@ -492,7 +492,8 @@ OpenClaw cleanup and update are worker-only, fixed-parameter Gateway operations 
 sanitized results. OpenClaw restart reuses the existing fixed `openclaw.gateway.restart` worker
 definition, executor, and provider already used by Settings; its `host.mutation` plus
 `openclaw.gateway` resource locks serialize it with both host maintenance and other Gateway
-mutations. Host cleanup, restart, and update have one separately provisioned fixed broker
+mutations. Dashboard web/worker restart and host cleanup, restart, and update have one separately
+provisioned fixed broker
 whose only input is the reviewed operation ID and whose only output is an accepted/completed
 status. The root-owned units use fixed paths, fixed arguments, bounded output and deadlines, and no
 shell or caller-controlled environment. Manifest-bound provisioning validates no-follow file
@@ -662,7 +663,7 @@ persistent Gateway lifecycle, events, sessions, chat, or cron behavior. Every la
 integration must first audit the then-installed OpenClaw source and protocol. Legacy Dashboard
 integrations remain parity input rather than authority. The complete assets, misuse cases,
 controls, tests, and residual risks are recorded in the
-[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md).
+[security threat model](../../security/security-threat-model.md).
 
 Session cookies are `Secure`, `HttpOnly`, `SameSite=Strict`, narrowly scoped, and never readable
 by JavaScript. Unsafe browser requests require exact allowed Origin and Fetch Metadata before

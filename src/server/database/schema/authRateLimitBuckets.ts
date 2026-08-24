@@ -13,6 +13,8 @@ export const authenticationRateLimitKinds = [
     "login-mfa-source",
     "login-password-global",
     "login-password-source",
+    "password-reset-global",
+    "password-reset-source",
 ] as const;
 
 export type AuthenticationRateLimitKind = (typeof authenticationRateLimitKinds)[number];

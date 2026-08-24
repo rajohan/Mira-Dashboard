@@ -77,6 +77,7 @@ describe("task service", () => {
             .insert(users)
             .values({
                 createdAt: new Date(1000),
+                email: "operator@example.com",
                 id: taskTestPrincipal.id,
                 passwordHash: testDashboardPasswordHash,
                 updatedAt: new Date(1000),

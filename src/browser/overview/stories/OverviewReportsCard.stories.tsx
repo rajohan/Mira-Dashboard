@@ -38,7 +38,7 @@ const reportsRoute = createRoute({
 rootRoute.addChildren([overviewRoute, reportsRoute]);
 
 const meta = {
-    args: { hasMore: true, reports },
+    args: { reports },
     component: OverviewReportsCard,
     parameters: {
         layout: "padded",
@@ -74,5 +74,5 @@ export const LatestWindow: Story = {
 };
 
 export const Empty: Story = {
-    args: { hasMore: false, reports: [] },
+    args: { reports: [] },
 };

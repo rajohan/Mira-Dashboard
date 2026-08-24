@@ -53,7 +53,7 @@ describe("fixed host operations provisioning", () => {
             path.join(artifacts, "60-mira-dashboard-host-operations.rules")
         );
         expect(policy.match(/mira-dashboard-host-system-/gu)).toHaveLength(3);
-        for (const unit of Object.values(fixedHostOperationUnits)) {
+        for (const unit of Object.values(fixedHostOperationUnits).flat()) {
             expect(policy).toContain(`"${unit}"`);
         }
         expect(policy).toContain('subject.user !== "ubuntu"');

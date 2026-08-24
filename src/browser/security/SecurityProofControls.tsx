@@ -12,7 +12,7 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import type { useExclusiveDashboardAction } from "../hooks/useExclusiveDashboardAction.ts";
 import { Button } from "../ui/Button.tsx";
 import { Form } from "../ui/Form.tsx";
-import { firstFormFieldError } from "../ui/formErrors.ts";
+import { progressiveFormValidators, touchedFormFieldError } from "../ui/formErrors.ts";
 import { FormField } from "../ui/FormField.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
@@ -56,7 +56,7 @@ export function SecurityProofControls({
                 onVerified();
             }
         },
-        validators: { onSubmit: passwordReauthenticationInputSchema },
+        validators: progressiveFormValidators(passwordReauthenticationInputSchema),
     });
     const totpForm = useForm({
         defaultValues: { code: "" },
@@ -69,7 +69,7 @@ export function SecurityProofControls({
                 onVerified();
             }
         },
-        validators: { onSubmit: totpStepUpInputSchema },
+        validators: progressiveFormValidators(totpStepUpInputSchema),
     });
     const recoveryForm = useForm({
         defaultValues: { code: "" },
@@ -82,7 +82,7 @@ export function SecurityProofControls({
                 onVerified();
             }
         },
-        validators: { onSubmit: recoveryStepUpInputSchema },
+        validators: progressiveFormValidators(recoveryStepUpInputSchema),
     });
 
     async function stepUpWebAuthn() {
@@ -124,7 +124,7 @@ export function SecurityProofControls({
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Password to confirm your identity"
                             >
                                 <Input
@@ -178,7 +178,7 @@ export function SecurityProofControls({
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Authenticator code"
                             >
                                 <Input
@@ -225,7 +225,7 @@ export function SecurityProofControls({
                         {(field) => (
                             <FormField
                                 disabled={action.busy}
-                                error={firstFormFieldError(field.state.meta.errors)}
+                                error={touchedFormFieldError(field.state.meta)}
                                 label="Recovery code"
                             >
                                 <Input

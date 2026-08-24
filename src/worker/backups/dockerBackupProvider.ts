@@ -673,7 +673,20 @@ export function createDockerBackupJobExecutionPort(
                         healthy,
                         ...(latestCompletedAtMs === undefined
                             ? {}
-                            : { latestCompletedAtMs }),
+                            : {
+                                  ...(projected.latestBackupName === undefined
+                                      ? {}
+                                      : {
+                                            latestBackupName: projected.latestBackupName,
+                                        }),
+                                  latestCompletedAtMs,
+                                  ...(projected.latestWalFileName === undefined
+                                      ? {}
+                                      : {
+                                            latestWalFileName:
+                                                projected.latestWalFileName,
+                                        }),
+                              }),
                         observedAtMs,
                         providerIdle: projected.idle,
                         sourceRevision: discovered.sourceRevision,

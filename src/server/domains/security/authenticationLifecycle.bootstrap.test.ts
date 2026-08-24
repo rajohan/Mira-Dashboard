@@ -10,6 +10,31 @@ import {
 } from "./testSupport/authenticationLifecycle.ts";
 
 describe("authentication lifecycle bootstrap", () => {
+    test("does not retain pending email verification when bootstrap delivery fails", async () => {
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send: () => Promise.resolve(),
+                sendVerification: () => Promise.reject(new Error("delivery failed")),
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+
+        try {
+            const created = await bootstrapAuthenticationLifecycle(harness);
+
+            expect(created.status).toBe("created");
+            expect(
+                harness.database.sqlite
+                    .query<{ count: number }, []>(
+                        "SELECT count(*) AS count FROM auth_password_reset_tokens"
+                    )
+                    .get()
+            ).toEqual({ count: 0 });
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("bootstraps the sole user and persists only the session validator", async () => {
         const harness = await createAuthenticationLifecycleHarness();
 
@@ -22,6 +47,7 @@ describe("authentication lifecycle bootstrap", () => {
             expect(
                 await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "invalid-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -32,6 +58,7 @@ describe("authentication lifecycle bootstrap", () => {
             expect(
                 await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "another-invalid-gateway",
                         password: "current-password-1",
                         username: "operator",
@@ -108,6 +135,7 @@ describe("authentication lifecycle bootstrap", () => {
         try {
             const unavailable = await harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -141,6 +169,7 @@ describe("authentication lifecycle bootstrap", () => {
             for (const clientSourceId of ["source-1", "source-2"]) {
                 const unavailable = await harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "current-password-1",
                         username: "operator",
@@ -155,6 +184,7 @@ describe("authentication lifecycle bootstrap", () => {
 
             const limited = await harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -196,6 +226,7 @@ describe("authentication lifecycle bootstrap", () => {
             try {
                 const winner = harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-winner",
                         password: "current-password-1",
                         username: "operator",
@@ -207,6 +238,7 @@ describe("authentication lifecycle bootstrap", () => {
                 );
                 const late = harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-late",
                         password: "current-password-1",
                         username: "operator",
@@ -279,6 +311,7 @@ describe("authentication lifecycle bootstrap", () => {
         try {
             const pending = harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -322,6 +355,7 @@ describe("authentication lifecycle bootstrap", () => {
         try {
             const pending = harness.service.bootstrap(
                 {
+                    email: "operator@example.com",
                     gatewayCredential: "gateway-token",
                     password: "current-password-1",
                     username: "operator",
@@ -357,6 +391,7 @@ describe("authentication lifecycle bootstrap", () => {
             const results = await Promise.all([
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "current-password-1",
                         username: "operator",
@@ -365,6 +400,7 @@ describe("authentication lifecycle bootstrap", () => {
                 ),
                 harness.service.bootstrap(
                     {
+                        email: "operator@example.com",
                         gatewayCredential: "gateway-token",
                         password: "replacement-password-2",
                         username: "operator-two",
