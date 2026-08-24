@@ -101,7 +101,7 @@ function AuthenticatedDashboardHeaderControls() {
     const status = projectDashboardSystemStatus(
         health.data,
         dashboardHealthSnapshotIsStale({
-            checkedAtMs: health.data?.checkedAtMs,
+            dataUpdatedAtMs: health.dataUpdatedAt,
             fetchStatus: health.fetchStatus,
             hasData: health.data !== undefined,
             isError: health.isError,

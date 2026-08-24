@@ -40,6 +40,8 @@ import {
     type JobActionDefinition,
     findJobActionDefinition,
     isRegisteredJobSchedule,
+    jobScheduleAllowsAutomationManualRun,
+    jobScheduleManualRunCapability,
     jobScheduleIsOperatorVisible,
     jobActionDefinitions,
 } from "./actionRegistry.ts";
@@ -521,6 +523,15 @@ export function createJobService(
                 }
                 if (
                     registration === undefined ||
+                    (principal.kind !== "session" &&
+                        !jobScheduleAllowsAutomationManualRun(
+                            schedule.id,
+                            schedule.actionKey
+                        )) ||
+                    (principal.kind === "session" &&
+                        !principal.capabilities.includes(
+                            jobScheduleManualRunCapability(schedule.actionKey)
+                        )) ||
                     (registration.manualExposure !== "jobs-write" &&
                         !jobScheduleIsOperatorVisible(schedule.id))
                 ) {

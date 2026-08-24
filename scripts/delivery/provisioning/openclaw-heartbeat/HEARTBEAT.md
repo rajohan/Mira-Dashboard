@@ -10,7 +10,8 @@ bun /home/ubuntu/projects/mira-dashboard/production/releases/current/server/open
 Require `schemaVersion: 5`. Assess only:
 
 - high/medium `agent-priority` tasks needing attention and every `owner-blocked` task;
-- missing, disabled, failing, stale, stuck, or synchronization-conflicted automation;
+- missing, unexpectedly disabled, failing, stale, stuck, or synchronization-conflicted
+  automation; a schedule disabled by its committed default is expected;
 - unavailable or attention-state schedules, cache, Gateway, backups, database maintenance,
   Docker, Git, capacity, logs, quota, and weather.
 

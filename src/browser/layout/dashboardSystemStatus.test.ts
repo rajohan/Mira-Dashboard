@@ -61,7 +61,7 @@ describe("Dashboard system status projection", () => {
         ).toBe(false);
         expect(
             dashboardHealthSnapshotIsStale({
-                checkedAtMs: observedAtMs,
+                dataUpdatedAtMs: observedAtMs,
                 fetchStatus: "fetching",
                 hasData: true,
                 isError: false,
@@ -70,7 +70,7 @@ describe("Dashboard system status projection", () => {
         ).toBe(false);
         expect(
             dashboardHealthSnapshotIsStale({
-                checkedAtMs: observedAtMs,
+                dataUpdatedAtMs: observedAtMs,
                 fetchStatus: "idle",
                 hasData: true,
                 isError: false,
@@ -79,7 +79,7 @@ describe("Dashboard system status projection", () => {
         ).toBe(false);
         expect(
             dashboardHealthSnapshotIsStale({
-                checkedAtMs: observedAtMs,
+                dataUpdatedAtMs: observedAtMs,
                 fetchStatus: "idle",
                 hasData: true,
                 isError: false,

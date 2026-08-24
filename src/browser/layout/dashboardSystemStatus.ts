@@ -29,16 +29,16 @@ export interface DashboardSystemStatus {
  * @returns Whether a prior snapshot is no longer backed by a current observation.
  */
 export function dashboardHealthSnapshotIsStale(query: {
-    readonly checkedAtMs?: number;
+    readonly dataUpdatedAtMs?: number;
     readonly fetchStatus: "fetching" | "idle" | "paused";
     readonly hasData: boolean;
     readonly isError: boolean;
     readonly nowMs?: number;
 }): boolean {
     const observationExpired =
-        query.checkedAtMs !== undefined &&
+        query.dataUpdatedAtMs !== undefined &&
         query.fetchStatus === "idle" &&
-        (query.nowMs ?? Date.now()) - query.checkedAtMs >
+        (query.nowMs ?? Date.now()) - query.dataUpdatedAtMs >
             systemStatusMaximumObservationAgeMs;
     return (
         query.hasData &&
