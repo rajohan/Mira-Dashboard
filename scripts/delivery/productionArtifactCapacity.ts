@@ -183,6 +183,7 @@ async function existingManagedDirectory(
 
 async function runtimeSourceBytes(sourceExecutable: string): Promise<bigint> {
     try {
+        if (typeof process.getuid !== "function") throw failure();
         if (
             !path.isAbsolute(sourceExecutable) ||
             sourceExecutable.includes("\0") ||
@@ -192,12 +193,19 @@ async function runtimeSourceBytes(sourceExecutable: string): Promise<bigint> {
             throw failure();
         }
         const status = await lstat(sourceExecutable, { bigint: true });
+        const currentUid = BigInt(process.getuid());
+        const rootControlled =
+            status.uid === 0n && (await rootControlsRuntimeSource(sourceExecutable));
         if (
-            typeof process.getuid !== "function" ||
             !status.isFile() ||
             status.isSymbolicLink() ||
             status.nlink !== 1n ||
-            status.uid !== BigInt(process.getuid()) ||
+            !runtimeSourceOwnershipIsTrusted(
+                status.uid,
+                currentUid,
+                status.mode,
+                rootControlled
+            ) ||
             status.size <= 0n ||
             status.size > maximumRuntimeBytes ||
             (status.mode & 0o100n) === 0n
@@ -208,6 +216,49 @@ async function runtimeSourceBytes(sourceExecutable: string): Promise<bigint> {
     } catch {
         throw failure();
     }
+}
+
+/**
+ * Checks every ancestor of one root-owned bootstrap runtime.
+ * @param sourceExecutable Canonical runtime executable path.
+ * @returns Whether root exclusively controls the complete parent path.
+ */
+async function rootControlsRuntimeSource(sourceExecutable: string): Promise<boolean> {
+    let candidate = path.dirname(sourceExecutable);
+    while (true) {
+        const status = await lstat(candidate, { bigint: true });
+        if (
+            !status.isDirectory() ||
+            status.isSymbolicLink() ||
+            status.uid !== 0n ||
+            (status.mode & 0o022n) !== 0n
+        ) {
+            return false;
+        }
+        const parent = path.dirname(candidate);
+        if (parent === candidate) return true;
+        candidate = parent;
+    }
+}
+
+/**
+ * Evaluates the bounded runtime-source ownership policy.
+ * @param ownerUid Runtime file owner.
+ * @param currentUid Delivery process owner.
+ * @param mode Runtime file mode.
+ * @param rootControlled Whether every ancestor is root-controlled.
+ * @returns Whether the runtime is an admissible immutable copy source.
+ */
+export function runtimeSourceOwnershipIsTrusted(
+    ownerUid: bigint,
+    currentUid: bigint,
+    mode: bigint,
+    rootControlled: boolean
+): boolean {
+    return (
+        (mode & 0o022n) === 0n &&
+        (ownerUid === currentUid || (ownerUid === 0n && rootControlled))
+    );
 }
 
 /**
