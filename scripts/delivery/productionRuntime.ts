@@ -16,6 +16,8 @@ import * as v from "valibot";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import {
     assertProductionArtifactCopyCapacity,
+    rootControlsRuntimeSource,
+    runtimeSourceOwnershipIsTrusted,
     type ProductionArtifactCapacityDependencies,
 } from "./productionArtifactCapacity.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
@@ -81,13 +83,18 @@ function errorCode(error: unknown): string | undefined {
         : undefined;
 }
 
-function snapshot(status: BigIntStats): FileSnapshot {
+function snapshot(status: BigIntStats, rootControlled: boolean): FileSnapshot {
+    if (typeof process.getuid !== "function") throw productionRuntimeFailure();
     if (
-        typeof process.getuid !== "function" ||
         !status.isFile() ||
         status.isSymbolicLink() ||
         status.nlink !== 1n ||
-        status.uid !== BigInt(process.getuid()) ||
+        !runtimeSourceOwnershipIsTrusted(
+            status.uid,
+            BigInt(process.getuid()),
+            status.mode,
+            rootControlled
+        ) ||
         status.size <= 0n ||
         status.size > BigInt(maximumRuntimeBytes)
     ) {
@@ -293,7 +300,9 @@ async function copyRuntimeExecutable(
     try {
         source = await open(sourceExecutable, sourceFlags);
         const heldStatus = await source.stat({ bigint: true });
-        const heldBefore = snapshot(heldStatus);
+        const rootControlled =
+            heldStatus.uid === 0n && (await rootControlsRuntimeSource(sourceExecutable));
+        const heldBefore = snapshot(heldStatus, rootControlled);
         const canonical = await realpath(`/proc/self/fd/${source.fd}`);
         if (canonical !== sourceExecutable || (heldStatus.mode & 0o100n) === 0n) {
             throw productionRuntimeFailure();
@@ -337,12 +346,15 @@ async function copyRuntimeExecutable(
             lstat(sourceExecutable, { bigint: true }),
             target.stat({ bigint: true }),
         ]);
+        const sourceStillRootControlled =
+            heldBefore.uid === 0n && (await rootControlsRuntimeSource(sourceExecutable));
         if (
-            !sameSnapshot(heldBefore, snapshot(heldAfter)) ||
-            !sameSnapshot(heldBefore, snapshot(sourceAfter)) ||
+            !sameSnapshot(heldBefore, snapshot(heldAfter, sourceStillRootControlled)) ||
+            !sameSnapshot(heldBefore, snapshot(sourceAfter, sourceStillRootControlled)) ||
             targetStatus.size !== heldBefore.size ||
             targetStatus.nlink !== 1n ||
-            targetStatus.uid !== heldBefore.uid
+            typeof process.getuid !== "function" ||
+            targetStatus.uid !== BigInt(process.getuid())
         ) {
             throw productionRuntimeFailure();
         }

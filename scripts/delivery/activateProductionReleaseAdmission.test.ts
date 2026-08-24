@@ -17,6 +17,7 @@ import {
     assertProductionArtifactCopyCapacity,
     productionArtifactCapacityReserveBytes,
     productionArtifactCapacityReserveInodes,
+    runtimeSourceOwnershipIsTrusted,
 } from "./productionArtifactCapacity.ts";
 import { retainProductionArtifacts } from "./productionArtifactRetention.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
@@ -119,6 +120,13 @@ async function immutableTree(
 }
 
 describe("production artifact pre-admission lifecycle", () => {
+    test("admits a root-owned bootstrap runtime only under root-controlled ancestors", () => {
+        expect(runtimeSourceOwnershipIsTrusted(0n, 1000n, 0o755n, true)).toBeTrue();
+        expect(runtimeSourceOwnershipIsTrusted(0n, 1000n, 0o755n, false)).toBeFalse();
+        expect(runtimeSourceOwnershipIsTrusted(0n, 1000n, 0o775n, true)).toBeFalse();
+        expect(runtimeSourceOwnershipIsTrusted(1000n, 1000n, 0o500n, false)).toBeTrue();
+    });
+
     test("activates only after admission, install, and publication settle", async () => {
         const fixture = await createFixture();
         await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
