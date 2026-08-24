@@ -4,6 +4,7 @@ import type { SystemHealthDiagnostics } from "../../contracts/system.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 const systemStatusRefreshIntervalMs = 15_000;
+const systemStatusMaximumObservationAgeMs = systemStatusRefreshIntervalMs * 3;
 
 export const dashboardHealthDiagnosticsQueryKey = [
     "system-status",
@@ -28,16 +29,20 @@ export interface DashboardSystemStatus {
  * @returns Whether a prior snapshot is no longer backed by a current observation.
  */
 export function dashboardHealthSnapshotIsStale(query: {
+    readonly checkedAtMs?: number;
     readonly fetchStatus: "fetching" | "idle" | "paused";
     readonly hasData: boolean;
     readonly isError: boolean;
-    readonly isStale: boolean;
+    readonly nowMs?: number;
 }): boolean {
+    const observationExpired =
+        query.checkedAtMs !== undefined &&
+        query.fetchStatus === "idle" &&
+        (query.nowMs ?? Date.now()) - query.checkedAtMs >
+            systemStatusMaximumObservationAgeMs;
     return (
         query.hasData &&
-        (query.isError ||
-            query.fetchStatus === "paused" ||
-            (query.isStale && query.fetchStatus === "idle"))
+        (query.isError || query.fetchStatus === "paused" || observationExpired)
     );
 }
 

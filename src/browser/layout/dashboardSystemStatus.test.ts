@@ -50,7 +50,6 @@ describe("Dashboard system status projection", () => {
                 fetchStatus: "idle",
                 hasData: false,
                 isError: true,
-                isStale: true,
             })
         ).toBe(false);
         expect(
@@ -58,15 +57,33 @@ describe("Dashboard system status projection", () => {
                 fetchStatus: "fetching",
                 hasData: true,
                 isError: false,
-                isStale: true,
             })
         ).toBe(false);
         expect(
             dashboardHealthSnapshotIsStale({
+                checkedAtMs: observedAtMs,
+                fetchStatus: "fetching",
+                hasData: true,
+                isError: false,
+                nowMs: observedAtMs + 45_001,
+            })
+        ).toBe(false);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                checkedAtMs: observedAtMs,
                 fetchStatus: "idle",
                 hasData: true,
                 isError: false,
-                isStale: true,
+                nowMs: observedAtMs + 15_001,
+            })
+        ).toBe(false);
+        expect(
+            dashboardHealthSnapshotIsStale({
+                checkedAtMs: observedAtMs,
+                fetchStatus: "idle",
+                hasData: true,
+                isError: false,
+                nowMs: observedAtMs + 45_001,
             })
         ).toBe(true);
         expect(
@@ -74,7 +91,6 @@ describe("Dashboard system status projection", () => {
                 fetchStatus: "paused",
                 hasData: true,
                 isError: false,
-                isStale: false,
             })
         ).toBe(true);
         expect(
@@ -82,7 +98,6 @@ describe("Dashboard system status projection", () => {
                 fetchStatus: "idle",
                 hasData: true,
                 isError: true,
-                isStale: false,
             })
         ).toBe(true);
         expect(
@@ -90,7 +105,6 @@ describe("Dashboard system status projection", () => {
                 fetchStatus: "idle",
                 hasData: true,
                 isError: false,
-                isStale: false,
             })
         ).toBe(false);
     });
