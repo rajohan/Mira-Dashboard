@@ -1,0 +1,311 @@
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { CalendarClock } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
+
+import type { ScheduleConfiguration } from "../../contracts/jobModel.ts";
+import type { ListSchedulesInput } from "../../contracts/schedules.ts";
+import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { Alert } from "../ui/Alert.tsx";
+import { Button } from "../ui/Button.tsx";
+import { FormField } from "../ui/FormField.tsx";
+import { Heading } from "../ui/Heading.tsx";
+import { PageState } from "../ui/PageState.tsx";
+import { Select, type SelectOption } from "../ui/Select.tsx";
+import { Text } from "../ui/Text.tsx";
+import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
+import { useRunScheduleMutation, useUpdateScheduleMutation } from "./jobMutations.ts";
+import {
+    scheduleDetailQueryOptions,
+    scheduleListQueryOptions,
+    scheduleRunListQueryOptions,
+    uniqueJobRows,
+} from "./jobQueries.ts";
+import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
+import { JobRunTable } from "./JobRunTable.tsx";
+import { ScheduleDetail } from "./ScheduleDetail.tsx";
+import { ScheduleTable } from "./ScheduleTable.tsx";
+
+type ScheduleEnabledFilter = NonNullable<ListSchedulesInput["enabled"]>;
+
+const scheduleEnabledOptions: readonly SelectOption<ScheduleEnabledFilter>[] =
+    Object.freeze([
+        { label: "All schedules", value: "all" },
+        { label: "Enabled", value: "enabled" },
+        { label: "Disabled", value: "disabled" },
+    ]);
+
+interface SelectedScheduleProps {
+    readonly focusRequested: boolean;
+    readonly id: string;
+    readonly onFocusHandled: (id: string) => void;
+    readonly onSelectRun: (id: string) => void;
+    readonly selectedRunId?: string;
+}
+
+function SelectedSchedule({
+    focusRequested,
+    id,
+    onFocusHandled,
+    onSelectRun,
+    selectedRunId,
+}: SelectedScheduleProps) {
+    const client = useDashboardTrpcClient();
+    const detail = useQuery(scheduleDetailQueryOptions(client, id));
+    const history = useInfiniteQuery(scheduleRunListQueryOptions(client, id));
+    const update = useUpdateScheduleMutation();
+    const run = useRunScheduleMutation();
+    const runs = uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []);
+
+    useEffect(() => {
+        if (!focusRequested || detail.data === undefined) return;
+        const timer = setTimeout(() => {
+            document.querySelector<HTMLElement>("#schedule-detail-heading")?.focus();
+            onFocusHandled(id);
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [detail.data, focusRequested, id, onFocusHandled]);
+
+    if (detail.isPending && detail.data === undefined) {
+        return <PageState label="Loading schedule…" status="loading" />;
+    }
+    if (detail.data === undefined) {
+        return (
+            <PageState
+                message={jobBrowserFailureMessage(detail.error)}
+                onRetry={() => void detail.refetch()}
+                retryBusy={detail.isFetching}
+                status="error"
+                title="Schedule unavailable"
+            />
+        );
+    }
+
+    const schedule = detail.data;
+    const mutationError = update.error ?? run.error;
+    let historyContent;
+    if (history.isPending && history.data === undefined) {
+        historyContent = <PageState label="Loading schedule runs…" status="loading" />;
+    } else if (history.data === undefined) {
+        historyContent = (
+            <PageState
+                message={jobBrowserFailureMessage(history.error)}
+                onRetry={() => void history.refetch()}
+                retryBusy={history.isFetching}
+                status="error"
+                title="Schedule history unavailable"
+            />
+        );
+    } else {
+        historyContent = (
+            <>
+                <Alert
+                    className="mb-4"
+                    focusOnError={false}
+                    message={
+                        history.error === null
+                            ? undefined
+                            : jobBrowserFailureMessage(history.error)
+                    }
+                />
+                <JobRunTable
+                    onSelect={onSelectRun}
+                    runs={runs}
+                    selectedId={selectedRunId}
+                />
+                {history.hasNextPage && (
+                    <Button
+                        busy={history.isFetchingNextPage}
+                        busyLabel="Loading…"
+                        className="mt-4"
+                        onClick={() => void history.fetchNextPage()}
+                        variant="secondary"
+                    >
+                        Load more schedule runs
+                    </Button>
+                )}
+            </>
+        );
+    }
+
+    const updateSchedule = async (
+        patch: Parameters<typeof update.mutateAsync>[0]["patch"],
+        expectedVersion = schedule.version
+    ): Promise<void> => {
+        run.reset();
+        await update.mutateAsync({
+            expectedVersion,
+            id: schedule.id,
+            patch,
+        });
+    };
+
+    return (
+        <ScheduleDetail
+            disableError={
+                update.error === null ? undefined : jobBrowserFailureMessage(update.error)
+            }
+            error={
+                mutationError === null && detail.error === null
+                    ? undefined
+                    : jobBrowserFailureMessage(mutationError ?? detail.error)
+            }
+            errorFocus={mutationError !== null}
+            history={historyContent}
+            onDisable={(disableIntent, expectedVersion) =>
+                updateSchedule({ disableIntent, enabled: false }, expectedVersion)
+            }
+            onEnable={() => updateSchedule({ disableIntent: null, enabled: true })}
+            onOpenDisable={() => {
+                update.reset();
+                run.reset();
+            }}
+            onRun={async () => {
+                update.reset();
+                const enqueued = await run.mutateAsync({ id: schedule.id });
+                onSelectRun(enqueued.id);
+            }}
+            onSaveConfiguration={(configuration: ScheduleConfiguration) =>
+                updateSchedule({ schedule: configuration })
+            }
+            runBusy={run.isPending}
+            runReplayAvailable={run.hasPendingRequest(schedule.id)}
+            schedule={schedule}
+            updateBusy={update.isPending}
+        />
+    );
+}
+
+interface ScheduleBrowserProps {
+    readonly onRequestRunFocus: (id: string) => void;
+}
+
+/** @returns Filtered schedule directory, exact editor, and schedule-scoped history. */
+export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
+    const client = useDashboardTrpcClient();
+    const navigate = useNavigate({ from: "/jobs" });
+    const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
+    const [enabled, setEnabled] = useState<ScheduleEnabledFilter>("all");
+    const [focusScheduleId, setFocusScheduleId] = useState<string>();
+    const query = useInfiniteQuery(scheduleListQueryOptions(client, enabled));
+    const schedules = uniqueJobRows(
+        query.data?.pages.flatMap((page) => page.schedules) ?? []
+    );
+    const select = (selection: { runId?: string; scheduleId?: string }) => {
+        void navigate({ replace: true, search: selection });
+    };
+    const selectSchedule = (scheduleId: string | undefined) => {
+        setFocusScheduleId(scheduleId);
+        select({
+            ...(search.runId === undefined ? {} : { runId: search.runId }),
+            ...(scheduleId === undefined ? {} : { scheduleId }),
+        });
+    };
+    const selectRun = (runId: string) => {
+        onRequestRunFocus(runId);
+        select({
+            runId,
+            ...(search.scheduleId === undefined ? {} : { scheduleId: search.scheduleId }),
+        });
+    };
+    let directoryContent: ReactNode;
+    if (query.isPending && query.data === undefined) {
+        directoryContent = <PageState label="Loading schedules…" status="loading" />;
+    } else if (query.data === undefined) {
+        directoryContent = (
+            <PageState
+                message={jobBrowserFailureMessage(query.error)}
+                onRetry={() => void query.refetch()}
+                retryBusy={query.isFetching}
+                status="error"
+                title="Schedule directory unavailable"
+            />
+        );
+    } else if (schedules.length === 0) {
+        directoryContent = (
+            <PageState
+                description="Change the enabled-state filter or reconcile a code-owned schedule."
+                icon={CalendarClock}
+                status="empty"
+                title="No matching schedules"
+            />
+        );
+    } else {
+        directoryContent = (
+            <>
+                <ScheduleTable
+                    onSelect={selectSchedule}
+                    schedules={schedules}
+                    selectedId={search.scheduleId}
+                />
+                {query.hasNextPage && (
+                    <Button
+                        busy={query.isFetchingNextPage}
+                        busyLabel="Loading…"
+                        className="mt-4"
+                        onClick={() => void query.fetchNextPage()}
+                        variant="secondary"
+                    >
+                        Load more schedules
+                    </Button>
+                )}
+            </>
+        );
+    }
+
+    return (
+        <section aria-labelledby="schedules-heading">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                    <Heading id="schedules-heading" level={2}>
+                        Dashboard schedules
+                    </Heading>
+                    <Text className="mt-1" tone="muted">
+                        Edit code-owned cadence, explicit disable intent, and
+                        lost-response-safe manual runs.
+                    </Text>
+                </div>
+                <FormField label="Directory filter">
+                    <Select
+                        className="mt-2 min-w-48"
+                        onChange={setEnabled}
+                        options={scheduleEnabledOptions}
+                        value={enabled}
+                    />
+                </FormField>
+            </div>
+            <Alert
+                className="mt-4"
+                focusOnError={false}
+                message={
+                    query.data === undefined || query.error === null
+                        ? undefined
+                        : jobBrowserFailureMessage(query.error)
+                }
+            />
+            <div className="mt-5">{directoryContent}</div>
+            <div className="mt-7">
+                {search.scheduleId === undefined ? (
+                    <PageState
+                        description="Select a schedule from any page, or open a validated scheduleId deep link."
+                        status="empty"
+                        title="Select a schedule"
+                    />
+                ) : (
+                    <SelectedSchedule
+                        focusRequested={focusScheduleId === search.scheduleId}
+                        id={search.scheduleId}
+                        key={search.scheduleId}
+                        onFocusHandled={(id) =>
+                            setFocusScheduleId((current) =>
+                                current === id ? undefined : current
+                            )
+                        }
+                        onSelectRun={selectRun}
+                        selectedRunId={search.runId}
+                    />
+                )}
+            </div>
+        </section>
+    );
+}

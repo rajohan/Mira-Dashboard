@@ -2,6 +2,7 @@ import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/re
 import { Outlet, useLocation } from "@tanstack/react-router";
 import {
     Bot,
+    CalendarClock,
     Home,
     ListTodo,
     Menu,
@@ -31,6 +32,7 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Home, label: "Dashboard", to: "/" },
     { icon: Bot, label: "Agents", to: "/agents" },
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
+    { icon: CalendarClock, label: "Jobs", to: "/jobs" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
     { icon: ShieldCheck, label: "Account security", to: "/account-security" },
 ]);

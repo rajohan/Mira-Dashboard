@@ -101,12 +101,15 @@ export const listSchedulesResultSchema = v.pipe(
 /** Exact schedule lookup request. */
 export const getScheduleInputSchema = v.strictObject({ id: scheduleIdSchema });
 
+/** Operator-supplied reason shared by the schedule contract and browser form. */
+export const scheduleDisableReasonSchema = boundedControlSafeTextSchema(
+    jobDescriptionMaximumLength,
+    "Schedule disable reason is invalid"
+);
+
 const scheduleDisableIntentInputSchema = v.strictObject({
     expiresAtMs: v.optional(jobTimestampSchema),
-    reason: boundedControlSafeTextSchema(
-        jobDescriptionMaximumLength,
-        "Schedule disable reason is invalid"
-    ),
+    reason: scheduleDisableReasonSchema,
 });
 
 const updateSchedulePatchObjectSchema = v.strictObject({

@@ -115,6 +115,11 @@ describe("Dashboard data table and virtualizer", () => {
 
         expect(screen.getByText("First row")).toBeTruthy();
         expect(screen.getByText("Second row")).toBeTruthy();
+        const scrollRegion = screen.getByRole("region", { name: "Fixture rows" });
+        expect(scrollRegion).toHaveAttribute("tabindex", "0");
+        scrollRegion.focus();
+        expect(scrollRegion).toHaveFocus();
+        expect(scrollRegion).toHaveClass("focus-visible:ring-2");
     });
 
     test("composes the table with a bounded virtual row window", () => {
