@@ -177,6 +177,14 @@ import {
     openClawCronUpdatePatchIsNonempty,
 } from "../../src/contracts/openClawCron.ts";
 import {
+    openClawAgentAccessHasStableUniqueOrder,
+    openClawAgentToolsAreCompleteAndOrdered,
+    openClawChannelsHaveStableUniqueOrder,
+    openClawSkillBundledSourceIsConsistent,
+    openClawSkillInstallationSourceIsConsistent,
+    openClawSkillsHaveStableUniqueOrder,
+} from "../../src/contracts/openClawSettings.ts";
+import {
     openClawTaskCancelledResultWasFound,
     openClawTaskCancelSnapshotMatchesFound,
     openClawTaskDetailLifecycleIsConsistent,
@@ -514,6 +522,30 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         openClawCronUpdatePatchIsNonempty,
         "Live Valibot validation additionally requires at least one reviewed OpenClaw cron field to change.",
+    ],
+    [
+        openClawAgentAccessHasStableUniqueOrder,
+        "Live Valibot validation additionally requires OpenClaw agent IDs to be unique and strictly ordered.",
+    ],
+    [
+        openClawAgentToolsAreCompleteAndOrdered,
+        "Live Valibot validation additionally requires every OpenClaw agent row to contain the complete canonical reviewed tool set in exact order.",
+    ],
+    [
+        openClawChannelsHaveStableUniqueOrder,
+        "Live Valibot validation additionally requires configured OpenClaw channel IDs to be unique and strictly ordered.",
+    ],
+    [
+        openClawSkillBundledSourceIsConsistent,
+        "Live Valibot validation additionally requires the bundled marker to be true exactly for the openclaw-bundled source.",
+    ],
+    [
+        openClawSkillInstallationSourceIsConsistent,
+        "Live Valibot validation additionally requires only configured-only OpenClaw skills to be marked not installed.",
+    ],
+    [
+        openClawSkillsHaveStableUniqueOrder,
+        "Live Valibot validation additionally requires OpenClaw skill keys to be unique and strictly ordered.",
     ],
     [
         gatewaySessionTokenFreshnessIsConsistent,

@@ -19,6 +19,7 @@ import {
     PersistentGatewayCapacityError,
     persistentGatewayChatEventQueueMaximumBytes,
     persistentGatewayChatTrackedRunMaximum,
+    persistentGatewayConfigurationChangedReason,
     persistentGatewayCronJobChangedReason,
     persistentGatewaySessionCompanionBusyReason,
     type PersistentGatewayConnectionSnapshot,
@@ -1299,6 +1300,312 @@ describe("persistent native Gateway transport", () => {
         expect(harness.sockets).toHaveLength(1);
     });
 
+    test("reuses the persistent read lane but isolates Settings controls on admin sockets", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        transport.start();
+        const readSocket = harness.sockets[0];
+        if (readSocket === undefined) throw new Error("Expected persistent read socket");
+        completeHandshake(readSocket, {
+            lane: "web-read",
+            methods: ["config.get", "skills.status"],
+        });
+
+        const read = transport.requestOpenClawSettingsRead("config.get", {});
+        const readFrame = sentFrame(readSocket, 1);
+        expect(readFrame).toMatchObject({ method: "config.get", params: {} });
+        readSocket.receive({
+            id: readFrame.id,
+            ok: true,
+            payload: { hash: "a".repeat(64) },
+            type: "res",
+        });
+        expect(await read).toEqual({ hash: "a".repeat(64) });
+
+        const write = transport.requestOpenClawSettingsWrite(
+            "config.patch",
+            {
+                baseHash: "a".repeat(64),
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({
+                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                }),
+            },
+            { beforeDispatch: () => Promise.resolve() }
+        );
+        const writeSocket = harness.sockets[1];
+        if (writeSocket === undefined) throw new Error("Expected Settings admin socket");
+        const connect = completeHandshake(writeSocket, {
+            lane: "admin",
+            methods: ["config.patch"],
+        });
+        expect(connect.params).toMatchObject({ scopes: ["operator.admin"] });
+        await flushMicrotasks();
+        const writeFrame = sentFrame(writeSocket, 1);
+        expect(writeFrame).toMatchObject({
+            method: "config.patch",
+            params: {
+                baseHash: "a".repeat(64),
+                note: "Updated from Mira Dashboard settings",
+            },
+        });
+        writeSocket.receive({
+            id: writeFrame.id,
+            ok: true,
+            payload: { ok: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+        writeSocket.finishClose();
+        expect(await write).toEqual({ ok: true });
+        expect(readSocket.closeCalls).toHaveLength(0);
+        await stopConnected(transport, readSocket);
+    });
+
+    test("runs skills.update only after reauthorization on a fresh admin socket and preserves unknown outcomes", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const authorization = Promise.withResolvers<void>();
+        let authorizationCalls = 0;
+        const firstMutation = transport.requestOpenClawSettingsWrite(
+            "skills.update",
+            { enabled: false, skillKey: "imagegen" },
+            {
+                beforeDispatch: () => {
+                    authorizationCalls += 1;
+                    return authorization.promise;
+                },
+            }
+        );
+        const firstSocket = harness.sockets[0];
+        if (firstSocket === undefined) throw new Error("Expected Settings admin socket");
+        expect(authorizationCalls).toBe(0);
+
+        const connect = completeHandshake(firstSocket, {
+            lane: "admin",
+            methods: ["skills.update"],
+        });
+        expect(connect.params).toMatchObject({ scopes: ["operator.admin"] });
+        await flushMicrotasks();
+        expect(authorizationCalls).toBe(1);
+        expect(firstSocket.sent).toHaveLength(1);
+
+        authorization.resolve();
+        await flushMicrotasks();
+        const firstRequest = sentFrame(firstSocket, 1);
+        expect(firstRequest).toMatchObject({
+            method: "skills.update",
+            params: { enabled: false, skillKey: "imagegen" },
+        });
+        firstSocket.receive({
+            id: firstRequest.id,
+            ok: true,
+            payload: { ok: true },
+            type: "res",
+        });
+        await flushMicrotasks();
+        expect(firstSocket.closeCalls).toEqual([
+            { code: 1000, reason: "gateway lane complete" },
+        ]);
+        firstSocket.finishClose();
+        expect(await firstMutation).toEqual({ ok: true });
+
+        const secondMutation = transport.requestOpenClawSettingsWrite(
+            "skills.update",
+            { enabled: true, skillKey: "imagegen" },
+            {
+                beforeDispatch: () => {
+                    authorizationCalls += 1;
+                    return Promise.resolve();
+                },
+            }
+        );
+        const secondFailure = captureFailure(() => secondMutation);
+        const secondSocket = harness.sockets[1];
+        if (secondSocket === undefined)
+            throw new Error("Expected a fresh Settings admin socket");
+        completeHandshake(secondSocket, {
+            lane: "admin",
+            methods: ["skills.update"],
+        });
+        await flushMicrotasks();
+        expect(authorizationCalls).toBe(2);
+        expect(sentFrame(secondSocket, 1)).toMatchObject({
+            method: "skills.update",
+            params: { enabled: true, skillKey: "imagegen" },
+        });
+
+        secondSocket.finishClose();
+        expect(await secondFailure).toEqual(new PersistentGatewayUnknownOutcomeError());
+        expect(harness.sockets).toHaveLength(2);
+        await transport.stop();
+    });
+
+    test("rejects skills.update through every non-Settings request lane", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const parameters = { enabled: false, skillKey: "imagegen" };
+        const wrongLaneRequests = [
+            transport.request.bind(transport),
+            transport.requestAdmin.bind(transport),
+            transport.requestOpenClawSettingsRead.bind(transport),
+            transport.requestChatRead.bind(transport),
+            transport.requestChatReadMutation.bind(transport),
+            transport.requestChatWrite.bind(transport),
+            transport.requestTaskRead.bind(transport),
+            transport.requestTaskWrite.bind(transport),
+        ] as readonly RuntimeRequest[];
+
+        for (const request of wrongLaneRequests) {
+            expect(
+                await captureFailure(() => request("skills.update", parameters))
+            ).toBeInstanceOf(PersistentGatewayUnavailableError);
+        }
+        expect(harness.sockets).toHaveLength(0);
+        await transport.stop();
+    });
+
+    test("reauthorizes Settings controls after handshake before sending a mutation", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const authorizationFailure = new Error("recent MFA expired");
+        let revoked = false;
+        let authorizationCalls = 0;
+        const mutation = transport.requestOpenClawSettingsWrite(
+            "config.patch",
+            {
+                baseHash: "a".repeat(64),
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({
+                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                }),
+            },
+            {
+                beforeDispatch: () => {
+                    authorizationCalls += 1;
+                    return revoked
+                        ? Promise.reject(authorizationFailure)
+                        : Promise.resolve();
+                },
+            }
+        );
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected Settings admin socket");
+        socket.open();
+        socket.receive({
+            event: "connect.challenge",
+            payload: { nonce: "fixture-nonce" },
+            type: "event",
+        });
+        const connect = sentFrame(socket, 0);
+        expect(authorizationCalls).toBe(0);
+        expect(socket.sent).toHaveLength(1);
+
+        revoked = true;
+        socket.receive({
+            id: connect.id,
+            ok: true,
+            payload: helloPayload({
+                connectionId: "settings-authorization",
+                methods: ["config.patch"],
+                scopes: ["operator.admin"],
+            }),
+            type: "res",
+        });
+        await flushMicrotasks();
+        expect(authorizationCalls).toBe(1);
+        expect(socket.sent).toHaveLength(1);
+        expect(socket.closeCalls).toEqual([
+            { code: 1000, reason: "gateway lane complete" },
+        ]);
+        socket.finishClose();
+        expect(await captureFailure(() => mutation)).toBe(authorizationFailure);
+        expect(socket.sent).toHaveLength(1);
+        await transport.stop();
+    });
+
+    test("does not dispatch when the Settings lane settles during reauthorization", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const authorization = Promise.withResolvers<void>();
+        const mutation = transport.requestOpenClawSettingsWrite(
+            "config.patch",
+            {
+                baseHash: "a".repeat(64),
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({
+                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                }),
+            },
+            { beforeDispatch: () => authorization.promise }
+        );
+        const failure = captureFailure(() => mutation);
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected Settings admin socket");
+        completeHandshake(socket, {
+            lane: "admin",
+            methods: ["config.patch"],
+        });
+        await flushMicrotasks();
+        expect(socket.sent).toHaveLength(1);
+
+        socket.finishClose();
+        expect(await failure).toBeInstanceOf(PersistentGatewayUnavailableError);
+        authorization.resolve();
+        await flushMicrotasks();
+        expect(socket.sent).toHaveLength(1);
+        await transport.stop();
+    });
+
+    test("bounds Settings reauthorization before mutation dispatch", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const authorization = Promise.withResolvers<void>();
+        const mutation = transport.requestOpenClawSettingsWrite(
+            "config.patch",
+            {
+                baseHash: "a".repeat(64),
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({
+                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                }),
+            },
+            {
+                beforeDispatch: () => authorization.promise,
+                timeoutMs: 40,
+            }
+        );
+        const failure = captureFailure(() => mutation);
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected Settings admin socket");
+        completeHandshake(socket, {
+            lane: "admin",
+            methods: ["config.patch"],
+        });
+        await flushMicrotasks();
+        expect(socket.sent).toHaveLength(1);
+
+        scheduler.advance(39);
+        await flushMicrotasks();
+        expect(socket.closeCalls).toHaveLength(0);
+        scheduler.advance(1);
+        await flushMicrotasks();
+        expect(socket.closeCalls).toEqual([
+            { code: 1000, reason: "gateway lane complete" },
+        ]);
+        socket.finishClose();
+        expect(await failure).toEqual(new PersistentGatewayTimeoutError("config.patch"));
+        expect(socket.sent).toHaveLength(1);
+        authorization.resolve();
+        await transport.stop();
+    });
+
     test("classifies terminal credential rejection without retrying or exposing detail", async () => {
         const scheduler = new ManualScheduler();
         const harness = new SocketHarness();
@@ -1805,6 +2112,48 @@ describe("persistent native Gateway transport", () => {
         );
         expect(JSON.stringify(error)).not.toContain(fixtureToken);
         expect(String(error)).not.toContain(fixtureToken);
+        await transport.stop();
+    });
+
+    test("canonicalizes the installed config base-hash conflict without its message", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const mutation = transport.requestOpenClawSettingsWrite(
+            "config.patch",
+            {
+                baseHash: "a".repeat(64),
+                note: "Updated from Mira Dashboard settings",
+                raw: JSON.stringify({
+                    session: { reset: { idleMinutes: 60, mode: "idle" } },
+                }),
+            },
+            { beforeDispatch: () => Promise.resolve() }
+        );
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected Settings admin socket");
+        completeHandshake(socket, { lane: "admin", methods: ["config.patch"] });
+        await flushMicrotasks();
+        const request = sentFrame(socket, 1);
+        socket.receive({
+            error: {
+                code: "INVALID_REQUEST",
+                details: { currentHash: fixtureToken },
+                message: "config changed since last load; re-run config.get and retry",
+            },
+            id: request.id,
+            ok: false,
+            type: "res",
+        });
+        await flushMicrotasks();
+        socket.finishClose();
+
+        expect(await captureFailure(() => mutation)).toEqual(
+            new PersistentGatewayRequestError({
+                code: "INVALID_REQUEST",
+                reason: persistentGatewayConfigurationChangedReason,
+            })
+        );
         await transport.stop();
     });
 
@@ -2686,6 +3035,10 @@ describe("persistent native Gateway transport", () => {
         const transport: PersistentGatewayTransport = {
             request: () => Promise.reject(new PersistentGatewayUnavailableError()),
             requestAdmin: () => Promise.reject(new PersistentGatewayUnavailableError()),
+            requestOpenClawSettingsRead: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
+            requestOpenClawSettingsWrite: () =>
+                Promise.reject(new PersistentGatewayUnavailableError()),
             requestChatRead: () =>
                 Promise.reject(new PersistentGatewayUnavailableError()),
             requestChatReadMutation: () =>

@@ -41,6 +41,10 @@ import {
 } from "../../src/contracts/monitoring.ts";
 import { listNotificationsResultSchema } from "../../src/contracts/notifications.ts";
 import { openClawCronJobSchema } from "../../src/contracts/openClawCron.ts";
+import {
+    listOpenClawSkillsResultSchema,
+    openClawConfigurationSnapshotSchema,
+} from "../../src/contracts/openClawSettings.ts";
 import { openClawTaskGetOutputSchema } from "../../src/contracts/openClawTasks.ts";
 import { listReportsResultSchema } from "../../src/contracts/reports.ts";
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
@@ -273,6 +277,8 @@ describe("contract JSON Schema conversion", () => {
                     "monitoring:write",
                     "notifications:read",
                     "notifications:write",
+                    "openclaw-settings:read",
+                    "openclaw-settings:write",
                     "openclaw-tasks:read",
                     "openclaw-tasks:write",
                     "reports:read",
@@ -283,7 +289,7 @@ describe("contract JSON Schema conversion", () => {
                     "terminal:write",
                 ],
             },
-            maxItems: 25,
+            maxItems: 27,
             type: "array",
             uniqueItems: true,
         });
@@ -320,6 +326,40 @@ describe("contract JSON Schema conversion", () => {
             )
         );
         expect(creationDocument).toContain("matching one-time token prefix");
+    });
+
+    test("documents runtime-only OpenClaw settings projection invariants", () => {
+        const configurationDocument = JSON.stringify(
+            convertContractSchema(
+                openClawConfigurationSnapshotSchema,
+                "test.openClawConfiguration",
+                "output"
+            )
+        );
+        expect(configurationDocument).toContain(
+            "channel IDs to be unique and strictly ordered"
+        );
+        expect(configurationDocument).toContain(
+            "agent IDs to be unique and strictly ordered"
+        );
+        expect(configurationDocument).toContain(
+            "complete canonical reviewed tool set in exact order"
+        );
+
+        const skillsDocument = JSON.stringify(
+            convertContractSchema(
+                listOpenClawSkillsResultSchema,
+                "test.openClawSkills",
+                "output"
+            )
+        );
+        expect(skillsDocument).toContain(
+            "bundled marker to be true exactly for the openclaw-bundled source"
+        );
+        expect(skillsDocument).toContain(
+            "only configured-only OpenClaw skills to be marked not installed"
+        );
+        expect(skillsDocument).toContain("skill keys to be unique and strictly ordered");
     });
 
     test("documents runtime-only WebAuthn identifier equality", () => {

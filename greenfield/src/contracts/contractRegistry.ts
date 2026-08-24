@@ -29,6 +29,7 @@ import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
 import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
 import { notificationProcedureContracts } from "./notifications.ts";
 import { openClawCronProcedureContracts } from "./openClawCron.ts";
+import { openClawSettingsProcedureContracts } from "./openClawSettings.ts";
 import { openClawTaskProcedureContracts } from "./openClawTasks.ts";
 import { openClawTasksRealtimeEventContract } from "./openClawTasksRealtime.ts";
 import {
@@ -63,6 +64,7 @@ const registeredProcedureContracts = [
     ...monitoringProcedureContracts,
     ...moltbookProcedureContracts,
     ...notificationProcedureContracts,
+    ...openClawSettingsProcedureContracts,
     ...openClawTaskProcedureContracts,
     ...openClawCronProcedureContracts,
     ...reportProcedureContracts,

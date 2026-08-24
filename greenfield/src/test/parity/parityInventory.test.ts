@@ -63,6 +63,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/moltbook",
             "/reports",
             "/sessions",
+            "/settings",
             "/tasks",
             "/terminal",
         ]);
@@ -85,7 +86,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             reviewedLegacyEndpointRowCount
         );
         expect(countByPhase(legacyEndpoints.endpoints)).toEqual({
-            "phase-1": 7,
+            "phase-1": 5,
             "phase-2": 28,
             "phase-3": 39,
             "phase-4": 15,
@@ -238,6 +239,75 @@ describe("reviewed pre-cutover parity inventory", () => {
             names: ["system.metrics"],
             phase: "phase-3",
         });
+    });
+
+    test("records the unused host-home Dashboard settings endpoints as reviewed removals", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const settingsEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ id }) => id === "GET /api/settings" || id === "PUT /api/settings"
+        );
+
+        expect(settingsEndpoints.map(({ id }) => id)).toEqual([
+            "GET /api/settings",
+            "PUT /api/settings",
+        ]);
+        expect(settingsEndpoints.map(({ target }) => target)).toEqual([
+            {
+                consumerEvidence: "no-current-consumers",
+                kind: "reviewed-removal",
+                reason: expect.stringContaining("host-home preference read"),
+            },
+            {
+                consumerEvidence: "no-current-consumers",
+                kind: "reviewed-removal",
+                reason: expect.stringContaining("host-home preference write"),
+            },
+        ]);
+    });
+
+    test("records the bounded OpenClaw settings slice without claiming export or restart", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const settingsRoute = reviewed.frontend.routes.find(
+            ({ path }) => path === "/settings"
+        );
+        const endpoints = reviewed.legacyEndpoints.endpoints.filter(({ id }) =>
+            [
+                "GET /api/config",
+                "GET /api/skills",
+                "POST /api/backup",
+                "POST /api/restart",
+                "POST /api/skills/:name",
+                "PUT /api/config",
+            ].includes(id)
+        );
+
+        expect(settingsRoute).toMatchObject({
+            access: "session",
+            searchNormalizer: "normalizeSettingsSearch",
+            target: { delivery: "implemented", path: "/settings", phase: "phase-5" },
+        });
+        expect(
+            endpoints.map(({ id, target }) => [
+                id,
+                target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                target.kind === "procedure" ? target.names : undefined,
+            ])
+        ).toEqual([
+            ["GET /api/config", "implemented", ["openClawSettings.getConfiguration"]],
+            ["GET /api/skills", "implemented", ["openClawSettings.listSkills"]],
+            [
+                "POST /api/backup",
+                "planned",
+                ["openClawSettings.createConfigurationBackup"],
+            ],
+            ["POST /api/restart", "planned", ["openClawSettings.restartGateway"]],
+            [
+                "POST /api/skills/:name",
+                "implemented",
+                ["openClawSettings.setSkillEnabled"],
+            ],
+            ["PUT /api/config", "implemented", ["openClawSettings.updateConfiguration"]],
+        ]);
     });
 
     test("keeps the reviewed Phase 5 Logs slice closed", async () => {

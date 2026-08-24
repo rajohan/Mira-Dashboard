@@ -215,6 +215,80 @@ test("records only classified OpenClaw cron audit settlement fields", () => {
     expect(lines[0]).not.toContain(sensitiveId);
 });
 
+test("records only classified OpenClaw settings audit settlement fields", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+    const sensitiveTarget = "skill:private-skill-key";
+    const targetFingerprint = `sha256:${"c".repeat(64)}`;
+
+    logger.warn({
+        component: "openclaw-settings-audit",
+        event: "openclaw_settings.audit_settlement.failed",
+        failure: new Error(`database failed for ${sensitiveTarget}`),
+        fields: {
+            kind: "openclaw-settings-audit-settlement",
+            operation: "set-skill-enabled",
+            settlement: "partial",
+            targetFingerprint,
+        },
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "openclaw-settings-audit",
+        event: "openclaw_settings.audit_settlement.failed",
+        fields: {
+            operation: "set-skill-enabled",
+            settlement: "partial",
+            targetFingerprint,
+        },
+        level: "warn",
+        outcome: "server-error",
+    });
+    expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
+    expect(lines[0]).not.toContain(sensitiveTarget);
+});
+
+test("records bounded OpenClaw settings mutation queue observations", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.info({
+        component: "openclaw-settings",
+        durationMs: 125,
+        event: "openclaw_settings.mutation_queue.waited",
+        fields: {
+            kind: "openclaw-settings-mutation-queue",
+            queueDepth: 2,
+        },
+        outcome: "success",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "openclaw-settings",
+        durationMs: 125,
+        event: "openclaw_settings.mutation_queue.waited",
+        fields: { queueDepth: 2 },
+        level: "info",
+        outcome: "success",
+    });
+    expect(JSON.parse(lines[0] ?? "null")).not.toHaveProperty("fields.kind");
+});
+
 test("records only fixed log-maintenance audit settlement fields", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

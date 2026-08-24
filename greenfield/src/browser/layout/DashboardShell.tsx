@@ -12,7 +12,7 @@ import {
     MessageCircle,
     MessagesSquare,
     Newspaper,
-    ShieldCheck,
+    Settings as SettingsIcon,
     SquareTerminal,
     X,
     type LucideIcon,
@@ -52,7 +52,7 @@ const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: BookOpen, label: "Moltbook", to: "/moltbook" },
     { icon: SquareTerminal, label: "Terminal", to: "/terminal" },
     { icon: Newspaper, label: "Reports", to: "/reports" },
-    { icon: ShieldCheck, label: "Account security", to: "/account-security" },
+    { icon: SettingsIcon, label: "Settings", to: "/settings" },
 ]);
 const routeTitles: readonly Pick<NavigationItem, "label" | "to">[] = Object.freeze([
     ...navigationItems,
@@ -60,7 +60,11 @@ const routeTitles: readonly Pick<NavigationItem, "label" | "to">[] = Object.free
 const authenticatedRouteTitles: readonly {
     readonly label: string;
     readonly to: DashboardAuthenticatedPath;
-}[] = Object.freeze([...routeTitles, { label: "Incidents", to: "/incidents" }]);
+}[] = Object.freeze([
+    ...routeTitles,
+    { label: "Account security", to: "/account-security" },
+    { label: "Incidents", to: "/incidents" },
+]);
 const dashboardTopBarClassName = "border-primary-700 h-16 shrink-0 border-b";
 
 interface NavigationProps {

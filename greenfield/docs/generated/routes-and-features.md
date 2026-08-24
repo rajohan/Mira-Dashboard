@@ -5,7 +5,7 @@
 | Path | Access | Navigation | Feature owner | Summary |
 | --- | --- | --- | --- | --- |
 | `/` | Browser session | Dashboard | `overview` | Shows bounded operational summaries for implemented Dashboard domains. |
-| `/account-security` | Browser session | Account security | `security` | Manages password, MFA factors, recovery codes, and browser sessions. |
+| `/account-security` | Browser session | Hidden | `security` | Manages password, MFA factors, recovery codes, and browser sessions. |
 | `/agents` | Browser session | Agents | `agents` | Shows the reviewed agent directory, task state, and durable history. |
 | `/chat` | Browser session | Chat | `chat` | Runs the bounded persistent Gateway chat and attachment workflow. |
 | `/files` | Browser session | Files | `files` | Browses, previews, downloads, uploads, and CAS-replaces workspace files. |
@@ -16,5 +16,6 @@
 | `/moltbook` | Browser session | Moltbook | `moltbook` | Reads the bounded worker-owned Moltbook profile, feeds, posts, and comments snapshot. |
 | `/reports` | Browser session | Reports | `monitoring` | Lists and renders durable bounded monitoring reports. |
 | `/sessions` | Browser session | Sessions | `gateway-sessions` | Shows and controls the bounded current Gateway session projection. |
+| `/settings` | Browser session | Settings | `settings` | Combines Dashboard account security with bounded secret-free OpenClaw settings. |
 | `/tasks` | Browser session | Tasks | `tasks` | Manages the durable task board, updates, labels, and assignments. |
 | `/terminal` | Browser session | Terminal | `terminal` | Runs a recent-MFA-gated interactive PTY without persisting its contents. |

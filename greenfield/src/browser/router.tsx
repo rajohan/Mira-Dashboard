@@ -13,6 +13,7 @@ import {
     parseIncidentsRouteSearch,
     parseReportsRouteSearch,
 } from "./monitoring/monitoringRouteSearch.ts";
+import { normalizeSettingsSearch } from "./settings/settingsRouteSearch.ts";
 import { LoadingState } from "./ui/LoadingState.tsx";
 
 const rootRoute = createRootRoute({ component: DashboardShell });
@@ -66,6 +67,11 @@ const sessionsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/sessions",
 }).lazy(() => import("./routes/sessions.lazy.tsx").then((module) => module.Route));
+const settingsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/settings",
+    validateSearch: normalizeSettingsSearch,
+}).lazy(() => import("./routes/settings.lazy.tsx").then((module) => module.Route));
 const reportsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/reports",
@@ -89,6 +95,7 @@ const routeTree = rootRoute.addChildren([
     moltbookRoute,
     reportsRoute,
     sessionsRoute,
+    settingsRoute,
     tasksRoute,
     terminalRoute,
 ]);

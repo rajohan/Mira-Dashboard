@@ -487,6 +487,24 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 - A secret that must be editable through Dashboard is stored in `secret_envelopes` using a
   versioned AES-GCM envelope whose master key never enters SQLite.
 - Configuration APIs return presence/status metadata, never recoverable secret values.
+- OpenClaw settings never return the raw Gateway configuration document. The session-only read
+  contract projects bounded redacted model, reset, heartbeat, tool, channel, canonical agent-level
+  override, and skill fields; unknown or secret-bearing provider fields remain server-side. A
+  configuration write accepts exactly one typed section or one agent/tool override, requires the
+  current root hash and source-derived revision, re-reads authority, and constructs one narrow
+  root-hash-CAS `config.patch` on the server. Include-owned sources and unverified or pending
+  whole-candidate model normalization lock configuration writes. An enabled-only skill toggle uses
+  the same revision preflight but dispatches one exact `skills.update` leaf on the latest
+  configuration; this is deliberately last-writer-wins rather than an upstream CAS. Agent access
+  never accepts raw policy arrays and configured-only skills never expose paths or install
+  authority. Invalid configuration, incomplete affected sets, attempts to submit unprojected
+  fields, and post-dispatch uncertainty fail closed. An uncertain skill write receives one bounded
+  readback and is never replayed. Attempted audit must commit before the effect; session and
+  recent-MFA authority are then revalidated at the actual post-handshake pre-dispatch boundary.
+  Terminal audit metadata contains only the operation, a domain-separated target fingerprint, and
+  classified settlement. No raw configuration, patch body, policy array, skill description,
+  provider error, or host path enters audit or logs. The privileged web-side mutation FIFO retains
+  at most sixteen active-plus-waiting operations and removes aborted waiters immediately.
 - Generated docs include environment variable names, type, default behavior, and secret flag,
   but never runtime values.
 - File and media operations resolve against named allowlisted roots, reject traversal, verify

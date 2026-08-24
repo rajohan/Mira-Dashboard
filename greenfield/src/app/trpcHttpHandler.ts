@@ -11,6 +11,7 @@ import type { LogsService } from "../server/domains/logs/service.ts";
 import type { MonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
 import type { MonitoringService } from "../server/domains/monitoring/service.ts";
 import type { OpenClawCronService } from "../server/domains/openClawCron/service.ts";
+import type { OpenClawSettingsService } from "../server/domains/openClawSettings/service.ts";
 import type { OpenClawTasksService } from "../server/domains/openClawTasks/service.ts";
 import type { AuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import type { AutomationSecurityLifecycleService } from "../server/domains/security/automation/lifecycle.ts";
@@ -60,6 +61,7 @@ export interface TrpcHttpHandlerOptions {
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
     readonly openClawCronService: OpenClawCronService;
+    readonly openClawSettingsService: OpenClawSettingsService;
     readonly openClawTasksService?: OpenClawTasksService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly systemHealthDiagnosticsService: SystemHealthDiagnosticsService;
@@ -255,6 +257,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     monitoringCatalogService: options.monitoringCatalogService,
                     monitoringService: options.monitoringService,
                     openClawCronService: options.openClawCronService,
+                    openClawSettingsService: options.openClawSettingsService,
                     ...(options.openClawTasksService === undefined
                         ? {}
                         : { openClawTasksService: options.openClawTasksService }),

@@ -19,9 +19,17 @@ export const dashboardRouteDocumentation = Object.freeze([
     {
         access: "session",
         featureOwner: "security",
-        navigationLabel: "Account security",
+        navigationLabel: null,
         path: "/account-security",
         summary: "Manages password, MFA factors, recovery codes, and browser sessions.",
+    },
+    {
+        access: "session",
+        featureOwner: "settings",
+        navigationLabel: "Settings",
+        path: "/settings",
+        summary:
+            "Combines Dashboard account security with bounded secret-free OpenClaw settings.",
     },
     {
         access: "session",

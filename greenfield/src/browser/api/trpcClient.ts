@@ -120,6 +120,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/openClawTasks.ts");
             return module.openClawTaskProcedureContracts;
         }
+        case "openClawSettings": {
+            const module = await import("../../contracts/openClawSettings.ts");
+            return module.openClawSettingsProcedureContracts;
+        }
         case "accountSecurity": {
             const module = await import("../../contracts/accountSecurity.ts");
             return module.accountSecurityProcedureContracts;

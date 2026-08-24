@@ -63,6 +63,8 @@ function createFakePersistentGatewayTransport(): {
     const transport: PersistentGatewayTransport = {
         request: unavailablePersistentGatewayRequest,
         requestAdmin: unavailablePersistentGatewayRequest,
+        requestOpenClawSettingsRead: unavailablePersistentGatewayRequest,
+        requestOpenClawSettingsWrite: unavailablePersistentGatewayRequest,
         requestChatRead: unavailablePersistentGatewayRequest,
         requestChatReadMutation: unavailablePersistentGatewayRequest,
         requestChatWrite: unavailablePersistentGatewayRequest,

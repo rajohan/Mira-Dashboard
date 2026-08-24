@@ -1,0 +1,363 @@
+{
+    "agentAccess": {
+        "configPatchArrayReplacement": {
+            "destructiveRemovalRequiresDeclaredPath": true,
+            "exactPathTemplates": [
+                "agents.entries.<agentId>.tools.alsoAllow",
+                "agents.entries.<agentId>.tools.deny"
+            ],
+            "listedPathReplacesArray": true,
+            "pathComparison": "normalized-exact"
+        },
+        "coreCatalog": {
+            "canonicalSchedulerTool": "automations",
+            "legacySchedulerAliases": ["cron"],
+            "reviewedToolIds": [
+                "automations",
+                "browser",
+                "edit",
+                "exec",
+                "gateway",
+                "image",
+                "image_generate",
+                "memory_search",
+                "message",
+                "music_generate",
+                "nodes",
+                "read",
+                "sessions_history",
+                "sessions_list",
+                "tts",
+                "video_generate",
+                "web_fetch",
+                "web_search",
+                "write"
+            ]
+        },
+        "entries": {
+            "blockedObjectKeysRejected": true,
+            "defaultEntryCount": 1,
+            "idCaseInsensitive": true,
+            "idMaximumLength": 64,
+            "idMinimumLength": 1,
+            "idPattern": "^[a-z0-9_][a-z0-9_-]{0,63}$",
+            "inlineIdOmitted": true,
+            "storagePath": "agents.entries",
+            "storageShape": "record-by-id"
+        },
+        "toolsPolicy": {
+            "aliases": ["bash=>exec", "cron=>automations"],
+            "nonEmptyAllowAndAlsoAllowConflictRejected": true,
+            "optionalStringArrayFields": ["allow", "alsoAllow", "deny"]
+        }
+    },
+    "channels": {
+        "providerEntriesArePassthrough": true,
+        "providerEntryEnabledUnlessExplicitlyFalse": true,
+        "reservedConfigKeys": ["defaults", "modelByChannel"]
+    },
+    "configGet": {
+        "cache": {
+            "bypassedUnlessHotReloadActive": true,
+            "explicitWriteInvalidation": true,
+            "keyFields": [
+                "getHotReloadStatus-identity",
+                "appliedConfigHash",
+                "pluginRegistryVersion"
+            ],
+            "rejectedPromiseEvicted": true,
+            "sharedInFlightPromise": true
+        },
+        "handlerValidatesParams": true,
+        "method": "config.get",
+        "requestParams": [],
+        "response": {
+            "authoredParsedPrecedesEnvironmentResolution": true,
+            "invalidSnapshotClearsConfigPayloads": true,
+            "pluginMetadataOmitted": true,
+            "redactedSnapshotFields": [
+                "config",
+                "parsed",
+                "raw",
+                "resolved",
+                "runtimeConfig",
+                "sourceConfig"
+            ],
+            "revisionHashFields": ["appliedConfigHash", "configRevisionHash"],
+            "snapshotHashPreserved": true,
+            "uiHintsDriveRedaction": true
+        }
+    },
+    "configPatch": {
+        "baseHash": {
+            "blankIsAbsent": true,
+            "generalWritesRequireHash": true,
+            "hashlessLastWriterWinsPaths": ["ui.prefs"],
+            "mismatchRejected": true,
+            "protocolOptional": true,
+            "writeUsesSnapshotHash": true
+        },
+        "handlerValidatesParams": true,
+        "method": "config.patch",
+        "modelNormalization": {
+            "agentScopeCollections": ["defaults", "entries", "list"],
+            "agentSelectionFields": [
+                "imageModel",
+                "model",
+                "pdfModel",
+                "utilityModel",
+                "voiceModel"
+            ],
+            "appliedBeforeMerge": true,
+            "dynamicEnvironmentRefs": {
+                "canonicalizedResolvedValueDoesNotRestoreOriginalReference": true,
+                "resolvedBeforeSnapshotValidation": true,
+                "restoredOnlyWhenResolvedValueUnchanged": true
+            },
+            "googleAliases": [
+                "gemini-3-pro=>gemini-3.1-pro-preview",
+                "gemini-3-pro-preview=>gemini-3.1-pro-preview",
+                "gemini-3-flash=>gemini-3-flash-preview",
+                "gemini-3.1-pro=>gemini-3.1-pro-preview",
+                "gemini-3.1-flash-lite-preview=>gemini-3.1-flash-lite",
+                "gemini-3.1-flash=>gemini-3-flash-preview",
+                "gemini-3.1-flash-preview=>gemini-3-flash-preview",
+                "gemma-4-26b=>gemma-4-26b-a4b-it"
+            ],
+            "googleProviderIds": ["google", "google-gemini-cli", "google-vertex"],
+            "mediaSelectionFields": ["image", "music", "video"],
+            "modelSelectionShapes": ["fallbacks[]", "primary", "string"],
+            "nestedAgentModelPaths": [
+                "compaction.memoryFlush.model",
+                "compaction.model",
+                "heartbeat.model",
+                "models.<key>",
+                "subagents.fallbacks[]",
+                "subagents.model",
+                "subagents.primary"
+            ],
+            "nestedGoogleModelIdsNormalized": true,
+            "normalizesAgentScopes": true,
+            "normalizesProviderCatalogs": true,
+            "providerCatalogModelPath": "models.providers[].models[].id",
+            "togetherAliases": ["moonshotai/Kimi-K2.5=>moonshotai/Kimi-K2.6"],
+            "togetherProviderId": "together",
+            "wholeMergedCandidateNormalizedBeforeValidation": true
+        },
+        "redaction": {
+            "getAndWriteResponsesRedacted": true,
+            "patchRestoresSensitiveValuesFromSnapshot": true,
+            "reservedOrUnrestorableSentinelRejected": true,
+            "sentinel": "__OPENCLAW_REDACTED__"
+        },
+        "requestParams": [
+            "baseHash",
+            "deliveryContext",
+            "note",
+            "raw",
+            "replacePaths",
+            "restartDelayMs",
+            "sessionKey"
+        ],
+        "restart": {
+            "changedPathsDriveRequirement": true,
+            "directRestartConditional": true,
+            "schedulerSuccess": {
+                "ok": true,
+                "resultFields": [
+                    "coalesced",
+                    "cooldownMsApplied",
+                    "delayMs",
+                    "emitHooksQueued",
+                    "mode",
+                    "ok",
+                    "pid",
+                    "reason",
+                    "signal"
+                ]
+            },
+            "sentinelPersistenceBestEffort": true,
+            "sentinelRequiresRestartPath": "sentinel.payload.stats.requiresRestart",
+            "sentinelResultFields": ["payload", "persisted"]
+        },
+        "write": {
+            "arraysMergeById": true,
+            "heartbeatTargetPath": "agents.defaults.heartbeat.target",
+            "heartbeatTargetSchema": "optional-string",
+            "noChangeReturnsNoop": true,
+            "nullDeletesObjectKeys": true,
+            "rawFormat": "json5-object",
+            "replacePathsSupported": true
+        }
+    },
+    "domain": "settings",
+    "exec": {
+        "approvalFileConstrainsNonSandbox": true,
+        "defaultAsk": "off",
+        "defaultConfiguredHost": "auto",
+        "defaultSecurityByEffectiveHost": {
+            "nonSandbox": "full",
+            "sandbox": "deny"
+        },
+        "modePolicies": [
+            "allowlist:allowlist:off:no-auto-review",
+            "ask:allowlist:on-miss:no-auto-review",
+            "auto:allowlist:on-miss:auto-review",
+            "deny:deny:off:no-auto-review",
+            "full:full:off:no-auto-review"
+        ],
+        "omittedModeDerivedFromSecurityAndAsk": true,
+        "policyLayerOrder": ["global", "agent", "session-legacy", "request-overrides"]
+    },
+    "io": {
+        "snapshot": {
+            "configAlias": "runtimeConfig",
+            "includedPathsSource": "sorted-resolved-include-watch-paths",
+            "parsedSource": "authored-root-before-environment-resolution",
+            "resolvedAlias": "sourceConfig",
+            "runtimeConfigSource": "validated-materialized-source-config",
+            "snapshotHashSource": "root-raw-bytes",
+            "sourceConfigSource": "include-resolved-environment-resolved-migrated-config"
+        },
+        "write": {
+            "includeTargetPersistedConfigSource": "refreshed-resolved-source-config",
+            "includeTargetPersistedHashSource": "refreshed-root-snapshot-hash",
+            "jsonFormat": "json-two-space-trailing-newline",
+            "json5CommentsWarnedAndStripped": true,
+            "rootPersistedHashSource": "serialized-root-json-bytes",
+            "settlement": {
+                "canonicalRereadBeforeRuntimeRefresh": true,
+                "persistedBeforeCanonicalReread": true,
+                "postCommitFailureCanBeMutationOutcomeUnknown": true,
+                "rollbackFailureSurfaced": true,
+                "rollbackFalseCanLeaveCommittedBytes": true,
+                "runtimeRefreshFailureAttemptsHashGuardedRollback": true
+            }
+        }
+    },
+    "methodAccess": [
+        {
+            "controlPlaneWrite": false,
+            "name": "config.get",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": true,
+            "name": "config.patch",
+            "scope": "operator.admin"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "skills.status",
+            "scope": "operator.read"
+        },
+        {
+            "controlPlaneWrite": false,
+            "name": "skills.update",
+            "scope": "operator.admin"
+        }
+    ],
+    "schemaVersion": 1,
+    "sessionReset": {
+        "absentPolicyMode": "none",
+        "defaultAtHour": 4,
+        "explicitIdleModePreserved": true,
+        "explicitNoneModePreserved": true,
+        "idleWithoutMinutesDefaultsToZero": true,
+        "presentPolicyWithoutMode": "daily"
+    },
+    "toolActivationDefaults": {
+        "agentToAgentRequiresExplicitTrue": true,
+        "elevatedEnabledUnlessExplicitlyFalse": true,
+        "webFetchEnabledWhenOmitted": true,
+        "webSearchEnabledWhenOmitted": true
+    },
+    "skillsStatus": {
+        "row": {
+            "disabledFrom": "skills.entries[skillKey].enabled-equals-false",
+            "eligibleRequiresNotDisabled": true,
+            "reviewedFields": [
+                "baseDir",
+                "bundled",
+                "description",
+                "disabled",
+                "eligible",
+                "filePath",
+                "name",
+                "skillKey",
+                "source"
+            ]
+        },
+        "handlerValidatesParams": true,
+        "method": "skills.status",
+        "requestParams": ["agentId"],
+        "source": {
+            "bundling": {
+                "canonicalBundledSource": "openclaw-bundled",
+                "unknownSourceUsesBundledNameFallback": true
+            },
+            "fallback": {
+                "canonicalField": "skill.source",
+                "compatibilityField": "skill.sourceInfo.source",
+                "missingSource": "unknown"
+            },
+            "keyResolution": {
+                "canonicalField": "entry.metadata.skillKey",
+                "fallbackField": "skill.name",
+                "indexUsesResolver": true,
+                "statusUsesIndexedKey": true
+            },
+            "taxonomy": [
+                "agents-skills-personal",
+                "agents-skills-project",
+                "openclaw-bundled",
+                "openclaw-extra",
+                "openclaw-managed",
+                "openclaw-node",
+                "openclaw-workspace",
+                "unknown"
+            ]
+        },
+        "workspace": {
+            "defaultAgentResolved": true,
+            "remoteEligibilityIncluded": true,
+            "unknownExplicitAgentRejected": true,
+            "upstreamHostPathFields": [
+                "managedSkillsDir",
+                "skills[].baseDir",
+                "skills[].filePath",
+                "workspaceDir"
+            ]
+        }
+    },
+    "skillsUpdate": {
+        "handler": {
+            "apiKeySemantics": [
+                "redacted-sentinel-preserves",
+                "blank-deletes",
+                "nonblank-sets"
+            ],
+            "afterWriteMode": "auto",
+            "configMutationUsesRetry": true,
+            "enabledBooleanOnly": true,
+            "envSemantics": [
+                "blank-key-ignored",
+                "redacted-sentinel-preserves",
+                "blank-value-deletes",
+                "nonblank-value-sets"
+            ],
+            "localEntryPath": "skills.entries[skillKey]",
+            "mutationBase": "source-config-default",
+            "responseConfigRedacted": true,
+            "resultFields": ["config", "ok", "skillKey"],
+            "wholeConfigModelNormalization": false
+        },
+        "handlerValidatesParams": true,
+        "method": "skills.update",
+        "request": {
+            "baseHashAccepted": false,
+            "localParams": ["apiKey", "enabled", "env", "skillKey"],
+            "unpatchableConfigEntryKeys": ["constructor", "prototype"]
+        }
+    }
+}

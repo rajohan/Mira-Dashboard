@@ -225,7 +225,7 @@
             "searchNormalizer": "normalizeSettingsSearch",
             "sourceRouteName": "settings",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/settings",
                 "phase": "phase-5"
             }

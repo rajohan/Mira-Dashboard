@@ -427,6 +427,32 @@ disable intents expose non-atomic external/local outcomes for reconciliation and
 worker's task-notification sender is a separate purpose-specific `chat.send` port with durable
 idempotency; it is not the Phase 4 chat runtime.
 
+OpenClaw settings use another dedicated, source-audited adapter rather than the generic persistent
+request API. Only `config.get` and `skills.status` enter its read method set; `config.patch` and
+`skills.update` are the only fresh one-shot admin writes. `config.patch` carries the upstream root
+hash as an atomic CAS fence. `skills.update` cannot carry that fence and is therefore an exact
+leaf-on-latest last-writer-wins operation rather than a configuration CAS.
+The domain provider exposes only a bounded secret-free configuration projection, canonical
+agent-level overrides for a fixed core-tool subset, and a path-free bounded skill inventory that
+retains safe configured-only entries. Configuration changes and skill toggles are exact typed
+intents. Every control refetches authoritative state and validates both the submitted root hash and
+the source-derived revision before dispatch. Configuration changes build one narrow server-side
+`config.patch`; include-owned sources or model references that would be normalized outside the
+requested intent lock all such writes. Skill toggles dispatch one exact `skills.update` leaf after
+the same preflight, then verify that leaf against the latest state. Post-dispatch loss of authority
+or authoritative-readback mismatch is an explicit unknown outcome; uncertain skill writes receive
+one bounded reconciliation read and are never replayed.
+The provider never accepts an arbitrary Gateway method, raw configuration document, JSON Patch,
+host path, policy array, or skill metadata mutation from the browser. Agent-tool controls target
+canonical `agents.entries` keys and replace only exact `alsoAllow`/`deny` arrays while preserving
+unknown siblings; explicit or ambiguous policy remains visibly locked rather than being rewritten.
+Browser reads are session-only; writes require recent MFA again after fail-closed audit admission
+and at the actual post-handshake pre-dispatch boundary. The web process serializes these controls
+through a sixteen-operation active-plus-waiting ceiling; aborted waiters are removed from the FIFO
+immediately instead of retaining unbounded work behind a slow Gateway operation.
+Configuration export and Gateway restart deliberately remain separate later boundaries: the former
+needs an actor-bound no-store raw ticket, while the latter needs a durable worker-owned action.
+
 ### Current-protocol Control UI projections
 
 The 2026-08-06 OpenClaw audit separates protocol authority from Control UI projection through 23
