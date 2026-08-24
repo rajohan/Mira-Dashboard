@@ -890,6 +890,7 @@ describe("managed log rotation engine", () => {
         const submaker = managedLogManifest.fileTargets.find(
             ({ id }) => id === "docker.submaker"
         );
+        expect(submaker?.trustedOwnerIds).toContain(1000);
         expect(submaker?.trustedOwnerIds).toContain(1001);
         expect(submaker?.trustedOwnerIds).toContain(ownerId);
     });

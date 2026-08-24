@@ -15,7 +15,8 @@ const directoryFlags =
     constants.O_DIRECTORY |
     constants.O_NOFOLLOW |
     constants.O_NONBLOCK;
-const fileFlags = constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const fileFlags =
+    constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const userIdPattern = /^(?:0|[1-9]\d{0,9})$/u;
 
 function failure(): Error {
@@ -58,7 +59,8 @@ function trustedLogFile(
 
 /**
  * Migrates the four fixed application log files from the legacy root launcher owner.
- * Missing state on a clean host is intentionally left to non-root state preparation.
+ * Missing fixed files are created only after non-root state preparation has admitted the
+ * private logs directory.
  * @param userId Canonical production service user id.
  * @param options Deterministic test-only identity and path seams.
  */
@@ -96,15 +98,11 @@ export async function migrateManagedApplicationLogs(
         for (const fileName of logFileNames) {
             let file: FileHandle | undefined;
             try {
-                try {
-                    file = await open(
-                        path.join(`/proc/self/fd/${directory.fd}`, fileName),
-                        fileFlags
-                    );
-                } catch (error) {
-                    if (errorCode(error) === "ENOENT") continue;
-                    throw error;
-                }
+                file = await open(
+                    path.join(`/proc/self/fd/${directory.fd}`, fileName),
+                    fileFlags,
+                    0o600
+                );
                 const status = await file.stat({ bigint: true });
                 if (!trustedLogFile(status, directoryStatus, userId)) throw failure();
                 files.push(file);

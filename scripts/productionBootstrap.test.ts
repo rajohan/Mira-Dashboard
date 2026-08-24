@@ -577,6 +577,13 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) => command.includes("delivery prepare-state"))
         ).toBe(true);
+        expect(
+            commands.findIndex((command) => command.includes("delivery prepare-state"))
+        ).toBeLessThan(
+            commands.findIndex((command) =>
+                command.includes("migrateManagedApplicationLogs.ts")
+            )
+        );
         expect(commands.at(-1)).toContain("delivery activate");
         expect(commands.at(-1)).toContain("--activation-mode=greenfield");
     });

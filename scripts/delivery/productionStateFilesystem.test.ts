@@ -1,14 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-    chmod,
-    lstat,
-    mkdir,
-    mkdtemp,
-    rename,
-    rm,
-    symlink,
-    writeFile,
-} from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -40,23 +31,6 @@ async function createProjectRoot(): Promise<{ parent: string; root: string }> {
 async function permissionMode(directory: string): Promise<number> {
     const status = await lstat(directory, { bigint: true });
     return Number(status.mode & 0o7777n);
-}
-
-async function expectPrivateLogFiles(logsDirectory: string): Promise<void> {
-    for (const fileName of [
-        "web-stdout.log",
-        "web-stderr.log",
-        "worker-stdout.log",
-        "worker-stderr.log",
-    ]) {
-        const status = await lstat(path.join(logsDirectory, fileName), {
-            bigint: true,
-        });
-        expect(status.isFile()).toBe(true);
-        expect(status.nlink).toBe(1n);
-        expect(status.uid).toBe(BigInt(process.getuid?.() ?? -1));
-        expect(Number(status.mode & 0o7777n)).toBe(0o600);
-    }
 }
 
 async function expectFilesystemRejection(operation: Promise<unknown>): Promise<void> {
@@ -100,7 +74,6 @@ describe("production state filesystem", () => {
         expect(await permissionMode(prepared.logsDirectory)).toBe(0o700);
         expect(await permissionMode(prepared.terminalBrokerDirectory)).toBe(0o700);
         expect(await permissionMode(prepared.workspaceFileUploadsDirectory)).toBe(0o700);
-        await expectPrivateLogFiles(prepared.logsDirectory);
     });
 
     test("narrows existing managed directories without broadening permissions", async () => {
@@ -113,19 +86,6 @@ describe("production state filesystem", () => {
 
         expect(await permissionMode(prepared.productionDirectory)).toBe(0o700);
         expect(await prepareProtectedProductionStatePath(root)).toEqual(prepared);
-        await expectPrivateLogFiles(prepared.logsDirectory);
-    });
-
-    test("rejects a pre-existing managed log file outside the private file policy", async () => {
-        const { root } = await createProjectRoot();
-        const logs = path.join(root, "production/state/logs");
-        await mkdir(logs, { mode: 0o700, recursive: true });
-        const unsafeLog = path.join(logs, "web-stdout.log");
-        await writeFile(unsafeLog, "existing\n", { mode: 0o644 });
-        await chmod(unsafeLog, 0o644);
-
-        await expectFilesystemRejection(prepareProtectedProductionStatePath(root));
-        expect(await permissionMode(unsafeLog)).toBe(0o644);
     });
 
     test("rejects a managed directory that private-mode repair would broaden", async () => {

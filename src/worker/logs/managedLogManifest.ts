@@ -46,9 +46,9 @@ const rootAndRuntimeOwnerIds = Object.freeze(
     runtimeOwnerId === 0 ? [0] : [0, runtimeOwnerId]
 );
 
-function trustedContainerOwnerIds(containerOwnerId: number): readonly number[] {
+function trustedContainerOwnerIds(...containerOwnerIds: number[]): readonly number[] {
     return Object.freeze(
-        [...new Set([...rootAndRuntimeOwnerIds, containerOwnerId])].toSorted(
+        [...new Set([...rootAndRuntimeOwnerIds, ...containerOwnerIds])].toSorted(
             (left, right) => left - right
         )
     );
@@ -139,7 +139,7 @@ export const managedLogManifest: ManagedLogManifest = Object.freeze({
             trustedOwnerIds: trustedContainerOwnerIds(1001),
         }),
         managedFile("docker.submaker", "/opt/docker/data/submaker/logs/app.log", {
-            trustedOwnerIds: trustedContainerOwnerIds(1001),
+            trustedOwnerIds: trustedContainerOwnerIds(1000, 1001),
         }),
         managedFile("docker.traefik", "/opt/docker/data/traefik/access.log", {
             trustedOwnerIds: trustedContainerOwnerIds(1001),

@@ -52,6 +52,32 @@ describe("managed application log migration", () => {
         expect(status.mode & 0o7777).toBe(0o600);
     });
 
+    test("creates every fixed log after private state preparation", async () => {
+        const root = await mkdtemp(path.join(os.tmpdir(), "mira-managed-app-empty-"));
+        temporaryDirectories.push(root);
+        const directory = path.join(root, "logs");
+        await mkdir(directory, { mode: 0o700 });
+        if ((process.getuid?.() ?? 1) === 0) {
+            await chown(directory, testUserId, 0);
+        }
+
+        await migrateManagedApplicationLogs(testUserId, {
+            directoryPath: directory,
+            requireRoot: () => true,
+        });
+
+        for (const fileName of [
+            "web-stdout.log",
+            "web-stderr.log",
+            "worker-stdout.log",
+            "worker-stderr.log",
+        ]) {
+            const status = await lstat(path.join(directory, fileName));
+            expect(status.uid).toBe(testUserId);
+            expect(status.mode & 0o7777).toBe(0o600);
+        }
+    });
+
     test("allows absent clean-host state", async () => {
         const root = await mkdtemp(path.join(os.tmpdir(), "mira-managed-app-missing-"));
         temporaryDirectories.push(root);

@@ -682,6 +682,13 @@ export async function bootstrapProduction(
             dependencies,
             repositoryRoot
         );
+        await requireSuccess(dependencies, [
+            process.execPath,
+            "run",
+            "delivery",
+            "prepare-state",
+            `--project-root=${projectHome}`,
+        ]);
         await stageProductionBootstrapRootAuthority(
             artifactRoot,
             releaseId,
@@ -691,13 +698,6 @@ export async function bootstrapProduction(
             userId,
             dependencies
         );
-        await requireSuccess(dependencies, [
-            process.execPath,
-            "run",
-            "delivery",
-            "prepare-state",
-            `--project-root=${projectHome}`,
-        ]);
         await requireSuccess(dependencies, [
             process.execPath,
             "run",
