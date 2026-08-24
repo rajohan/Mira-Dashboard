@@ -1,5 +1,3 @@
-import * as v from "valibot";
-
 import { previewTailscaleOperatorUser } from "./policy.ts";
 
 const tailscaleExecutable = "/usr/bin/tailscale";
@@ -7,10 +5,6 @@ const commandDeadlineMs = 15_000;
 const outputMaximumBytes = 64 * 1024;
 const failureMessage = "Preview Tailscale operator provisioning failed";
 const usage = "Usage: bun operator.ts --mode=apply|verify";
-
-const preferencesSchema = v.looseObject({
-    OperatorUser: v.optional(v.string()),
-});
 
 export interface PreviewTailscaleOperatorProcessRequest {
     readonly command: readonly string[];
@@ -131,13 +125,20 @@ async function run(
     }
 }
 
-function parsePreferences(bytes: Uint8Array): v.InferOutput<typeof preferencesSchema> {
+function parsePreferences(bytes: Uint8Array): Readonly<{ OperatorUser?: string }> {
     if (bytes.byteLength === 0 || bytes.byteLength > outputMaximumBytes) throw failure();
     try {
-        return v.parse(
-            preferencesSchema,
-            JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown
-        );
+        const value = JSON.parse(
+            new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+        ) as unknown;
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+            throw failure();
+        }
+        const operatorUser = (value as Record<string, unknown>).OperatorUser;
+        if (operatorUser !== undefined && typeof operatorUser !== "string") {
+            throw failure();
+        }
+        return operatorUser === undefined ? {} : { OperatorUser: operatorUser };
     } catch {
         throw failure();
     }

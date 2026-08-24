@@ -78,6 +78,12 @@ export async function runBootstrap(
     const [mode, ...modeArguments] = arguments_;
     if (mode === undefined || mode === "production") {
         if (modeArguments.length > 0) throw new TypeError(usage);
+        const installExitCode = await dependencies.run([
+            process.execPath,
+            "install",
+            "--frozen-lockfile",
+        ]);
+        if (installExitCode !== 0) return installExitCode;
         return dependencies.run([process.execPath, "scripts/productionBootstrap.ts"]);
     }
     if (mode !== "development") throw new TypeError(usage);

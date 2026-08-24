@@ -2,7 +2,9 @@
 
 ## Fresh production host
 
-Install the exact Bun version in `.bun-version`, Git, GitHub CLI, Doppler CLI, Tailscale, and sudo.
+Install the exact Bun version in `.bun-version`, Git, GitHub CLI, Doppler CLI, Tailscale, Docker
+Engine, and sudo. Docker must be running, its `docker` group must exist, and `ubuntu` must already
+be able to query the daemon in its current login session.
 Authenticate those host-owned tools outside chat. Clone GitHub `main` into
 `/home/ubuntu/projects/mira-dashboard/production/checkout`, ensure `origin/main` is current, then run
 as `ubuntu`:

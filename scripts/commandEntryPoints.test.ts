@@ -145,6 +145,7 @@ describe("repository command entrypoints", () => {
         };
         expect(await runBootstrap([], "/source", dependencies)).toBe(0);
         expect(calls.map((call) => call.slice(1))).toEqual([
+            ["install", "--frozen-lockfile"],
             ["scripts/productionBootstrap.ts"],
         ]);
     });

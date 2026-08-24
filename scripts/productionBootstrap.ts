@@ -382,6 +382,22 @@ export async function stageProductionBootstrapRootAuthority(
 
 const productionBootstrapDependencies = Object.freeze({ run: defaultRun });
 
+async function verifyProductionBootstrapPrerequisites(
+    dependencies: ProductionBootstrapDependencies,
+    repositoryRoot: string
+): Promise<void> {
+    await requireSuccess(
+        dependencies,
+        ["/usr/bin/getent", "group", "docker"],
+        repositoryRoot
+    );
+    await requireSuccess(
+        dependencies,
+        ["/usr/bin/docker", "version", "--format={{.Server.Version}}"],
+        repositoryRoot
+    );
+}
+
 /**
  * Performs the complete first production installation on one clean host.
  * @param dependencies Fixed process boundary used by focused orchestration tests.
@@ -405,11 +421,7 @@ export async function bootstrapProduction(
     if (Bun.version !== selectedVersion) {
         throw new Error(`Production bootstrap requires Bun ${selectedVersion}`);
     }
-    await requireSuccess(
-        dependencies,
-        [process.execPath, "install", "--frozen-lockfile"],
-        repositoryRoot
-    );
+    await verifyProductionBootstrapPrerequisites(dependencies, repositoryRoot);
     const temporaryRoot = options.createTemporaryRoot
         ? await options.createTemporaryRoot()
         : await mkdtemp(path.join(os.tmpdir(), "mira-dashboard-bootstrap-"));

@@ -271,7 +271,10 @@ describe("production bootstrap admission", () => {
                 if (invocation.includes(" rev-list ")) {
                     return { exitCode: 0, stdout: `${releaseId}\n` };
                 }
-                if (command[0] === "/usr/bin/getent") {
+                if (
+                    command[0] === "/usr/bin/getent" &&
+                    command.at(-1) === "mira-dashboard-log-maintenance"
+                ) {
                     return { exitCode: 2, stdout: "" };
                 }
                 return { exitCode: 0, stdout: "" };
@@ -285,9 +288,10 @@ describe("production bootstrap admission", () => {
             userId: 1000,
         });
 
-        expect(
-            commands.some((command) => command.includes("install --frozen-lockfile"))
-        ).toBe(true);
+        expect(commands.some((command) => command.includes("getent group docker"))).toBe(
+            true
+        );
+        expect(commands.some((command) => command.includes("docker version"))).toBe(true);
         expect(
             commands.some((command) => command.includes("delivery prepare-state"))
         ).toBe(true);

@@ -21,6 +21,7 @@ jobs:
             - name: Dispatch checks for the release PR
               env:
                   GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
               shell: bash
               run: |
                   branch="$(gh pr list --state open --label 'autorelease: pending' --json headRefName --jq '.[0].headRefName // ""')"
@@ -63,8 +64,8 @@ jobs:
               shell: bash
               run: |
                   tag="${{ steps.artifact-release.outputs.tag_name }}"
-                  for asset in release.tar receipt.json; do
-                      if ! gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
-                          gh release upload "$tag" "dist/production-release-artifact/$asset" --repo "${{ github.repository }}"
-                      fi
-                  done
+                  gh release upload "$tag" \
+                      dist/production-release-artifact/release.tar \
+                      dist/production-release-artifact/receipt.json \
+                      --clobber \
+                      --repo "${{ github.repository }}"
