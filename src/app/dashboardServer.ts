@@ -644,6 +644,7 @@ export async function createDashboardServer(
         | OpenClawConfigurationBackupTicketStore
         | undefined;
     let workspaceFilesService: WorkspaceFilesService | undefined;
+    let drainPasswordResetDeliveries: (() => Promise<void>) | undefined;
     let openClawTasksSupervisor:
         | ReturnType<typeof createOpenClawTasksSubscriptionSupervisor>
         | undefined;
@@ -664,6 +665,7 @@ export async function createDashboardServer(
         await disposeIndependently(() => chatSessionActivitySupervisor?.stop());
         await disposeIndependently(() => chatTranscriptLifecycleSupervisor?.stop());
         await disposeIndependently(() => openClawTasksSupervisor?.stop());
+        await disposeIndependently(() => drainPasswordResetDeliveries?.());
         await disposeIndependently(() => workspaceFilesService?.dispose());
         await disposeIndependently(() => openClawCronHeartbeatReader?.disposeHeartbeat());
         await disposeIndependently(() => chatService?.dispose());
@@ -838,6 +840,8 @@ export async function createDashboardServer(
             sessionIdleDurationMs: options.sessionIdleDurationMs,
             verifyGatewayCredential,
         });
+        drainPasswordResetDeliveries = () =>
+            authenticationLifecycle.drainPasswordResetDeliveries();
         const automationSecurityLifecycle = createAutomationSecurityLifecycleService({
             ...(options.now !== undefined && { now: options.now }),
             recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,

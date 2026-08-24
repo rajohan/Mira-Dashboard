@@ -677,12 +677,7 @@ export function OverviewEnvironmentCards() {
     return (
         <>
             <QuotaOverviewCard query={quota} />
-            <ProviderCard
-                icon={GitBranch}
-                query={git}
-                showFreshness={false}
-                title="Managed Git"
-            >
+            <ProviderCard icon={GitBranch} query={git} title="Managed Git">
                 {(payload) => <GitDetails payload={payload} />}
             </ProviderCard>
         </>

@@ -142,6 +142,57 @@ describe("authentication password recovery", () => {
         }
     });
 
+    test("rejects an email change invalidated while delivery is in flight", async () => {
+        const delivery = Promise.withResolvers<void>();
+        const verificationUrls: string[] = [];
+        const harness = await createAuthenticationLifecycleHarness({
+            passwordRecoveryEmailSender: {
+                send: () => Promise.resolve(),
+                sendVerification(message) {
+                    verificationUrls.push(message.verificationUrl);
+                    return verificationUrls.length === 1
+                        ? Promise.resolve()
+                        : delivery.promise;
+                },
+            },
+            publicOrigin: "https://dashboard.example.com",
+        });
+        try {
+            const bootstrap = await bootstrapAuthenticationLifecycle(harness);
+            const identity = {
+                sessionId: bootstrap.session.id,
+                userId: bootstrap.user.id,
+            };
+            const change = harness.service.changeEmail(
+                identity,
+                { email: "replacement@example.com" },
+                authenticationLifecycleMetadata
+            );
+            await Bun.sleep(0);
+            harness.database.sqlite
+                .query(
+                    "UPDATE users SET authentication_version = authentication_version + 1 WHERE id = ?"
+                )
+                .run(bootstrap.user.id);
+            delivery.resolve();
+
+            expect(await change).toEqual({ status: "session-changed" });
+            const token = new URL(verificationUrls.at(-1) ?? "").searchParams.get(
+                "verifyEmailToken"
+            );
+            if (token === null) throw new Error("Verification URL omitted its token");
+            expect(
+                await harness.service.verifyEmail(
+                    { token },
+                    authenticationLifecycleMetadata
+                )
+            ).toEqual({ status: "invalid-token" });
+        } finally {
+            delivery.resolve();
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("keeps the delivered email-verification token when replacement delivery fails", async () => {
         const verificationUrls: string[] = [];
         let changeDeliveryCount = 0;
@@ -391,6 +442,11 @@ describe("authentication password recovery", () => {
                     { ...authenticationLifecycleMetadata, clientSourceId }
                 )
             );
+            expect(await Promise.all(requests)).toEqual([
+                { status: "accepted" },
+                { status: "accepted" },
+                { status: "accepted" },
+            ]);
             await waitForMessageCount(1);
             expect(messages).toHaveLength(1);
             deliveries[0]?.resolve();
@@ -400,11 +456,7 @@ describe("authentication password recovery", () => {
             await waitForMessageCount(3);
             expect(messages).toHaveLength(3);
             deliveries[2]?.resolve();
-            expect(await Promise.all(requests)).toEqual([
-                { status: "accepted" },
-                { status: "accepted" },
-                { status: "accepted" },
-            ]);
+            await harness.service.drainPasswordResetDeliveries();
 
             const tokens = messages.map(({ resetUrl }) =>
                 new URL(resetUrl).searchParams.get("resetToken")

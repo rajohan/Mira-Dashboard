@@ -41,7 +41,8 @@ export function createAuthenticationPasswordRecoveryOperations(
 ): Pick<
     AuthenticationLifecycleService,
     "requestPasswordReset" | "resetPassword" | "verifyEmail"
-> {
+> &
+    Readonly<{ drainPasswordResetDeliveries: () => Promise<void> }> {
     const passwordResetDeliveryTails = new Map<string, Promise<void>>();
 
     async function serializePasswordResetDelivery(
@@ -67,6 +68,12 @@ export function createAuthenticationPasswordRecoveryOperations(
     }
 
     return {
+        async drainPasswordResetDeliveries() {
+            while (passwordResetDeliveryTails.size > 0) {
+                await Promise.all(passwordResetDeliveryTails.values());
+            }
+        },
+
         async requestPasswordReset(input, metadata) {
             if (
                 context.passwordRecoveryEmailSender === undefined ||
@@ -124,7 +131,7 @@ export function createAuthenticationPasswordRecoveryOperations(
             }
             if (prepared.status === "accepted") return { status: "accepted" };
 
-            await serializePasswordResetDelivery(prepared.user.id, async () => {
+            void serializePasswordResetDelivery(prepared.user.id, async () => {
                 const token = context.generatePasswordResetToken();
                 const previousTokenPrefix =
                     await context.repository.withImmediateTransaction((unit) => {

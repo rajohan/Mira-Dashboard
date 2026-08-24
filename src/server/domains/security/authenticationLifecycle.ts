@@ -20,6 +20,10 @@ export type {
     RecentMfaAuthorization,
     VerifyGatewayCredential,
 } from "./authenticationLifecycleTypes.ts";
+
+export interface ManagedAuthenticationLifecycleService extends AuthenticationLifecycleService {
+    drainPasswordResetDeliveries(): Promise<void>;
+}
 export type {
     AuthenticatedBrowserIdentity,
     AuthenticationRequestMetadata,
@@ -32,7 +36,7 @@ export type {
  */
 export function createAuthenticationLifecycleService(
     dependencies: AuthenticationLifecycleDependencies
-): AuthenticationLifecycleService {
+): ManagedAuthenticationLifecycleService {
     const context = createAuthenticationLifecycleContext(dependencies);
     return Object.freeze({
         ...createAuthenticationBootstrapOperation(context),

@@ -284,7 +284,7 @@ const quotaEntry = Object.freeze({
 const gitEntry = Object.freeze({
     consecutiveFailures: 0,
     expiresAtMs: timestampMs + 5 * 60_000,
-    freshness: "fresh",
+    freshness: "stale",
     key: "git.workspace",
     lastAttemptAtMs: timestampMs,
     lastAttemptDurationMs: 120,
@@ -1191,6 +1191,9 @@ describe("Dashboard operational overview foundation", () => {
         });
         const managedGitCard = managedGitHeading.closest("section");
         expect(managedGitCard).toBeTruthy();
+        expect(
+            within(managedGitCard as HTMLElement).getByText("Last known good")
+        ).toBeTruthy();
         expect(
             screen.getByRole("link", { name: "Open Mira Dashboard on GitHub" })
         ).toHaveAttribute("href", "https://github.com/rajohan/Mira-Dashboard");

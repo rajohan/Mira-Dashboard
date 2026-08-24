@@ -211,17 +211,30 @@ export function createAuthenticationSessionOperations(
                     });
                     return { status: "service-unavailable" } as const;
                 }
-                await context.repository.withImmediateTransaction((unit) => {
-                    const deliveredToken = unit.findPasswordResetToken(
-                        prepared.token.prefix
-                    );
-                    if (deliveredToken === undefined) return;
-                    unit.deletePasswordResetTokensForUserPurpose(
-                        prepared.userId,
-                        "email-verification"
-                    );
-                    unit.insertPasswordResetToken(deliveredToken);
-                });
+                const delivered = await context.repository.withImmediateTransaction(
+                    (unit) => {
+                        const user = unit.findUserById(prepared.userId);
+                        const deliveredToken = unit.findPasswordResetToken(
+                            prepared.token.prefix
+                        );
+                        if (
+                            user === undefined ||
+                            deliveredToken === undefined ||
+                            deliveredToken.authenticationVersion !==
+                                user.authenticationVersion
+                        ) {
+                            unit.deletePasswordResetToken(prepared.token.prefix);
+                            return false;
+                        }
+                        unit.deletePasswordResetTokensForUserPurpose(
+                            prepared.userId,
+                            "email-verification"
+                        );
+                        unit.insertPasswordResetToken(deliveredToken);
+                        return true;
+                    }
+                );
+                if (!delivered) return { status: "session-changed" } as const;
                 return { email: prepared.email, status: "changed" } as const;
             });
         },
