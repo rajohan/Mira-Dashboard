@@ -233,6 +233,8 @@ export interface ServerOptions {
     readonly gatewaySessionsService: GatewaySessionsService;
     /** Manifest-indexed browser artifacts and controlled SPA navigation. */
     readonly frontendAssets?: FrontendAssetHandler;
+    /** Repository or release-selected Bun version validated before listener bind. */
+    readonly expectedRuntimeVersion: string;
     /** Graceful request-drain budget before active connections are forced closed. */
     readonly gracefulShutdownTimeoutMs?: number;
     readonly hostname?: string;
@@ -275,7 +277,7 @@ export interface ApplicationServer {
 export async function createServer(options: ServerOptions): Promise<ApplicationServer> {
     try {
         const logger = options.applicationRuntime.logger;
-        readRuntimeIdentity();
+        readRuntimeIdentity(undefined, options.expectedRuntimeVersion);
         const gracefulShutdownTimeoutMs = v.parse(
             serverGracefulShutdownTimeoutSchema,
             options.gracefulShutdownTimeoutMs ?? serverGracefulShutdownTimeoutDefaultMs

@@ -273,6 +273,7 @@ export interface DashboardServerOptions extends Omit<
     | "workspaceFileRawHttpHandler"
     | "workspaceFilesService"
     | "disposeBeforeRuntime"
+    | "expectedRuntimeVersion"
     | "gatewayConnectionService"
     | "gatewaySessionsService"
     | "hostname"
@@ -309,6 +310,8 @@ export interface DashboardServerOptions extends Omit<
     readonly dockerBrokerSocket?: string;
     /** Optional server-only speech credential; absence keeps both voice controls hidden. */
     readonly elevenLabsApiKey?: Redacted.Redacted<string>;
+    /** Release-selected version; optional only for isolated composition tests. */
+    readonly expectedRuntimeVersion?: string;
     /** Direct-loopback endpoint shared by bootstrap verification and persistent Gateway traffic. */
     readonly gatewayUrl: string;
     /** Server-only Gateway credential used by the outgoing-media proxy. */
@@ -1711,6 +1714,7 @@ export async function createDashboardServer(
             gatewayConnectionService,
             gatewaySessionsService,
             frontendAssets: options.frontendAssets,
+            expectedRuntimeVersion: options.expectedRuntimeVersion ?? Bun.version,
             gracefulShutdownTimeoutMs: options.gracefulShutdownTimeoutMs,
             hostname: "127.0.0.1",
             mfaAccountLifecycle,
@@ -1996,6 +2000,7 @@ export async function runDashboardWebProcess(
                           }),
                   }),
             frontendAssets,
+            expectedRuntimeVersion: release.manifest.runtime.version,
             gatewayUrl: configuration.gatewayUrl,
             gatewayToken: configuration.gatewayToken,
             openClawFileRoot,
