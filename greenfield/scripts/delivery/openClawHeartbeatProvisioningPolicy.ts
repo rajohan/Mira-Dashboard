@@ -5,6 +5,7 @@ export const openClawHeartbeatProvisioningReleaseArtifactPaths = Object.freeze([
 ] as const);
 
 export const openClawHeartbeatProvisioningPolicy = Object.freeze({
+    agentId: "ops",
     artifactPath: path.join(
         import.meta.dir,
         "provisioning",
@@ -12,6 +13,9 @@ export const openClawHeartbeatProvisioningPolicy = Object.freeze({
         "HEARTBEAT.md"
     ),
     capabilities: Object.freeze(["cache:read", "monitoring:write"] as const),
+    credentialFormat: "greenfield-opaque-token-v1",
     credentialFile: "openclaw-heartbeat.token",
-    targetPath: "/home/ubuntu/.openclaw/workspace/HEARTBEAT.md",
+    legacyCredentialReuse: false,
+    principalId: "openclaw-heartbeat",
+    promptConfigPath: "agents.entries.ops.heartbeat.prompt",
 });

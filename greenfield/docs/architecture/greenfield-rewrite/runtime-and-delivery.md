@@ -810,25 +810,30 @@ manifest-bound `productionDelivery.js` executor for `delivery.production.v1`. It
 secrets.
 
 Every release also contains the manifest-bound `openClawHeartbeat.js` executable and the exact
-`scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md` consumer contract. The executable
-has only `collect` and `report` modes and reads the existing `openclaw-heartbeat.token` from its
-fixed private client path. The live workspace prompt is external runtime authority and is not
-updated during build, publication, or ordinary application activation. The coordinated final
-cutover must first verify the Greenfield target and exact automation capabilities
-`cache:read,monitoring:write`, then atomically replace the prompt from the immutable candidate and
-fsync its parent. Rollback restores the previous release's prompt before the previous service pair
-resumes. An authenticated smoke must observe one v5 collection and one complete-snapshot report
-before heartbeat parity can close.
+`scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md` Markdown prompt source. The retained
+artifact filename is release inventory, not the runtime target. The executable has only `collect`
+and `report` modes and reads `openclaw-heartbeat.token` from its fixed private client path. OpenClaw
+owns the live authority at `agents.entries.ops.heartbeat.prompt`; Dashboard build, publication,
+retention, ordinary activation, and service restart never install or reset either that config value
+or the external credential.
 
-Heartbeat cutover is one journaled filesystem transition, not an ordinary application write. It
-descriptor-reads and verifies both the live prompt and the manifest-bound candidate, retains the
-exact pre-transition bytes while that activation remains rollback-eligible, writes a private
-sibling stage, fsyncs the stage, renames it over the target, and fsyncs the workspace directory.
-The credential capability change and prompt replacement are committed only after target readiness;
-a failure before the authenticated smoke performs the same atomic replacement from the retained
-pre-transition bytes. Later rollbacks use the exact prompt retained with the authoritative previous
-release. Identity, mode, mount, inode, or journal drift blocks the transition without touching the
-live prompt. Build, publication, retention, and a normal service restart never install or reset it.
+Heartbeat cutover is a manual one-time external transition after Greenfield is active and ready:
+
+1. Create or qualify the Greenfield principal `openclaw-heartbeat` with exactly `cache:read` and
+   `monitoring:write`, then issue a new canonical `greenfield-opaque-token-v1` credential. The
+   incompatible legacy `openclaw-heartbeat.<64-hex>` token is never reused.
+2. Atomically install the new token in the fixed private credential file and reverify its owner,
+   `0600` mode, regular-file identity, and non-symlink boundary.
+3. Read the current OpenClaw config and base hash, validate the manifest-bound candidate prompt,
+   dry-run the exact patch, and CAS patch only `agents.entries.ops.heartbeat.prompt`.
+4. Allow the `agents.entries` change to hot-restart the heartbeat scheduler without a full Gateway
+   restart, then run one isolated authenticated heartbeat and prove exactly one schema-v5
+   collection followed by one complete-snapshot report.
+
+No app-owned cutover executor, config writer, credential rotator, activation journal, or legacy
+token parser is introduced. Legacy is removed rather than retained as a rollback target. Later
+Greenfield release rollbacks keep the same external schema-v5 prompt and credential. Heartbeat
+parity remains planned until the live smoke succeeds.
 
 PR-preview publication requires one explicit new-host bootstrap: a root operator runs the
 manifest-inventoried Tailscale provisioning artifact, which delegates the fixed local account

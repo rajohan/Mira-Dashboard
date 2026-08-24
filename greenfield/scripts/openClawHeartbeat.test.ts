@@ -241,6 +241,25 @@ describe("OpenClaw heartbeat automation wrapper", () => {
         expect(calls).toBe(0);
     });
 
+    test("rejects the legacy credential format before transport", async () => {
+        let calls = 0;
+        const legacyToken = `openclaw-heartbeat.${"c".repeat(64)}`;
+
+        const failure = runOpenClawHeartbeatCommand(["collect"], {
+            fetch: () => {
+                calls += 1;
+                return Promise.resolve(response({}));
+            },
+            readCredential: () => Promise.resolve(legacyToken),
+            writeStandardOutput: () => {},
+        });
+
+        expect(failure).rejects.toThrow("OpenClaw heartbeat automation failed");
+        await Promise.allSettled([failure]);
+
+        expect(calls).toBe(0);
+    });
+
     test("does not retry or expose upstream data when one response fails", async () => {
         let calls = 0;
         const upstreamSecret = "upstream-secret-must-not-escape";

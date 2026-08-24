@@ -533,14 +533,21 @@ unavailable upstream state.
 The matching external consumer has no generic Dashboard transport. One immutable, release-bound
 wrapper admits only `collect` and `report`: `collect` performs one `cache.getHeartbeat` query and
 requires schema v5; `report` accepts one bounded, strict complete monitoring snapshot over stdin
-and performs one `monitoring.submitCompleteSnapshot` mutation. It reads the existing credential
-through `O_NOFOLLOW`, exact `0600` mode and current-owner checks, permits only loopback HTTP, rejects
-redirects, bounds and fatally decodes response bytes, and collapses transport/provider/validation
-failure to one fixed secret-free error. The automation principal therefore needs exactly
-`cache:read` and `monitoring:write`; the legacy `reports:write` grant is removed at coordinated
-cutover. The current live `HEARTBEAT.md` is not modified ahead of that cutover: its schema-v5
-replacement is an immutable provisioning artifact installed atomically only after target readiness
-and restored from the previous release on rollback.
+and performs one `monitoring.submitCompleteSnapshot` mutation. It reads a canonical Greenfield
+credential through `O_NOFOLLOW`, exact `0600` mode and current-owner checks, permits only loopback
+HTTP, rejects redirects, bounds and fatally decodes response bytes, and collapses
+transport/provider/validation failure to one fixed secret-free error. The automation principal
+therefore needs exactly `cache:read` and `monitoring:write`.
+
+The legacy `openclaw-heartbeat.<64-hex>` token cannot satisfy the Greenfield opaque-token schema and
+is never reused. Once Greenfield is active and ready, the operator creates a new canonical
+credential, atomically installs it in the fixed private client file, and base-hash/CAS patches the
+immutable candidate prompt into the external OpenClaw authority
+`agents.entries.ops.heartbeat.prompt`. The heartbeat delivery path receives no OpenClaw
+configuration or credential-mutation authority, and build, publication, and ordinary activation
+perform neither change. The resulting `agents.entries` update hot-restarts only the heartbeat
+scheduler. Legacy is not a rollback target; subsequent Greenfield release rollbacks retain the
+same schema-v5 prompt and credential.
 
 Queue behavior is explicit:
 

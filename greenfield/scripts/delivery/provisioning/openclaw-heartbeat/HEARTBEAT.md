@@ -1,4 +1,7 @@
-# HEARTBEAT.md - Dashboard heartbeat v5
+# Dashboard heartbeat v5 prompt
+
+This immutable Markdown is the prompt source for
+`agents.entries.ops.heartbeat.prompt`; it is not a workspace `HEARTBEAT.md` target.
 
 The hourly `ops-check` is assessment and reporting only. It uses exactly two shell executions and
 no other Dashboard, filesystem, repository, service, browser, network, or diagnostic call.
