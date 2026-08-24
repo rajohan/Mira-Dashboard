@@ -6,6 +6,7 @@ import {
 } from "../../../contracts/auth.ts";
 import {
     boundedNonBlankTextSchema,
+    hasNoUnicodeControlOrFormat,
     lowercaseSha256Action,
 } from "../../../shared/validation.ts";
 import { isDashboardPasswordHash } from "../../shared/passwordHash.ts";
@@ -22,10 +23,10 @@ export const securityLabelSchema = boundedNonBlankTextSchema(
     "Security label is invalid"
 );
 
-/** Human-readable security label without Unicode control or format characters. */
+/** Human-readable label without Unicode controls, formats, or line/paragraph separators. */
 export const controlSafeSecurityLabelSchema = v.pipe(
     securityLabelSchema,
-    v.check((value) => !/[\p{Cc}\p{Cf}]/u.test(value), "Security label is invalid")
+    v.check(hasNoUnicodeControlOrFormat, "Security label is invalid")
 );
 
 /** Bounded user-agent metadata without NUL characters. */

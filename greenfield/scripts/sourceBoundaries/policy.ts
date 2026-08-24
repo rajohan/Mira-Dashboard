@@ -9,6 +9,7 @@ import {
     environmentSourceFile,
     isTestPath,
     isReviewedApplicationServerTarget,
+    isReviewedScriptBrowserTarget,
     normalizeRepositoryPath,
     relativeImportTarget,
     sourceRole,
@@ -322,6 +323,12 @@ export function validateSourceImport(
     if (
         targetRole === "server" &&
         isReviewedApplicationServerTarget(normalizedImporter, target)
+    ) {
+        return undefined;
+    }
+    if (
+        targetRole === "browser" &&
+        isReviewedScriptBrowserTarget(normalizedImporter, target)
     ) {
         return undefined;
     }

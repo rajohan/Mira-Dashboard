@@ -96,6 +96,8 @@ describe("shared scalar validation", () => {
         expect(v.parse(schema, "😀😀😀😀😀😀😀😀")).toBe("😀😀😀😀😀😀😀😀");
         expect(v.safeParse(schema, "Road\nmap").success).toBeFalse();
         expect(v.safeParse(schema, "Road\u200Bmap").success).toBeFalse();
+        expect(v.safeParse(schema, "Road\u2028map").success).toBeFalse();
+        expect(v.safeParse(schema, "Road\u2029map").success).toBeFalse();
         expect(v.safeParse(schema, "         ").success).toBeFalse();
     });
 

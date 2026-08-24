@@ -1157,6 +1157,16 @@ const defaultWebProcessDependencies = Object.freeze({
     resolveWorkspaceFileRoot: resolveReviewedWorkspaceFileRoot,
 } satisfies DashboardWebProcessDependencies);
 
+/**
+ * Returns the reviewed production web-process dependency set for narrow composition overrides.
+ * Development replaces only release loading, frontend assets, and database startup; production
+ * callers continue to use this exact frozen object unchanged.
+ * @returns The frozen default web-process dependencies.
+ */
+export function createDefaultDashboardWebProcessDependencies(): DashboardWebProcessDependencies {
+    return defaultWebProcessDependencies;
+}
+
 function createWebLogger(
     configuration: WebConfiguration,
     release: RuntimeRelease,

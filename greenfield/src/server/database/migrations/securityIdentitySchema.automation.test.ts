@@ -5,7 +5,7 @@ import { openFreshMigratedDatabase } from "../../test/support/freshDatabase.ts";
 import { insertAutomationPrincipal } from "./testSupport/securityIdentitySchema.ts";
 
 describe("automation identity schema", () => {
-    test("rejects embedded NUL across automation security scalars", async () => {
+    test("rejects embedded NUL and Unicode separators across automation security scalars", async () => {
         const database = await openFreshMigratedDatabase();
 
         try {
@@ -20,6 +20,19 @@ describe("automation identity schema", () => {
                     ["openclaw-task-tracking\0suffix"]
                 )
             ).toThrow("automation_principals_id_check");
+            for (const separator of ["\u2028", "\u2029"]) {
+                expect(() =>
+                    database.sqlite.run(
+                        `INSERT INTO automation_principals (
+                            created_at,
+                            id,
+                            label,
+                            updated_at
+                        ) VALUES (1000, 'separator-principal', ?, 1000)`,
+                        [`Unsafe${separator}label`]
+                    )
+                ).toThrow("automation_principals_label_check");
+            }
 
             insertAutomationPrincipal(database);
             expect(() =>

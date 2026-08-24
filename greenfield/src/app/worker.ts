@@ -207,6 +207,16 @@ const defaultDependencies = Object.freeze({
     startTerminalBroker: startWorkerTerminalBrokerLifecycle,
 } satisfies DashboardWorkerProcessDependencies);
 
+/**
+ * Returns the reviewed production worker dependency set for narrow composition overrides.
+ * Development replaces only release loading, database startup, and host-capability adapters;
+ * production callers continue to use this exact frozen object unchanged.
+ * @returns The frozen default worker-process dependencies.
+ */
+export function createDefaultDashboardWorkerProcessDependencies(): DashboardWorkerProcessDependencies {
+    return defaultDependencies;
+}
+
 function createWorkerLogger(
     configuration: WorkerConfiguration,
     release: RuntimeRelease,
