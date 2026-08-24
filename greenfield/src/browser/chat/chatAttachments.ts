@@ -78,7 +78,7 @@ export function validateChatAttachmentFiles(
         if (mediaType === undefined) {
             failures.push(
                 isVideoChatAttachment(file.name, file.type)
-                    ? `${file.name || "Unnamed file"} is a video; video attachments are not supported.`
+                    ? `${file.name || "Unnamed file"} is a video. Video attachments are not supported.`
                     : `${file.name || "Unnamed file"} has an unsupported file type.`
             );
         }

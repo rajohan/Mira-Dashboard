@@ -161,8 +161,8 @@ describe("OpenClawCronSection", () => {
             />
         );
         expect(
-            screen.getByText(/separate from Dashboard schedules and background jobs/u)
-        ).toBeInTheDocument();
+            screen.getByRole("heading", { level: 2, name: "OpenClaw scheduled jobs" })
+        ).toHaveClass("sr-only");
         expect(
             screen.getByRole("list", { name: "OpenClaw scheduled jobs" })
         ).toBeVisible();
@@ -177,13 +177,83 @@ describe("OpenClawCronSection", () => {
         expect(screen.getByText("model-preview (shortened)")).toBeVisible();
         expect(screen.getByText("provider-preview (shortened)")).toBeVisible();
         expect(
-            screen.getByText(
-                "Updates automatically every 10 seconds and when OpenClaw reports changes."
-            )
-        ).toBeVisible();
-        expect(
             screen.queryByRole("button", { name: "Refresh OpenClaw" })
         ).not.toBeInTheDocument();
+    });
+
+    test("shows heartbeat instructions and presents wake-request history without empty agent fields", () => {
+        const actions = callbacks();
+        const heartbeatJob = {
+            ...job,
+            payload: { kind: "heartbeat" },
+            scratch: {
+                content: "Collect the bounded ops snapshot and post one report.",
+                revision: 5,
+                truncated: false,
+            },
+        } satisfies OpenClawCronJob;
+        render(
+            <OpenClawCronSectionView
+                {...actions}
+                heartbeatSession={{
+                    displayName: "Ops heartbeat",
+                    hasActiveRun: false,
+                    key: "agent:ops:main:heartbeat",
+                    kind: "main",
+                    model: "kimi",
+                    modelProvider: "openai",
+                    thinkingDefault: "high",
+                    totalTokens: 12_345,
+                    totalTokensFresh: true,
+                    updatedAtMs: 1_800_010_000_000,
+                }}
+                runs={{
+                    ...runs,
+                    runs: runs.runs.map(({ model, provider, ...run }) => {
+                        void model;
+                        void provider;
+                        return run;
+                    }),
+                }}
+                state={{ result: resultWithJobs([heartbeatJob]), status: "ready" }}
+            />
+        );
+
+        expect(screen.getByText("Message")).toBeVisible();
+        expect(
+            screen.getByText("Collect the bounded ops snapshot and post one report.")
+        ).toBeVisible();
+        expect(screen.getAllByText("Model")).toHaveLength(2);
+        expect(screen.getAllByText("Provider")).toHaveLength(2);
+        expect(screen.getByText("Thinking")).toBeVisible();
+        expect(screen.getByText("high")).toBeVisible();
+        expect(screen.getByText("Timeout")).toBeVisible();
+        const history = screen.getByRole("list", {
+            name: `OpenClaw runs for ${heartbeatJob.name}`,
+        });
+        expect(within(history).getByText("Completed")).toBeVisible();
+        expect(within(history).getByText("Model")).toBeVisible();
+        expect(within(history).getByText("Provider")).toBeVisible();
+        expect(within(history).getByText("Delivery")).toBeVisible();
+        expect(within(history).getByText("Report delivered.")).toBeVisible();
+        expect(within(history).getAllByText("—")).toHaveLength(2);
+    });
+
+    test("does not present heartbeat session settings as defaults before observation", () => {
+        const heartbeatJob = {
+            ...job,
+            payload: { kind: "heartbeat" },
+        } satisfies OpenClawCronJob;
+
+        render(
+            <OpenClawCronSectionView
+                {...callbacks()}
+                heartbeatSessionStatus="unavailable"
+                state={{ result: resultWithJobs([heartbeatJob]), status: "ready" }}
+            />
+        );
+
+        expect(screen.getAllByText("Unavailable")).toHaveLength(3);
     });
 
     test("uses mobile-first cards and desktop grids without horizontal scrolling or field loss", async () => {
@@ -229,7 +299,7 @@ describe("OpenClawCronSection", () => {
             name: `OpenClaw runs for ${longName}`,
         });
         expect(inventory).toHaveClass("grid-cols-1", "min-w-0", "max-w-full");
-        expect(history).toHaveClass("grid-cols-1", "min-w-0", "max-w-full");
+        expect(history).toHaveClass("relative", "min-w-0", "max-w-full");
         expect(history.querySelector("dl")).toHaveClass(
             "sm:grid-cols-2",
             "lg:grid-cols-3"
@@ -241,16 +311,10 @@ describe("OpenClawCronSection", () => {
         ).toBe(false);
         expect(section.querySelector(".min-w-224, .min-w-240")).toBeNull();
 
-        for (const label of [
-            "OpenClaw status",
-            "Dashboard status",
-            "Schedule",
-            "Last run",
-            "Next run",
-            "Last status",
-        ]) {
+        for (const label of ["Last:", "Next:"]) {
             expect(within(inventory).getByText(label)).toBeVisible();
         }
+        expect(within(inventory).getByLabelText("Last status: Succeeded")).toBeVisible();
         for (const label of [
             "Completed",
             "Status",
@@ -262,7 +326,7 @@ describe("OpenClawCronSection", () => {
         ]) {
             expect(within(history).getByText(label)).toBeVisible();
         }
-        expect(within(inventory).getByText(longJobId)).toHaveClass("wrap-anywhere");
+        expect(within(inventory).getByText(longJobId)).toHaveClass("truncate");
         const detailHeading = within(section).getByRole("heading", {
             level: 3,
             name: longName,

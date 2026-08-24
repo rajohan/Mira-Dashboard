@@ -1,11 +1,15 @@
 import { useLiveQuery } from "@tanstack/react-db";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import type {
     AgentDefinition,
     AgentStatusProjection,
     AgentTaskRun,
 } from "../../contracts/agentModel.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useDashboardBrowserCollections } from "../data/dashboardCollectionsContextValue.ts";
@@ -14,7 +18,10 @@ import { Button } from "../ui/Button.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageHeader } from "../ui/PageHeader.tsx";
 import { AgentHistoryTable } from "./AgentHistoryTable.tsx";
-import { agentHistoryQueryOptions } from "./agentQueries.ts";
+import {
+    agentHistoryLiveHeadQueryOptions,
+    agentHistoryQueryOptions,
+} from "./agentQueries.ts";
 import { AgentStatusGrid } from "./AgentStatusGrid.tsx";
 import { useAgentCollectionQueryState } from "./useAgentCollectionQueryState.ts";
 import { useAgentRealtimeInvalidation } from "./useAgentRealtimeInvalidation.ts";
@@ -32,25 +39,38 @@ export function AgentsRoute() {
     const statuses = useLiveQuery(collections.statuses);
     const collectionQueries = useAgentCollectionQueryState();
     const history = useInfiniteQuery(agentHistoryQueryOptions(client));
+    const historyLiveHead = useQuery(agentHistoryLiveHeadQueryOptions(client));
     const agents = configuration.data ?? emptyAgents;
     const agentStatuses = statuses.data ?? emptyStatuses;
-    const runs = history.data?.pages.flatMap((page) => page.runs) ?? emptyRuns;
+    const runs = useAccumulatedLiveHistoryRows(
+        historyLiveHead.data?.runs ?? [],
+        history.data?.pages.flatMap((page) => page.runs) ?? emptyRuns,
+        liveHistoryRowIdentity,
+        "agents"
+    );
     const error =
         collectionQueries.configuration?.error ??
         collectionQueries.statuses?.error ??
+        historyLiveHead.error ??
         history.error;
-    const pending = configuration.isLoading || statuses.isLoading || history.isPending;
+    const historyAvailable =
+        history.data !== undefined || historyLiveHead.data !== undefined;
+    const pending =
+        configuration.isLoading ||
+        statuses.isLoading ||
+        (history.isPending && historyLiveHead.isPending);
     const hasCompleteData =
         configuration.isReady &&
         statuses.isReady &&
         collectionQueries.configuration?.data !== undefined &&
         collectionQueries.statuses?.data !== undefined &&
-        history.data !== undefined;
+        historyAvailable;
 
     const refresh = () => {
         void Promise.allSettled([
             collections.definitions.utils.refetch(),
             collections.statuses.utils.refetch(),
+            historyLiveHead.refetch(),
             history.refetch(),
         ]);
     };
@@ -58,7 +78,7 @@ export function AgentsRoute() {
     return (
         <div>
             <PageHeader
-                description="Reviewed roles, Dashboard-owned tasks, and separate Gateway session availability; availability is not online status or health. Updates automatically from agent and Gateway events, with 10-second status repair polling."
+                description="Reviewed roles, Dashboard-owned tasks, and separate Gateway session availability. Availability is not online status or health. Updates automatically from agent and Gateway events, with 10-second status repair polling."
                 eyebrow="Operations"
                 title="Agents"
             />
@@ -66,12 +86,15 @@ export function AgentsRoute() {
                 <LoadingState className="mt-10" label="Loading agents…" />
             )}
             {error !== null && (
-                <div className="mt-6">
-                    <Alert message={dashboardBrowserFailureMessage(error)} />
-                    <Button className="mt-3" onClick={refresh} variant="secondary">
-                        Try again
-                    </Button>
-                </div>
+                <Alert
+                    action={
+                        <Button onClick={refresh} size="sm" variant="secondary">
+                            Try again
+                        </Button>
+                    }
+                    className="mt-6"
+                    message={dashboardBrowserFailureMessage(error)}
+                />
             )}
             {hasCompleteData && (
                 <div className="mt-8 space-y-10">

@@ -1,4 +1,4 @@
-import { ArrowDown, Download, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, Download, FileText, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable log must be keyboard-focusable. */
 
@@ -15,17 +15,15 @@ import {
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
-import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
-import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageState } from "../ui/PageState.tsx";
+import { SearchInput } from "../ui/SearchInput.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
@@ -46,14 +44,13 @@ export interface LogsViewProps {
     readonly maintenance?: LogMaintenanceStatusOutput;
     readonly maintenanceError?: string;
     readonly maintenanceLoading?: boolean;
-    readonly maintenanceRefreshing?: boolean;
     readonly onClearSearch: () => void;
     readonly onRefresh: () => void;
-    readonly onRefreshMaintenance: () => void;
     readonly onRequestMaintenance: (
         policyId: LogMaintenancePolicyId,
         dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
+    readonly onRetryMaintenance?: () => void;
     readonly onSearch: (query: string) => void;
     readonly onSelectSource: (sourceId: string) => void;
     readonly onRowCountChange: (rowCount: number) => void;
@@ -109,11 +106,13 @@ function downloadRedactedLogLines(
 
 function LogSnapshot({
     activeLevels,
+    onActiveLevelsChange,
     rowCount,
     searchQuery,
     snapshot,
 }: Readonly<{
     readonly activeLevels: ReadonlySet<FilterableLogLevel>;
+    readonly onActiveLevelsChange: (levels: ReadonlySet<FilterableLogLevel>) => void;
     readonly rowCount: number;
     readonly searchQuery?: string;
     readonly snapshot: LogSnapshotOutput;
@@ -171,8 +170,8 @@ function LogSnapshot({
                 className="border-primary-700/70 bg-primary-950/40 mt-4"
                 description={
                     activeLevels.size === 0
-                        ? "Select one or more levels, or choose All."
-                        : "Choose another level or select All to include every classified line."
+                        ? "Select one or more log levels."
+                        : "Choose another level to include matching classified lines."
                 }
                 headingLevel={3}
                 title="No log lines at the selected levels"
@@ -243,38 +242,53 @@ function LogSnapshot({
     }
     return (
         <>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-primary-400 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            <div className="mt-4 grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:items-center">
+                <div
+                    aria-label="Log snapshot summary"
+                    className="text-primary-400 flex min-w-0 flex-nowrap items-center gap-3 overflow-x-auto text-xs whitespace-nowrap"
+                    tabIndex={0}
+                >
                     <span>{formatDashboardDateTime(snapshot.observedAtMs)}</span>
                     <span>{formatByteCount(snapshot.scannedBytes)} read</span>
                     <span>{lineCountLabel}</span>
-                    {snapshot.hasEarlier && <span>Older lines not shown</span>}
                 </div>
-                <Button
-                    disabled={visibleLines.length === 0}
-                    onClick={() =>
-                        downloadRedactedLogLines(
-                            snapshot,
-                            visibleLines.map(({ entry }) => entry)
-                        )
-                    }
-                    size="sm"
-                    variant="secondary"
-                >
-                    <Icon icon={Download} size="sm" tone="inherit" />
-                    Export
-                </Button>
-                <Button
-                    disabled={unclearedLines.length === 0}
-                    onClick={() => {
-                        setClearedLineIds(new Set(snapshot.lines.map(({ id }) => id)));
-                    }}
-                    size="sm"
-                    variant="secondary"
-                >
-                    <Icon icon={Trash2} size="sm" tone="inherit" />
-                    Clear buffer
-                </Button>
+                <div className="min-w-0">
+                    <LogLevelFilter
+                        activeLevels={activeLevels}
+                        onChange={onActiveLevelsChange}
+                    />
+                </div>
+                <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:items-center">
+                    <Button
+                        className="min-w-0 whitespace-nowrap"
+                        disabled={visibleLines.length === 0}
+                        onClick={() =>
+                            downloadRedactedLogLines(
+                                snapshot,
+                                visibleLines.map(({ entry }) => entry)
+                            )
+                        }
+                        size="sm"
+                        variant="secondary"
+                    >
+                        <Icon icon={Download} size="sm" tone="inherit" />
+                        Export
+                    </Button>
+                    <Button
+                        className="min-w-0 whitespace-nowrap"
+                        disabled={unclearedLines.length === 0}
+                        onClick={() => {
+                            setClearedLineIds(
+                                new Set(snapshot.lines.map(({ id }) => id))
+                            );
+                        }}
+                        size="sm"
+                        variant="secondary"
+                    >
+                        <Icon icon={Trash2} size="sm" tone="inherit" />
+                        Clear buffer
+                    </Button>
+                </div>
             </div>
             {linesContent}
         </>
@@ -290,11 +304,10 @@ export function LogsView({
     maintenance,
     maintenanceError,
     maintenanceLoading = false,
-    maintenanceRefreshing = false,
     onClearSearch,
     onRefresh,
-    onRefreshMaintenance,
     onRequestMaintenance,
+    onRetryMaintenance,
     onRowCountChange,
     onSearch,
     onSelectSource,
@@ -318,12 +331,6 @@ export function LogsView({
     const [activeLevels, setActiveLevels] =
         useState<ReadonlySet<FilterableLogLevel>>(allLogLevels);
     const selectedSource = sources.find(({ id }) => id === selectedSourceId);
-
-    function submitSearch() {
-        const query = searchDraft.trim();
-        if (query.length > 0) onSearch(query);
-    }
-
     let snapshotContent: ReactNode;
     if (snapshotLoading && snapshot === undefined) {
         snapshotContent = <LoadingState label="Loading log lines…" />;
@@ -338,6 +345,7 @@ export function LogsView({
             <LogSnapshot
                 activeLevels={activeLevels}
                 key={`${snapshot.sourceId}:${searchQuery ?? "latest"}:${rowCount}`}
+                onActiveLevelsChange={setActiveLevels}
                 rowCount={rowCount}
                 searchQuery={searchQuery}
                 snapshot={snapshot}
@@ -350,9 +358,8 @@ export function LogsView({
             maintenance={maintenance}
             maintenanceError={maintenanceError}
             maintenanceLoading={maintenanceLoading}
-            maintenanceRefreshing={maintenanceRefreshing}
-            onRefresh={onRefreshMaintenance}
             onRequestMaintenance={onRequestMaintenance}
+            onRetryMaintenance={onRetryMaintenance}
             requestedRun={requestedRun}
             requestedRunError={requestedRunError}
             requestedRunInactiveConfirmed={requestedRunInactiveConfirmed}
@@ -406,50 +413,14 @@ export function LogsView({
     return (
         <div className="space-y-6">
             <Alert focusOnError={false} message={sourcesError} />
-            <Card aria-labelledby="log-source-heading">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                    <div className="min-w-0 flex-1">
-                        <Heading id="log-source-heading" level={2} size="subsection">
-                            Log source
-                        </Heading>
-                        <Text className="mt-1" tone="muted">
-                            Choose a configured source. File paths stay on the server, and
-                            sensitive values are removed before lines reach this page.
-                        </Text>
-                    </div>
-                    <div className="flex w-full gap-2 sm:w-auto">
-                        <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
-                            <Select
-                                ariaLabel="Log rows"
-                                disabled={selectedSource?.availability !== "available"}
-                                onChange={(value) => {
-                                    const selectedRowCount = logSnapshotRowOptions.find(
-                                        (option) => String(option) === value
-                                    );
-                                    if (selectedRowCount !== undefined) {
-                                        onRowCountChange(selectedRowCount);
-                                    }
-                                }}
-                                options={logSnapshotRowOptions.map((option) => ({
-                                    label: `${option} lines`,
-                                    value: String(option),
-                                }))}
-                                value={String(rowCount)}
-                            />
-                        </div>
-                        <Button
-                            busy={refreshing}
-                            busyLabel="Refreshing logs…"
-                            onClick={onRefresh}
-                            size="sm"
-                            variant="secondary"
-                        >
-                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                            Refresh
-                        </Button>
-                    </div>
+            <Card aria-label="Log viewer">
+                <div className="flex items-center gap-3">
+                    <Icon icon={FileText} tone="accent" />
+                    <Heading id="logs-card-heading" level={2} size="subsection">
+                        Logs
+                    </Heading>
                 </div>
-                <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(14rem,22rem)_minmax(18rem,1fr)]">
+                <div className="border-primary-700 mt-4 grid min-w-0 gap-3 border-t pt-4 lg:grid-cols-[minmax(14rem,22rem)_10rem_minmax(18rem,1fr)] lg:items-end">
                     <FormField label="Log source">
                         <div className="mt-2">
                             <Select
@@ -468,95 +439,55 @@ export function LogsView({
                             />
                         </div>
                     </FormField>
-                    <Form
-                        className="flex min-w-0 items-end gap-2"
-                        onSubmit={submitSearch}
-                    >
-                        <FormField
-                            className="min-w-0 flex-1"
-                            description="Searches recent lines from this source."
-                            label="Search logs"
-                        >
-                            <Input
-                                className="mt-2"
+                    <FormField label="Lines">
+                        <div className="mt-2">
+                            <Select
+                                ariaLabel="Log rows"
                                 disabled={selectedSource?.availability !== "available"}
+                                onChange={(value) => {
+                                    const selectedRowCount = logSnapshotRowOptions.find(
+                                        (option) => String(option) === value
+                                    );
+                                    if (selectedRowCount !== undefined) {
+                                        onRowCountChange(selectedRowCount);
+                                    }
+                                }}
+                                options={logSnapshotRowOptions.map((option) => ({
+                                    label: `${option} lines`,
+                                    value: String(option),
+                                }))}
+                                value={String(rowCount)}
+                            />
+                        </div>
+                    </FormField>
+                    <div className="flex min-w-0 items-end gap-2">
+                        <FormField className="min-w-0 flex-1" label="Search logs">
+                            <SearchInput
+                                className="mt-2"
+                                clearLabel="Clear log search"
+                                disabled={selectedSource?.availability !== "available"}
+                                label="Search logs"
                                 maxLength={logSearchMaximumCharacters}
-                                onChange={(event) => setSearchDraft(event.target.value)}
+                                onChange={(draft) => {
+                                    const query = draft.trim();
+                                    setSearchDraft(draft);
+                                    if (query.length === 0) onClearSearch();
+                                    else onSearch(query);
+                                }}
                                 placeholder='Try "request-42" or "connection failed"'
-                                type="search"
                                 value={searchDraft}
                             />
                         </FormField>
-                        <Button
-                            disabled={
-                                selectedSource?.availability !== "available" ||
-                                searchDraft.trim().length === 0
-                            }
-                            type="submit"
-                            variant="secondary"
-                        >
-                            <Icon icon={Search} size="sm" tone="inherit" />
-                            Search
-                        </Button>
-                        {searchQuery !== undefined && (
-                            <Button
-                                aria-label="Clear log search"
-                                onClick={() => {
-                                    setSearchDraft("");
-                                    onClearSearch();
-                                }}
-                                variant="ghost"
-                            >
-                                <Icon icon={X} size="sm" tone="inherit" />
-                                Latest
-                            </Button>
-                        )}
-                    </Form>
-                </div>
-            </Card>
-
-            {selectedSource?.availability !== "available" && (
-                <Alert
-                    focusOnError={false}
-                    message="This log source is missing or cannot be read safely."
-                />
-            )}
-            <Alert focusOnError={false} message={snapshotError} />
-
-            <Card aria-labelledby="log-snapshot-heading">
-                <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
-                    <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Heading
-                                id="log-snapshot-heading"
-                                level={2}
-                                size="subsection"
-                            >
-                                {selectedSource?.label ?? "Log snapshot"}
-                            </Heading>
-                            <Badge
-                                variant={searchQuery === undefined ? "info" : "warning"}
-                            >
-                                {searchQuery === undefined ? "Latest lines" : "Search"}
-                            </Badge>
-                        </div>
-                        {searchQuery !== undefined && (
-                            <Text className="mt-1 break-all" tone="muted">
-                                Query: {searchQuery}
-                            </Text>
-                        )}
-                    </div>
-                    <div className="min-w-0 xl:max-w-[38rem]">
-                        <p className="text-primary-100 mb-2 text-sm font-medium">
-                            Log level
-                        </p>
-                        <LogLevelFilter
-                            activeLevels={activeLevels}
-                            disabled={snapshot === undefined}
-                            onChange={setActiveLevels}
-                        />
                     </div>
                 </div>
+                {selectedSource?.availability !== "available" && (
+                    <Alert
+                        className="mt-4"
+                        focusOnError={false}
+                        message="This log source is missing or cannot be read safely."
+                    />
+                )}
+                <Alert className="mt-4" focusOnError={false} message={snapshotError} />
                 {snapshotContent}
             </Card>
 

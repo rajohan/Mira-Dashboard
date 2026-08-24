@@ -39,7 +39,7 @@ import {
 const serviceActionsStatusQueryKey = ["service-actions", "status"] as const;
 const serviceActionMutationKey = ["service-actions", "request"] as const;
 const serviceActionUnknownOutcomeMessage =
-    "Dashboard could not confirm whether the service action request was queued. Retrying that action reuses the same recovery key; review Dashboard jobs before retrying.";
+    "Dashboard could not confirm whether the service action request was queued. Retrying that action reuses the same recovery key. Review Dashboard jobs before retrying.";
 
 function serviceActionsStatusQueryOptions(client: DashboardTrpcClient) {
     return queryOptions({

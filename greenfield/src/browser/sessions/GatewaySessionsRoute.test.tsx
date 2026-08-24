@@ -68,15 +68,15 @@ test("sessions route composes its bounded browser and lazy route registration", 
         expect(sessionsLazyRoute.options.id).toBe("/sessions");
         expect(
             await screen.findByRole("heading", { level: 1, name: "Sessions" })
-        ).toBeVisible();
+        ).toHaveClass("sr-only");
         expect(
             await screen.findByRole("table", { name: "Current OpenClaw sessions" })
         ).toBeVisible();
         expect(
-            screen.getByText(
+            screen.queryByText(
                 /Sensitive actions require a recent multi-factor authentication check/u
             )
-        ).toBeVisible();
+        ).toBeNull();
         expect(screen.queryByText(/Updates automatically every 10 seconds/u)).toBeNull();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         const table = screen.getByRole("table", {

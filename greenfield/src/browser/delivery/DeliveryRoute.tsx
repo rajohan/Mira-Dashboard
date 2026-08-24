@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink as ExternalLinkIcon, X } from "lucide-react";
+import { ExternalLink as ExternalLinkIcon, Rocket, X } from "lucide-react";
 
 import type {
     DeliveryPreviewResult,
@@ -17,7 +17,6 @@ import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { Text } from "../ui/Text.tsx";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import { DeliveryJobsPanel } from "./DeliveryJobsPanel.tsx";
@@ -27,6 +26,7 @@ import {
     rollbackReleasePrompt,
     stopPreviewPrompt,
 } from "./deliveryOperations.ts";
+import { deliveryFailureMessage } from "./deliveryPresentation.ts";
 import {
     deliveryCheckoutQueryOptions,
     deliveryDeploymentsQueryOptions,
@@ -37,7 +37,7 @@ import {
 } from "./deliveryQueries.ts";
 import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
 import { PreviewPanel } from "./PreviewPanel.tsx";
-import { ProductionCheckoutCard, ProductionReleasesPanel } from "./ProductionPanel.tsx";
+import { ProductionReleasesPanel } from "./ProductionPanel.tsx";
 import { PullRequestBrowser } from "./PullRequestBrowser.tsx";
 import { useDeliveryOperations } from "./useDeliveryOperations.ts";
 
@@ -104,6 +104,33 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
     const availablePreview = availablePreviewResult(preview);
     const availableCheckout = availableCheckoutResult(checkout);
     const availableReleases = availableReleasesResult(releases);
+    const pullRequestsBrowserRetained =
+        pullRequestsQuery.error !== null && pullRequests?.state !== undefined;
+    const retainedReads = [
+        ["production releases", releases?.state, releasesQuery.error],
+        ["pull request preview", preview?.state, previewQuery.error],
+        ["production checkout", checkout?.state, checkoutQuery.error],
+        ["pull requests", pullRequests?.state, pullRequestsQuery.error],
+        ["recent Delivery jobs", deployments?.state, deploymentsQuery.error],
+    ].flatMap(([label, state, error]) =>
+        state === "last-known-good" || (state !== undefined && error !== null)
+            ? [label]
+            : []
+    );
+    const retainedReadsFetching =
+        releasesQuery.isFetching ||
+        previewQuery.isFetching ||
+        checkoutQuery.isFetching ||
+        pullRequestsQuery.isFetching ||
+        deploymentsQuery.isFetching;
+    const retryRetainedReads = () =>
+        void Promise.allSettled([
+            releasesQuery.refetch(),
+            previewQuery.refetch(),
+            checkoutQuery.refetch(),
+            pullRequestsQuery.refetch(),
+            deploymentsQuery.refetch(),
+        ]);
     const pullRequestsFresh =
         pullRequests?.state === "fresh" && pullRequestsQuery.error === null;
     const previewFresh = preview?.state === "fresh" && previewQuery.error === null;
@@ -242,14 +269,26 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
         deployReason = "An active managed release is required before deployment.";
     }
 
+    function requestDeploy(): void {
+        if (
+            !checkoutFresh ||
+            !releasesFresh ||
+            availableCheckout === undefined ||
+            availableReleases === undefined
+        )
+            return;
+        operations.open(
+            deployMainPrompt(
+                availableCheckout.checkout,
+                availableCheckout.sourceRevision,
+                availableReleases.releases
+            )
+        );
+    }
+
     return (
-        <div>
-            <PageHeader
-                description="Review ordinary and stacked pull requests, run one isolated preview, and queue exact immutable deploy or paired rollback operations."
-                eyebrow="Release engineering"
-                title="Delivery"
-            />
-            <div className="mt-8 space-y-10">
+        <div className="space-y-4">
+            <div className="space-y-4">
                 {operations.result === undefined ? null : (
                     <Card aria-labelledby="delivery-operation-result-heading">
                         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -265,8 +304,9 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                                     {operations.result.jobRunId}
                                 </code>
                             </div>
-                            <div className="flex gap-2">
+                            <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto">
                                 <ActionLink
+                                    className="w-full justify-center sm:w-auto"
                                     search={{ runId: operations.result.jobRunId }}
                                     size="sm"
                                     to="/jobs"
@@ -276,6 +316,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                                     View job
                                 </ActionLink>
                                 <Button
+                                    className="w-full sm:w-auto"
                                     onClick={operations.dismissResult}
                                     size="sm"
                                     variant="ghost"
@@ -290,21 +331,81 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 {operations.error !== undefined && operations.pending === undefined ? (
                     <Alert message={operations.error} />
                 ) : null}
+                {retainedReads.length === 0 ? null : (
+                    <Alert
+                        action={
+                            <Button
+                                busy={retainedReadsFetching}
+                                onClick={retryRetainedReads}
+                                size="sm"
+                                variant="secondary"
+                            >
+                                Try again
+                            </Button>
+                        }
+                        focusOnError={false}
+                        message={`The latest Delivery refresh did not complete. Retained data is shown for ${retainedReads.join(", ")}. Consequential controls require fresh data.`}
+                        variant="warning"
+                    />
+                )}
 
                 <DeliveryReadRegion
-                    checkedAtMs={preview?.checkedAtMs}
+                    error={releasesQuery.error}
+                    fetching={releasesQuery.isFetching}
+                    headingId="delivery-releases-heading"
+                    loading={releasesQuery.isPending}
+                    onRetry={() => void releasesQuery.refetch()}
+                    showRetainedFeedback={false}
+                    state={releases?.state}
+                    title="Production releases"
+                    titleIcon={Rocket}
+                >
+                    {availableReleases === undefined ? null : (
+                        <ProductionReleasesPanel
+                            busy={operations.busy}
+                            checkout={
+                                checkoutFresh ? availableCheckout?.checkout : undefined
+                            }
+                            checkoutError={
+                                checkoutQuery.data === undefined &&
+                                checkoutQuery.error !== null
+                                    ? deliveryFailureMessage(checkoutQuery.error)
+                                    : undefined
+                            }
+                            checkoutRetryBusy={checkoutQuery.isFetching}
+                            deployAvailable={deployAvailable}
+                            deployReason={deployReason}
+                            onDeploy={requestDeploy}
+                            onRetryCheckout={
+                                checkoutQuery.data === undefined &&
+                                checkoutQuery.error !== null
+                                    ? () => void checkoutQuery.refetch()
+                                    : undefined
+                            }
+                            onRollback={() => {
+                                if (!releasesFresh) return;
+                                const prompt = rollbackReleasePrompt(
+                                    availableReleases.releases,
+                                    availableReleases.sourceRevision
+                                );
+                                if (prompt !== undefined) operations.open(prompt);
+                            }}
+                            releases={availableReleases.releases}
+                            releasesFresh={releasesFresh}
+                        />
+                    )}
+                </DeliveryReadRegion>
+
+                <DeliveryReadRegion
                     error={previewQuery.error}
                     fetching={previewQuery.isFetching}
                     headingId="delivery-preview-heading"
                     loading={previewQuery.isPending}
-                    observedAtMs={
-                        preview?.state === "unavailable"
-                            ? undefined
-                            : preview?.observedAtMs
-                    }
                     onRetry={() => void previewQuery.refetch()}
+                    showRetainedFeedback={false}
                     state={preview?.state}
                     title="Pull request preview"
+                    visuallyHiddenTitle
                 >
                     {availablePreview === undefined ? null : (
                         <PreviewPanel
@@ -322,114 +423,58 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                     )}
                 </DeliveryReadRegion>
 
-                <DeliveryReadRegion
-                    checkedAtMs={pullRequests?.checkedAtMs}
-                    error={pullRequestsQuery.error}
-                    fetching={pullRequestsQuery.isFetching}
-                    headingId="delivery-pull-requests-heading"
-                    loading={pullRequestsQuery.isPending}
-                    observedAtMs={
-                        pullRequests?.state === "unavailable"
-                            ? undefined
-                            : pullRequests?.observedAtMs
-                    }
-                    onRetry={() => void pullRequestsQuery.refetch()}
-                    state={pullRequests?.state}
-                    title="Pull requests"
-                >
-                    {availablePullRequests === undefined ? null : (
-                        <PullRequestBrowser
-                            actionState={actionState}
-                            busy={operations.busy}
-                            groups={availablePullRequests.groups}
-                            onAction={requestPullRequestAction}
-                        />
-                    )}
-                </DeliveryReadRegion>
+                <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22.5rem]">
+                    <DeliveryReadRegion
+                        error={
+                            pullRequestsBrowserRetained ? null : pullRequestsQuery.error
+                        }
+                        fetching={pullRequestsQuery.isFetching}
+                        headingId="delivery-pull-requests-heading"
+                        loading={pullRequestsQuery.isPending}
+                        onRetry={() => void pullRequestsQuery.refetch()}
+                        showRetainedFeedback={false}
+                        state={pullRequests?.state}
+                        title="Pull requests"
+                        visuallyHiddenTitle
+                    >
+                        {availablePullRequests === undefined ? null : (
+                            <PullRequestBrowser
+                                actionState={actionState}
+                                busy={operations.busy}
+                                groups={availablePullRequests.groups}
+                                onAction={requestPullRequestAction}
+                                preview={availablePreview?.preview}
+                            />
+                        )}
+                    </DeliveryReadRegion>
 
-                <DeliveryReadRegion
-                    checkedAtMs={checkout?.checkedAtMs}
-                    error={checkoutQuery.error}
-                    fetching={checkoutQuery.isFetching}
-                    headingId="delivery-checkout-heading"
-                    loading={checkoutQuery.isPending}
-                    observedAtMs={
-                        checkout?.state === "unavailable"
-                            ? undefined
-                            : checkout?.observedAtMs
-                    }
-                    onRetry={() => void checkoutQuery.refetch()}
-                    state={checkout?.state}
-                    title="Production checkout"
-                >
-                    {availableCheckout === undefined ? null : (
-                        <ProductionCheckoutCard checkout={availableCheckout.checkout} />
-                    )}
-                </DeliveryReadRegion>
-
-                <DeliveryReadRegion
-                    checkedAtMs={releases?.checkedAtMs}
-                    error={releasesQuery.error}
-                    fetching={releasesQuery.isFetching}
-                    headingId="delivery-releases-heading"
-                    loading={releasesQuery.isPending}
-                    observedAtMs={
-                        releases?.state === "unavailable"
-                            ? undefined
-                            : releases?.observedAtMs
-                    }
-                    onRetry={() => void releasesQuery.refetch()}
-                    state={releases?.state}
-                    title="Production releases"
-                >
-                    {availableReleases === undefined ? null : (
-                        <ProductionReleasesPanel
-                            busy={operations.busy}
-                            deployAvailable={deployAvailable}
-                            deployReason={deployReason}
-                            onDeploy={() => {
-                                if (
-                                    !checkoutFresh ||
-                                    !releasesFresh ||
-                                    availableCheckout === undefined
-                                )
-                                    return;
-                                operations.open(
-                                    deployMainPrompt(
-                                        availableCheckout.checkout,
-                                        availableCheckout.sourceRevision,
-                                        availableReleases.releases
-                                    )
-                                );
-                            }}
-                            onRollback={() => {
-                                if (!releasesFresh) return;
-                                const prompt = rollbackReleasePrompt(
-                                    availableReleases.releases,
-                                    availableReleases.sourceRevision
-                                );
-                                if (prompt !== undefined) operations.open(prompt);
-                            }}
-                            releases={availableReleases.releases}
-                            releasesFresh={releasesFresh}
-                        />
-                    )}
-                </DeliveryReadRegion>
-
-                <DeliveryReadRegion
-                    checkedAtMs={deployments?.checkedAtMs}
-                    error={deploymentsQuery.error}
-                    fetching={deploymentsQuery.isFetching}
-                    headingId="delivery-deployments-heading"
-                    loading={deploymentsQuery.isPending}
-                    onRetry={() => void deploymentsQuery.refetch()}
-                    state={deployments?.state}
-                    title="Recent Delivery jobs"
-                >
-                    {deployments?.state === "fresh" ? (
-                        <DeliveryJobsPanel deployments={deployments.deployments} />
-                    ) : null}
-                </DeliveryReadRegion>
+                    <div
+                        className={
+                            (availablePullRequests?.groups.length ?? 0) > 0
+                                ? "xl:pt-15"
+                                : undefined
+                        }
+                    >
+                        <DeliveryReadRegion
+                            error={deploymentsQuery.error}
+                            fetching={deploymentsQuery.isFetching}
+                            headingId="delivery-deployments-heading"
+                            loading={deploymentsQuery.isPending}
+                            onRetry={() => void deploymentsQuery.refetch()}
+                            showRetainedFeedback={false}
+                            state={deployments?.state}
+                            title="Recent Delivery jobs"
+                            visuallyHiddenTitle
+                        >
+                            {deployments !== undefined &&
+                            deployments.state !== "unavailable" ? (
+                                <DeliveryJobsPanel
+                                    deployments={deployments.deployments}
+                                />
+                            ) : null}
+                        </DeliveryReadRegion>
+                    </div>
+                </div>
             </div>
             <ConfirmModal
                 busy={operations.busy}
@@ -442,7 +487,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 error={
                     operations.current
                         ? operations.error
-                        : "Delivery state changed; reopen this confirmation."
+                        : "Delivery state changed. Reopen this confirmation."
                 }
                 onCancel={operations.close}
                 onConfirm={() => void operations.confirm()}

@@ -11,6 +11,7 @@ import {
 
 import { cn } from "../lib/classNames.ts";
 import { dashboardDataTableClassNames } from "./dataTableStyles.ts";
+import { TableSortButton } from "./TableSortButton.tsx";
 
 export interface DataTableRowWindow {
     readonly getVirtualItemForOffset: (
@@ -45,6 +46,76 @@ type DataTableProps<
     TFeatures extends TableFeatures,
     TData extends RowData,
 > = DataTableBaseProps<TFeatures, TData> & Readonly<{ rowWindow?: DataTableRowWindow }>;
+
+interface SortableColumn {
+    clearSorting(): void;
+    getCanSort(): boolean;
+    getIsSorted(): false | "asc" | "desc";
+    getSortIndex(): number;
+    toggleSorting(desc?: boolean, multi?: boolean): void;
+}
+
+function sortableColumn(value: unknown): SortableColumn | undefined {
+    if (typeof value !== "object" || value === null) return undefined;
+    const candidate = value as Partial<SortableColumn>;
+    return typeof candidate.clearSorting === "function" &&
+        typeof candidate.getCanSort === "function" &&
+        typeof candidate.getIsSorted === "function" &&
+        typeof candidate.getSortIndex === "function" &&
+        typeof candidate.toggleSorting === "function" &&
+        candidate.getCanSort()
+        ? (candidate as SortableColumn)
+        : undefined;
+}
+
+function ariaSortDirection(
+    direction: false | "asc" | "desc" | undefined
+): "ascending" | "descending" | "none" {
+    if (direction === "asc") return "ascending";
+    if (direction === "desc") return "descending";
+    return "none";
+}
+
+function primaryAriaSort(
+    column: SortableColumn | undefined
+): "ascending" | "descending" | undefined {
+    if (column === undefined || column.getSortIndex() !== 0) return undefined;
+    const direction = ariaSortDirection(column.getIsSorted());
+    return direction === "none" ? undefined : direction;
+}
+
+function tableSortDirection(direction: false | "asc" | "desc") {
+    if (direction === "asc") return "ascending" as const;
+    if (direction === "desc") return "descending" as const;
+    return false;
+}
+
+function SortableHeaderButton({
+    children,
+    column,
+    direction,
+}: {
+    readonly children: ReactNode;
+    readonly column: SortableColumn;
+    readonly direction: false | "asc" | "desc";
+}) {
+    function toggleSorting(multi: boolean): void {
+        if (direction === "desc") {
+            column.clearSorting();
+            return;
+        }
+        column.toggleSorting(direction === "asc", multi);
+    }
+
+    return (
+        <TableSortButton
+            direction={tableSortDirection(direction)}
+            onClick={(event) => toggleSorting(event.shiftKey)}
+        >
+            {children}
+        </TableSortButton>
+    );
+}
 
 /**
  * Renders one TanStack Table instance with shared Dashboard table semantics.
@@ -269,13 +340,32 @@ export function DataTable<TFeatures extends TableFeatures, TData extends RowData
                             <tr key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => (
                                     <th
+                                        aria-sort={primaryAriaSort(
+                                            sortableColumn(header.column)
+                                        )}
                                         className="text-primary-300 border-primary-700 bg-primary-950 border-b px-3 py-2 text-left text-xs font-semibold tracking-wide uppercase"
                                         key={header.id}
                                         scope="col"
                                     >
-                                        {!header.isPlaceholder && (
-                                            <table.FlexRender header={header} />
-                                        )}
+                                        {!header.isPlaceholder &&
+                                            (() => {
+                                                const column = sortableColumn(
+                                                    header.column
+                                                );
+                                                const content = (
+                                                    <table.FlexRender header={header} />
+                                                );
+                                                return column === undefined ? (
+                                                    content
+                                                ) : (
+                                                    <SortableHeaderButton
+                                                        column={column}
+                                                        direction={column.getIsSorted()}
+                                                    >
+                                                        {content}
+                                                    </SortableHeaderButton>
+                                                );
+                                            })()}
                                     </th>
                                 ))}
                             </tr>

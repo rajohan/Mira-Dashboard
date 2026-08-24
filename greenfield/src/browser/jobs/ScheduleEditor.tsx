@@ -238,10 +238,17 @@ export function ScheduleEditor({ busy, onSave, schedule }: ScheduleEditorProps) 
                             schedule.schedule
                         );
                     return (
-                        <div className="flex justify-end sm:col-span-2">
+                        <div
+                            className={
+                                values.kind === "interval"
+                                    ? "flex justify-end sm:col-span-2"
+                                    : "flex justify-end sm:pt-7"
+                            }
+                        >
                             <Button
                                 busy={busy}
                                 busyLabel="Saving…"
+                                className="w-full sm:w-auto"
                                 disabled={!canSubmit || unchanged}
                                 type="submit"
                             >

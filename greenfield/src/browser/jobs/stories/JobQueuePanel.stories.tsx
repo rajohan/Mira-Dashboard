@@ -48,7 +48,9 @@ const queueSummary = Object.freeze({
 const meta = {
     args: {
         controlBusy: false,
+        onSelectRun: fn(),
         onSetClaimingPaused: fn(),
+        runs: [],
         summary: queueSummary,
     },
     component: JobQueuePanel,

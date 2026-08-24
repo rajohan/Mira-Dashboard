@@ -1,19 +1,22 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { History } from "lucide-react";
+import type { UIEvent } from "react";
 
 import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
+import { LoadingState } from "../ui/LoadingState.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 
 const minimumVirtualizedRows = 50;
-const jobRunTableFeatures = tableFeatures({});
+const jobRunTableFeatures = dashboardTableFeatures;
 
 interface JobRunTableRow {
     readonly onSelect: (id: string) => void;
@@ -104,7 +107,10 @@ const jobRunColumns = jobRunColumnHelper.columns([
     }),
     jobRunColumnHelper.accessor((row) => row.run.queuedAtMs, {
         cell: ({ getValue }) => (
-            <time dateTime={new Date(getValue()).toISOString()}>
+            <time
+                className="whitespace-nowrap"
+                dateTime={new Date(getValue()).toISOString()}
+            >
                 {formatDashboardDateTime(getValue())}
             </time>
         ),
@@ -113,7 +119,10 @@ const jobRunColumns = jobRunColumnHelper.columns([
     }),
     jobRunColumnHelper.accessor((row) => row.run.updatedAtMs, {
         cell: ({ getValue }) => (
-            <time dateTime={new Date(getValue()).toISOString()}>
+            <time
+                className="whitespace-nowrap"
+                dateTime={new Date(getValue()).toISOString()}
+            >
                 {formatDashboardDateTime(getValue())}
             </time>
         ),
@@ -123,7 +132,10 @@ const jobRunColumns = jobRunColumnHelper.columns([
 ]);
 
 export interface JobRunTableProps {
+    readonly compact?: boolean;
     readonly label?: string;
+    readonly loadingMore?: boolean;
+    readonly onLoadMore?: () => void;
     readonly onSelect: (id: string) => void;
     readonly runs: readonly JobRunSummary[];
     readonly selectedId?: string;
@@ -131,11 +143,23 @@ export interface JobRunTableProps {
 
 /** @returns Selectable durable run inventory with bounded virtual rendering. */
 export function JobRunTable({
+    compact = false,
     label = "Job runs",
+    loadingMore = false,
+    onLoadMore,
     onSelect,
     runs,
     selectedId,
 }: JobRunTableProps) {
+    const loadMoreNearEnd = (event: UIEvent<HTMLElement>): void => {
+        const container = event.currentTarget;
+        const remaining =
+            container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (remaining > 400 || loadingMore || onLoadMore === undefined) {
+            return;
+        }
+        onLoadMore();
+    };
     const table = useTable({
         columns: jobRunColumns,
         data: runs.map((run) => ({
@@ -160,11 +184,34 @@ export function JobRunTable({
 
     const tableElement = (rowWindow?: VirtualizerRenderState<HTMLTableRowElement>) => (
         <DataTable
+            columnWidths={{
+                attemptCount: "8%",
+                displayName: "21%",
+                queuedAtMs: "16.5%",
+                resourceClass: "10%",
+                state: "9%",
+                triggerType: "19%",
+                updatedAtMs: "16.5%",
+            }}
+            footer={
+                loadingMore ? (
+                    <LoadingState
+                        className="min-h-0 py-3"
+                        label="Loading older jobs…"
+                        size="sm"
+                    />
+                ) : undefined
+            }
             label={label}
+            onScroll={onLoadMore === undefined ? undefined : loadMoreNearEnd}
             rowWindow={rowWindow}
             scrollContainerRef={rowWindow?.scrollContainerRef}
             table={table}
-            tableClassName="min-w-256"
+            tableClassName={
+                compact
+                    ? "min-w-0 table-fixed [&_td:nth-child(n+4)]:hidden [&_th:nth-child(n+4)]:hidden @min-[66rem]:min-w-256 @min-[66rem]:[&_td:nth-child(n+4)]:table-cell @min-[66rem]:[&_th:nth-child(n+4)]:table-cell"
+                    : "min-w-256 table-fixed"
+            }
         />
     );
 

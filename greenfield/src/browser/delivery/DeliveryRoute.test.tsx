@@ -21,6 +21,11 @@ import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
+import {
+    deliveryCheckoutQueryKey,
+    deliveryPullRequestsQueryKey,
+} from "./deliveryQueries.ts";
+import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
 import { DeliveryRoute } from "./DeliveryRoute.tsx";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
@@ -80,7 +85,7 @@ const pullRequestsResult = {
                     mergeState: "CLEAN",
                     mergeability: "mergeable",
                     number: 424,
-                    reviewState: "approved",
+                    reviewState: "required",
                     title: "Delivery parity",
                     updatedAtMs: observedAtMs,
                     url: "https://github.com/rajohan/Mira-Dashboard/pull/424",
@@ -195,6 +200,7 @@ const queuedResult = {
 } as const satisfies DeliveryRequestOperationResult;
 
 interface DeliveryClientOverrides {
+    readonly checkout?: DeliveryProductionCheckoutResult | Error;
     readonly mutation?: DeliveryClient["mutation"];
     readonly preview?: DeliveryPreviewResult;
     readonly pullRequests?: DeliveryPullRequestsResult | Error;
@@ -202,7 +208,7 @@ interface DeliveryClientOverrides {
 }
 
 function createClient(overrides: DeliveryClientOverrides = {}) {
-    const query = jest.fn((name: string) => {
+    const queryMock = jest.fn((name: string) => {
         switch (name) {
             case "delivery.listPullRequests": {
                 return overrides.pullRequests instanceof Error
@@ -213,7 +219,9 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
                 return Promise.resolve(overrides.preview ?? previewResult);
             }
             case "delivery.getProductionCheckout": {
-                return Promise.resolve(checkoutResult);
+                return overrides.checkout instanceof Error
+                    ? Promise.reject(overrides.checkout)
+                    : Promise.resolve(overrides.checkout ?? checkoutResult);
             }
             case "delivery.getReleases": {
                 return Promise.resolve(overrides.releases ?? releasesResult);
@@ -225,18 +233,28 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
                 return Promise.reject(new Error("Unexpected Delivery query"));
             }
         }
-    }) as unknown as DeliveryClient["query"];
+    });
+    const query = queryMock as unknown as DeliveryClient["query"];
     const mutation = overrides.mutation ?? jest.fn(() => Promise.resolve(queuedResult));
-    return { client: { mutation, query } satisfies DeliveryClient, mutation, query };
+    return {
+        client: { mutation, query } satisfies DeliveryClient,
+        mutation,
+        query,
+        queryMock,
+    };
 }
 
-function renderDelivery(client: DeliveryClient) {
+function renderDelivery(
+    client: DeliveryClient,
+    initializeQueryClient?: (queryClient: QueryClient) => void
+) {
     const queryClient = new QueryClient({
         defaultOptions: {
             mutations: { retry: false },
             queries: { refetchOnWindowFocus: false, retry: false },
         },
     });
+    initializeQueryClient?.(queryClient);
     const rootRoute = createRootRoute();
     const deliveryRoute = createRoute({
         component: () => <DeliveryRoute client={client} />,
@@ -261,6 +279,7 @@ function renderDelivery(client: DeliveryClient) {
         </DashboardRealtimeProvider>
     );
     return {
+        queryClient,
         unmount() {
             view.unmount();
             queryClient.clear();
@@ -269,6 +288,78 @@ function renderDelivery(client: DeliveryClient) {
 }
 
 describe("DeliveryRoute", () => {
+    test("surfaces and retries an initial production checkout failure", async () => {
+        const harness = createClient({ checkout: new Error("private provider detail") });
+        const view = renderDelivery(harness.client);
+        try {
+            const checkout = await screen.findByLabelText("Main checkout");
+            expect(
+                within(checkout).getByText(
+                    "The Delivery request could not be completed safely. Try again from fresh state."
+                )
+            ).toBeVisible();
+
+            const user = userEvent.setup();
+            await user.click(within(checkout).getByRole("button", { name: "Try again" }));
+            await waitFor(() =>
+                expect(
+                    harness.queryMock.mock.calls.filter(
+                        ([name]) => name === "delivery.getProductionCheckout"
+                    )
+                ).toHaveLength(2)
+            );
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("shows the failure reason for an owned preview", async () => {
+        const harness = createClient({
+            preview: {
+                ...previewResult,
+                preview: {
+                    ...previewResult.preview,
+                    reason: "Preview runtime failed.",
+                    status: "failed",
+                    url: undefined,
+                },
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(await screen.findByText("Preview runtime failed.")).toBeVisible();
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("keeps rebuild for the current preview and hides a completed approval", async () => {
+        const group = pullRequestsResult.groups[0];
+        const pullRequest = group.members[0];
+        const harness = createClient({
+            preview: previewResult,
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...group,
+                        members: [{ ...pullRequest, reviewState: "approved" }],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(
+                await screen.findByRole("button", { name: "Rebuild preview" })
+            ).toBeVisible();
+            expect(screen.queryByRole("button", { name: "Run preview" })).toBeNull();
+            expect(screen.queryByRole("button", { name: "Approve PR" })).toBeNull();
+        } finally {
+            view.unmount();
+        }
+    });
+
     test("disables direct preview and production controls while another Delivery action is active", async () => {
         const harness = createClient({
             preview: { ...previewResult, actionActive: true },
@@ -277,17 +368,37 @@ describe("DeliveryRoute", () => {
         const view = renderDelivery(harness.client);
         try {
             expect(
-                await screen.findByRole("button", { name: "Stop preview" })
+                await screen.findByRole("button", { name: "Stop dev" })
             ).toBeDisabled();
             expect(
                 screen.getByRole("button", { name: "Deploy latest main" })
             ).toBeDisabled();
             expect(
-                screen.getByRole("button", { name: "Run / rebuild preview" })
+                screen.getByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
             ).toBeDisabled();
+            const productionPanel = screen.getByRole("region", {
+                name: "Production release slots",
+            });
+            const deployButton = within(productionPanel).getByRole("button", {
+                name: "Deploy latest main",
+            });
+            const deployAlert = within(productionPanel)
+                .getByText("Another Delivery action is active.")
+                .closest("#delivery-deploy-disabled-reason");
+            expect(deployAlert).not.toBeNull();
+            expect(
+                deployAlert!.compareDocumentPosition(deployButton) &
+                    Node.DOCUMENT_POSITION_FOLLOWING
+            ).not.toBe(0);
+            expect(deployButton).toHaveAccessibleDescription(
+                "Another Delivery action is active."
+            );
+            expect(
+                within(productionPanel).getAllByText("Another Delivery action is active.")
+            ).toHaveLength(1);
             expect(
                 screen.getAllByText("Another Delivery action is active.").length
-            ).toBeGreaterThanOrEqual(2);
+            ).toBeGreaterThanOrEqual(1);
         } finally {
             view.unmount();
         }
@@ -301,7 +412,7 @@ describe("DeliveryRoute", () => {
                 await screen.findByRole("heading", { name: "Pull requests unavailable" })
             ).toBeVisible();
             const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Stop preview" }));
+            await user.click(screen.getByRole("button", { name: "Stop dev" }));
             expect(
                 screen.getByRole("dialog", { name: "Stop pull request preview?" })
             ).toBeVisible();
@@ -333,35 +444,41 @@ describe("DeliveryRoute", () => {
         }
     });
 
-    test("renders all five regions and exact Mira/Raymond confirmation boundaries", async () => {
+    test("renders Delivery regions and exact Mira/Raymond confirmation boundaries", async () => {
         const harness = createClient();
         const view = renderDelivery(harness.client);
         try {
-            expect(
-                await screen.findByRole("heading", { level: 1, name: "Delivery" })
-            ).toBeVisible();
-            for (const name of [
-                "Pull request preview",
-                "Pull requests",
-                "Production checkout",
-                "Production releases",
-                "Recent Delivery jobs",
-            ]) {
+            await screen.findByRole("heading", { level: 2, name: "Production releases" });
+            for (const name of ["Production releases", "Recent Delivery jobs"]) {
                 expect(screen.getByRole("heading", { level: 2, name })).toBeVisible();
             }
+            expect(
+                screen.getByRole("region", { name: "Pull request preview" })
+            ).toBeInTheDocument();
+            expect(
+                screen.getByRole("region", { name: "Pull requests" })
+            ).toBeInTheDocument();
             expect(screen.getAllByText("Current release").length).toBeGreaterThan(0);
             expect(screen.getByText("Previous release")).toBeVisible();
+            expect(
+                within(screen.getByLabelText("Active release")).getByText("Current")
+            ).toBeVisible();
+            expect(
+                within(screen.getByLabelText("Previous / rollback target")).getByText(
+                    "Eligible"
+                )
+            ).toBeVisible();
             expect(screen.getByText("Checks passed")).toBeVisible();
             expect(screen.getByText("Image: remote")).toBeVisible();
 
             const user = userEvent.setup();
-            await user.click(screen.getByRole("button", { name: "Approve review" }));
+            await user.click(screen.getByRole("button", { name: "Approve PR" }));
             expect(
                 screen.getByText(/Raymond \(rajohan\).*does not merge or deploy/iu)
             ).toBeVisible();
             await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-            await user.click(screen.getByRole("button", { name: "Merge" }));
+            await user.click(screen.getByRole("button", { name: "Merge only" }));
             expect(screen.getByText(/Mira \(mira-2026\).*squash-merge/iu)).toBeVisible();
         } finally {
             view.unmount();
@@ -387,27 +504,102 @@ describe("DeliveryRoute", () => {
                 return Promise.resolve(checkoutResult);
             }
             if (name === "delivery.getReleases") return Promise.resolve(releasesResult);
-            return Promise.resolve(deploymentsResult);
+            return Promise.resolve({
+                ...deploymentsResult,
+                staleSinceMs: observedAtMs + 500,
+                state: "last-known-good",
+            });
         }) as unknown as DeliveryClient["query"];
         const harness = createClient();
         const view = renderDelivery({ ...harness.client, query });
         try {
-            expect(await screen.findByText("Server last-known-good")).toBeVisible();
-            const pullRequestHeading = screen.getByRole("heading", {
-                level: 2,
+            expect(
+                await screen.findByText(
+                    /Retained data is shown for pull request preview, recent Delivery jobs\./u
+                )
+            ).toBeVisible();
+            expect(
+                within(
+                    screen.getByRole("region", { name: "Recent Delivery jobs" })
+                ).getByText("Current release")
+            ).toBeVisible();
+            const region = screen.getByRole("region", {
                 name: "Pull requests",
             });
-            const region = pullRequestHeading.closest("section");
-            expect(region).not.toBeNull();
             failRefresh = true;
-            await userEvent
-                .setup()
-                .click(within(region!).getByRole("button", { name: "Refresh" }));
-            await waitFor(() => {
-                expect(within(region!).getByText("Browser-retained")).toBeVisible();
+            await view.queryClient.invalidateQueries({
+                queryKey: deliveryPullRequestsQueryKey,
             });
-            expect(within(region!).getByRole("button", { name: "Merge" })).toBeDisabled();
-            expect(region?.textContent).not.toContain("/secret");
+            await waitFor(() => {
+                expect(
+                    screen.getByText(
+                        /Retained data is shown for pull request preview, pull requests, recent Delivery jobs\./u
+                    )
+                ).toBeVisible();
+            });
+            expect(
+                within(region).getByRole("button", { name: "Merge only" })
+            ).toBeDisabled();
+            expect(region.textContent).not.toContain("/secret");
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("offers retry for browser-retained fresh data", async () => {
+        const onRetry = jest.fn();
+        render(
+            <DeliveryReadRegion
+                error={new Error("refresh failed")}
+                fetching={false}
+                headingId="retained-delivery-heading"
+                loading={false}
+                onRetry={onRetry}
+                state="fresh"
+                title="Pull requests"
+            >
+                <div>Retained pull requests</div>
+            </DeliveryReadRegion>
+        );
+        const user = userEvent.setup();
+
+        await user.click(screen.getByRole("button", { name: "Try again" }));
+        expect(onRetry).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not present a browser-retained checkout as current", async () => {
+        const query = jest.fn((name: string) => {
+            if (name === "delivery.getProductionCheckout") {
+                return Promise.reject(new Error("private checkout path"));
+            }
+            if (name === "delivery.listPullRequests") {
+                return Promise.resolve(pullRequestsResult);
+            }
+            if (name === "delivery.getPreview") return Promise.resolve(previewResult);
+            if (name === "delivery.getReleases") return Promise.resolve(releasesResult);
+            return Promise.resolve(deploymentsResult);
+        }) as unknown as DeliveryClient["query"];
+        const harness = createClient();
+        const view = renderDelivery({ ...harness.client, query }, (queryClient) => {
+            queryClient.setQueryData(deliveryCheckoutQueryKey, checkoutResult, {
+                updatedAt: 0,
+            });
+        });
+
+        try {
+            const mainCheckout = await screen.findByLabelText("Main checkout");
+            expect(within(mainCheckout).queryByText("Current")).toBeNull();
+            expect(within(mainCheckout).getByText("Checking")).toBeVisible();
+            const retainedAlert = screen
+                .getByText(/Retained data is shown for production checkout\./u)
+                .closest('[role="status"]');
+            expect(retainedAlert).toBeTruthy();
+            expect(
+                within(retainedAlert as HTMLElement).getByRole("button", {
+                    name: "Try again",
+                })
+            ).toBeVisible();
+            expect(screen.queryByText("private checkout path")).toBeNull();
         } finally {
             view.unmount();
         }
@@ -442,9 +634,13 @@ describe("DeliveryRoute", () => {
         });
         const view = renderDelivery(harness.client);
         try {
-            expect(await screen.findByRole("button", { name: "Reject" })).toBeDisabled();
+            const reject = await screen.findByRole("button", { name: "Reject" });
+            expect(reject).toBeDisabled();
+            const pullRequestCard = reject.closest("section");
+            expect(pullRequestCard).not.toBeNull();
+            const status = within(pullRequestCard!).getByRole("status");
             expect(
-                screen.getByText(
+                within(status).getByText(
                     "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads."
                 )
             ).toBeVisible();

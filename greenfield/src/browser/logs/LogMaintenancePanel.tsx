@@ -1,4 +1,4 @@
-import { FlaskConical, RefreshCw, RotateCcw, ShieldCheck } from "lucide-react";
+import { FlaskConical, RotateCcw, ShieldCheck } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import * as v from "valibot";
 
@@ -35,12 +35,11 @@ export interface LogMaintenancePanelProps {
     readonly maintenance?: LogMaintenanceStatusOutput;
     readonly maintenanceError?: string;
     readonly maintenanceLoading?: boolean;
-    readonly maintenanceRefreshing?: boolean;
-    readonly onRefresh: () => void;
     readonly onRequestMaintenance: (
         policyId: LogMaintenancePolicyId,
         dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
+    readonly onRetryMaintenance?: () => void;
     readonly requestedRun?: JobRunDetail;
     readonly requestedRunError?: string;
     readonly requestedRunInactiveConfirmed?: boolean;
@@ -325,11 +324,10 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
         maintenance,
         maintenanceError,
         maintenanceLoading = false,
-        maintenanceRefreshing = false,
         onActionErrorChange,
         onActionStatusChange,
-        onRefresh,
         onRequestMaintenance,
+        onRetryMaintenance,
         onRunningActionChange,
         requestedRun,
         requestedRunError,
@@ -376,32 +374,36 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
 
     return (
         <Card aria-labelledby="log-maintenance-heading">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex items-start gap-3">
-                    <Icon className="mt-0.5 shrink-0" icon={ShieldCheck} tone="accent" />
-                    <div>
-                        <Heading id="log-maintenance-heading" level={2} size="subsection">
-                            Log maintenance
-                        </Heading>
-                        <Text className="mt-1" tone="muted">
-                            Dashboard rotates application and container logs. System log
-                            cleanup uses the four configured Ubuntu cleanup jobs.
-                        </Text>
-                    </div>
+            <div className="flex items-start gap-3">
+                <Icon className="mt-0.5 shrink-0" icon={ShieldCheck} tone="accent" />
+                <div>
+                    <Heading id="log-maintenance-heading" level={2} size="subsection">
+                        Log maintenance
+                    </Heading>
+                    <Text className="mt-1" tone="muted">
+                        Dashboard rotates application and container logs. System log
+                        cleanup uses the four configured Ubuntu cleanup jobs.
+                    </Text>
                 </div>
-                <Button
-                    busy={maintenanceRefreshing}
-                    busyLabel="Refreshing maintenance…"
-                    className="shrink-0"
-                    onClick={onRefresh}
-                    size="sm"
-                    variant="secondary"
-                >
-                    <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                    Refresh maintenance
-                </Button>
             </div>
-            <Alert className="mt-4" focusOnError={false} message={maintenanceError} />
+            <Alert
+                action={
+                    maintenanceError === undefined ||
+                    onRetryMaintenance === undefined ? undefined : (
+                        <Button
+                            busy={maintenanceLoading}
+                            onClick={onRetryMaintenance}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
+                className="mt-4"
+                focusOnError={false}
+                message={maintenanceError}
+            />
             <Alert
                 className="mt-4"
                 focusOnError={false}

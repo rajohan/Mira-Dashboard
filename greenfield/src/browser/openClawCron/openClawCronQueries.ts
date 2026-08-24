@@ -13,6 +13,10 @@ import type {
     OpenClawCronJob,
     OpenClawCronRun,
 } from "../../contracts/openClawCron.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 /** Stable cache root shared by bounded OpenClaw cron inventory, detail, and history. */
@@ -173,9 +177,7 @@ export function accumulateOpenClawCronRunPages(
     let expectedOffset = 0;
     let stable = true;
 
-    for (const [pageIndex, page] of pages
-        .slice(0, openClawCronBrowserPageMaximum)
-        .entries()) {
+    for (const [pageIndex, page] of pages.entries()) {
         const candidateRunIds = page.runs.flatMap(({ runId }) =>
             runId === undefined ? [] : [runId]
         );
@@ -276,7 +278,7 @@ export function openClawCronRunsQueryOptions(
                 "openClawCron.listRuns",
                 {
                     id,
-                    limit: 100,
+                    limit: 25,
                     offset: pageParam,
                     sortDir: "desc",
                 },
@@ -284,11 +286,31 @@ export function openClawCronRunsQueryOptions(
             );
         },
         getNextPageParam: (lastPage, pages) =>
-            pages.length >= openClawCronBrowserPageMaximum ||
-            !everyRunHasStableIdentity(pages)
-                ? undefined
-                : lastPage.nextOffset,
-        queryKey: [...openClawCronRunsQueryRoot, id ?? null],
+            everyRunHasStableIdentity(pages) ? lastPage.nextOffset : undefined,
+        queryKey: liveHistoryArchiveQueryKey([...openClawCronRunsQueryRoot, id ?? null]),
+        retry: false,
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Polling first-page projection for one OpenClaw job's newest runs. */
+export function openClawCronRunsLiveHeadQueryOptions(
+    client: DashboardTrpcClient,
+    id: string | undefined
+) {
+    return queryOptions({
+        enabled: id !== undefined,
+        queryFn: ({ signal }): Promise<ListOpenClawCronRunsResult> => {
+            if (id === undefined) {
+                return Promise.reject(new Error("OpenClaw cron job is not selected"));
+            }
+            return client.query(
+                "openClawCron.listRuns",
+                { id, limit: 25, offset: 0, sortDir: "desc" },
+                { signal }
+            );
+        },
+        queryKey: liveHistoryHeadQueryKey([...openClawCronRunsQueryRoot, id ?? null]),
         refetchInterval: openClawCronRefreshIntervalMs,
         retry: false,
         staleTime: openClawCronRefreshIntervalMs,

@@ -9,6 +9,10 @@ import type {
     ListIncidentsResult,
 } from "../../contracts/incidents.ts";
 import type { ListReportsInput, ListReportsResult } from "../../contracts/reports.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 type IncidentCursor = NonNullable<ListIncidentsInput["cursor"]>;
@@ -100,7 +104,24 @@ export function incidentListQueryOptions(
                 { signal }
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
-        queryKey: incidentListQueryKey(filters),
+        queryKey: liveHistoryArchiveQueryKey(incidentListQueryKey(filters)),
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Live first-page incident projection for one server-owned filter. */
+export function incidentLiveHeadQueryOptions(
+    client: DashboardTrpcClient,
+    filters: ListIncidentsInput["filters"]
+) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListIncidentsResult> =>
+            client.query(
+                "incidents.list",
+                { ...(filters === undefined ? {} : { filters }), limit: 50 },
+                { signal }
+            ),
+        queryKey: liveHistoryHeadQueryKey(incidentListQueryKey(filters)),
         staleTime: 10_000,
     });
 }
@@ -174,7 +195,27 @@ export function reportListQueryOptions(
                 { signal }
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
-        queryKey: reportListQueryKey(filters),
+        queryKey: liveHistoryArchiveQueryKey(reportListQueryKey(filters)),
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Live first-page report projection for one server-owned filter. */
+export function reportLiveHeadQueryOptions(
+    client: DashboardTrpcClient,
+    filters: ListReportsInput["filters"]
+) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListReportsResult> =>
+            client.query(
+                "reports.list",
+                {
+                    ...(filters === undefined ? {} : { filters }),
+                    limit: reportListPageSize,
+                },
+                { signal }
+            ),
+        queryKey: liveHistoryHeadQueryKey(reportListQueryKey(filters)),
         staleTime: 10_000,
     });
 }
@@ -194,7 +235,12 @@ export function reportDetailQueryOptions(client: DashboardTrpcClient, id: string
 
 /** @param queryClient Browser cache to invalidate after one durable incident event. */
 export async function refreshIncidentQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: incidentQueryKey });
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: incidentQueryKey }),
+        queryClient.invalidateQueries({
+            queryKey: liveHistoryArchiveQueryKey(incidentQueryKey),
+        }),
+    ]);
 }
 
 /** @param queryClient Browser cache to invalidate after one durable report event. */

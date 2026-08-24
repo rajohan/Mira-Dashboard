@@ -4,7 +4,6 @@ import * as v from "valibot";
 
 import type { ScheduleSummary } from "../../../contracts/jobModel.ts";
 import { listSchedulesResultSchema } from "../../../contracts/schedules.ts";
-import { expectVirtualizedTable } from "../../storySupport/virtualizationAssertions.ts";
 import { ScheduleTable } from "../ScheduleTable.tsx";
 
 const timestampMs = 1_800_000_000_000;
@@ -112,17 +111,16 @@ export const CadenceVariants: Story = {
     },
 };
 
-export const VirtualizedInventory: Story = {
+export const LargeInventory: Story = {
     args: {
         schedules: virtualizedSchedules,
         selectedId: virtualizedSchedules[0]?.id,
     },
     play: async ({ canvasElement }) => {
-        await expectVirtualizedTable({
-            canvasElement,
-            label: "Dashboard schedules",
-            rowCount: virtualizedSchedules.length,
+        const list = within(canvasElement).getByRole("list", {
+            name: "Dashboard schedules",
         });
+        await expect(list.children).toHaveLength(virtualizedSchedules.length);
     },
 };
 

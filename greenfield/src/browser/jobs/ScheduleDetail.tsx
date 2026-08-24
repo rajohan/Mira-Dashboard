@@ -26,6 +26,7 @@ import { scheduleConfigurationLabel } from "./schedulePresentation.ts";
 interface ScheduleDetailProps {
     readonly disableError?: string;
     readonly error?: string;
+    readonly errorAction?: ReactNode;
     readonly errorFocus?: boolean;
     readonly history: ReactNode;
     readonly onDisable: (
@@ -53,6 +54,7 @@ function focusScheduleDetailHeading(): void {
 export function ScheduleDetail({
     disableError,
     error,
+    errorAction,
     errorFocus = true,
     history,
     onDisable,
@@ -161,6 +163,7 @@ export function ScheduleDetail({
                 </div>
             </div>
             <Alert
+                action={disableOpen ? undefined : errorAction}
                 className="mt-4"
                 focusOnError={errorFocus}
                 message={disableOpen ? undefined : error}
@@ -207,7 +210,10 @@ export function ScheduleDetail({
                 </div>
             )}
             <div className="mt-6">
-                <Heading level={3}>Schedule</Heading>
+                <div className="flex items-center gap-2">
+                    <Icon icon={CalendarClock} tone="accent" />
+                    <Heading level={3}>Schedule</Heading>
+                </div>
                 <div className="mt-4">
                     <ScheduleEditor
                         busy={actionsBusy}
@@ -217,13 +223,9 @@ export function ScheduleDetail({
                     />
                 </div>
             </div>
-            <div className="mt-7">
+            <div className="mt-5">
                 <div className="mb-4 flex items-center gap-2">
-                    <Icon
-                        className="text-primary-400"
-                        icon={CalendarClock}
-                        tone="inherit"
-                    />
+                    <Icon icon={CalendarClock} tone="accent" />
                     <Heading level={3}>Run history</Heading>
                 </div>
                 {history}

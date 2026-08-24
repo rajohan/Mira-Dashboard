@@ -26,10 +26,6 @@ import type {
     RunScheduleInput,
     UpdateScheduleInput,
 } from "../../contracts/schedules.ts";
-import {
-    type GetServiceActionsStatusResult,
-    serviceActionIds,
-} from "../../contracts/serviceActions.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import type { DashboardRealtimeClient } from "../api/realtimeClient.ts";
 import {
@@ -136,37 +132,6 @@ function runDetail(run: JobRunSummary): JobRunDetail {
     };
 }
 
-function serviceActionRun(): JobRunSummary {
-    return {
-        ...queuedRun({
-            displayName: "OpenClaw session cleanup",
-            id: runId,
-        }),
-        actionKey: "openclaw.sessions.cleanup",
-        attemptLimit: 1,
-        cancellationPolicy: "never",
-        priority: 20,
-        resourceClass: "exclusive",
-        resourceKeys: ["host.mutation"],
-        retrySafe: false,
-        timeoutMs: 600_000,
-        triggerType: "manual",
-    };
-}
-
-function serviceActionsStatus(activeRun?: JobRunSummary): GetServiceActionsStatusResult {
-    return {
-        actions: serviceActionIds.map((id) => ({
-            ...(id === "openclaw-cleanup" && activeRun !== undefined
-                ? { activeRun }
-                : {}),
-            availability: "available" as const,
-            id,
-        })),
-        observedAtMs: timestampMs,
-    };
-}
-
 function scheduleSummary(
     id = scheduleId,
     overrides: Partial<ScheduleSummary> = {}
@@ -264,7 +229,6 @@ class JobsRouteTransport implements DashboardTrpcTransport {
     readonly scheduleDetails = new Map<string, ScheduleSummary>();
     scheduleRuns: JobRunSummary[] = [];
     schedules: ScheduleSummary[] = [];
-    serviceActionsStatus = serviceActionsStatus();
 
     addRunDetail(run: JobRunSummary): void {
         this.runDetails.set(run.id, runDetail(run));
@@ -514,9 +478,6 @@ class JobsRouteTransport implements DashboardTrpcTransport {
                     total: 0,
                 });
             }
-            case "serviceActions.getStatus": {
-                return Promise.resolve(this.serviceActionsStatus);
-            }
             case "schedules.list": {
                 if (this.failScheduleList) {
                     return Promise.reject(new TypeError("Schedule list unavailable"));
@@ -610,40 +571,16 @@ afterEach(async () => {
 });
 
 describe("Dashboard jobs route", () => {
-    test("shows fixed Service Actions and exposes their durable run history and detail", async () => {
+    test("does not duplicate Service actions and exposes durable run history", async () => {
         const transport = new JobsRouteTransport();
-        const run = serviceActionRun();
+        const run = queuedRun({ displayName: "Dashboard background job", id: runId });
         transport.runs = [run];
         transport.addRunDetail(run);
-        transport.serviceActionsStatus = serviceActionsStatus(run);
-        await renderJobsRoute("/jobs", transport);
+        const { queryClient } = await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
 
-        expect(
-            await screen.findByRole("heading", { level: 2, name: "Service actions" })
-        ).toBeTruthy();
-        const serviceActions = screen.getByRole("region", {
-            name: "Service actions",
-        });
-        expect(within(serviceActions).getAllByRole("heading", { level: 3 })).toHaveLength(
-            serviceActionIds.length
-        );
-        expect(
-            within(serviceActions).getByRole("heading", { name: "OpenClaw cleanup" })
-        ).toBeTruthy();
-        expect(
-            within(serviceActions).getByRole("heading", { name: "OpenClaw restart" })
-        ).toBeTruthy();
-        expect(
-            within(serviceActions).getByRole("heading", { name: "System cleanup" })
-        ).toBeTruthy();
-        expect(
-            within(serviceActions).getByRole("heading", { name: "System restart" })
-        ).toBeTruthy();
-        expect(screen.queryByRole("link", { name: "View Dashboard jobs" })).toBeNull();
-        expect(transport.callsFor("serviceActions.getStatus")).toEqual([
-            { input: {}, kind: "query", path: "serviceActions.getStatus" },
-        ]);
+        expect(screen.queryByText("Service actions")).toBeNull();
+        expect(transport.callsFor("serviceActions.getStatus")).toEqual([]);
 
         const openRun = await screen.findByRole("button", {
             name: `Open run ${run.displayName}; action ${run.actionKey}; id ${run.id}`,
@@ -654,11 +591,83 @@ describe("Dashboard jobs route", () => {
             name: run.displayName,
         });
         await waitFor(() => expect(detailHeading).toHaveFocus());
+        const cancelButton = screen.getByRole("button", {
+            name: `Cancel queued run: ${run.displayName}`,
+        });
+        act(() => cancelButton.focus());
+        expect(cancelButton).toHaveFocus();
+        await act(async () => {
+            await queryClient.invalidateQueries({
+                queryKey: ["jobs", "runs", "detail"],
+            });
+        });
+        await waitFor(() => expect(transport.callsFor("jobs.getRun")).toHaveLength(2));
+        expect(cancelButton).toHaveFocus();
         expect(transport.callsFor("jobs.getRun").at(-1)?.input).toEqual({
             eventLimit: 100,
             id: run.id,
         });
     }, 10_000);
+
+    test("can page beyond the first run-history page", async () => {
+        const intersectionCallbacks: IntersectionObserverCallback[] = [];
+        const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+        globalThis.IntersectionObserver = class {
+            readonly root = null;
+            readonly rootMargin = "400px 0px";
+            readonly scrollMargin = "0px";
+            readonly thresholds = [0];
+            constructor(callback: IntersectionObserverCallback) {
+                intersectionCallbacks.push(callback);
+            }
+            disconnect(): void {}
+            observe(): void {}
+            takeRecords(): IntersectionObserverEntry[] {
+                return [];
+            }
+            unobserve(): void {}
+        };
+        const transport = new JobsRouteTransport();
+        const newerActive = queuedRun({
+            displayName: "Newer active run",
+            id: runId,
+        });
+        const olderActive = queuedRun({
+            displayName: "Older active run",
+            id: olderRunId,
+            queuedAtMs: timestampMs - 1000,
+        });
+        transport.runs = [newerActive, olderActive];
+        transport.runPages = [[newerActive], [olderActive]];
+
+        try {
+            await renderJobsRoute("/jobs", transport);
+            await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(0));
+            act(() => {
+                intersectionCallbacks.at(-1)?.(
+                    [{ isIntersecting: true } as IntersectionObserverEntry],
+                    {} as IntersectionObserver
+                );
+            });
+
+            expect(
+                await screen.findByRole("button", {
+                    name: `Open run Older active run; action system.worker-smoke; id ${olderRunId}`,
+                })
+            ).toBeVisible();
+            expect(
+                transport
+                    .callsFor("jobs.listRuns")
+                    .some(
+                        ({ input }) =>
+                            (input as ListJobRunsInput).cursor?.id === newerActive.id
+                    )
+            ).toBeTrue();
+            expect(screen.queryByRole("button", { name: "Load more jobs" })).toBeNull();
+        } finally {
+            globalThis.IntersectionObserver = OriginalIntersectionObserver;
+        }
+    });
 
     test("loads independent exact deep links and wires navigation and realtime refresh", async () => {
         const transport = new JobsRouteTransport();
@@ -899,7 +908,7 @@ describe("Dashboard jobs route", () => {
             await screen.findByRole("heading", { level: 1, name: "Jobs" })
         ).toBeTruthy();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-        expect(screen.getByRole("heading", { name: "Select a job run" })).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Select a job run" })).toBeNull();
         expect(screen.getByRole("heading", { name: "Select a schedule" })).toBeTruthy();
         expect(transport.callsFor("jobs.getRun")).toEqual([]);
         expect(transport.callsFor("schedules.get")).toEqual([]);
@@ -970,9 +979,11 @@ describe("Dashboard jobs route", () => {
             await screen.findByRole("heading", { level: 2, name: "Cached schedule" })
         ).toBeTruthy();
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-        const applyFilters = screen.getByRole("button", { name: "Apply" });
-        act(() => applyFilters.focus());
-        expect(applyFilters).toHaveFocus();
+        const cachedRun = screen.getByRole("button", {
+            name: `Open run Cached durable run; action system.worker-smoke; id ${runId}`,
+        });
+        act(() => cachedRun.focus());
+        expect(cachedRun).toHaveFocus();
         const paths = [
             "jobs.getRun",
             "jobs.listRuns",
@@ -984,10 +995,7 @@ describe("Dashboard jobs route", () => {
             paths.map((path) => [path, transport.callsFor(path).length] as const)
         );
         for (const path of paths) {
-            transport.failNextQueryCounts.set(
-                path,
-                path === "jobs.listRuns" ? (previousCallCounts.get(path) ?? 1) : 1
-            );
+            transport.failNextQueryCounts.set(path, path === "jobs.listRuns" ? 2 : 1);
         }
 
         await act(async () => {
@@ -997,13 +1005,11 @@ describe("Dashboard jobs route", () => {
             ]);
         });
         await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-        expect(applyFilters).toHaveFocus();
+        expect(cachedRun).toHaveFocus();
 
         for (const path of paths) {
-            const expectedAdditionalCalls =
-                path === "jobs.listRuns" ? (previousCallCounts.get(path) ?? 1) : 1;
             expect(transport.callsFor(path)).toHaveLength(
-                (previousCallCounts.get(path) ?? 0) + expectedAdditionalCalls
+                (previousCallCounts.get(path) ?? 0) + (path === "jobs.listRuns" ? 2 : 1)
             );
         }
         expect(screen.getByRole("heading", { name: "Queue and workers" })).toBeTruthy();
@@ -1028,7 +1034,7 @@ describe("Dashboard jobs route", () => {
                     "The request could not be completed. Try again."
                 )
             );
-        expect(nonBlockingErrors.length).toBeGreaterThanOrEqual(5);
+        expect(nonBlockingErrors).toHaveLength(4);
         expect(
             screen.queryByRole("heading", { name: "Job history unavailable" })
         ).toBeNull();
@@ -1041,90 +1047,24 @@ describe("Dashboard jobs route", () => {
         ).toBeNull();
     });
 
-    test("clears a schedule filter error while the draft is corrected", async () => {
-        const transport = new JobsRouteTransport();
-        const { queryClient } = await renderJobsRoute("/jobs", transport);
-        const user = userEvent.setup();
-        const historyCalls = () =>
-            transport
-                .callsFor("jobs.listRuns")
-                .filter(({ input }) => (input as ListJobRunsInput).limit === 100);
-
-        expect(
-            await screen.findByRole("heading", { level: 1, name: "Jobs" })
-        ).toBeTruthy();
-        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-        const initialHistoryCallCount = historyCalls().length;
-        const scheduleInput = screen.getByLabelText("Schedule ID");
-        expect(scheduleInput).toHaveAttribute("placeholder", "system.worker-smoke");
-        const applyFilters = screen.getByRole("button", { name: "Apply" });
-
-        await user.type(scheduleInput, "INVALID");
-        await user.click(applyFilters);
-        expect(
-            screen.getByText("Enter a schedule ID such as system.worker-smoke.")
-        ).toBeTruthy();
-        await waitFor(() => expect(scheduleInput).toHaveFocus());
-        expect(scheduleInput).toHaveAccessibleDescription(
-            "Enter a schedule ID such as system.worker-smoke."
-        );
-        expect(historyCalls()).toHaveLength(initialHistoryCallCount);
-
-        await user.click(applyFilters);
-        await waitFor(() => expect(scheduleInput).toHaveFocus());
-        expect(historyCalls()).toHaveLength(initialHistoryCallCount);
-
-        await user.clear(scheduleInput);
-        await waitFor(() =>
-            expect(
-                screen.queryByText("Enter a schedule ID such as system.worker-smoke.")
-            ).toBeNull()
-        );
-        expect(historyCalls()).toHaveLength(initialHistoryCallCount);
-    });
-
-    test("applies all run filter drafts as one global-history query", async () => {
-        const transport = new JobsRouteTransport();
-        const { queryClient } = await renderJobsRoute("/jobs", transport);
-        const user = userEvent.setup();
-        const historyCalls = () =>
-            transport
-                .callsFor("jobs.listRuns")
-                .filter(({ input }) => (input as ListJobRunsInput).limit === 100);
-
-        expect(
-            await screen.findByRole("heading", { level: 1, name: "Jobs" })
-        ).toBeTruthy();
-        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
-        const initialHistoryCallCount = historyCalls().length;
-        expect(initialHistoryCallCount).toBe(1);
-        const scheduleInput = screen.getByLabelText("Schedule ID");
-
-        await user.click(screen.getByLabelText("Status"));
-        await user.click(screen.getByRole("option", { name: "running" }));
-        await user.click(screen.getByLabelText("Work size"));
-        await user.click(screen.getByRole("option", { name: "network" }));
-        await user.click(screen.getByLabelText("Started by"));
-        await user.click(screen.getByRole("option", { name: "manual" }));
-        await user.type(scheduleInput, scheduleId);
-        expect(historyCalls()).toHaveLength(initialHistoryCallCount);
-
-        await user.click(screen.getByRole("button", { name: "Apply" }));
-        await waitFor(() =>
-            expect(historyCalls()).toHaveLength(initialHistoryCallCount + 1)
-        );
-        expect(historyCalls().at(-1)?.input).toEqual({
-            filters: {
-                resourceClasses: ["network"],
-                scheduleId,
-                states: ["running"],
-                triggerTypes: ["manual"],
-            },
-            limit: 100,
-        });
-    });
-
     test("deduplicates an overlapping older run page", async () => {
+        const intersectionCallbacks: IntersectionObserverCallback[] = [];
+        const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+        globalThis.IntersectionObserver = class {
+            readonly root = null;
+            readonly rootMargin = "400px 0px";
+            readonly scrollMargin = "0px";
+            readonly thresholds = [0];
+            constructor(callback: IntersectionObserverCallback) {
+                intersectionCallbacks.push(callback);
+            }
+            disconnect(): void {}
+            observe(): void {}
+            takeRecords(): IntersectionObserverEntry[] {
+                return [];
+            }
+            unobserve(): void {}
+        };
         const transport = new JobsRouteTransport();
         const newest = queuedRun({
             displayName: "Newest paged run",
@@ -1138,34 +1078,42 @@ describe("Dashboard jobs route", () => {
         });
         transport.runs = [newest, older];
         transport.runPages = [[newest], [newest, older]];
-        await renderJobsRoute("/jobs", transport);
-        const user = userEvent.setup();
-
-        expect(
-            await screen.findByRole("button", {
-                name: `Open run Newest paged run; action system.worker-smoke; id ${runId}`,
-            })
-        ).toBeTruthy();
-        await user.click(screen.getByRole("button", { name: "Load more runs" }));
-        expect(
-            await screen.findByRole("button", {
-                name: `Open run Older paged run; action system.worker-smoke; id ${olderRunId}`,
-            })
-        ).toBeTruthy();
-        expect(
-            screen.getAllByRole("button", {
-                name: `Open run Newest paged run; action system.worker-smoke; id ${runId}`,
-            })
-        ).toHaveLength(1);
-        expect(
-            transport
-                .callsFor("jobs.listRuns")
-                .find(({ input }) => (input as ListJobRunsInput).cursor?.id === runId)
-                ?.input
-        ).toEqual({
-            cursor: { id: runId, queuedAtMs: timestampMs },
-            limit: 100,
-        });
+        try {
+            await renderJobsRoute("/jobs", transport);
+            expect(
+                await screen.findByRole("button", {
+                    name: `Open run Newest paged run; action system.worker-smoke; id ${runId}`,
+                })
+            ).toBeTruthy();
+            await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(0));
+            act(() => {
+                intersectionCallbacks.at(-1)?.(
+                    [{ isIntersecting: true } as IntersectionObserverEntry],
+                    {} as IntersectionObserver
+                );
+            });
+            expect(
+                await screen.findByRole("button", {
+                    name: `Open run Older paged run; action system.worker-smoke; id ${olderRunId}`,
+                })
+            ).toBeTruthy();
+            expect(
+                screen.getAllByRole("button", {
+                    name: `Open run Newest paged run; action system.worker-smoke; id ${runId}`,
+                })
+            ).toHaveLength(1);
+            expect(
+                transport
+                    .callsFor("jobs.listRuns")
+                    .find(({ input }) => (input as ListJobRunsInput).cursor?.id === runId)
+                    ?.input
+            ).toEqual({
+                cursor: { id: runId, queuedAtMs: timestampMs },
+                limit: 100,
+            });
+        } finally {
+            globalThis.IntersectionObserver = OriginalIntersectionObserver;
+        }
     });
 
     test("executes versioned pause and confirmed run cancellation", async () => {
@@ -1237,15 +1185,58 @@ describe("Dashboard jobs route", () => {
         const user = userEvent.setup();
 
         await user.click(
-            await screen.findByRole("button", {
-                name: `Open run Schedule-history run; action system.worker-smoke; id ${runId}`,
-            })
+            await screen.findByRole("button", { name: /Schedule-history run/u })
         );
         const heading = await screen.findByRole("heading", {
             level: 2,
             name: "Schedule-history run",
         });
         await waitFor(() => expect(heading).toHaveFocus());
+    });
+
+    test("keeps a selected schedule run visible outside the virtual window", async () => {
+        const transport = new JobsRouteTransport();
+        const selected = queuedRun({
+            displayName: "Selected older schedule run",
+            id: olderRunId,
+            queuedAtMs: timestampMs - 1000,
+            scheduledJobId: scheduleId,
+        });
+        transport.scheduleRuns = [
+            ...Array.from({ length: 60 }, (_, index) =>
+                queuedRun({
+                    displayName: `Schedule run ${index}`,
+                    id: `019fdd00-0000-7000-8000-${String(index).padStart(12, "0")}`,
+                    queuedAtMs: timestampMs - index,
+                    scheduledJobId: scheduleId,
+                })
+            ),
+            selected,
+        ];
+        transport.addRunDetail(selected);
+        transport.addScheduleDetail(scheduleSummary());
+
+        await renderJobsRoute(
+            `/jobs?scheduleId=${scheduleId}&runId=${olderRunId}`,
+            transport
+        );
+
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Selected older schedule run",
+            })
+        ).toBeVisible();
+    });
+
+    test("shows an empty state when a schedule has no run history", async () => {
+        const transport = new JobsRouteTransport();
+        const schedule = scheduleSummary();
+        transport.addScheduleDetail(schedule);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+
+        expect(await screen.findByRole("heading", { name: "No job runs" })).toBeVisible();
+        expect(screen.queryByLabelText("Schedule run history")).toBeNull();
     });
 
     test("focuses schedule detail selected from the directory", async () => {
@@ -1266,6 +1257,87 @@ describe("Dashboard jobs route", () => {
             name: "Worker smoke",
         });
         await waitFor(() => expect(heading).toHaveFocus());
+    });
+
+    test("clears a run selection when switching schedules", async () => {
+        const transport = new JobsRouteTransport();
+        const secondScheduleId = "system.database-maintenance";
+        const firstSchedule = scheduleSummary(scheduleId, { name: "Worker smoke" });
+        const secondSchedule = scheduleSummary(secondScheduleId, {
+            name: "Database maintenance",
+        });
+        const selectedRun = queuedRun({
+            displayName: "First schedule run",
+            id: runId,
+            scheduledJobId: scheduleId,
+        });
+        transport.schedules = [firstSchedule, secondSchedule];
+        transport.addScheduleDetail(firstSchedule);
+        transport.addScheduleDetail(secondSchedule);
+        transport.addRunDetail(selectedRun);
+        const { queryClient, router } = await renderJobsRoute(
+            `/jobs?scheduleId=${scheduleId}&runId=${runId}`,
+            transport
+        );
+        const user = userEvent.setup();
+
+        await screen.findByRole("heading", {
+            level: 2,
+            name: "First schedule run",
+        });
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: "Database maintenance; system.database-maintenance",
+            })
+        );
+
+        await waitFor(() => {
+            expect(router.state.location.search).toEqual({
+                scheduleId: secondScheduleId,
+            });
+        });
+        const secondHeading = await screen.findByRole("heading", {
+            level: 2,
+            name: "Database maintenance",
+        });
+        await waitFor(() => expect(secondHeading).toHaveFocus());
+        expect(screen.queryByText("First schedule run")).toBeNull();
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    });
+
+    test("clears stale schedule context when selecting an unscheduled run", async () => {
+        const transport = new JobsRouteTransport();
+        const selectedSchedule = scheduleSummary();
+        const unscheduledRun = queuedRun({
+            displayName: "Unscheduled maintenance run",
+            id: olderRunId,
+        });
+        transport.runs = [unscheduledRun];
+        transport.addRunDetail(unscheduledRun);
+        transport.addScheduleDetail(selectedSchedule);
+        const { router } = await renderJobsRoute(
+            `/jobs?scheduleId=${scheduleId}`,
+            transport
+        );
+        const user = userEvent.setup();
+
+        await user.click(
+            await screen.findByRole("button", {
+                name: `Open run Unscheduled maintenance run; action system.worker-smoke; id ${olderRunId}`,
+            })
+        );
+
+        await waitFor(() => {
+            expect(router.state.location.search).toEqual({ runId: olderRunId });
+        });
+        expect(
+            await screen.findByRole("heading", {
+                level: 2,
+                name: "Unscheduled maintenance run",
+            })
+        ).toBeVisible();
     });
 
     test("saves cadence through a versioned schedule update", async () => {
@@ -1518,17 +1590,15 @@ describe("Dashboard jobs route", () => {
         const { router } = await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
 
-        const source = await screen.findByRole("group", { name: "Job source" });
+        const source = await screen.findByRole("tablist", { name: "Job source" });
         expect(
-            within(source).getByRole("button", { name: "Dashboard jobs" })
-        ).toHaveAttribute("aria-pressed", "true");
-        await user.click(
-            within(source).getByRole("button", { name: "OpenClaw schedules" })
-        );
+            within(source).getByRole("tab", { name: "Dashboard jobs" })
+        ).toHaveAttribute("aria-selected", "true");
+        await user.click(within(source).getByRole("tab", { name: "OpenClaw schedules" }));
 
         expect(
-            within(source).getByRole("button", { name: "OpenClaw schedules" })
-        ).toHaveAttribute("aria-pressed", "true");
+            within(source).getByRole("tab", { name: "OpenClaw schedules" })
+        ).toHaveAttribute("aria-selected", "true");
         expect(
             await screen.findByRole("heading", {
                 level: 2,
@@ -1553,8 +1623,8 @@ describe("Dashboard jobs route", () => {
         act(() => router.history.back());
         await waitFor(() =>
             expect(
-                within(source).getByRole("button", { name: "Dashboard jobs" })
-            ).toHaveAttribute("aria-pressed", "true")
+                within(source).getByRole("tab", { name: "Dashboard jobs" })
+            ).toHaveAttribute("aria-selected", "true")
         );
     });
 

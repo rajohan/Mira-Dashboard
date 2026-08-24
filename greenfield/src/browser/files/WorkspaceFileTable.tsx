@@ -1,4 +1,4 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import {
     Download,
     Eye,
@@ -15,6 +15,7 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
@@ -23,7 +24,7 @@ import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx"
 import { workspaceFileKindLabel } from "./workspaceFilePresentation.ts";
 
 const minimumVirtualizedRows = 50;
-const workspaceFileTableFeatures = tableFeatures({});
+const workspaceFileTableFeatures = dashboardTableFeatures;
 
 interface WorkspaceFileTableRow {
     readonly entry: WorkspaceFileEntry;
@@ -100,11 +101,13 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         },
         header: "Name",
         id: "name",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => workspaceFileKindLabel(row.entry), {
         cell: ({ getValue }) => <Text>{getValue()}</Text>,
         header: "Kind",
         id: "kind",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => row.entry.sizeBytes, {
         cell: ({ getValue }) => {
@@ -117,6 +120,7 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         },
         header: "Size",
         id: "sizeBytes",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => row.entry.modifiedAtMs, {
         cell: ({ getValue }) => {
@@ -131,6 +135,7 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         },
         header: "Modified",
         id: "modifiedAtMs",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.accessor((row) => row.entry.writable, {
         cell: ({ getValue }) => (
@@ -140,6 +145,7 @@ const workspaceFileColumns = workspaceFileColumnHelper.columns([
         ),
         header: "Access",
         id: "writable",
+        enableSorting: false,
     }),
     workspaceFileColumnHelper.display({
         cell: ({ row }) => {

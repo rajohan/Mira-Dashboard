@@ -1,9 +1,10 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { History } from "lucide-react";
 
 import type { AgentTaskRun } from "../../contracts/agentModel.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
@@ -11,7 +12,7 @@ import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
 
 const minimumVirtualizedRows = 50;
-const historyTableFeatures = tableFeatures({});
+const historyTableFeatures = dashboardTableFeatures;
 const historyColumnHelper = createColumnHelper<
     typeof historyTableFeatures,
     AgentTaskRun
@@ -25,10 +26,12 @@ const historyColumns = historyColumnHelper.columns([
             </Text>
         ),
         header: "Agent",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor("task", {
         cell: ({ getValue }) => <Text className="wrap-break-word">{getValue()}</Text>,
         header: "Task",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor("status", {
         cell: ({ getValue }) => (
@@ -37,6 +40,7 @@ const historyColumns = historyColumnHelper.columns([
             </Badge>
         ),
         header: "Status",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor("startedAtMs", {
         cell: ({ getValue }) => (
@@ -45,6 +49,7 @@ const historyColumns = historyColumnHelper.columns([
             </time>
         ),
         header: "Started",
+        enableSorting: false,
     }),
     historyColumnHelper.accessor(
         (run) => (run.status === "completed" ? run.completedAtMs : undefined),
@@ -63,6 +68,7 @@ const historyColumns = historyColumnHelper.columns([
             },
             header: "Completed",
             id: "completedAtMs",
+            enableSorting: false,
         }
     ),
 ]);

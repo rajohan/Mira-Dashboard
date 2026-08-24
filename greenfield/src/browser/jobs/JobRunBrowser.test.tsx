@@ -23,7 +23,11 @@ import {
     type DashboardTrpcTransport,
 } from "../api/trpcClient.ts";
 import { DashboardTrpcProvider } from "../api/trpcContext.tsx";
-import { jobRunDetailQueryKey, jobRunEventHistoryQueryKey } from "./jobQueries.ts";
+import {
+    jobHistoryNeedsInitialFill,
+    jobRunDetailQueryKey,
+    jobRunEventHistoryQueryKey,
+} from "./jobQueries.ts";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
 import { JobRunBrowser } from "./JobRunBrowser.tsx";
 
@@ -35,6 +39,12 @@ const runId = "019fdf70-0000-7000-8000-000000000002";
 const otherRunId = "019fdf70-0000-7000-8000-000000000003";
 const timestampMs = 1_800_000_000_000;
 const eventProjectionWait = { timeout: 3000 } as const;
+
+test("keeps filling history until reported active runs are represented", () => {
+    expect(jobHistoryNeedsInitialFill(0, 100, 1)).toBeTrue();
+    expect(jobHistoryNeedsInitialFill(1, 100, 1)).toBeFalse();
+    expect(jobHistoryNeedsInitialFill(0, 49)).toBeTrue();
+});
 
 function runningRun(eventCount: number, id = runId): JobRunSummary {
     return {
@@ -116,6 +126,7 @@ class EventGapTransport implements DashboardTrpcTransport {
     #deferredGap = Promise.withResolvers<unknown>();
     #deferredGapEnabled = false;
     #deferredGapUsed = false;
+    exactFailuresRemaining = 0;
     gap33FailuresRemaining = 0;
     newestExactSequence = 22;
 
@@ -146,6 +157,10 @@ class EventGapTransport implements DashboardTrpcTransport {
             return Promise.resolve(detailPage(2, 1, 2, false, otherRunId));
         }
         if (eventCursor === undefined) {
+            if (this.exactFailuresRemaining > 0) {
+                this.exactFailuresRemaining -= 1;
+                return Promise.reject(new TypeError("Exact detail unavailable"));
+            }
             if (this.newestExactSequence === 22) {
                 return Promise.resolve(detailPage(22, 13, 22));
             }
@@ -176,6 +191,20 @@ class EventGapTransport implements DashboardTrpcTransport {
         return Promise.reject(
             new TypeError(`Unexpected event cursor: ${eventCursor.sequence}`)
         );
+    }
+}
+
+class DetailOnlyTransport extends EventGapTransport {
+    override query(
+        path: string,
+        input?: unknown,
+        options?: TRPCRequestOptions
+    ): Promise<unknown> {
+        if (path === "jobs.listRuns") {
+            this.calls.push({ input, path, signal: options?.signal });
+            return Promise.reject(new TypeError("Run list unavailable"));
+        }
+        return super.query(path, input, options);
     }
 }
 
@@ -260,6 +289,21 @@ async function refreshExactDetail(
 }
 
 describe("job run browser", () => {
+    test("renders a deep-linked run while list and summary reads fail", async () => {
+        const transport = new DetailOnlyTransport();
+        const { queryClient, view } = createJobBrowserHarness(transport);
+
+        try {
+            expect(
+                await screen.findByRole("heading", { name: "Gap-safe worker smoke" })
+            ).toBeTruthy();
+            expect(transport.calls.some(({ path }) => path === "jobs.getRun")).toBeTrue();
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
     test("fills a realtime cursor jump without discarding loaded history", async () => {
         const transport = new EventGapTransport();
         const { queryClient, view } = createJobBrowserHarness(transport);
@@ -523,6 +567,37 @@ describe("job run browser", () => {
                 eventCursors(transport).filter((cursor) => cursor === 33)
             ).toHaveLength(2);
             expect(eventCursors(transport)).toContain(53);
+        } finally {
+            view.unmount();
+            queryClient.clear();
+        }
+    });
+
+    test("keeps event-history retry when its safe message matches detail failure", async () => {
+        const transport = new EventGapTransport();
+        transport.gap33FailuresRemaining = 1;
+        const { queryClient, view } = createJobBrowserHarness(transport);
+
+        try {
+            await loadInitialEventHistory();
+            await refreshExactDetail(transport, queryClient, 42);
+            expect(
+                await screen.findByRole(
+                    "button",
+                    { name: "Retry missing events" },
+                    eventProjectionWait
+                )
+            ).toBeVisible();
+
+            transport.exactFailuresRemaining = 1;
+            await refreshExactDetail(transport, queryClient, 42);
+
+            expect(
+                screen.getByRole("button", { name: "Retry missing events" })
+            ).toBeVisible();
+            expect(
+                screen.getAllByText("The request could not be completed. Try again.")
+            ).toHaveLength(1);
         } finally {
             view.unmount();
             queryClient.clear();

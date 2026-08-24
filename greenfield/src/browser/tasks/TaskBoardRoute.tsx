@@ -139,16 +139,19 @@ export function TaskBoardRoute() {
                 <LoadingState className="mt-10" label="Loading tasks…" />
             )}
             {taskPages.isError && (
-                <div className="mt-6">
-                    <Alert message={dashboardBrowserFailureMessage(taskPages.error)} />
-                    <Button
-                        className="mt-3"
-                        onClick={() => void taskPages.refetch()}
-                        variant="secondary"
-                    >
-                        Try again
-                    </Button>
-                </div>
+                <Alert
+                    action={
+                        <Button
+                            onClick={() => void taskPages.refetch()}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    }
+                    className="mt-6"
+                    message={dashboardBrowserFailureMessage(taskPages.error)}
+                />
             )}
             {taskPages.isSuccess && tasks.length === 0 && (
                 <div className="mt-8">

@@ -265,7 +265,7 @@ export function WorkspaceFileEditorPane({
             <header className="border-primary-700 flex flex-col gap-3 border-b p-4 xl:flex-row xl:items-start xl:justify-between">
                 <div className="min-w-0 xl:flex-1">
                     <div className="flex min-w-0 items-center gap-2">
-                        <Icon icon={FilePenLine} size="sm" />
+                        <Icon icon={FilePenLine} size="sm" tone="accent" />
                         <h2 className="text-primary-50 min-w-0 truncate font-semibold">
                             {entry.name}
                         </h2>
@@ -394,7 +394,7 @@ export function WorkspaceFileEditorPane({
                 <Alert
                     className={paneAlertClassName}
                     focusOnError={false}
-                    message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane; inspect and repair invalid JSON without copying secrets into logs or messages."
+                    message="If needed, enroll and confirm MFA in Account security before revealing. Reveal exposes raw secrets only in this pane. Inspect and repair invalid JSON without copying secrets into logs or messages."
                     variant="info"
                 />
             )}

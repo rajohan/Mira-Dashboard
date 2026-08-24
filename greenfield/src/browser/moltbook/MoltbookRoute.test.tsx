@@ -9,7 +9,7 @@ import { Route as moltbookLazyRoute } from "../routes/moltbook.lazy.tsx";
 import { moltbookSnapshotQueryKey } from "./moltbookQueries.ts";
 import { MoltbookRoute } from "./MoltbookRoute.tsx";
 
-const { act, render, screen, waitFor } = await import("@testing-library/react");
+const { act, render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
@@ -97,8 +97,26 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
         updatedAt,
     });
     const failedFeed = Promise.withResolvers<unknown>();
-    const retriedFeed = Promise.withResolvers<unknown>();
     let newFeedRequests = 0;
+    const recoveredSnapshot = {
+        ...snapshot,
+        feed: {
+            ...snapshot.feed,
+            posts: [
+                {
+                    ...snapshot.feed.posts[0],
+                    title: "Recovered new feed post",
+                },
+            ],
+            sort: "new" as const,
+        },
+        status: {
+            ...status,
+            freshness: "fresh" as const,
+            lastAttemptStatus: "succeeded" as const,
+            lastSuccessAtMs: 3000,
+        },
+    } satisfies MoltbookSnapshotResult;
     const client = {
         mutation: () => Promise.reject(new Error("Unexpected mutation")),
         query: (name: string, input: unknown) => {
@@ -112,10 +130,10 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
                 return Promise.reject(new Error(`Unexpected query: ${name}`));
             }
 
-            const response =
-                newFeedRequests === 0 ? failedFeed.promise : retriedFeed.promise;
             newFeedRequests += 1;
-            return response;
+            return newFeedRequests === 1
+                ? failedFeed.promise
+                : Promise.resolve(recoveredSnapshot);
         },
     } as unknown as DashboardTrpcClient;
     const view = render(
@@ -129,8 +147,8 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
     try {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Moltbook" })
-        ).toBeVisible();
-        expect(screen.getByText("Last-known-good snapshot")).toBeVisible();
+        ).toHaveClass("sr-only");
+        expect(screen.queryByText("Last-known-good snapshot")).toBeNull();
         expect(screen.getByText("2 unread messages")).toBeVisible();
         expect(screen.getByText("3 unread notifications")).toBeVisible();
         expect(screen.getByRole("link", { name: /Open Mira/u })).toHaveAttribute(
@@ -162,36 +180,15 @@ test("Moltbook route renders LKG state, encoded links, and independent content t
         });
         expect(
             await screen.findByText(
-                "The new feed could not be loaded; showing hot feed data."
+                "The new feed could not be loaded. Showing hot feed data."
             )
         ).toBeVisible();
         expect(screen.getByText("A feed post")).toBeVisible();
+        expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
 
         await user.click(screen.getByRole("button", { name: "Retry" }));
-        await waitFor(() => expect(newFeedRequests).toBe(2));
-        act(() => {
-            retriedFeed.resolve({
-                ...snapshot,
-                feed: {
-                    hasMore: false,
-                    posts: [
-                        {
-                            author: { name: "grace" },
-                            commentCount: 0,
-                            contentPreview: "Newest bounded preview",
-                            createdAtMs: updatedAt,
-                            downvotes: 0,
-                            id: "post-new",
-                            submoltName: "agents",
-                            title: "Newest post",
-                            upvotes: 1,
-                        },
-                    ],
-                    sort: "new",
-                },
-            });
-        });
-        expect(await screen.findByText("Newest post")).toBeVisible();
+        expect(await screen.findByText("Recovered new feed post")).toBeVisible();
+        expect(newFeedRequests).toBe(2);
     } finally {
         view.unmount();
         queryClient.clear();

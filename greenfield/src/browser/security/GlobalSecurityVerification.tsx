@@ -646,19 +646,21 @@ export function GlobalSecurityVerification({
         content = <LoadingState label="Retrying the protected action…" size="sm" />;
     } else if (snapshot.phase === "cache-reset" || snapshot.phase === "reconciling") {
         content = reconciliationFailure ? (
-            <div className="space-y-3">
-                <Alert message={reconciliationFailure} />
-                <Button
-                    busy={reconciliationBusy}
-                    busyLabel="Refreshing secure session…"
-                    fullWidth
-                    onClick={() =>
-                        void reconcileAuthenticationStatus(snapshot.generation)
-                    }
-                >
-                    Retry secure session refresh
-                </Button>
-            </div>
+            <Alert
+                action={
+                    <Button
+                        busy={reconciliationBusy}
+                        busyLabel="Refreshing secure session…"
+                        onClick={() =>
+                            void reconcileAuthenticationStatus(snapshot.generation)
+                        }
+                        size="sm"
+                    >
+                        Retry secure session refresh
+                    </Button>
+                }
+                message={reconciliationFailure}
+            />
         ) : (
             <LoadingState label="Refreshing secure session…" size="sm" />
         );
@@ -666,17 +668,19 @@ export function GlobalSecurityVerification({
         content = <LoadingState label="Loading verification methods…" size="sm" />;
     } else if (summary.isError) {
         content = (
-            <div className="space-y-3">
-                <Alert message={dashboardBrowserFailureMessage(summary.error)} />
-                <Button
-                    busy={summary.isFetching}
-                    busyLabel="Loading verification methods…"
-                    fullWidth
-                    onClick={() => void summary.refetch()}
-                >
-                    Try again
-                </Button>
-            </div>
+            <Alert
+                action={
+                    <Button
+                        busy={summary.isFetching}
+                        busyLabel="Loading verification methods…"
+                        onClick={() => void summary.refetch()}
+                        size="sm"
+                    >
+                        Try again
+                    </Button>
+                }
+                message={dashboardBrowserFailureMessage(summary.error)}
+            />
         );
     } else if (summary.data.mfa.enabled) {
         content = (

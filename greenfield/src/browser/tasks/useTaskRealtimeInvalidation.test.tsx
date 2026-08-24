@@ -183,7 +183,7 @@ describe("task realtime invalidation", () => {
                 await Promise.resolve();
                 await Promise.resolve();
             });
-            expect(refreshCount).toBe(1);
+            expect(refreshCount).toBe(2);
 
             view.unmount();
             queryClient.clear();

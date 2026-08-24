@@ -5,6 +5,10 @@ import { type ReactNode, useState } from "react";
 
 import type { ReportDetail, ReportSummary } from "../../contracts/monitoring.ts";
 import type { ListReportsInput } from "../../contracts/reports.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import {
     classifyDashboardBrowserFailure,
@@ -31,6 +35,7 @@ import { useDeleteReportMutation } from "./monitoringMutations.ts";
 import { reportKindLabel, reportStatusVariant } from "./monitoringPresentation.ts";
 import {
     reportDetailQueryOptions,
+    reportLiveHeadQueryOptions,
     reportListQueryOptions,
     uniqueMonitoringRows,
 } from "./monitoringQueries.ts";
@@ -103,7 +108,7 @@ function ReportListItem({ onSelect, report, selected }: ReportListItemProps) {
 
 interface ReportDetailPanelProps {
     readonly id: string;
-    readonly onDeleted: () => void;
+    readonly onDeleted: (id: string) => void;
 }
 
 function ReportDetailPanel({ id, onDeleted }: ReportDetailPanelProps) {
@@ -215,6 +220,9 @@ export function ReportBrowser() {
     const [source, setSource] = useState("");
     const [statusDraft, setStatusDraft] = useState<ReportStatusFilter>("all");
     const [status, setStatus] = useState<ReportStatusFilter>("all");
+    const [deletedReportIds, setDeletedReportIds] = useState<ReadonlySet<string>>(
+        () => new Set()
+    );
     const filters: ListReportsInput["filters"] =
         kind === "" && source === "" && status === "all"
             ? undefined
@@ -224,9 +232,18 @@ export function ReportBrowser() {
                   ...(status === "all" ? {} : { statuses: [status] }),
               };
     const query = useInfiniteQuery(reportListQueryOptions(client, filters));
-    const reports = uniqueMonitoringRows(
-        query.data?.pages.flatMap((page) => page.reports) ?? []
+    const liveHead = useQuery(reportLiveHeadQueryOptions(client, filters));
+    const reports = useAccumulatedLiveHistoryRows(
+        liveHead.data?.reports ?? [],
+        uniqueMonitoringRows(query.data?.pages.flatMap((page) => page.reports) ?? []),
+        liveHistoryRowIdentity,
+        JSON.stringify(filters ?? null),
+        deletedReportIds
     );
+    const catalogError = liveHead.error ?? query.error;
+    const catalogHasData = liveHead.data !== undefined || query.data !== undefined;
+    const retryCatalog = () =>
+        void Promise.allSettled([liveHead.refetch(), query.refetch()]);
     const selectedId = search.reportId;
     const selectReport = (reportId: string | undefined) => {
         void navigate({
@@ -248,19 +265,19 @@ export function ReportBrowser() {
         setStatus("all");
     };
     let catalogContent: ReactNode;
-    if (query.isPending && query.data === undefined) {
+    if (liveHead.isPending && query.isPending && !catalogHasData) {
         catalogContent = (
             <div className="p-5">
                 <PageState label="Loading reports…" status="loading" />
             </div>
         );
-    } else if (query.data === undefined) {
+    } else if (!catalogHasData) {
         catalogContent = (
             <div className="p-5">
                 <PageState
-                    message={dashboardBrowserFailureMessage(query.error)}
-                    onRetry={() => void query.refetch()}
-                    retryBusy={query.isFetching}
+                    message={dashboardBrowserFailureMessage(catalogError)}
+                    onRetry={retryCatalog}
+                    retryBusy={liveHead.isFetching || query.isFetching}
                     status="error"
                     title="Reports unavailable"
                 />
@@ -338,18 +355,31 @@ export function ReportBrowser() {
                     </Button>
                 </div>
             </Form>
-            {query.error !== null && query.data !== undefined && (
+            {catalogError !== null && catalogHasData && (
                 <Alert
+                    action={
+                        <Button
+                            busy={liveHead.isFetching || query.isFetching}
+                            onClick={retryCatalog}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    }
                     className="mt-4"
-                    message={dashboardBrowserFailureMessage(query.error)}
+                    message={dashboardBrowserFailureMessage(catalogError)}
                 />
             )}
             <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)]">
                 <Card className="min-w-0 p-0">
                     <div className="border-primary-700 border-b px-4 py-3">
-                        <Heading level={2} size="subsection">
-                            Reports
-                        </Heading>
+                        <div className="flex items-center gap-2">
+                            <Icon icon={FileText} tone="accent" />
+                            <Heading level={2} size="subsection">
+                                Reports
+                            </Heading>
+                        </div>
                     </div>
                     {catalogContent}
                     {query.hasNextPage && (
@@ -378,7 +408,10 @@ export function ReportBrowser() {
                     <ReportDetailPanel
                         id={selectedId}
                         key={selectedId}
-                        onDeleted={() => selectReport(undefined)}
+                        onDeleted={(id) => {
+                            setDeletedReportIds((current) => new Set(current).add(id));
+                            selectReport(undefined);
+                        }}
                     />
                 )}
             </div>

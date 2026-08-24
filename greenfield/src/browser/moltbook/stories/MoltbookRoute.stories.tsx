@@ -112,7 +112,7 @@ const lastKnownGoodSnapshot = {
         lastAttemptStatus: "failed",
         lastSuccessAtMs: observedAtMs,
         refreshFailureMessage:
-            "The latest Moltbook refresh failed; showing last-known-good data.",
+            "The latest Moltbook refresh failed. Showing last-known-good data.",
     },
 } satisfies MoltbookSnapshotResult;
 

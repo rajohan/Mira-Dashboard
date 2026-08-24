@@ -37,6 +37,9 @@ describe("WorkspaceFileTable", () => {
             "cursor-pointer",
             "focus-visible:ring-offset-2"
         );
+        expect(
+            screen.getByRole("columnheader", { name: "Name" }).querySelector("button")
+        ).toBeNull();
 
         await user.click(primaryAction);
         expect(onOpenDirectory).toHaveBeenCalledWith(directory);

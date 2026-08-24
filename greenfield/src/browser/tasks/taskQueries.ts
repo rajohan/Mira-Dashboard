@@ -11,6 +11,10 @@ import type {
     ListTasksInput,
     ListTasksResult,
 } from "../../contracts/tasks.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 type TaskCursor = NonNullable<ListTasksInput["cursor"]>;
@@ -127,7 +131,20 @@ export function taskProgressQueryOptions(client: DashboardTrpcClient, taskId: st
                 { signal }
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
-        queryKey: taskProgressQueryKey(taskId),
+        queryKey: liveHistoryArchiveQueryKey(taskProgressQueryKey(taskId)),
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Live first-page projection for one task's newest progress updates. */
+export function taskProgressLiveHeadQueryOptions(
+    client: DashboardTrpcClient,
+    taskId: string
+) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListTaskProgressResult> =>
+            client.query("tasks.listUpdates", { limit: 50, taskId }, { signal }),
+        queryKey: liveHistoryHeadQueryKey(taskProgressQueryKey(taskId)),
         staleTime: 0,
     });
 }
@@ -138,7 +155,12 @@ export function taskProgressQueryOptions(client: DashboardTrpcClient, taskId: st
  * @returns Completion after active task observers have refreshed.
  */
 export async function refreshTaskQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+        queryClient.invalidateQueries({
+            queryKey: liveHistoryArchiveQueryKey(taskQueryKey),
+        }),
+    ]);
 }
 
 /**

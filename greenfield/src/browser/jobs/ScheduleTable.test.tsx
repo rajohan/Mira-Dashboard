@@ -58,8 +58,8 @@ describe("schedule table", () => {
             })
             .click();
         expect(onSelect).toHaveBeenCalledWith("system.worker-smoke-disabled");
-        expect(screen.getByText("enabled")).toBeTruthy();
-        expect(screen.getByText("disabled")).toBeTruthy();
+        expect(screen.getByText("Enabled")).toBeTruthy();
+        expect(screen.getByText("Disabled")).toBeTruthy();
     });
 
     test("formats every schedule variant without losing contract values", () => {

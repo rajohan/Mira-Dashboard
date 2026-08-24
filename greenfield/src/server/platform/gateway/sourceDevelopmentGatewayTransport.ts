@@ -81,6 +81,7 @@ export interface SourceDevelopmentGatewayTransportOptions {
 export type SourceDevelopmentGatewayReadTransport = Pick<
     PersistentGatewayTransport,
     | "request"
+    | "requestAdmin"
     | "requestChatRead"
     | "requestChatWrite"
     | "requestOpenClawSettingsRead"
@@ -845,11 +846,7 @@ function simulatedResponse(
             });
         }
         case "cron.scratch.get": {
-            const id = parameterString(parameters, "id");
-            return (
-                state.simulatedResponses.get(readKey("cron.scratch.get", { id })) ??
-                Object.freeze({ currentRevision: 0, maxBytes: 64 * 1024, scratch: null })
-            );
+            throw new TypeError("Development cron scratch reads must be delegated");
         }
         case "cron.scratch.set": {
             const id = parameterString(parameters, "id");
@@ -1045,6 +1042,11 @@ export function createSourceDevelopmentGatewayTransport(
         },
         requestAdmin(method, parameters, requestOptions) {
             assertPersistentGatewayAdminParameters(method, parameters);
+            if (method === "cron.scratch.get") {
+                return observedRead(state, readKey(method, parameters), () =>
+                    options.readTransport.requestAdmin(method, parameters, requestOptions)
+                );
+            }
             return dispatch(method, parameters, requestOptions);
         },
         requestChatRead(method, parameters, requestOptions) {

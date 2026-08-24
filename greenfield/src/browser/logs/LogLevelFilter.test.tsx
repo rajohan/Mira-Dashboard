@@ -40,7 +40,7 @@ describe("log level filter", () => {
         expect(logLevelIsVisible("unknown", new Set())).toBe(false);
     });
 
-    test("exposes pressed multi-select chips plus clear and all behavior", async () => {
+    test("exposes pressed multi-select level chips without bulk controls", async () => {
         const user = userEvent.setup();
         render(<Fixture />);
 
@@ -54,12 +54,7 @@ describe("log level filter", () => {
             );
         }
         expect(group).toHaveTextContent("trace");
-        expect(
-            screen.getByRole("button", { name: "Select all log levels" })
-        ).toBeDisabled();
-
-        await user.click(screen.getByRole("button", { name: "Clear all log levels" }));
-        expect(screen.getByTestId("active-levels")).toHaveTextContent("");
+        await user.click(screen.getByRole("button", { name: "trace" }));
         expect(screen.getByRole("button", { name: "trace" })).toHaveAttribute(
             "aria-pressed",
             "false"
@@ -68,16 +63,13 @@ describe("log level filter", () => {
         await user.click(screen.getByRole("button", { name: "warn" }));
         expect(screen.getByRole("button", { name: "warn" })).toHaveAttribute(
             "aria-pressed",
-            "true"
+            "false"
         );
-        expect(screen.getByTestId("active-levels")).toHaveTextContent("warn");
+        expect(screen.getByTestId("active-levels")).toHaveTextContent(
+            "debug,info,error,fatal"
+        );
 
-        await user.click(screen.getByRole("button", { name: "Select all log levels" }));
-        for (const level of filterableLogLevels) {
-            expect(screen.getByRole("button", { name: level })).toHaveAttribute(
-                "aria-pressed",
-                "true"
-            );
-        }
+        expect(screen.queryByText("All")).toBeNull();
+        expect(screen.queryByText("Clear")).toBeNull();
     });
 });

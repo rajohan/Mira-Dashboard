@@ -64,6 +64,7 @@ const config: StorybookConfig = {
                 ...viteConfiguration.optimizeDeps,
                 include: [
                     ...(viteConfiguration.optimizeDeps?.include ?? []),
+                    "@date-fns/tz",
                     "@daypicker/react",
                     "@daypicker/react/locale",
                 ],

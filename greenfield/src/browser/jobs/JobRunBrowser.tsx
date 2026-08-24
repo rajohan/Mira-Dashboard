@@ -1,48 +1,32 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Filter, RotateCcw } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
-import * as v from "valibot";
+import { useEffect, useRef, useState } from "react";
 
+import type { JobRunEvent } from "../../contracts/jobModel.ts";
+import type { JobRunDetail as JobRunDetailData } from "../../contracts/jobs.ts";
 import {
-    jobResourceClasses,
-    type JobResourceClass,
-    type JobRunEvent,
-    type JobRunState,
-    jobRunStates,
-    type JobTriggerType,
-    jobTriggerTypes,
-    scheduleIdMaximumLength,
-    scheduleIdSchema,
-} from "../../contracts/jobModel.ts";
-import type {
-    JobRunDetail as JobRunDetailData,
-    ListJobRunsInput,
-} from "../../contracts/jobs.ts";
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
-import { Form } from "../ui/Form.tsx";
-import { FormField } from "../ui/FormField.tsx";
-import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
-import { Input } from "../ui/Input.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Select, type SelectOption } from "../ui/Select.tsx";
-import { Text } from "../ui/Text.tsx";
 import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
 import {
     useCancelJobRunMutation,
     useSetJobClaimingPausedMutation,
 } from "./jobMutations.ts";
 import {
+    jobHistoryNeedsInitialFill,
     jobRunDetailQueryOptions,
     type JobRunEventGapRequest,
     type JobRunEventGapResult,
     jobRunEventGapQueryOptions,
     jobRunEventHistoryQueryKey,
     jobRunEventHistoryQueryOptions,
+    jobRunLiveHeadQueryOptions,
     jobRunListQueryOptions,
     jobQueueSummaryQueryOptions,
     uniqueJobRunEvents,
@@ -51,33 +35,9 @@ import {
 import { JobQueuePanel } from "./JobQueuePanel.tsx";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
 import { JobRunDetail } from "./JobRunDetail.tsx";
-import { jobRunStateLabel } from "./jobRunPresentation.ts";
-import { JobRunTable } from "./JobRunTable.tsx";
-
-type JobStateFilter = JobRunState | "all";
-type ResourceClassFilter = JobResourceClass | "all";
-type TriggerTypeFilter = JobTriggerType | "all";
-
-const jobStateOptions: readonly SelectOption<JobStateFilter>[] = Object.freeze([
-    { label: "All states", value: "all" },
-    ...jobRunStates.map((state) => ({ label: jobRunStateLabel(state), value: state })),
-]);
-const resourceClassOptions: readonly SelectOption<ResourceClassFilter>[] = Object.freeze([
-    { label: "All resources", value: "all" },
-    ...jobResourceClasses.map((resourceClass) => ({
-        label: resourceClass,
-        value: resourceClass,
-    })),
-]);
-const triggerTypeOptions: readonly SelectOption<TriggerTypeFilter>[] = Object.freeze([
-    { label: "All triggers", value: "all" },
-    ...jobTriggerTypes.map((triggerType) => ({
-        label: triggerType,
-        value: triggerType,
-    })),
-]);
 
 interface SelectedJobRunProps {
+    readonly embedded?: boolean;
     readonly focusRequested: boolean;
     readonly id: string;
     readonly onFocusHandled: (id: string) => void;
@@ -98,7 +58,12 @@ interface JobRunEventProjection {
     readonly retiredDetailEvents: readonly JobRunEvent[];
 }
 
-function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunProps) {
+export function SelectedJobRun({
+    embedded = false,
+    focusRequested,
+    id,
+    onFocusHandled,
+}: SelectedJobRunProps) {
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
     const detail = useQuery(jobRunDetailQueryOptions(client, id));
@@ -223,6 +188,45 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
 
     const mutationError = cancellation.error;
     const error = mutationError ?? detail.error;
+    const primaryErrorMessage =
+        error === null ? undefined : jobBrowserFailureMessage(error);
+    const eventHistoryError = eventGap.error ?? history.error;
+    const eventHistoryErrorMessage =
+        eventHistoryError === null
+            ? undefined
+            : jobBrowserFailureMessage(eventHistoryError);
+    const eventHistorySharesPrimaryMessage =
+        eventHistoryErrorMessage !== undefined &&
+        eventHistoryErrorMessage === primaryErrorMessage;
+    const eventHistoryRetry =
+        eventHistoryErrorMessage === undefined ? undefined : (
+            <Button
+                busy={eventGap.isFetching || history.isFetching}
+                busyLabel="Retrying missing events…"
+                onClick={() =>
+                    void Promise.allSettled([eventGap.refetch(), history.refetch()])
+                }
+                size="sm"
+                variant="secondary"
+            >
+                Retry missing events
+            </Button>
+        );
+    let primaryRetry;
+    if (eventHistorySharesPrimaryMessage) {
+        primaryRetry = eventHistoryRetry;
+    } else if (mutationError === null && detail.error !== null) {
+        primaryRetry = (
+            <Button
+                busy={detail.isFetching}
+                onClick={() => void detail.refetch()}
+                size="sm"
+                variant="secondary"
+            >
+                Try again
+            </Button>
+        );
+    }
     const historyPages = history.data?.pages ?? [];
     const events = uniqueJobRunEvents([
         ...detail.data.events,
@@ -237,37 +241,29 @@ function SelectedJobRun({ focusRequested, id, onFocusHandled }: SelectedJobRunPr
     return (
         <div>
             <Alert
+                action={primaryRetry}
                 className="mb-4"
                 focusOnError={mutationError !== null}
-                message={error === null ? undefined : jobBrowserFailureMessage(error)}
+                message={primaryErrorMessage}
             />
             <JobRunDetail
                 cancelBusy={cancellation.isPending}
                 detail={{ ...detail.data, events, nextEventCursor }}
+                embedded={embedded}
                 focusRequested={focusRequested}
                 onCancel={() => setConfirmingCancel(true)}
                 onFocusHandled={onFocusHandled}
             />
             <Alert
+                action={eventHistorySharesPrimaryMessage ? undefined : eventHistoryRetry}
                 className="mt-4"
                 focusOnError={false}
                 message={
-                    eventGap.error === null && history.error === null
+                    eventHistorySharesPrimaryMessage
                         ? undefined
-                        : jobBrowserFailureMessage(eventGap.error ?? history.error)
+                        : eventHistoryErrorMessage
                 }
             />
-            {eventGap.error !== null && (
-                <Button
-                    busy={eventGap.isFetching}
-                    busyLabel="Retrying missing events…"
-                    className="mt-4"
-                    onClick={() => void eventGap.refetch()}
-                    variant="secondary"
-                >
-                    Retry missing events
-                </Button>
-            )}
             {nextEventCursor !== undefined && (
                 <Button
                     busy={historyEnabled && (eventGap.isFetching || history.isFetching)}
@@ -314,7 +310,7 @@ interface JobRunBrowserProps {
     readonly onRunFocusHandled: (id: string) => void;
 }
 
-/** @returns Queue state, filterable global history, and one exact durable run. */
+/** @returns Queue state, recent runs, and one exact durable run. */
 export function JobRunBrowser({
     focusRunId,
     onRequestRunFocus,
@@ -323,137 +319,84 @@ export function JobRunBrowser({
     const client = useDashboardTrpcClient();
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
-    const [stateDraft, setStateDraft] = useState<JobStateFilter>("all");
-    const [stateFilter, setStateFilter] = useState<JobStateFilter>("all");
-    const [resourceClassDraft, setResourceClassDraft] =
-        useState<ResourceClassFilter>("all");
-    const [resourceClassFilter, setResourceClassFilter] =
-        useState<ResourceClassFilter>("all");
-    const [triggerTypeDraft, setTriggerTypeDraft] = useState<TriggerTypeFilter>("all");
-    const [triggerTypeFilter, setTriggerTypeFilter] = useState<TriggerTypeFilter>("all");
-    const [scheduleDraft, setScheduleDraft] = useState("");
-    const [scheduleFilter, setScheduleFilter] = useState<string>();
-    const [scheduleFilterError, setScheduleFilterError] = useState<string>();
-    const scheduleFilterInputRef = useRef<HTMLInputElement>(null);
-    const filters: ListJobRunsInput["filters"] = (() => {
+    const query = useInfiniteQuery(jobRunListQueryOptions(client, undefined));
+    const liveHead = useQuery(jobRunLiveHeadQueryOptions(client, undefined));
+    const historySentinelRef = useRef<HTMLDivElement>(null);
+    const summaryQuery = useQuery(jobQueueSummaryQueryOptions(client));
+    const runs = useAccumulatedLiveHistoryRows(
+        liveHead.data?.runs ?? [],
+        uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []),
+        liveHistoryRowIdentity,
+        "jobs"
+    );
+    const summary =
+        summaryQuery.data ?? liveHead.data?.summary ?? query.data?.pages[0]?.summary;
+    const claiming = useSetJobClaimingPausedMutation();
+    const historyPageFailed = query.error !== null;
+    const fetchNextHistoryPage = query.fetchNextPage;
+    const hasNextHistoryPage = query.hasNextPage;
+    const historyPageLoading = query.isFetchingNextPage;
+    const loadedActiveRunCount = runs.filter(
+        ({ state }) => state === "queued" || state === "running"
+    ).length;
+    const loadedCompletedRunCount = runs.length - loadedActiveRunCount;
+    const reportedActiveRunCount =
+        summary === undefined
+            ? undefined
+            : summary.stateCounts.queued + summary.stateCounts.running;
+    const historyNeedsInitialFill = jobHistoryNeedsInitialFill(
+        loadedActiveRunCount,
+        loadedCompletedRunCount,
+        reportedActiveRunCount
+    );
+    useEffect(() => {
+        const sentinel = historySentinelRef.current;
         if (
-            stateFilter === "all" &&
-            resourceClassFilter === "all" &&
-            triggerTypeFilter === "all" &&
-            scheduleFilter === undefined
+            sentinel === null ||
+            !hasNextHistoryPage ||
+            historyPageFailed ||
+            historyPageLoading ||
+            globalThis.IntersectionObserver === undefined
         ) {
             return;
         }
-        return {
-            ...(resourceClassFilter === "all"
-                ? {}
-                : { resourceClasses: [resourceClassFilter] }),
-            ...(scheduleFilter === undefined ? {} : { scheduleId: scheduleFilter }),
-            ...(stateFilter === "all" ? {} : { states: [stateFilter] }),
-            ...(triggerTypeFilter === "all" ? {} : { triggerTypes: [triggerTypeFilter] }),
-        };
-    })();
-    const query = useInfiniteQuery(jobRunListQueryOptions(client, filters));
-    const summaryQuery = useQuery(jobQueueSummaryQueryOptions(client));
-    const runs = uniqueJobRows(query.data?.pages.flatMap((page) => page.runs) ?? []);
-    const summary = summaryQuery.data ?? query.data?.pages[0]?.summary;
-    const claiming = useSetJobClaimingPausedMutation();
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some(({ isIntersecting }) => isIntersecting)) {
+                    void fetchNextHistoryPage();
+                }
+            },
+            { rootMargin: "400px 0px" }
+        );
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [fetchNextHistoryPage, hasNextHistoryPage, historyPageFailed, historyPageLoading]);
     const selectRun = (runId: string | undefined) => {
         if (runId !== undefined) onRequestRunFocus(runId);
+        const selectedRun = runs.find(({ id }) => id === runId);
+        const scheduleId =
+            selectedRun === undefined ? search.scheduleId : selectedRun.scheduledJobId;
         void navigate({
             replace: true,
             search: {
                 ...(search.cronJobId === undefined
                     ? {}
                     : { cronJobId: search.cronJobId }),
-                ...(search.scheduleId === undefined
-                    ? {}
-                    : { scheduleId: search.scheduleId }),
+                ...(scheduleId === undefined ? {} : { scheduleId }),
                 ...(search.source === undefined ? {} : { source: search.source }),
                 ...(runId === undefined ? {} : { runId }),
             },
         });
     };
-    const applyFilters = () => {
-        const candidate = scheduleDraft.trim();
-        let nextScheduleFilter: string | undefined;
-        if (candidate.length > 0) {
-            const parsed = v.safeParse(scheduleIdSchema, candidate);
-            if (!parsed.success) {
-                setScheduleFilterError(
-                    "Enter a schedule ID such as system.worker-smoke."
-                );
-                setTimeout(() => scheduleFilterInputRef.current?.focus(), 0);
-                return;
-            }
-            nextScheduleFilter = parsed.output;
-        }
-        setStateFilter(stateDraft);
-        setResourceClassFilter(resourceClassDraft);
-        setTriggerTypeFilter(triggerTypeDraft);
-        setScheduleFilter(nextScheduleFilter);
-        setScheduleFilterError(undefined);
-    };
-    const resetFilters = () => {
-        setStateDraft("all");
-        setStateFilter("all");
-        setResourceClassDraft("all");
-        setResourceClassFilter("all");
-        setTriggerTypeDraft("all");
-        setTriggerTypeFilter("all");
-        setScheduleDraft("");
-        setScheduleFilter(undefined);
-        setScheduleFilterError(undefined);
-    };
-    let runListContent: ReactNode;
-    if (query.isPending && query.data === undefined) {
-        runListContent = <PageState label="Loading job runs…" status="loading" />;
-    } else if (query.data === undefined) {
-        runListContent = (
-            <PageState
-                message={jobBrowserFailureMessage(query.error)}
-                onRetry={() => void query.refetch()}
-                retryBusy={query.isFetching}
-                status="error"
-                title="Job history unavailable"
-            />
-        );
-    } else {
-        runListContent = (
-            <>
-                <JobRunTable onSelect={selectRun} runs={runs} selectedId={search.runId} />
-                {query.hasNextPage && (
-                    <Button
-                        busy={query.isFetchingNextPage}
-                        busyLabel="Loading…"
-                        className="mt-4"
-                        onClick={() => void query.fetchNextPage()}
-                        variant="secondary"
-                    >
-                        Load more runs
-                    </Button>
-                )}
-            </>
-        );
-    }
     let backgroundError: unknown;
-    if (query.data !== undefined) {
-        backgroundError = query.error ?? summaryQuery.error;
+    if (query.data !== undefined || liveHead.data !== undefined) {
+        backgroundError = liveHead.error ?? query.error ?? summaryQuery.error;
     } else if (summaryQuery.data !== undefined) {
         backgroundError = summaryQuery.error;
     }
 
     return (
-        <section aria-labelledby="job-runs-heading">
-            <div className="mb-4">
-                <Heading id="job-runs-heading" level={2}>
-                    Queue and run history
-                </Heading>
-                <Text className="mt-1" tone="muted">
-                    See what is waiting or running, available workers, saved output, and
-                    cancellation status.
-                </Text>
-            </div>
+        <section aria-label="Dashboard job runs">
             <Alert
                 className="mb-4"
                 message={
@@ -465,69 +408,96 @@ export function JobRunBrowser({
             {summary !== undefined && (
                 <JobQueuePanel
                     controlBusy={claiming.isPending}
+                    onLoadMoreRuns={
+                        query.hasNextPage && !historyPageFailed
+                            ? () => void query.fetchNextPage()
+                            : undefined
+                    }
+                    onSelectRun={selectRun}
                     onSetClaimingPaused={(paused) =>
                         claiming.mutate({
                             expectedVersion: summary.control.version,
                             paused,
                         })
                     }
+                    runs={runs}
+                    runsLoadingMore={query.isFetchingNextPage}
+                    selectedRunDetail={
+                        search.runId === undefined ||
+                        search.scheduleId !== undefined ? undefined : (
+                            <SelectedJobRun
+                                embedded
+                                focusRequested={focusRunId === search.runId}
+                                id={search.runId}
+                                key={search.runId}
+                                onFocusHandled={onRunFocusHandled}
+                            />
+                        )
+                    }
+                    selectedRunId={search.runId}
                     summary={summary}
                 />
             )}
-            <Form
-                aria-label="Job run filters"
-                className="border-primary-700 bg-primary-900/35 mt-6 grid gap-3 rounded-xl border p-4 md:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(12rem,1fr)_auto] xl:items-end"
-                onSubmit={applyFilters}
-            >
-                <FormField label="Status">
-                    <Select
-                        className="mt-2 capitalize"
-                        onChange={setStateDraft}
-                        options={jobStateOptions}
-                        value={stateDraft}
+            {summary === undefined &&
+                summaryQuery.error !== null &&
+                query.error !== null &&
+                liveHead.error !== null &&
+                search.runId !== undefined &&
+                search.scheduleId === undefined && (
+                    <SelectedJobRun
+                        focusRequested={focusRunId === search.runId}
+                        id={search.runId}
+                        key={search.runId}
+                        onFocusHandled={onRunFocusHandled}
                     />
-                </FormField>
-                <FormField label="Work size">
-                    <Select
-                        className="mt-2 capitalize"
-                        onChange={setResourceClassDraft}
-                        options={resourceClassOptions}
-                        value={resourceClassDraft}
-                    />
-                </FormField>
-                <FormField label="Started by">
-                    <Select
-                        className="mt-2 capitalize"
-                        onChange={setTriggerTypeDraft}
-                        options={triggerTypeOptions}
-                        value={triggerTypeDraft}
-                    />
-                </FormField>
-                <FormField error={scheduleFilterError} label="Schedule ID">
-                    <Input
-                        className="mt-2 font-mono"
-                        maxLength={scheduleIdMaximumLength}
-                        onChange={(event) => {
-                            setScheduleFilterError(undefined);
-                            setScheduleDraft(event.currentTarget.value);
-                        }}
-                        placeholder="system.worker-smoke"
-                        ref={scheduleFilterInputRef}
-                        value={scheduleDraft}
-                    />
-                </FormField>
-                <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-1">
-                    <Button size="sm" type="submit">
-                        <Icon icon={Filter} size="sm" tone="inherit" />
-                        Apply
-                    </Button>
-                    <Button onClick={resetFilters} size="sm" variant="secondary">
-                        <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                        Reset
-                    </Button>
+                )}
+            {query.hasNextPage &&
+            summary !== undefined &&
+            !historyPageFailed &&
+            historyNeedsInitialFill ? (
+                <div aria-hidden="true" className="h-px" ref={historySentinelRef} />
+            ) : null}
+            {query.data === undefined && liveHead.data === undefined && (
+                <div className="mt-4">
+                    {query.isPending && liveHead.isPending ? (
+                        <PageState label="Loading job runs…" status="loading" />
+                    ) : (
+                        <PageState
+                            message={jobBrowserFailureMessage(
+                                liveHead.error ?? query.error
+                            )}
+                            onRetry={() =>
+                                void Promise.allSettled([
+                                    liveHead.refetch(),
+                                    query.refetch(),
+                                ])
+                            }
+                            retryBusy={liveHead.isFetching || query.isFetching}
+                            status="error"
+                            title="Job history unavailable"
+                        />
+                    )}
                 </div>
-            </Form>
+            )}
             <Alert
+                action={
+                    backgroundError == null ? undefined : (
+                        <Button
+                            busy={liveHead.isFetching || query.isFetching}
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    liveHead.refetch(),
+                                    query.refetch(),
+                                    summaryQuery.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Retry job history
+                        </Button>
+                    )
+                }
                 className="mt-4"
                 focusOnError={false}
                 message={
@@ -536,23 +506,6 @@ export function JobRunBrowser({
                         : jobBrowserFailureMessage(backgroundError)
                 }
             />
-            <div className="mt-5">{runListContent}</div>
-            <div className="mt-7">
-                {search.runId === undefined ? (
-                    <PageState
-                        description="Choose a run from the table to see its details."
-                        status="empty"
-                        title="Select a job run"
-                    />
-                ) : (
-                    <SelectedJobRun
-                        focusRequested={focusRunId === search.runId}
-                        id={search.runId}
-                        key={search.runId}
-                        onFocusHandled={onRunFocusHandled}
-                    />
-                )}
-            </div>
         </section>
     );
 }

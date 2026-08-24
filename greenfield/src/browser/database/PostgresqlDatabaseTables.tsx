@@ -1,4 +1,5 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
+import { Activity, Database, Gauge, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type {
@@ -8,15 +9,20 @@ import type {
 } from "../../contracts/database.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
+import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 
 const countFormatter = new Intl.NumberFormat();
 const durationFormatter = new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 2,
 });
+const compactMobileTableClassName =
+    "@max-[66rem]:[&_.dashboard-data-table-row]:grid @max-[66rem]:[&_.dashboard-data-table-row]:grid-cols-2 @max-[66rem]:[&_.dashboard-data-table-cell]:p-2.5 @max-[66rem]:[&_.dashboard-data-table-label]:text-[10px] @max-[66rem]:[&_.dashboard-data-table-label]:leading-3";
 
 function formatCount(value: number): string {
     return countFormatter.format(value);
@@ -46,6 +52,7 @@ interface DatabaseTableSectionProps {
     readonly empty: boolean;
     readonly emptyMessage: string;
     readonly headingId: string;
+    readonly icon: LucideIcon;
     readonly title: string;
 }
 
@@ -55,13 +62,17 @@ function DatabaseTableSection({
     empty,
     emptyMessage,
     headingId,
+    icon,
     title,
 }: DatabaseTableSectionProps) {
     return (
         <Card aria-labelledby={headingId} className="min-w-0">
-            <Heading id={headingId} level={2} size="section">
-                {title}
-            </Heading>
+            <div className="flex items-center gap-2">
+                <Icon icon={icon} tone="accent" />
+                <Heading id={headingId} level={2} size="section">
+                    {title}
+                </Heading>
+            </div>
             <Text className="mt-1" tone="muted">
                 {description}
             </Text>
@@ -74,21 +85,32 @@ function DatabaseTableSection({
     );
 }
 
-const databaseTableFeatures = tableFeatures({});
+const databaseTableFeatures = dashboardTableFeatures;
 const databaseColumnHelper = createColumnHelper<
     typeof databaseTableFeatures,
     DatabaseObservabilityDatabase
 >();
 const databaseColumns = databaseColumnHelper.columns([
     databaseColumnHelper.accessor("name", {
-        cell: ({ getValue }) => (
-            <span className="font-medium wrap-break-word">{getValue()}</span>
-        ),
+        cell: ({ getValue }) => {
+            const value = getValue();
+            return (
+                <span className="block truncate font-medium" title={value}>
+                    {value}
+                </span>
+            );
+        },
         header: "Database",
     }),
     databaseColumnHelper.accessor("detailsState", {
-        cell: ({ getValue }) =>
-            getValue() === "available" ? "Available" : "Unavailable",
+        cell: ({ getValue }) => {
+            const available = getValue() === "available";
+            return (
+                <Badge variant={available ? "success" : "danger"}>
+                    {available ? "Available" : "Unavailable"}
+                </Badge>
+            );
+        },
         header: "Details",
     }),
     databaseColumnHelper.accessor("sizeBytes", {
@@ -164,28 +186,64 @@ function PostgresqlDatabasesTable({
     });
     return (
         <DataTable
+            columnWidths={{ connections: "9%", name: "16%" }}
             label="PostgreSQL databases"
+            scrollClassName="overflow-x-hidden"
             table={table}
-            tableClassName="min-w-320"
+            tableClassName={`min-w-0! table-fixed [&_th_span]:break-normal [&_th_span]:wrap-normal [&_th:nth-child(3)]:whitespace-nowrap [&_.dashboard-data-table-cell:nth-child(n+2)]:tabular-nums [&_.dashboard-data-table-cell:nth-child(3)]:whitespace-nowrap ${compactMobileTableClassName} @max-[66rem]:[&_.dashboard-data-table-cell:first-child]:col-span-2`}
         />
     );
 }
 
-const tableHealthFeatures = tableFeatures({});
+const tableHealthFeatures = dashboardTableFeatures;
 const tableHealthColumnHelper = createColumnHelper<
     typeof tableHealthFeatures,
     DatabaseObservabilityTableHealth
 >();
 const tableHealthColumns = tableHealthColumnHelper.columns([
-    tableHealthColumnHelper.accessor("database", { header: "Database" }),
-    tableHealthColumnHelper.accessor("schema", { header: "Schema" }),
+    tableHealthColumnHelper.accessor("database", {
+        cell: ({ getValue }) => {
+            const value = getValue();
+            return (
+                <span className="block truncate" title={value}>
+                    {value}
+                </span>
+            );
+        },
+        header: "Database",
+    }),
+    tableHealthColumnHelper.accessor("schema", {
+        cell: ({ getValue }) => {
+            const value = getValue();
+            return (
+                <span className="block truncate" title={value}>
+                    {value}
+                </span>
+            );
+        },
+        header: "Schema",
+    }),
     tableHealthColumnHelper.accessor("table", {
-        cell: ({ getValue }) => <span className="wrap-break-word">{getValue()}</span>,
+        cell: ({ getValue }) => {
+            const value = getValue();
+            return (
+                <span className="block truncate" title={value}>
+                    {value}
+                </span>
+            );
+        },
         header: "Table",
     }),
     tableHealthColumnHelper.accessor("assessment", {
-        cell: ({ getValue }) => (getValue() === "assessed" ? "Assessed" : "Not assessed"),
-        header: "Bloat assessment",
+        cell: ({ getValue }) => {
+            const assessed = getValue() === "assessed";
+            return (
+                <Badge variant={assessed ? "success" : "danger"}>
+                    {assessed ? "Assessed" : "Unavailable"}
+                </Badge>
+            );
+        },
+        header: "Assessment",
     }),
     tableHealthColumnHelper.accessor("physicalBytes", {
         cell: ({ getValue }) => formatByteCount(getValue()),
@@ -233,14 +291,16 @@ function PostgresqlTableHealthTable({
     });
     return (
         <DataTable
+            columnWidths={{ database: "16%" }}
             label="PostgreSQL table health"
+            scrollClassName="overflow-x-hidden"
             table={table}
-            tableClassName="min-w-288"
+            tableClassName={`min-w-0! table-fixed [&_.dashboard-data-table-cell:nth-child(n+4)]:tabular-nums ${compactMobileTableClassName} @max-[66rem]:[&_.dashboard-data-table-cell:nth-child(3)]:col-span-2`}
         />
     );
 }
 
-const statementTableFeatures = tableFeatures({});
+const statementTableFeatures = dashboardTableFeatures;
 const statementColumnHelper = createColumnHelper<
     typeof statementTableFeatures,
     DatabaseObservabilityStatement
@@ -287,8 +347,9 @@ function PostgresqlStatementsTable({
     return (
         <DataTable
             label="PostgreSQL statement metrics"
+            scrollClassName="overflow-x-hidden"
             table={table}
-            tableClassName="min-w-224"
+            tableClassName={`min-w-0! table-fixed ${compactMobileTableClassName}`}
         />
     );
 }
@@ -314,6 +375,7 @@ export function PostgresqlDatabaseTables({
                 empty={databases.length === 0}
                 emptyMessage="No reviewed PostgreSQL databases were observed."
                 headingId="postgresql-databases-heading"
+                icon={Database}
                 title="Databases"
             >
                 <PostgresqlDatabasesTable databases={databases} />
@@ -323,6 +385,7 @@ export function PostgresqlDatabaseTables({
                 empty={tableHealth.length === 0}
                 emptyMessage="No table-health rows require presentation."
                 headingId="postgresql-table-health-heading"
+                icon={Activity}
                 title="Table health"
             >
                 <PostgresqlTableHealthTable tableHealth={tableHealth} />
@@ -336,6 +399,7 @@ export function PostgresqlDatabaseTables({
                         : "Statement metrics are unavailable because pg_stat_statements is not enabled."
                 }
                 headingId="postgresql-statements-heading"
+                icon={Gauge}
                 title="Statement performance"
             >
                 <PostgresqlStatementsTable statements={statements} />

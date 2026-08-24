@@ -25,6 +25,7 @@ import {
     openClawCronRunSchema,
     openClawCronTimestampSchema,
 } from "../../../contracts/openClawCron.ts";
+import { sha256Hex } from "../../shared/crypto.ts";
 import type { OpenClawCronActiveDisableIntent } from "./intentStore.ts";
 import {
     OpenClawCronProviderError,
@@ -578,7 +579,8 @@ function projectedUsage(entry: OpenClawCronProviderRunEntry) {
 }
 
 export function projectOpenClawCronRun(
-    entry: OpenClawCronProviderRunEntry
+    entry: OpenClawCronProviderRunEntry,
+    legacySourcePosition = 0
 ): OpenClawCronRun {
     const errorReason =
         entry.errorReason !== undefined &&
@@ -596,6 +598,9 @@ export function projectOpenClawCronRun(
         entry.provider === undefined
             ? undefined
             : safeLabelProjection(entry.provider, "unknown", 128);
+    const runId =
+        entry.runId ??
+        `synthetic:${sha256Hex(`${JSON.stringify(entry)}\0${legacySourcePosition}`)}`;
     return parseProviderProjection(openClawCronRunSchema, {
         completedAtMs: entry.ts,
         deliveryStatus: entry.deliveryStatus ?? "not-requested",
@@ -607,9 +612,7 @@ export function projectOpenClawCronRun(
         ...(provider === undefined ? {} : { provider: provider.text }),
         providerTruncated: provider?.truncated ?? false,
         ...(entry.runAtMs === undefined ? {} : { runAtMs: entry.runAtMs }),
-        ...(entry.runId === undefined
-            ? {}
-            : { runId: safeLabel(entry.runId, "unknown", 256) }),
+        runId: safeLabel(runId, "unknown", 256),
         status: entry.status ?? "unknown",
         ...(summary === undefined ? {} : { summary: summary.text }),
         summaryTruncated: summary?.truncated ?? false,
@@ -627,7 +630,10 @@ export function projectOpenClawCronRunsResult(
         limit: page.limit,
         ...(page.nextOffset === null ? {} : { nextOffset: page.nextOffset }),
         offset: page.offset,
-        runs: page.entries.map(projectOpenClawCronRun),
+        runs: page.entries.map((entry, index) => {
+            if (entry.runId !== undefined) return projectOpenClawCronRun(entry);
+            return projectOpenClawCronRun(entry, page.offset + index);
+        }),
         total: page.total,
     });
 }

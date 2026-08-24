@@ -137,9 +137,7 @@ export const LastKnownGood: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await expect(canvas.queryByText("Last known")).not.toBeInTheDocument();
-        await expect(canvas.getByRole("alert")).toHaveTextContent(
-            "Showing session data from"
-        );
+        await expect(canvas.getByText(/Showing session data from/u)).toBeVisible();
     },
 };
 

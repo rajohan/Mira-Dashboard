@@ -9,6 +9,7 @@ import type {
     OpenClawCronAuditContext,
     OpenClawCronOperationAuditInput,
 } from "./operationAudit.ts";
+import { projectOpenClawCronRun, projectOpenClawCronRunsResult } from "./projection.ts";
 import {
     type OpenClawCronProvider,
     OpenClawCronProviderError,
@@ -34,6 +35,70 @@ const auditContext = {
     },
     requestId: "request-1",
 } as const satisfies OpenClawCronAuditContext;
+
+test("keeps synthesized run identities unique for maximum-length job IDs", () => {
+    const jobId = "j".repeat(256);
+    const first = projectOpenClawCronRun({ jobId, runAtMs: 1000, ts: 2000 });
+    const second = projectOpenClawCronRun({ jobId, runAtMs: 2000, ts: 3000 });
+
+    expect(first.runId).toHaveLength(74);
+    expect(second.runId).toHaveLength(74);
+    expect(first.runId).not.toBe(second.runId);
+});
+
+test("keeps a legacy run identity independent of unrelated source positions", () => {
+    const entry = { jobId: "legacy-job", ts: 2000 } as const;
+    const first = projectOpenClawCronRun(entry);
+    const second = projectOpenClawCronRun(entry);
+
+    expect(first.runId).toBe(second.runId);
+});
+
+test("disambiguates indistinguishable legacy runs within one source page", () => {
+    const entry = { jobId: "legacy-job", ts: 2000 } as const;
+    const result = projectOpenClawCronRunsResult(
+        {
+            entries: [entry, entry],
+            hasMore: false,
+            limit: 25,
+            nextOffset: null,
+            offset: 0,
+            total: 2,
+        },
+        { kind: "fresh", observedAtMs: 2000 }
+    );
+
+    expect(result.runs[0]?.runId).not.toBe(result.runs[1]?.runId);
+});
+
+test("disambiguates indistinguishable legacy runs across source pages", () => {
+    const entry = { jobId: "legacy-job", ts: 2000 } as const;
+    const freshness = { kind: "fresh", observedAtMs: 2000 } as const;
+    const first = projectOpenClawCronRunsResult(
+        {
+            entries: Array.from({ length: 25 }, () => entry),
+            hasMore: true,
+            limit: 25,
+            nextOffset: 25,
+            offset: 0,
+            total: 26,
+        },
+        freshness
+    );
+    const second = projectOpenClawCronRunsResult(
+        {
+            entries: [entry],
+            hasMore: false,
+            limit: 25,
+            nextOffset: null,
+            offset: 25,
+            total: 26,
+        },
+        freshness
+    );
+
+    expect(first.runs[0]?.runId).not.toBe(second.runs[0]?.runId);
+});
 
 function providerJob(
     overrides: Partial<OpenClawCronProviderJob> = {}

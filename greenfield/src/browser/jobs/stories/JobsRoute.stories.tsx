@@ -21,11 +21,6 @@ import type {
     ListScheduleRunsResult,
     ListSchedulesResult,
 } from "../../../contracts/schedules.ts";
-import {
-    type GetServiceActionsStatusResult,
-    type RequestServiceActionResult,
-    serviceActionIds,
-} from "../../../contracts/serviceActions.ts";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import {
     dashboardStoryFailure,
@@ -38,7 +33,6 @@ import {
 const observedAtMs = 1_800_000_000_000;
 const asyncStoryTimeout = { timeout: 5000 } as const;
 const runId = "019fe400-0000-7000-8000-000000000001";
-const serviceActionRunId = "019fe400-0000-7000-8000-000000000002";
 const scheduleId = "system.worker-smoke";
 
 const workerControl = {
@@ -150,14 +144,6 @@ const scheduleRuns = {
     runs: [queuedRun],
 } as const satisfies ListScheduleRunsResult;
 
-const serviceActions = {
-    actions: serviceActionIds.map((id) => ({
-        availability: "available" as const,
-        id,
-    })),
-    observedAtMs,
-} satisfies GetServiceActionsStatusResult;
-
 const openClawJob = {
     agentId: "main",
     agentIdTruncated: false,
@@ -241,12 +227,6 @@ const notifications = {
     unreadCount: 0,
 } as const satisfies ListNotificationsResult;
 
-const queuedServiceAction = {
-    actionId: "openclaw-cleanup",
-    jobRunId: serviceActionRunId,
-    queued: true,
-} as const satisfies RequestServiceActionResult;
-
 interface JobsFixtureOptions {
     readonly jobRuns?: DashboardStoryFixtureValue;
     readonly openClawJobs?: DashboardStoryFixtureValue;
@@ -255,8 +235,6 @@ interface JobsFixtureOptions {
     readonly scheduleDetail?: DashboardStoryFixtureValue;
     readonly scheduleRuns?: DashboardStoryFixtureValue;
     readonly schedules?: DashboardStoryFixtureValue;
-    readonly serviceActionMutation?: DashboardStoryFixtureValue;
-    readonly serviceActions?: DashboardStoryFixtureValue;
     readonly workerControlMutation?: DashboardStoryFixtureValue;
 }
 
@@ -270,8 +248,6 @@ function jobsFixtures(options: JobsFixtureOptions = {}): DashboardStoryFixtures 
                     updatedAtMs: observedAtMs + 1000,
                     version: 2,
                 } satisfies JobWorkerControl),
-            "serviceActions.request":
-                options.serviceActionMutation ?? dashboardStoryValue(queuedServiceAction),
         },
         queries: {
             "jobs.getRun": options.runDetail ?? dashboardStoryValue(runDetail),
@@ -285,8 +261,6 @@ function jobsFixtures(options: JobsFixtureOptions = {}): DashboardStoryFixtures 
             "schedules.list": options.schedules ?? dashboardStoryValue(schedules),
             "schedules.listRuns":
                 options.scheduleRuns ?? dashboardStoryValue(scheduleRuns),
-            "serviceActions.getStatus":
-                options.serviceActions ?? dashboardStoryValue(serviceActions),
         },
     };
 }
@@ -297,30 +271,6 @@ const pending = dashboardStoryResolver(
             // Intentionally pending to render the independent loading states.
         })
 );
-
-const operationOutcomeUnknown = Object.assign(
-    new TypeError("Private service-action provider detail"),
-    {
-        data: {
-            code: "SERVICE_UNAVAILABLE",
-            reason: "operation_outcome_unknown",
-        },
-    }
-);
-
-async function openServiceActionDialog(
-    canvasElement: HTMLElement,
-    buttonName: string,
-    dialogName: string
-) {
-    const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: buttonName }));
-    return within(canvasElement.ownerDocument.body).findByRole(
-        "dialog",
-        { name: dialogName },
-        { timeout: 5000 }
-    );
-}
 
 const meta = {
     component: DashboardPageStory,
@@ -336,7 +286,6 @@ export const Loading: Story = {
         fixtures: jobsFixtures({
             jobRuns: pending,
             schedules: pending,
-            serviceActions: pending,
         }),
         route: "/jobs",
     },
@@ -353,26 +302,16 @@ export const DashboardJobs: Story = {
                 asyncStoryTimeout
             )
         ).toBeVisible();
-        const [serviceActionsHeading, jobRunsTable, dashboardSchedulesTable] =
-            await Promise.all([
-                canvas.findByRole(
-                    "heading",
-                    {
-                        level: 2,
-                        name: "Service actions",
-                    },
-                    asyncStoryTimeout
-                ),
-                canvas.findByRole("table", { name: "Job runs" }, asyncStoryTimeout),
-                canvas.findByRole(
-                    "table",
-                    { name: "Dashboard schedules" },
-                    asyncStoryTimeout
-                ),
-            ]);
-        await expect(serviceActionsHeading).toBeVisible();
-        await expect(jobRunsTable).toBeVisible();
-        await expect(dashboardSchedulesTable).toBeVisible();
+        const [queuedRunsTable, dashboardSchedules] = await Promise.all([
+            canvas.findByRole(
+                "table",
+                { name: "Queued and running jobs" },
+                asyncStoryTimeout
+            ),
+            canvas.findByRole("list", { name: "Dashboard schedules" }, asyncStoryTimeout),
+        ]);
+        await expect(queuedRunsTable).toBeVisible();
+        await expect(dashboardSchedules).toBeVisible();
     },
 };
 
@@ -381,7 +320,7 @@ export const OpenClawSchedules: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await userEvent.click(
-            await canvas.findByRole("button", { name: "OpenClaw schedules" })
+            await canvas.findByRole("tab", { name: "OpenClaw schedules" })
         );
         await waitFor(
             async () => {
@@ -418,7 +357,8 @@ export const Empty: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(await canvas.findByText("No job runs")).toBeVisible();
+        await expect(await canvas.findByText("No queued or running jobs.")).toBeVisible();
+        await expect(await canvas.findByText("No recent jobs.")).toBeVisible();
         await expect(await canvas.findByText("No matching schedules")).toBeVisible();
     },
 };
@@ -428,9 +368,6 @@ export const InitialError: Story = {
         fixtures: jobsFixtures({
             jobRuns: dashboardStoryFailure(new TypeError("Private jobs failure")),
             schedules: dashboardStoryFailure(new TypeError("Private schedules failure")),
-            serviceActions: dashboardStoryFailure(
-                new TypeError("Private service-actions failure")
-            ),
         }),
         route: "/jobs",
     },
@@ -469,20 +406,23 @@ export const BrowserRetained: Story = {
 };
 
 export const RunDetail: Story = {
-    args: { fixtures: jobsFixtures(), route: "/jobs" },
+    args: {
+        fixtures: jobsFixtures(),
+        route: `/jobs?scheduleId=${scheduleId}&runId=${runId}`,
+    },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await userEvent.click(
-            await canvas.findByRole("button", {
-                name: `Open run ${queuedRun.displayName}; action ${queuedRun.actionKey}; id ${queuedRun.id}`,
-            })
-        );
-        const heading = await canvas.findByRole("heading", {
-            level: 2,
-            name: queuedRun.displayName,
-        });
-        await expect(heading).toBeVisible();
-        await expect(canvas.getByRole("list", { name: "Job activity" })).toBeVisible();
+        await waitFor(async () => {
+            await expect(
+                canvas.getByRole("heading", {
+                    level: 2,
+                    name: queuedRun.displayName,
+                })
+            ).toBeVisible();
+            await expect(
+                canvas.getByRole("list", { name: "Job activity" })
+            ).toBeVisible();
+        }, asyncStoryTimeout);
     },
 };
 
@@ -527,76 +467,5 @@ export const Busy: Story = {
         await expect(busyButton).toBeDisabled();
         await expect(busyButton).toHaveAttribute("aria-busy", "true");
         await expect(canvas.getByText("Accepting new jobs")).toBeVisible();
-    },
-};
-
-export const Confirmation: Story = {
-    args: { fixtures: jobsFixtures(), route: "/jobs" },
-    play: async ({ canvasElement }) => {
-        const dialog = await openServiceActionDialog(
-            canvasElement,
-            "Queue system cleanup",
-            "Queue a system cleanup?"
-        );
-        const modal = within(dialog);
-        await expect(dialog).toHaveTextContent(
-            /unused Docker content older than seven days/iu
-        );
-        await expect(dialog).toHaveTextContent(/Docker volumes are never deleted/iu);
-        await expect(modal.getByRole("button", { name: "Queue cleanup" })).toBeEnabled();
-    },
-};
-
-export const Queued: Story = {
-    args: { fixtures: jobsFixtures(), route: "/jobs" },
-    play: async ({ canvasElement }) => {
-        const dialog = await openServiceActionDialog(
-            canvasElement,
-            "Queue OpenClaw cleanup",
-            "Queue OpenClaw cleanup?"
-        );
-        await userEvent.click(
-            within(dialog).getByRole("button", { name: "Queue cleanup" })
-        );
-        await expect(
-            await within(canvasElement).findByText(
-                `OpenClaw cleanup request queued. Dashboard job run: ${serviceActionRunId}.`
-            )
-        ).toBeVisible();
-        await waitFor(async () => await expect(dialog).not.toBeInTheDocument());
-    },
-};
-
-export const UnknownOutcome: Story = {
-    args: {
-        fixtures: jobsFixtures({
-            serviceActionMutation: dashboardStoryFailure(operationOutcomeUnknown),
-        }),
-        route: "/jobs",
-    },
-    play: async ({ canvasElement }) => {
-        const dialog = await openServiceActionDialog(
-            canvasElement,
-            "Queue OpenClaw restart",
-            "Queue an OpenClaw restart?"
-        );
-        await userEvent.click(
-            within(dialog).getByRole("button", { name: "Queue restart" })
-        );
-        const body = within(canvasElement.ownerDocument.body);
-        await waitFor(
-            async () => {
-                const currentDialog = body.getByRole("dialog", {
-                    name: "Queue an OpenClaw restart?",
-                });
-                await expect(
-                    within(currentDialog).getByText(
-                        /could not confirm whether the service action request was queued/iu
-                    )
-                ).toBeVisible();
-                await expect(currentDialog).toBeVisible();
-            },
-            { timeout: 5000 }
-        );
     },
 };

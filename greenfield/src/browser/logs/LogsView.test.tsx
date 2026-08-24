@@ -7,6 +7,7 @@ import type {
     LogSnapshotOutput,
     LogSource,
 } from "../../contracts/logs.ts";
+import { filterableLogLevels } from "./logLevelFiltering.ts";
 import { LogsView } from "./LogsView.tsx";
 
 const { act, fireEvent, render, screen, waitFor, within } =
@@ -156,7 +157,6 @@ function properties() {
         maintenance,
         onClearSearch: jest.fn(),
         onRefresh: jest.fn(),
-        onRefreshMaintenance: jest.fn(),
         onRequestMaintenance: jest.fn(() =>
             Promise.resolve({
                 dryRun: false,
@@ -261,6 +261,10 @@ describe("LogsView", () => {
         expect(container.querySelector("time")?.getAttribute("datetime")).toBe(
             "2027-01-15T08:00:00.000Z"
         );
+        expect(screen.getByLabelText("Log snapshot summary")).toHaveAttribute(
+            "tabindex",
+            "0"
+        );
         expect(screen.getByLabelText("Plain text log line")).toBeTruthy();
         expect(container.querySelector("script")).toBeNull();
 
@@ -277,8 +281,8 @@ describe("LogsView", () => {
             'Try "request-42" or "connection failed"'
         );
         await user.type(search, "request-42");
-        await user.click(screen.getByRole("button", { name: "Search" }));
-        expect(props.onSearch).toHaveBeenCalledWith("request-42");
+        await waitFor(() => expect(props.onSearch).toHaveBeenCalledWith("request-42"));
+        expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
     });
 
     test("exports only the bounded server-redacted lines as inert text", async () => {
@@ -333,6 +337,12 @@ describe("LogsView", () => {
         }
     });
 
+    test("does not add a permanent refresh action while searching", () => {
+        render(<LogsView {...properties()} searchQuery="request-42" />);
+
+        expect(screen.queryByRole("button", { name: "Refresh log search" })).toBeNull();
+    });
+
     test("clears the bounded current buffer without hiding new rows or crossing scopes", async () => {
         const rendered = render(<LogsView {...properties()} />);
         const user = userEvent.setup();
@@ -370,7 +380,9 @@ describe("LogsView", () => {
         const rendered = render(<LogsView {...properties()} />);
         const user = userEvent.setup();
 
-        await user.click(screen.getByRole("button", { name: "Clear all log levels" }));
+        for (const level of filterableLogLevels) {
+            await user.click(screen.getByRole("button", { name: level }));
+        }
         expect(
             screen.getByRole("heading", {
                 name: "No log lines at the selected levels",
@@ -383,7 +395,9 @@ describe("LogsView", () => {
         expect(
             screen.getByRole("heading", { name: "Current log buffer cleared" })
         ).toBeVisible();
-        await user.click(screen.getByRole("button", { name: "Select all log levels" }));
+        for (const level of filterableLogLevels) {
+            await user.click(screen.getByRole("button", { name: level }));
+        }
         expect(screen.queryByText(/Credential \[REDACTED\]/u)).toBeNull();
         expect(screen.queryByText(/raw \[REDACTED\]/u)).toBeNull();
 
@@ -410,11 +424,12 @@ describe("LogsView", () => {
         expect(screen.queryByText(/raw \[REDACTED\]/u)).toBeNull();
     });
 
-    test("keeps the search helper attached without a synthetic source description", () => {
+    test("keeps source controls and log output in one compact card", () => {
         const { container } = render(<LogsView {...properties()} />);
         const sourceSelect = container.querySelector<HTMLElement>(
             '[aria-haspopup="listbox"]'
         );
+        const logViewer = screen.getByRole("region", { name: "Log viewer" });
 
         expect(
             container.querySelector("[data-log-source-description-spacer]")
@@ -425,7 +440,13 @@ describe("LogsView", () => {
         );
         expect(
             screen.getByRole("searchbox", { name: "Search logs" })
-        ).toHaveAccessibleDescription("Searches recent lines from this source.");
+        ).not.toHaveAccessibleDescription();
+        expect(sourceSelect?.closest("section")).toBe(logViewer);
+        expect(
+            screen.queryByRole("heading", { name: "Dashboard web stderr" })
+        ).toBeNull();
+        expect(screen.queryByText("Latest lines")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
     });
 
     test("renders kernel/syslog metadata and the richer color-coded OpenClaw summary", async () => {
@@ -494,17 +515,19 @@ describe("LogsView", () => {
         expect(screen.queryByText("trace row")).toBeNull();
         expect(screen.getByText("debug row")).toBeVisible();
 
-        await user.click(screen.getByRole("button", { name: "Clear all log levels" }));
+        for (const level of filterableLogLevels.slice(1)) {
+            await user.click(screen.getByRole("button", { name: level }));
+        }
         expect(
             screen.getByRole("heading", {
                 name: "No log lines at the selected levels",
             })
         ).toBeVisible();
-        expect(
-            screen.getByText("Select one or more levels, or choose All.")
-        ).toBeVisible();
+        expect(screen.getByText("Select one or more log levels.")).toBeVisible();
 
-        await user.click(screen.getByRole("button", { name: "Select all log levels" }));
+        for (const level of filterableLogLevels) {
+            await user.click(screen.getByRole("button", { name: level }));
+        }
         await waitFor(() =>
             expect(screen.getByText("unclassified current-window row")).toBeVisible()
         );
@@ -789,7 +812,7 @@ describe("LogsView", () => {
         ).toHaveTextContent("succeeded");
     });
 
-    test("keeps maintenance and its explicit refresh available without log sources", async () => {
+    test("keeps maintenance available without log sources", async () => {
         const props = properties();
         render(
             <LogsView
@@ -810,15 +833,16 @@ describe("LogsView", () => {
         const user = userEvent.setup();
         await user.click(screen.getByRole("button", { name: "Refresh sources" }));
         expect(props.onRefresh).toHaveBeenCalledTimes(1);
-        await user.click(screen.getByRole("button", { name: "Refresh maintenance" }));
-        expect(props.onRefreshMaintenance).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("button", { name: "Refresh maintenance" })).toBeNull();
     });
 
     test("disables cached maintenance actions after a status refetch error", () => {
+        const onRetryMaintenance = jest.fn();
         render(
             <LogsView
                 {...properties()}
                 maintenanceError="Maintenance status is temporarily unavailable."
+                onRetryMaintenance={onRetryMaintenance}
             />
         );
 
@@ -830,6 +854,8 @@ describe("LogsView", () => {
         expect(
             screen.getByText("Maintenance status is temporarily unavailable.")
         ).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+        expect(onRetryMaintenance).toHaveBeenCalledTimes(1);
     });
 
     test("closes an open confirmation when authoritative status reports a global run", () => {

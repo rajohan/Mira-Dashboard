@@ -80,7 +80,17 @@ function readTransport(calls: string[]): PersistentGatewayTransport {
                     : Object.freeze({})
             );
         },
-        requestAdmin: (method) => unavailableWrite(method),
+        requestAdmin(method) {
+            if (method === "cron.scratch.get") {
+                calls.push(`read:${method}`);
+                return Promise.resolve({
+                    currentRevision: 0,
+                    maxBytes: 64 * 1024,
+                    scratch: null,
+                });
+            }
+            return unavailableWrite(method);
+        },
         requestChatRead(method) {
             calls.push(`read:${method}`);
             return Promise.resolve(Object.freeze({ exchanges: Object.freeze([]) }));
@@ -869,6 +879,17 @@ describe("source-development Gateway transport", () => {
             expectedRevision: 0,
             id: "cron-1",
         });
+        expect(
+            await transport.requestAdmin("cron.scratch.get", { id: "cron-1" })
+        ).toEqual({
+            currentRevision: 1,
+            maxBytes: 64 * 1024,
+            scratch: {
+                content: "reviewed scratch",
+                revision: 1,
+                updatedAtMs: 1_800_000_000_000,
+            },
+        });
         await transport.requestAdmin("cron.update", {
             expectedConfigRevision: "revision-1",
             id: "cron-1",
@@ -942,7 +963,9 @@ describe("source-development Gateway transport", () => {
             .toSorted();
         expect(journalMethods).toEqual(
             [
-                ...persistentGatewayAdminMethods,
+                ...persistentGatewayAdminMethods.filter(
+                    (method) => method !== "cron.scratch.get"
+                ),
                 ...persistentGatewayChatReadMutationMethods,
                 ...persistentGatewayChatWriteMethods,
                 ...persistentGatewayOpenClawSettingsWriteMethods,

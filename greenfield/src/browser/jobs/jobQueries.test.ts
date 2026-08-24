@@ -9,6 +9,7 @@ import type {
     ScheduleSummary,
 } from "../../contracts/jobModel.ts";
 import type { JobQueueSummary } from "../../contracts/jobs.ts";
+import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -21,6 +22,7 @@ import {
     jobRunEventHistoryQueryKey,
     jobRunEventHistoryQueryOptions,
     jobRunListQueryOptions,
+    jobRunListQueryKey,
     jobQueueSummaryQueryOptions,
     jobQueueSummaryRefreshIntervalMs,
     refreshJobQueries,
@@ -28,6 +30,7 @@ import {
     scheduleDetailQueryOptions,
     scheduleListQueryOptions,
     scheduleRunListQueryOptions,
+    scheduleRunListQueryKey,
     uniqueJobRunEvents,
     uniqueJobRows,
 } from "./jobQueries.ts";
@@ -623,17 +626,27 @@ describe("jobs browser queries", () => {
         const jobKey = ["jobs", "runs", "detail", newestRunId] as const;
         const eventHistoryKey = jobRunEventHistoryQueryKey(newestRunId);
         const scheduleKey = ["schedules", "detail", scheduleId] as const;
+        const archivedJobKey = liveHistoryArchiveQueryKey(jobRunListQueryKey(undefined));
+        const archivedScheduleKey = liveHistoryArchiveQueryKey(
+            scheduleRunListQueryKey(scheduleId)
+        );
         queryClient.setQueryData(jobKey, { run });
         queryClient.setQueryData(eventHistoryKey, { pages: [] });
         queryClient.setQueryData(scheduleKey, schedule(scheduleId));
+        queryClient.setQueryData(archivedJobKey, { pages: [] });
+        queryClient.setQueryData(archivedScheduleKey, { pages: [] });
         try {
             await refreshJobQueries(queryClient);
             expect(queryClient.getQueryState(jobKey)?.isInvalidated).toBeTrue();
             expect(queryClient.getQueryState(eventHistoryKey)?.isInvalidated).toBeFalse();
             expect(queryClient.getQueryState(scheduleKey)?.isInvalidated).toBeFalse();
+            expect(queryClient.getQueryState(archivedJobKey)?.isInvalidated).toBeTrue();
 
             await refreshScheduleQueries(queryClient);
             expect(queryClient.getQueryState(scheduleKey)?.isInvalidated).toBeTrue();
+            expect(
+                queryClient.getQueryState(archivedScheduleKey)?.isInvalidated
+            ).toBeTrue();
         } finally {
             queryClient.clear();
         }

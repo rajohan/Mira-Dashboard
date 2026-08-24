@@ -703,6 +703,11 @@ describe("DockerRoute", () => {
             expect(rows[0]).toHaveTextContent("alpha-api");
             await user.click(
                 screen.getByRole("button", {
+                    name: "Sort by Container ascending",
+                })
+            );
+            await user.click(
+                screen.getByRole("button", {
                     name: "Sort by Container descending",
                 })
             );

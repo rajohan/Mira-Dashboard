@@ -242,7 +242,7 @@ export const MaintenanceAttention: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await userEvent.click(
-            await canvas.findByRole("button", { name: "PostgreSQL & PgBouncer" })
+            await canvas.findByRole("tab", { name: "PostgreSQL & PgBouncer" })
         );
         await expect(
             await canvas.findByText(/estimated 5\.0 GiB.*reclaimable table space/iu)
@@ -280,13 +280,11 @@ export const BrowserRetained: Story = {
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
-        await expect(await canvas.findByText("Fresh observation")).toBeVisible();
-        const retry = canvas.getByRole("button", { name: "Retry" });
-        await expect(retry).toBeEnabled();
-        await userEvent.click(retry);
+        await expect(await canvas.findByText("Connection policy")).toBeVisible();
+        await expect(canvas.queryByText("Fresh observation")).not.toBeInTheDocument();
         await expect(
-            await canvas.findByText("Browser cache retained", {}, { timeout: 8000 })
-        ).toBeVisible();
+            canvas.queryByRole("button", { name: "Retry" })
+        ).not.toBeInTheDocument();
     },
 };
 
@@ -298,7 +296,7 @@ export const PartialUnavailable: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         await userEvent.click(
-            await canvas.findByRole("button", { name: "PostgreSQL & PgBouncer" })
+            await canvas.findByRole("tab", { name: "PostgreSQL & PgBouncer" })
         );
         await expect(
             await canvas.findByRole("heading", {

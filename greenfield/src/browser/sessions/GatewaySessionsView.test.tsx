@@ -165,8 +165,13 @@ describe("Gateway sessions view", () => {
         const table = screen.getByRole("table", { name: "Current OpenClaw sessions" });
         expect(within(table).getByRole("columnheader", { name: "Type" })).toHaveAttribute(
             "aria-sort",
-            "ascending"
+            "none"
         );
+        expect(
+            within(table)
+                .getByRole("button", { name: "Sort by Type ascending" })
+                .querySelector("svg")
+        ).toBeNull();
 
         await user.click(
             within(table).getByRole("button", {
@@ -181,9 +186,19 @@ describe("Gateway sessions view", () => {
                 name: "Sort by Session descending",
             })
         );
-        const rows = within(table).getAllByRole("row");
+        let rows = within(table).getAllByRole("row");
         expect(rows[1]).toHaveTextContent("Primary main");
         expect(rows[2]).toHaveTextContent("Startup hook");
+        await user.click(
+            within(table).getByRole("button", {
+                name: "Sort by Session off",
+            })
+        );
+        expect(
+            within(table).getByRole("columnheader", { name: "Session" })
+        ).toHaveAttribute("aria-sort", "none");
+        rows = within(table).getAllByRole("row");
+        expect(rows[1]).toHaveTextContent("Primary main");
     });
 
     test("applies the exact ALL MAIN SUBAGENT HOOK CRON filters locally", async () => {
@@ -350,7 +365,9 @@ describe("Gateway sessions view", () => {
         );
 
         expect(screen.queryByText("Last known")).toBeNull();
-        expect(screen.getByRole("alert")).toHaveTextContent("Showing session data from");
+        expect(
+            screen.getByText(/Showing session data from/u).closest('[role="status"]')
+        ).toBeTruthy();
         expect(
             screen.getByRole("table", { name: "Current OpenClaw sessions" })
         ).toBeTruthy();

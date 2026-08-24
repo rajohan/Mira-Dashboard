@@ -235,16 +235,10 @@ async function expectResponsiveLayout(canvasElement: HTMLElement) {
             name: `OpenClaw runs for ${responsiveJob.name}`,
         })
     ).toBeVisible();
-    for (const label of [
-        "OpenClaw status",
-        "Dashboard status",
-        "Schedule",
-        "Last run",
-        "Next run",
-        "Last status",
-    ]) {
+    for (const label of ["Last:", "Next:"]) {
         await expect(inventoryCanvas.getByText(label)).toBeVisible();
     }
+    await expect(inventoryCanvas.getByLabelText("Last status: Succeeded")).toBeVisible();
     await expect(selectedTarget).toHaveAttribute("aria-current", "true");
     await expect(selectedTarget).toHaveAttribute("aria-pressed", "true");
     await expect(selectedCard).toHaveClass(
@@ -253,7 +247,6 @@ async function expectResponsiveLayout(canvasElement: HTMLElement) {
         "ring-accent-300/40",
         "ring-inset"
     );
-    await expect(within(selectedCard).getByText("Selected")).toBeVisible();
     await expect(section.scrollWidth).toBeLessThanOrEqual(section.clientWidth);
 
     const storyDocument = canvasElement.ownerDocument;
@@ -308,8 +301,6 @@ export const ActiveInventory: Story = {
         const idleBackground = getComputedStyle(idleCard).backgroundColor;
         await expect(selectedBackground).not.toBe(idleBackground);
         await expect(selectedBorder).not.toBe(getComputedStyle(idleCard).borderColor);
-        await expect(within(card).getByText("Selected")).toBeVisible();
-        await expect(within(idleCard).queryByText("Selected")).not.toBeInTheDocument();
         await userEvent.hover(idleTarget);
         await waitFor(async () => {
             await expect(getComputedStyle(idleCard).backgroundColor).not.toBe(

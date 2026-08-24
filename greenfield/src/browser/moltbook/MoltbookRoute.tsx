@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flame, MessageCircle, MessageSquare, Newspaper, RotateCw } from "lucide-react";
+import { Flame, MessageCircle, MessageSquare, Newspaper } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -12,11 +12,9 @@ import type {
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { Alert } from "../ui/Alert.tsx";
-import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { PageHeader } from "../ui/PageHeader.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Tabs } from "../ui/Tabs.tsx";
 import {
@@ -31,26 +29,14 @@ import {
     refreshMoltbookQueries,
 } from "./moltbookQueries.ts";
 
-function MoltbookSnapshotNotice({ status }: { readonly status: MoltbookSnapshotStatus }) {
+function moltbookSnapshotNotice(status: MoltbookSnapshotStatus): string | undefined {
     if (status.freshness === "fresh" && status.lastAttemptStatus === "succeeded") {
-        return null;
+        return;
     }
-    const message =
-        status.lastAttemptStatus === "failed"
-            ? (status.refreshFailureMessage ??
-              "The latest Moltbook refresh failed; showing last-known-good data.")
-            : "Moltbook data is stale; showing the last-known-good snapshot.";
-    return <Alert focusOnError={false} message={message} variant="info" />;
-}
-
-function MoltbookSnapshotBadge({ status }: { readonly status: MoltbookSnapshotStatus }) {
-    const isCurrent =
-        status.freshness === "fresh" && status.lastAttemptStatus === "succeeded";
-    return (
-        <Badge variant={isCurrent ? "success" : "warning"}>
-            {isCurrent ? "Fresh snapshot" : "Last-known-good snapshot"}
-        </Badge>
-    );
+    return status.lastAttemptStatus === "failed"
+        ? (status.refreshFailureMessage ??
+              "The latest Moltbook refresh failed. Showing last-known-good data.")
+        : "Moltbook data is stale. Showing the last-known-good snapshot.";
 }
 
 function MoltbookFeedList({ posts }: { readonly posts: readonly MoltbookFeedPost[] }) {
@@ -110,26 +96,20 @@ export function MoltbookRoute() {
     const loading = snapshotQuery.isPending;
     const fetching = snapshotQuery.isFetching;
     const refresh = () => void refreshMoltbookQueries(queryClient);
+    let retainedMessage: string | undefined;
+    if (firstError === null) {
+        retainedMessage =
+            ready === undefined ? undefined : moltbookSnapshotNotice(ready.status);
+    } else if (ready?.feed.sort === sort) {
+        retainedMessage = dashboardBrowserFailureMessage(firstError);
+    } else {
+        retainedMessage = `The ${sort} feed could not be loaded. Showing ${ready?.feed.sort} feed data.`;
+    }
 
     return (
         <div>
-            <PageHeader
-                actions={
-                    <Button
-                        busy={fetching}
-                        busyLabel="Refreshing Moltbook…"
-                        onClick={refresh}
-                        variant="secondary"
-                    >
-                        <Icon icon={RotateCw} size="sm" tone="inherit" />
-                        Retry
-                    </Button>
-                }
-                description="Read the configured agent's bounded Moltbook profile, feeds, posts, and comments from a durable worker-owned snapshot."
-                eyebrow="Community"
-                title="Moltbook"
-            />
-            <div className="mt-8">
+            <h1 className="sr-only">Moltbook</h1>
+            <div>
                 {loading && !complete ? (
                     <PageState label="Loading Moltbook…" size="lg" status="loading" />
                 ) : null}
@@ -146,19 +126,23 @@ export function MoltbookRoute() {
                 {complete ? (
                     <PageState status="ready">
                         <div className="space-y-6">
-                            {firstError === null ? null : (
-                                <Alert
-                                    focusOnError={false}
-                                    message={
-                                        ready.feed.sort === sort
-                                            ? dashboardBrowserFailureMessage(firstError)
-                                            : `The ${sort} feed could not be loaded; showing ${ready.feed.sort} feed data.`
-                                    }
-                                    variant="info"
-                                />
-                            )}
-                            <MoltbookSnapshotNotice status={ready.status} />
-                            <MoltbookSnapshotBadge status={ready.status} />
+                            <Alert
+                                action={
+                                    retainedMessage === undefined ? undefined : (
+                                        <Button
+                                            busy={fetching}
+                                            onClick={refresh}
+                                            size="sm"
+                                            variant="secondary"
+                                        >
+                                            Retry
+                                        </Button>
+                                    )
+                                }
+                                focusOnError={false}
+                                message={retainedMessage}
+                                variant="warning"
+                            />
                             {ready.profile === undefined ? null : (
                                 <MoltbookProfileCard
                                     home={ready.home}

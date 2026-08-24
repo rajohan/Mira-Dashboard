@@ -21,7 +21,7 @@ export function RecoveryCodesModal({ codes, onClose }: RecoveryCodesModalProps) 
         <Modal onClose={onClose} open size="md" title="Save recovery codes now">
             <Alert
                 focusOnError={false}
-                message="These full codes are shown once. Store them offline; do not put them in Dashboard notes or screenshots."
+                message="These full codes are shown once. Store them offline. Do not put them in Dashboard notes or screenshots."
                 variant="warning"
             />
             <ul className="my-4 grid min-w-0 grid-cols-1 gap-2">

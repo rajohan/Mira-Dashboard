@@ -17,6 +17,7 @@ import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { OpenClawCronBrowser } from "./OpenClawCronBrowser.tsx";
 import { OpenClawCronDefinitionDialog } from "./OpenClawCronDefinitionDialog.tsx";
+import { OpenClawCronDetail } from "./OpenClawCronDetail.tsx";
 import {
     accumulateOpenClawCronInventoryPages,
     accumulateOpenClawCronRunPages,
@@ -91,7 +92,7 @@ const inventory: ListOpenClawCronResult = {
 const emptyRuns: ListOpenClawCronRunsResult = {
     freshness: { kind: "fresh", observedAtMs: timestampMs },
     hasMore: false,
-    limit: 100,
+    limit: 25,
     offset: 0,
     runs: [],
     total: 0,
@@ -105,7 +106,7 @@ function runPage(
     return {
         freshness: { kind: "fresh", observedAtMs: timestampMs },
         hasMore: offset === 0,
-        limit: 100,
+        limit: 25,
         ...(offset === 0 ? { nextOffset: 1 } : {}),
         offset,
         runs: [
@@ -361,7 +362,7 @@ describe("OpenClaw scheduled jobs browser", () => {
         ).toMatchObject({ success: true });
     });
 
-    test("shows heartbeat scratch in JSON and emits only its changed field", () => {
+    test("shows the heartbeat message in JSON and maps only its change to scratch", () => {
         const heartbeat: OpenClawCronJob = {
             ...enabledBeta,
             payload: { kind: "heartbeat" },
@@ -373,13 +374,20 @@ describe("OpenClaw scheduled jobs browser", () => {
         };
 
         expect(JSON.parse(openClawCronPatchJson(heartbeat))).toMatchObject({
-            scratch: "Check services",
+            payload: { kind: "heartbeat", message: "Check services" },
         });
+        const definition = JSON.parse(openClawCronPatchJson(heartbeat)) as Record<
+            string,
+            unknown
+        >;
         expect(
             parseOpenClawCronPatchJson(
                 JSON.stringify({
-                    ...JSON.parse(openClawCronPatchJson(heartbeat)),
-                    scratch: "Check services and disk",
+                    ...definition,
+                    payload: {
+                        kind: "heartbeat",
+                        message: "Check services and disk",
+                    },
                 }),
                 heartbeat
             )
@@ -409,13 +417,22 @@ describe("OpenClaw scheduled jobs browser", () => {
             expect(
                 await screen.findByRole("heading", { level: 3, name: "Beta" })
             ).toBeTruthy();
-            await waitFor(() => expect(calls).toHaveLength(2));
+            await waitFor(() => expect(calls).toHaveLength(3));
             expect(calls.map(({ input, name }) => ({ input, name }))).toEqual([
                 { input: openClawCronInventoryInput, name: "openClawCron.list" },
                 {
                     input: {
                         id: enabledBeta.id,
-                        limit: 100,
+                        limit: 25,
+                        offset: 0,
+                        sortDir: "desc",
+                    },
+                    name: "openClawCron.listRuns",
+                },
+                {
+                    input: {
+                        id: enabledBeta.id,
+                        limit: 25,
                         offset: 0,
                         sortDir: "desc",
                     },
@@ -459,10 +476,8 @@ describe("OpenClaw scheduled jobs browser", () => {
                 "ring-1",
                 "ring-inset"
             );
-            expect(selectedCard).toHaveTextContent("Selected");
             expect(nextCard).toHaveClass("border-primary-700", "bg-primary-900/40");
             expect(nextCard).not.toHaveClass("bg-accent-500/20");
-            expect(nextCard).not.toHaveTextContent("Selected");
             expect(nextCardTarget).toHaveClass("absolute", "inset-0");
             expect(nextCardTarget.querySelector("dl")).toBeNull();
             expect(nextCardTarget.closest("li")?.querySelector("dl")).not.toBeNull();
@@ -492,6 +507,30 @@ describe("OpenClaw scheduled jobs browser", () => {
     });
 
     test("loads bounded additional inventory and run pages", async () => {
+        const intersectionCallbacks: IntersectionObserverCallback[] = [];
+        const intersectionOptions: (IntersectionObserverInit | undefined)[] = [];
+        const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+        globalThis.IntersectionObserver = class {
+            readonly root = null;
+            readonly rootMargin = "400px 0px";
+            readonly scrollMargin = "0px";
+            readonly thresholds = [0];
+
+            constructor(
+                callback: IntersectionObserverCallback,
+                options?: IntersectionObserverInit
+            ) {
+                intersectionCallbacks.push(callback);
+                intersectionOptions.push(options);
+            }
+
+            disconnect(): void {}
+            observe(): void {}
+            takeRecords(): IntersectionObserverEntry[] {
+                return [];
+            }
+            unobserve(): void {}
+        };
         const firstInventory: ListOpenClawCronResult = {
             ...inventory,
             hasMore: true,
@@ -503,6 +542,7 @@ describe("OpenClaw scheduled jobs browser", () => {
             jobs: [disabledAlpha],
             offset: 1,
         };
+        const runOffsets: number[] = [];
         const client = {
             query(name: string, input: unknown) {
                 const offset = (input as { offset: number }).offset;
@@ -511,6 +551,7 @@ describe("OpenClaw scheduled jobs browser", () => {
                         offset === 0 ? firstInventory : secondInventory
                     );
                 }
+                runOffsets.push(offset);
                 return Promise.resolve(
                     offset === 0
                         ? runPage(0, "run-new", "Newest run")
@@ -527,10 +568,161 @@ describe("OpenClaw scheduled jobs browser", () => {
                 screen.getByRole("button", { name: "Load more OpenClaw jobs" })
             );
             expect(await screen.findByRole("button", { name: "Alpha" })).toBeTruthy();
-            await user.click(
-                screen.getByRole("button", { name: "Load older OpenClaw runs" })
+            await waitFor(() => expect(intersectionCallbacks.length).toBeGreaterThan(0));
+            expect(intersectionOptions.at(-1)?.root).toHaveAttribute(
+                "aria-label",
+                "OpenClaw run history"
             );
+            act(() => {
+                intersectionCallbacks.at(-1)?.(
+                    [{ isIntersecting: true } as IntersectionObserverEntry],
+                    {} as IntersectionObserver
+                );
+            });
             expect(await screen.findByText("Older run")).toBeTruthy();
+            expect(runOffsets.slice(-2)).toEqual([0, 1]);
+        } finally {
+            globalThis.IntersectionObserver = OriginalIntersectionObserver;
+            rendered.view.unmount();
+            rendered.queryClient.clear();
+        }
+    });
+
+    test("does not observe more run pages while a run-history error is visible", () => {
+        const observe = jest.fn();
+        const OriginalIntersectionObserver = globalThis.IntersectionObserver;
+        globalThis.IntersectionObserver = class {
+            readonly root = null;
+            readonly rootMargin = "0px";
+            readonly scrollMargin = "0px";
+            readonly thresholds = [0];
+            disconnect(): void {}
+            observe = observe;
+            takeRecords(): IntersectionObserverEntry[] {
+                return [];
+            }
+            unobserve(): void {}
+        };
+
+        const view = render(
+            <OpenClawCronDetail
+                actionBusy={false}
+                definitionControlsAvailable
+                job={enabledBeta}
+                onDelete={() => {}}
+                onEdit={() => {}}
+                onLoadMoreRuns={() => {}}
+                onRetryRuns={() => {}}
+                onRun={() => {}}
+                onSetEnabled={() => {}}
+                runs={{
+                    freshness: inventory.freshness,
+                    hasMore: true,
+                    runs: runPage(0, "run-new", "Newest run").runs,
+                    total: 2,
+                }}
+                runsError="Run history is temporarily unavailable."
+            />
+        );
+
+        try {
+            expect(observe).not.toHaveBeenCalled();
+            expect(
+                screen.getByText("Run history is temporarily unavailable.")
+            ).toBeVisible();
+            expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+        } finally {
+            globalThis.IntersectionObserver = OriginalIntersectionObserver;
+            view.unmount();
+        }
+    });
+
+    test("keeps run pagination blocked when inventory and run refreshes fail alike", async () => {
+        let failing = false;
+        const client = {
+            query(name: string) {
+                if (failing) return Promise.reject(new Error("shared outage"));
+                if (name === "openClawCron.list") return Promise.resolve(inventory);
+                return Promise.resolve(runPage(0, "run-new", "Newest run"));
+            },
+        } as unknown as DashboardTrpcClient;
+        const rendered = renderBrowser(client);
+
+        try {
+            expect(await screen.findByText("Newest run")).toBeVisible();
+            failing = true;
+            await rendered.queryClient.invalidateQueries({
+                queryKey: openClawCronQueryKey,
+            });
+
+            expect(
+                await screen.findByText("The request could not be completed. Try again.")
+            ).toBeVisible();
+            expect(
+                screen.getAllByText("The request could not be completed. Try again.")
+            ).toHaveLength(1);
+        } finally {
+            rendered.view.unmount();
+            rendered.queryClient.clear();
+        }
+    });
+
+    test("merges heartbeat scratch without regressing fresh inventory fields", async () => {
+        const freshHeartbeat: OpenClawCronJob = {
+            ...enabledBeta,
+            configRevision: "fresh-revision",
+            payload: { kind: "heartbeat" },
+            scratch: undefined,
+        };
+        const staleDetail: OpenClawCronJob = {
+            ...freshHeartbeat,
+            configRevision: "stale-revision",
+            enabled: false,
+            scratch: { content: "Check services", revision: 4, truncated: false },
+        };
+        const client = {
+            query(name: string) {
+                if (name === "openClawCron.list") {
+                    return Promise.resolve({
+                        ...inventory,
+                        jobs: [freshHeartbeat],
+                        total: 1,
+                    });
+                }
+                if (name === "openClawCron.get") {
+                    return Promise.resolve({
+                        freshness: {
+                            kind: "last-known-good" as const,
+                            observedAtMs: timestampMs - 1000,
+                            staleSinceMs: timestampMs - 500,
+                        },
+                        job: staleDetail,
+                    });
+                }
+                if (name === "gatewaySessions.list") {
+                    return Promise.resolve({ sessions: [] });
+                }
+                return Promise.resolve(emptyRuns);
+            },
+        } as unknown as DashboardTrpcClient;
+        const rendered = renderBrowser(client);
+
+        try {
+            const detailHeading = await screen.findByText("Check services");
+            const detail = detailHeading.closest<HTMLElement>("[aria-labelledby]");
+            expect(detail).not.toBeNull();
+            if (detail === null)
+                throw new Error("OpenClaw job detail card was not found");
+            expect(within(detail).getByText("Enabled")).toBeVisible();
+            expect(within(detail).queryByText("Disabled")).not.toBeInTheDocument();
+            expect(
+                screen.getByText(
+                    "The latest refresh failed, so the last available OpenClaw data is shown. Refresh successfully before trying an action."
+                )
+            ).toBeVisible();
+            expect(
+                within(detail).getByRole("button", { name: "Edit settings" })
+            ).toBeDisabled();
         } finally {
             rendered.view.unmount();
             rendered.queryClient.clear();
@@ -576,6 +768,33 @@ describe("OpenClaw scheduled jobs browser", () => {
             result: {
                 freshness: stale.freshness,
                 jobs: [{ id: enabledBeta.id }, { id: disabledAlpha.id }],
+            },
+            stable: true,
+        });
+    });
+
+    test("accumulates more than five stable 25-run history pages", () => {
+        const pages = Array.from({ length: 6 }, (_, pageIndex) => {
+            const offset = pageIndex * 25;
+            const template = runPage(offset, `run-${offset}`, `Run ${offset}`);
+            return {
+                ...template,
+                hasMore: pageIndex < 5,
+                nextOffset: pageIndex < 5 ? offset + 25 : undefined,
+                runs: Array.from({ length: 25 }, (_, runIndex) => ({
+                    ...template.runs[0]!,
+                    runId: `run-${offset + runIndex}`,
+                    summary: `Run ${offset + runIndex}`,
+                })),
+                total: 150,
+            };
+        });
+
+        expect(accumulateOpenClawCronRunPages(pages)).toMatchObject({
+            result: {
+                hasMore: false,
+                runs: pages.flatMap(({ runs }) => runs),
+                total: 150,
             },
             stable: true,
         });

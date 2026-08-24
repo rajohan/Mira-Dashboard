@@ -7,9 +7,8 @@ import { Badge } from "../ui/Badge.tsx";
 import { StretchedAction } from "../ui/StretchedAction.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
+    openClawCronRunStatusBadgeVariant,
     openClawCronRunStatusLabel,
-    openClawCronScheduleLabel,
-    openClawCronSynchronizationLabel,
 } from "./presentation.ts";
 
 interface OpenClawCronTableProps {
@@ -18,26 +17,12 @@ interface OpenClawCronTableProps {
     readonly selectedId?: string;
 }
 
-function synchronizationVariant(state: OpenClawCronJob["synchronization"]["state"]) {
-    if (state === "confirmed") return "success" as const;
-    if (state === "pending") return "warning" as const;
-    return "danger" as const;
-}
-
 function dateTime(timestampMs: number | undefined) {
     if (timestampMs === undefined) return "—";
     return (
         <time dateTime={new Date(timestampMs).toISOString()}>
             {formatDashboardDateTime(timestampMs)}
         </time>
-    );
-}
-
-function definitionLabel(label: string) {
-    return (
-        <dt className="text-primary-400 text-xs font-medium tracking-wide uppercase">
-            {label}
-        </dt>
     );
 }
 
@@ -60,7 +45,7 @@ export function OpenClawCronTable({
     return (
         <ul
             aria-label="OpenClaw scheduled jobs"
-            className="grid max-w-full min-w-0 grid-cols-1 gap-3"
+            className="grid max-w-full min-w-0 grid-cols-1 gap-2"
         >
             {jobs.map((job) => {
                 const selected = job.id === selectedId;
@@ -68,7 +53,7 @@ export function OpenClawCronTable({
                 return (
                     <li
                         className={cn(
-                            "group relative max-w-full min-w-0 rounded-lg border p-3 transition-colors sm:p-4",
+                            "group relative max-w-full min-w-0 rounded-lg border px-3 py-2 transition-colors",
                             inventoryCardSurface(selected, hovered)
                         )}
                         key={job.id}
@@ -87,14 +72,30 @@ export function OpenClawCronTable({
                             }
                         />
                         <div className="max-w-full min-w-0">
-                            <div className="flex max-w-full min-w-0 items-start justify-between gap-2">
-                                <p className="text-primary-100 group-focus-within:text-accent-300 group-hover:text-accent-300 min-w-0 text-left font-medium wrap-anywhere">
+                            <div className="flex max-w-full min-w-0 items-center justify-between gap-2">
+                                <p className="text-primary-100 group-focus-within:text-accent-300 group-hover:text-accent-300 min-w-0 truncate text-left text-sm font-medium">
                                     {job.name}
                                 </p>
-                                {selected && <Badge variant="info">Selected</Badge>}
+                                <div className="flex shrink-0 items-center gap-1">
+                                    <Badge variant={job.enabled ? "success" : "default"}>
+                                        {job.enabled ? "Enabled" : "Disabled"}
+                                    </Badge>
+                                    {job.state.lastRunStatus !== undefined && (
+                                        <Badge
+                                            aria-label={`Last status: ${openClawCronRunStatusLabel(job.state.lastRunStatus)}`}
+                                            variant={openClawCronRunStatusBadgeVariant(
+                                                job.state.lastRunStatus
+                                            )}
+                                        >
+                                            {openClawCronRunStatusLabel(
+                                                job.state.lastRunStatus
+                                            )}
+                                        </Badge>
+                                    )}
+                                </div>
                             </div>
                             <Text
-                                className="mt-1 max-w-full font-mono wrap-anywhere"
+                                className="mt-1 max-w-full truncate"
                                 size="sm"
                                 tone="muted"
                             >
@@ -102,55 +103,17 @@ export function OpenClawCronTable({
                             </Text>
                         </div>
 
-                        <dl className="mt-4 grid max-w-full min-w-0 grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
-                            <div className="min-w-0">
-                                {definitionLabel("OpenClaw status")}
-                                <dd className="mt-1">
-                                    <Badge variant={job.enabled ? "success" : "default"}>
-                                        {job.enabled ? "enabled" : "disabled"}
-                                    </Badge>
-                                </dd>
-                            </div>
-                            <div className="min-w-0">
-                                {definitionLabel("Dashboard status")}
-                                <dd className="mt-1">
-                                    <Badge
-                                        variant={synchronizationVariant(
-                                            job.synchronization.state
-                                        )}
-                                    >
-                                        {openClawCronSynchronizationLabel(
-                                            job.synchronization.state
-                                        )}
-                                    </Badge>
-                                </dd>
-                            </div>
-                            <div className="min-w-0 sm:col-span-2">
-                                {definitionLabel("Schedule")}
-                                <dd className="text-primary-100 mt-1 max-w-full font-mono text-xs wrap-anywhere">
-                                    {openClawCronScheduleLabel(job)}
-                                </dd>
-                            </div>
-                            <div className="min-w-0">
-                                {definitionLabel("Last run")}
-                                <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                        <dl className="text-primary-400 mt-2 grid max-w-full min-w-0 grid-cols-1 gap-x-2 gap-y-1 text-[11px] sm:grid-cols-2">
+                            <div className="flex min-w-0 gap-1">
+                                <dt>Last:</dt>
+                                <dd className="min-w-0 truncate">
                                     {dateTime(job.state.lastRunAtMs)}
                                 </dd>
                             </div>
-                            <div className="min-w-0">
-                                {definitionLabel("Next run")}
-                                <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
+                            <div className="flex min-w-0 gap-1">
+                                <dt>Next:</dt>
+                                <dd className="min-w-0 truncate">
                                     {dateTime(job.state.nextRunAtMs)}
-                                </dd>
-                            </div>
-                            <div className="min-w-0 sm:col-span-2">
-                                {definitionLabel("Last status")}
-                                <dd className="text-primary-100 mt-1 text-sm wrap-anywhere">
-                                    {job.state.lastRunStatus === undefined
-                                        ? "—"
-                                        : openClawCronRunStatusLabel(
-                                              job.state.lastRunStatus
-                                          )}
                                 </dd>
                             </div>
                         </dl>

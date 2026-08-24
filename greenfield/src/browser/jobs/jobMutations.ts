@@ -11,6 +11,11 @@ import type {
     ListSchedulesInput,
     ListSchedulesResult,
 } from "../../contracts/schedules.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryArchiveQueryRoot,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import type {
     DashboardProcedureInput,
     DashboardProcedureOutput,
@@ -49,6 +54,16 @@ interface PendingScheduleRunKeys {
 }
 
 const pendingScheduleRunKeys = new WeakMap<QueryClient, PendingScheduleRunKeys>();
+
+function archiveQueryMatches(
+    queryKey: readonly unknown[],
+    featureRoot: readonly unknown[]
+): boolean {
+    return (
+        queryKey[0] === liveHistoryArchiveQueryRoot[0] &&
+        featureRoot.every((part, index) => queryKey[index + 1] === part)
+    );
+}
 
 function scheduleRunKeysForCurrentCache(queryClient: QueryClient): Map<string, string> {
     const cacheGeneration = authenticatedBrowserCacheGeneration(queryClient);
@@ -223,6 +238,28 @@ function patchRunInBoundedSnapshot(
     };
 }
 
+function patchLiveRunRows(
+    rows: readonly JobRunSummary[],
+    run: JobRunSummary,
+    includeNew: boolean
+): JobRunSummary[] {
+    const existing = rows.find((candidate) => candidate.id === run.id);
+    if (existing === undefined) {
+        return includeNew ? [run, ...rows] : [...rows];
+    }
+    return rows.map((candidate) =>
+        candidate.id === run.id ? currentJobRunSnapshot(candidate, run) : candidate
+    );
+}
+
+function patchRunInLiveSnapshot(
+    result: ListJobRunsResult,
+    run: JobRunSummary,
+    includeNew: boolean
+): ListJobRunsResult {
+    return { ...result, runs: patchLiveRunRows(result.runs, run, includeNew) };
+}
+
 function patchRunPages<TPage extends { readonly runs: JobRunSummary[] }>(
     data: InfiniteData<TPage>,
     run: JobRunSummary,
@@ -324,11 +361,25 @@ export function patchJobRunInCachedQueries(
     run: JobRunSummary,
     newRun = false
 ): void {
-    for (const [queryKey, data] of queryClient.getQueriesData<JobRunListData>({
+    for (const [queryKey, data] of queryClient.getQueriesData<ListJobRunsResult>({
         queryKey: jobRunListQueryRoot,
     })) {
+        if (data === undefined || queryKey.at(-1) !== "live-head") continue;
+        const filters = queryKey[jobRunListQueryRoot.length] as JobRunFilters | null;
+        queryClient.setQueryData<ListJobRunsResult>(
+            queryKey,
+            patchRunInLiveSnapshot(
+                data,
+                run,
+                newRun && runMatchesFilters(run, filters ?? undefined)
+            )
+        );
+    }
+    for (const [queryKey, data] of queryClient.getQueriesData<JobRunListData>({
+        predicate: ({ queryKey }) => archiveQueryMatches(queryKey, jobRunListQueryRoot),
+    })) {
         if (data === undefined) continue;
-        const filters = queryKey.at(-1) as JobRunFilters | null;
+        const filters = queryKey[1 + jobRunListQueryRoot.length] as JobRunFilters | null;
         const patched = patchRunPages(data, run, (candidate) =>
             runMatchesFilters(candidate, filters ?? undefined)
         );
@@ -351,8 +402,18 @@ export function patchJobRunInCachedQueries(
                   }
     );
     if (run.scheduledJobId !== undefined) {
+        queryClient.setQueryData<ListScheduleRunsResult>(
+            liveHistoryHeadQueryKey(scheduleRunListQueryKey(run.scheduledJobId)),
+            (data) =>
+                data === undefined
+                    ? undefined
+                    : {
+                          ...data,
+                          runs: patchLiveRunRows(data.runs, run, newRun),
+                      }
+        );
         queryClient.setQueryData<ScheduleRunListData>(
-            scheduleRunListQueryKey(run.scheduledJobId),
+            liveHistoryArchiveQueryKey(scheduleRunListQueryKey(run.scheduledJobId)),
             (data) =>
                 data === undefined ? undefined : patchRunPages(data, run, () => true)
         );
@@ -366,8 +427,22 @@ export function removeJobRunFromCachedQueries(
     id: string
 ): void {
     queryClient.setQueriesData<JobRunListData>(
-        { queryKey: jobRunListQueryRoot },
+        {
+            predicate: ({ queryKey }) =>
+                archiveQueryMatches(queryKey, jobRunListQueryRoot),
+        },
         (data) => (data === undefined ? undefined : removeRunFromPages(data, id))
+    );
+    queryClient.setQueriesData<ListJobRunsResult>(
+        {
+            predicate: ({ queryKey }) =>
+                jobRunListQueryRoot.every((part, index) => queryKey[index] === part) &&
+                queryKey.at(-1) === "live-head",
+        },
+        (data) =>
+            data === undefined
+                ? undefined
+                : { ...data, runs: data.runs.filter((run) => run.id !== id) }
     );
     queryClient.setQueryData<ListJobRunsResult>(jobQueueSummaryQueryKey, (result) =>
         result === undefined
@@ -378,8 +453,23 @@ export function removeJobRunFromCachedQueries(
               }
     );
     queryClient.setQueriesData<ScheduleRunListData>(
-        { queryKey: scheduleRunListQueryRoot },
+        {
+            predicate: ({ queryKey }) =>
+                archiveQueryMatches(queryKey, scheduleRunListQueryRoot),
+        },
         (data) => (data === undefined ? undefined : removeRunFromPages(data, id))
+    );
+    queryClient.setQueriesData<ListScheduleRunsResult>(
+        {
+            predicate: ({ queryKey }) =>
+                scheduleRunListQueryRoot.every(
+                    (part, index) => queryKey[index] === part
+                ) && queryKey.at(-1) === "live-head",
+        },
+        (data) =>
+            data === undefined
+                ? undefined
+                : { ...data, runs: data.runs.filter((run) => run.id !== id) }
     );
     queryClient.removeQueries({ exact: true, queryKey: jobRunDetailQueryKey(id) });
     queryClient.removeQueries({ queryKey: [...jobRunEventHistoryQueryRoot, id] });
@@ -482,7 +572,14 @@ export function removeScheduleFromCachedQueries(
                   }
     );
     queryClient.removeQueries({ exact: true, queryKey: scheduleDetailQueryKey(id) });
-    queryClient.removeQueries({ queryKey: scheduleRunListQueryKey(id) });
+    queryClient.removeQueries({
+        exact: true,
+        queryKey: liveHistoryArchiveQueryKey(scheduleRunListQueryKey(id)),
+    });
+    queryClient.removeQueries({
+        exact: true,
+        queryKey: liveHistoryHeadQueryKey(scheduleRunListQueryKey(id)),
+    });
 }
 
 /** Patches the versioned claim-control singleton before queue refresh. */
@@ -491,7 +588,10 @@ export function patchJobWorkerControlInCachedQueries(
     control: JobWorkerControl
 ): void {
     queryClient.setQueriesData<JobRunListData>(
-        { queryKey: jobRunListQueryRoot },
+        {
+            predicate: ({ queryKey }) =>
+                archiveQueryMatches(queryKey, jobRunListQueryRoot),
+        },
         (data) =>
             data === undefined
                 ? undefined
@@ -507,6 +607,23 @@ export function patchJobWorkerControlInCachedQueries(
                               ),
                           },
                       })),
+                  }
+    );
+    queryClient.setQueriesData<ListJobRunsResult>(
+        {
+            predicate: ({ queryKey }) =>
+                jobRunListQueryRoot.every((part, index) => queryKey[index] === part) &&
+                queryKey.at(-1) === "live-head",
+        },
+        (data) =>
+            data === undefined
+                ? undefined
+                : {
+                      ...data,
+                      summary: {
+                          ...data.summary,
+                          control: currentJobWorkerControl(data.summary.control, control),
+                      },
                   }
     );
     queryClient.setQueryData<ListJobRunsResult>(jobQueueSummaryQueryKey, (result) =>

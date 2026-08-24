@@ -1,3 +1,4 @@
+import { Activity, Braces, Package, SquareTerminal } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import {
@@ -14,6 +15,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 
@@ -230,6 +232,7 @@ export interface JobRunDetailProps {
     readonly cancelBusy: boolean;
     readonly cancelDisabled?: boolean;
     readonly detail: JobRunDetailData;
+    readonly embedded?: boolean;
     readonly focusRequested?: boolean;
     readonly onCancel: (id: string) => void;
     readonly onFocusHandled?: (id: string) => void;
@@ -240,6 +243,7 @@ export function JobRunDetail({
     cancelBusy,
     cancelDisabled = false,
     detail,
+    embedded = false,
     focusRequested = false,
     onCancel,
     onFocusHandled,
@@ -283,7 +287,14 @@ export function JobRunDetail({
     }
 
     return (
-        <Card aria-labelledby={headingId}>
+        <Card
+            aria-labelledby={headingId}
+            className={
+                embedded
+                    ? "rounded-none border-0 bg-transparent p-0 shadow-none"
+                    : undefined
+            }
+        >
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0" ref={restoreCancellationFocus}>
                     <div className="flex flex-wrap items-center gap-2">
@@ -382,9 +393,12 @@ export function JobRunDetail({
 
             {run.resourceKeys.length > 0 && (
                 <section aria-labelledby={`${headingId}-resources`} className="mt-5">
-                    <Heading id={`${headingId}-resources`} level={3}>
-                        Reserved resources
-                    </Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={Package} tone="accent" />
+                        <Heading id={`${headingId}-resources`} level={3}>
+                            Reserved resources
+                        </Heading>
+                    </div>
                     <ul className="mt-2 flex flex-wrap gap-2">
                         {run.resourceKeys.map((resourceKey) => (
                             <li key={resourceKey}>
@@ -402,9 +416,12 @@ export function JobRunDetail({
                     aria-labelledby={`${headingId}-terminal`}
                     className="border-primary-700 mt-5 rounded-lg border p-4"
                 >
-                    <Heading id={`${headingId}-terminal`} level={3}>
-                        Terminal status
-                    </Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={SquareTerminal} tone="accent" />
+                        <Heading id={`${headingId}-terminal`} level={3}>
+                            Terminal status
+                        </Heading>
+                    </div>
                     <Text
                         className="mt-2 font-mono wrap-anywhere"
                         size="sm"
@@ -420,9 +437,12 @@ export function JobRunDetail({
 
             {detail.result !== undefined && (
                 <section aria-labelledby={`${headingId}-result`} className="mt-5">
-                    <Heading id={`${headingId}-result`} level={3}>
-                        Result
-                    </Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={Braces} tone="accent" />
+                        <Heading id={`${headingId}-result`} level={3}>
+                            Result
+                        </Heading>
+                    </div>
                     <section
                         aria-label={`Result for job run ${run.id}`}
                         className="bg-primary-950 text-primary-200 focus-visible:ring-accent-400/30 mt-2 max-h-96 overflow-auto rounded-lg p-3 text-xs wrap-anywhere whitespace-pre-wrap outline-none focus-visible:ring-2"
@@ -437,9 +457,12 @@ export function JobRunDetail({
 
             <section aria-labelledby={`${headingId}-events`} className="mt-6">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <Heading id={`${headingId}-events`} level={3}>
-                        Job activity
-                    </Heading>
+                    <div className="flex items-center gap-2">
+                        <Icon icon={Activity} tone="accent" />
+                        <Heading id={`${headingId}-events`} level={3}>
+                            Job activity
+                        </Heading>
+                    </div>
                     <Text size="sm" tone="muted">
                         Newest first · {run.eventCount} total
                     </Text>

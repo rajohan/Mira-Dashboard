@@ -1,8 +1,12 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { TaskProgressUpdate } from "../../contracts/taskModel.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
@@ -17,7 +21,10 @@ import { Markdown } from "../ui/Markdown.tsx";
 import { Text } from "../ui/Text.tsx";
 import { useTaskMutation } from "./taskMutations.ts";
 import { TaskProgressForm } from "./TaskProgressForm.tsx";
-import { taskProgressQueryOptions } from "./taskQueries.ts";
+import {
+    taskProgressLiveHeadQueryOptions,
+    taskProgressQueryOptions,
+} from "./taskQueries.ts";
 
 function taskProgressAuthorLabel(update: TaskProgressUpdate): string {
     return update.author.kind === "user"
@@ -106,14 +113,27 @@ interface TaskProgressSectionProps {
 export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
     const client = useDashboardTrpcClient();
     const progress = useInfiniteQuery(taskProgressQueryOptions(client, taskId));
+    const progressLiveHead = useQuery(taskProgressLiveHeadQueryOptions(client, taskId));
     const addProgress = useTaskMutation("tasks.addUpdate");
     const updateProgress = useTaskMutation("tasks.updateProgress");
     const deleteProgress = useTaskMutation("tasks.deleteProgress");
     const [editingId, setEditingId] = useState<string>();
     const [pendingDelete, setPendingDelete] = useState<TaskProgressUpdate>();
-    const updates = progress.data?.pages.flatMap((page) => page.updates) ?? [];
+    const [evictedUpdateIds, setEvictedUpdateIds] = useState<ReadonlySet<string>>(
+        () => new Set()
+    );
+    const archiveFirstPageResetKey = JSON.stringify(progress.data?.pages[0]);
+    const updates = useAccumulatedLiveHistoryRows(
+        progressLiveHead.data?.updates ?? [],
+        progress.data?.pages.flatMap((page) => page.updates) ?? [],
+        liveHistoryRowIdentity,
+        taskId,
+        evictedUpdateIds,
+        archiveFirstPageResetKey
+    );
+    const progressFailure = progressLiveHead.error ?? progress.error;
     const failure =
-        progress.error ??
+        progressFailure ??
         addProgress.error ??
         updateProgress.error ??
         deleteProgress.error;
@@ -129,6 +149,23 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                 Authenticated progress notes remain versioned and auditable.
             </Text>
             <Alert
+                action={
+                    progressFailure === null ? undefined : (
+                        <Button
+                            busy={progressLiveHead.isFetching || progress.isFetching}
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    progressLiveHead.refetch(),
+                                    progress.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
                 className="mt-4"
                 message={
                     failure === null ? undefined : dashboardBrowserFailureMessage(failure)
@@ -200,7 +237,14 @@ export function TaskProgressSection({ taskId }: TaskProgressSectionProps) {
                             taskId,
                             updateId: pendingDelete.id,
                         },
-                        { onSuccess: () => setPendingDelete(undefined) }
+                        {
+                            onSuccess: () => {
+                                setEvictedUpdateIds((current) =>
+                                    new Set(current).add(pendingDelete.id)
+                                );
+                                setPendingDelete(undefined);
+                            },
+                        }
                     );
                 }}
                 open={pendingDelete !== undefined}

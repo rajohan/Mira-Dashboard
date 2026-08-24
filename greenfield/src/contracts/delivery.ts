@@ -314,6 +314,7 @@ const deliveryPullRequestGroupObjectSchema = v.strictObject({
             "Delivery pull request group is outside its budget"
         )
     ),
+    stackNumber: v.optional(pullRequestNumberSchema),
 });
 export type DeliveryPullRequestGroup = v.InferOutput<
     typeof deliveryPullRequestGroupObjectSchema
@@ -322,6 +323,7 @@ export type DeliveryPullRequestGroup = v.InferOutput<
 export function pullRequestGroupIsConsistent(group: DeliveryPullRequestGroup): boolean {
     return (
         hasUniqueArrayItems(group.members.map(({ number }) => number)) &&
+        (group.kind === "native-stack" || group.stackNumber === undefined) &&
         (group.kind === "candidate-stack"
             ? group.members.length >= 2
             : group.kind === "native-stack" ||

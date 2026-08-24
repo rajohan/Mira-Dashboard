@@ -1,61 +1,104 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CalendarClock } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { ScheduleConfiguration } from "../../contracts/jobModel.ts";
-import type { ListSchedulesInput } from "../../contracts/schedules.ts";
+import {
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
+import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
-import { FormField } from "../ui/FormField.tsx";
+import { Card } from "../ui/Card.tsx";
+import { ExpandableCard } from "../ui/ExpandableCard.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { LoadingState } from "../ui/LoadingState.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Select, type SelectOption } from "../ui/Select.tsx";
-import { Text } from "../ui/Text.tsx";
+import { Virtualizer } from "../ui/Virtualizer.tsx";
 import { jobBrowserFailureMessage } from "./jobBrowserFailure.ts";
 import { useRunScheduleMutation, useUpdateScheduleMutation } from "./jobMutations.ts";
 import {
     scheduleDetailQueryOptions,
     scheduleListQueryOptions,
+    scheduleRunLiveHeadQueryOptions,
     scheduleRunListQueryOptions,
     uniqueJobRows,
 } from "./jobQueries.ts";
 import { parseJobsRouteSearch } from "./jobRouteSearch.ts";
-import { JobRunTable } from "./JobRunTable.tsx";
+import { SelectedJobRun } from "./JobRunBrowser.tsx";
+import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 import { ScheduleDetail } from "./ScheduleDetail.tsx";
 import { ScheduleTable } from "./ScheduleTable.tsx";
-
-type ScheduleEnabledFilter = NonNullable<ListSchedulesInput["enabled"]>;
-
-const scheduleEnabledOptions: readonly SelectOption<ScheduleEnabledFilter>[] =
-    Object.freeze([
-        { label: "All schedules", value: "all" },
-        { label: "Enabled", value: "enabled" },
-        { label: "Disabled", value: "disabled" },
-    ]);
 
 interface SelectedScheduleProps {
     readonly focusRequested: boolean;
     readonly id: string;
     readonly onFocusHandled: (id: string) => void;
+    readonly onRunFocusHandled: (id: string) => void;
     readonly onSelectRun: (id: string) => void;
     readonly selectedRunId?: string;
+    readonly runFocusRequested?: string;
 }
 
 function SelectedSchedule({
     focusRequested,
     id,
     onFocusHandled,
+    onRunFocusHandled,
     onSelectRun,
+    runFocusRequested,
     selectedRunId,
 }: SelectedScheduleProps) {
     const client = useDashboardTrpcClient();
     const detail = useQuery(scheduleDetailQueryOptions(client, id));
     const history = useInfiniteQuery(scheduleRunListQueryOptions(client, id));
+    const liveHead = useQuery(scheduleRunLiveHeadQueryOptions(client, id));
     const update = useUpdateScheduleMutation();
     const run = useRunScheduleMutation();
-    const runs = uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []);
+    const historyScrollContainerRef = useRef<HTMLDivElement>(null);
+    const historySentinelRef = useRef<HTMLDivElement>(null);
+    const fetchNextHistoryPage = history.fetchNextPage;
+    const hasNextHistoryPage = history.hasNextPage;
+    const historyPageLoading = history.isFetchingNextPage;
+    const historyPageFailed = history.error !== null;
+    const historyError = liveHead.error ?? history.error;
+    const historyHasData = liveHead.data !== undefined || history.data !== undefined;
+    const runs = useAccumulatedLiveHistoryRows(
+        liveHead.data?.runs ?? [],
+        uniqueJobRows(history.data?.pages.flatMap((page) => page.runs) ?? []),
+        liveHistoryRowIdentity,
+        id
+    );
+
+    useEffect(() => {
+        const sentinel = historySentinelRef.current;
+        if (
+            sentinel === null ||
+            !hasNextHistoryPage ||
+            historyPageFailed ||
+            historyPageLoading ||
+            globalThis.IntersectionObserver === undefined
+        ) {
+            return;
+        }
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some(({ isIntersecting }) => isIntersecting)) {
+                    void fetchNextHistoryPage();
+                }
+            },
+            {
+                root: historyScrollContainerRef.current,
+                rootMargin: "400px 0px",
+            }
+        );
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [fetchNextHistoryPage, hasNextHistoryPage, historyPageFailed, historyPageLoading]);
 
     useEffect(() => {
         if (!focusRequested || detail.data === undefined) return;
@@ -83,48 +126,192 @@ function SelectedSchedule({
 
     const schedule = detail.data;
     const mutationError = update.error ?? run.error;
+    const scheduleErrorMessage =
+        mutationError === null && detail.error === null
+            ? undefined
+            : jobBrowserFailureMessage(mutationError ?? detail.error);
+    const historyErrorMessage =
+        historyError === null ? undefined : jobBrowserFailureMessage(historyError);
+    const historyErrorIsDistinct =
+        historyErrorMessage !== undefined && historyErrorMessage !== scheduleErrorMessage;
+    const historyRetry = historyErrorMessage !== undefined && (
+        <Button
+            busy={liveHead.isFetching || history.isFetching}
+            onClick={() =>
+                void Promise.allSettled([liveHead.refetch(), history.refetch()])
+            }
+            size="sm"
+            variant="secondary"
+        >
+            Retry schedule history
+        </Button>
+    );
+    const selectedRunDetail = selectedRunId !== undefined && (
+        <div className="mt-2">
+            <ExpandableCard
+                compact
+                onOpenChange={(open) => onSelectRun(open ? selectedRunId : "")}
+                open
+                title="Run details"
+            >
+                <SelectedJobRun
+                    embedded
+                    focusRequested={selectedRunId === runFocusRequested}
+                    id={selectedRunId}
+                    onFocusHandled={onRunFocusHandled}
+                />
+            </ExpandableCard>
+        </div>
+    );
     let historyContent;
-    if (history.isPending && history.data === undefined) {
+    if (history.isPending && liveHead.isPending && !historyHasData) {
         historyContent = <PageState label="Loading schedule runs…" status="loading" />;
-    } else if (history.data === undefined) {
+    } else if (!historyHasData) {
         historyContent = (
             <PageState
-                message={jobBrowserFailureMessage(history.error)}
-                onRetry={() => void history.refetch()}
-                retryBusy={history.isFetching}
+                message={jobBrowserFailureMessage(historyError)}
+                onRetry={() =>
+                    void Promise.allSettled([liveHead.refetch(), history.refetch()])
+                }
+                retryBusy={liveHead.isFetching || history.isFetching}
                 status="error"
                 title="Schedule history unavailable"
             />
+        );
+    } else if (runs.length === 0 && !hasNextHistoryPage && historyError === null) {
+        historyContent = (
+            <>
+                <div className="border-primary-700 bg-primary-900/40 rounded-lg border px-4 py-8 text-center">
+                    <Heading level={3} size="subsection">
+                        No job runs
+                    </Heading>
+                    <p className="text-primary-400 mt-1 text-sm">
+                        Runs will appear here after this schedule starts a job.
+                    </p>
+                </div>
+                {selectedRunDetail}
+            </>
         );
     } else {
         historyContent = (
             <>
                 <Alert
+                    action={historyErrorIsDistinct ? historyRetry : undefined}
                     className="mb-4"
                     focusOnError={false}
-                    message={
-                        history.error === null
-                            ? undefined
-                            : jobBrowserFailureMessage(history.error)
-                    }
+                    message={historyErrorIsDistinct ? historyErrorMessage : undefined}
                 />
-                <JobRunTable
-                    label="Schedule job runs"
-                    onSelect={onSelectRun}
-                    runs={runs}
-                    selectedId={selectedRunId}
-                />
-                {history.hasNextPage && (
-                    <Button
-                        busy={history.isFetchingNextPage}
-                        busyLabel="Loading…"
-                        className="mt-4"
-                        onClick={() => void history.fetchNextPage()}
-                        variant="secondary"
-                    >
-                        Load more schedule runs
-                    </Button>
-                )}
+                <Virtualizer<HTMLLIElement>
+                    count={runs.length}
+                    estimateSize={() => 180}
+                    getItemKey={(index) => runs[index]?.id ?? `missing-run:${index}`}
+                    initialRect={{ height: 560, width: 960 }}
+                    overscan={4}
+                >
+                    {({
+                        measureElement,
+                        scrollContainerRef,
+                        totalSize,
+                        virtualItems,
+                    }) => {
+                        const visibleRuns =
+                            virtualItems.length > 0
+                                ? virtualItems
+                                : runs.slice(0, 7).map((jobRun, index) => ({
+                                      index,
+                                      key: jobRun.id,
+                                      start: index * 180,
+                                  }));
+                        const historyHeight =
+                            virtualItems.length > 0 ? totalSize : runs.length * 180;
+                        const selectedRunVisible = visibleRuns.some(
+                            ({ index }) => runs[index]?.id === selectedRunId
+                        );
+                        return (
+                            <>
+                                <div
+                                    aria-label="Schedule run history"
+                                    className="h-[min(42rem,65dvh)] min-h-72 overflow-x-hidden overflow-y-auto overscroll-contain"
+                                    ref={(node) => {
+                                        scrollContainerRef.current = node;
+                                        historyScrollContainerRef.current = node;
+                                    }}
+                                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- The shared Virtualizer requires a div scroll container.
+                                    role="region"
+                                    // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded virtual run history must remain keyboard-scrollable.
+                                    tabIndex={0}
+                                >
+                                    <ol
+                                        aria-label={`Runs for ${schedule.name}`}
+                                        className="relative min-w-0"
+                                        style={{ height: historyHeight }}
+                                    >
+                                        {visibleRuns.map((virtualItem) => {
+                                            const jobRun = runs[virtualItem.index];
+                                            if (jobRun === undefined) return null;
+                                            return (
+                                                <li
+                                                    className="absolute top-0 left-0 w-full min-w-0 pb-2"
+                                                    data-index={virtualItem.index}
+                                                    key={virtualItem.key}
+                                                    ref={measureElement}
+                                                    style={{
+                                                        transform: `translateY(${virtualItem.start}px)`,
+                                                    }}
+                                                >
+                                                    <ExpandableCard
+                                                        compact
+                                                        onOpenChange={(open) =>
+                                                            onSelectRun(
+                                                                open ? jobRun.id : ""
+                                                            )
+                                                        }
+                                                        open={jobRun.id === selectedRunId}
+                                                        title={jobRun.displayName}
+                                                        trailing={
+                                                            <Badge
+                                                                variant={jobRunStateBadgeVariant(
+                                                                    jobRun.state
+                                                                )}
+                                                            >
+                                                                {jobRunStateLabel(
+                                                                    jobRun.state
+                                                                )}
+                                                            </Badge>
+                                                        }
+                                                    >
+                                                        <SelectedJobRun
+                                                            embedded
+                                                            focusRequested={
+                                                                jobRun.id ===
+                                                                runFocusRequested
+                                                            }
+                                                            id={jobRun.id}
+                                                            onFocusHandled={
+                                                                onRunFocusHandled
+                                                            }
+                                                        />
+                                                    </ExpandableCard>
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                    {hasNextHistoryPage && !historyPageFailed && (
+                                        <div className="py-2" ref={historySentinelRef}>
+                                            {historyPageLoading && (
+                                                <LoadingState
+                                                    label="Loading older runs…"
+                                                    size="sm"
+                                                />
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                                {selectedRunVisible ? null : selectedRunDetail}
+                            </>
+                        );
+                    }}
+                </Virtualizer>
             </>
         );
     }
@@ -146,11 +333,8 @@ function SelectedSchedule({
             disableError={
                 update.error === null ? undefined : jobBrowserFailureMessage(update.error)
             }
-            error={
-                mutationError === null && detail.error === null
-                    ? undefined
-                    : jobBrowserFailureMessage(mutationError ?? detail.error)
-            }
+            error={scheduleErrorMessage}
+            errorAction={historyErrorIsDistinct ? undefined : historyRetry}
             errorFocus={mutationError !== null}
             history={historyContent}
             onDisable={(disableIntent, expectedVersion) =>
@@ -178,20 +362,26 @@ function SelectedSchedule({
 }
 
 interface ScheduleBrowserProps {
+    readonly focusRunId?: string;
     readonly onRequestRunFocus: (id: string) => void;
+    readonly onRunFocusHandled: (id: string) => void;
 }
 
-/** @returns Filtered schedule directory, exact editor, and schedule-scoped history. */
-export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
+/** @returns Schedule directory, exact editor, and schedule-scoped history. */
+export function ScheduleBrowser({
+    focusRunId,
+    onRequestRunFocus,
+    onRunFocusHandled,
+}: ScheduleBrowserProps) {
     const client = useDashboardTrpcClient();
     const navigate = useNavigate({ from: "/jobs" });
     const search = parseJobsRouteSearch(useSearch({ from: "/jobs" }) as unknown);
-    const [enabled, setEnabled] = useState<ScheduleEnabledFilter>("all");
     const [focusScheduleId, setFocusScheduleId] = useState<string>();
-    const query = useInfiniteQuery(scheduleListQueryOptions(client, enabled));
+    const query = useInfiniteQuery(scheduleListQueryOptions(client, "all"));
     const schedules = uniqueJobRows(
         query.data?.pages.flatMap((page) => page.schedules) ?? []
     );
+    const selectedScheduleId = search.scheduleId;
     const select = (selection: { runId?: string; scheduleId?: string }) => {
         void navigate({
             replace: true,
@@ -206,15 +396,12 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
     };
     const selectSchedule = (scheduleId: string | undefined) => {
         setFocusScheduleId(scheduleId);
-        select({
-            ...(search.runId === undefined ? {} : { runId: search.runId }),
-            ...(scheduleId === undefined ? {} : { scheduleId }),
-        });
+        select(scheduleId === undefined ? {} : { scheduleId });
     };
     const selectRun = (runId: string) => {
-        onRequestRunFocus(runId);
+        if (runId !== "") onRequestRunFocus(runId);
         select({
-            runId,
+            ...(runId === "" ? {} : { runId }),
             ...(search.scheduleId === undefined ? {} : { scheduleId: search.scheduleId }),
         });
     };
@@ -234,7 +421,7 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
     } else if (schedules.length === 0) {
         directoryContent = (
             <PageState
-                description="Try another status filter."
+                description="Create or enable a Dashboard schedule to see it here."
                 icon={CalendarClock}
                 status="empty"
                 title="No matching schedules"
@@ -246,7 +433,7 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
                 <ScheduleTable
                     onSelect={selectSchedule}
                     schedules={schedules}
-                    selectedId={search.scheduleId}
+                    selectedId={selectedScheduleId}
                 />
                 {query.hasNextPage && (
                     <Button
@@ -265,56 +452,49 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
 
     return (
         <section aria-label="Dashboard schedule management">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <Heading id="schedules-heading" level={2}>
-                        Dashboard schedules
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        Change when Dashboard jobs run, pause them with a reason, or start
-                        one now.
-                    </Text>
-                </div>
-                <FormField label="Show schedules">
-                    <Select
-                        className="mt-2 min-w-48"
-                        onChange={setEnabled}
-                        options={scheduleEnabledOptions}
-                        value={enabled}
-                    />
-                </FormField>
-            </div>
-            <Alert
-                className="mt-4"
-                focusOnError={false}
-                message={
-                    query.data === undefined || query.error === null
-                        ? undefined
-                        : jobBrowserFailureMessage(query.error)
-                }
-            />
-            <div className="mt-5">{directoryContent}</div>
-            <div className="mt-7">
-                {search.scheduleId === undefined ? (
-                    <PageState
-                        description="Choose a schedule from the table to see and edit it."
-                        status="empty"
-                        title="Select a schedule"
-                    />
-                ) : (
-                    <SelectedSchedule
-                        focusRequested={focusScheduleId === search.scheduleId}
-                        id={search.scheduleId}
-                        key={search.scheduleId}
-                        onFocusHandled={(id) =>
-                            setFocusScheduleId((current) =>
-                                current === id ? undefined : current
-                            )
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                <Card className="min-w-0 p-0 xl:flex xl:max-h-[calc(100vh-10rem)] xl:flex-col xl:overflow-hidden">
+                    <div className="border-primary-700 shrink-0 border-b p-3">
+                        <div className="flex items-center gap-2">
+                            <Icon icon={CalendarClock} tone="accent" />
+                            <Heading id="schedules-heading" level={2}>
+                                Dashboard schedules
+                            </Heading>
+                        </div>
+                    </div>
+                    <Alert
+                        className="mx-3 mt-3"
+                        focusOnError={false}
+                        message={
+                            query.data === undefined || query.error === null
+                                ? undefined
+                                : jobBrowserFailureMessage(query.error)
                         }
-                        onSelectRun={selectRun}
-                        selectedRunId={search.runId}
                     />
-                )}
+                    <div className="min-h-0 p-2 xl:flex-1 xl:overflow-y-auto">
+                        {directoryContent}
+                    </div>
+                </Card>
+                <div className="min-w-0">
+                    {selectedScheduleId === undefined ? (
+                        <PageState status="empty" title="Select a schedule" />
+                    ) : (
+                        <SelectedSchedule
+                            focusRequested={focusScheduleId === selectedScheduleId}
+                            id={selectedScheduleId}
+                            key={selectedScheduleId}
+                            onFocusHandled={(id) =>
+                                setFocusScheduleId((current) =>
+                                    current === id ? undefined : current
+                                )
+                            }
+                            onRunFocusHandled={onRunFocusHandled}
+                            onSelectRun={selectRun}
+                            runFocusRequested={focusRunId}
+                            selectedRunId={search.runId}
+                        />
+                    )}
+                </div>
             </div>
         </section>
     );

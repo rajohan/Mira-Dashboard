@@ -24,7 +24,7 @@ import { emptyInputSchema } from "./system.ts";
 /** Maximum number of operator-selectable sources in one complete catalog. */
 export const logSourceMaximum = 64;
 /** Maximum number of rows returned by one tail or search request. */
-export const logRowMaximum = 500;
+export const logRowMaximum = 5000;
 /** Default row count for the live tail. */
 export const logTailDefaultRows = 200;
 /** Maximum characters retained from one physical log line after redaction. */

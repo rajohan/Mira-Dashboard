@@ -9,6 +9,7 @@ import type { AuthStatus } from "../../contracts/auth.ts";
 import { refreshCacheEntryInputSchema } from "../../contracts/cache.ts";
 import type { JobRunSummary, ScheduleSummary } from "../../contracts/jobModel.ts";
 import type { ListJobRunsResult } from "../../contracts/jobs.ts";
+import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -400,7 +401,7 @@ describe("cache browser refresh mutation", () => {
         const confirmedRun = queuedRun(runId, timestampMs + 1000);
         const transport = new CacheMutationTransport([confirmedRun]);
         const queryClient = createDashboardQueryClient();
-        const jobListKey = jobRunListQueryKey(undefined);
+        const jobListKey = liveHistoryArchiveQueryKey(jobRunListQueryKey(undefined));
         const scheduleListKey = scheduleListQueryKey("enabled");
         const schedule = cacheSchedule();
         const exactCacheKey = cacheEntryQueryKey(cacheKey);

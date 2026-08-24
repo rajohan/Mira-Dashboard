@@ -555,6 +555,7 @@ function deliveryPullRequestsPayload(now: number) {
             {
                 id: "c".repeat(64),
                 kind: "native-stack",
+                stackNumber: 41,
                 members: [
                     member({
                         actions: nativeStackActions,

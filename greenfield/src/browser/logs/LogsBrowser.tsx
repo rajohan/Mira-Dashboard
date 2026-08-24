@@ -69,6 +69,11 @@ export function LogsBrowser() {
     const [rowCount, setRowCount] = useState(logTailDefaultRows);
     const [search, setSearch] =
         useState<Readonly<{ readonly query: string; readonly sourceId: string }>>();
+    const [debouncedSearch, setDebouncedSearch] = useState(search);
+    useEffect(() => {
+        const timeout = globalThis.setTimeout(() => setDebouncedSearch(search), 300);
+        return () => globalThis.clearTimeout(timeout);
+    }, [search]);
     const sources = sourcesQuery.data?.sources ?? [];
     const selectedSource =
         sources.find(({ id }) => id === selectedSourceId) ??
@@ -78,11 +83,11 @@ export function LogsBrowser() {
     let selection: LogSnapshotSelection | undefined;
     if (selectedSource !== undefined) {
         selection =
-            search?.sourceId === selectedSource.id
+            debouncedSearch?.sourceId === selectedSource.id
                 ? {
                       limit: rowCount,
                       mode: "search",
-                      query: search.query,
+                      query: debouncedSearch.query,
                       sourceId: selectedSource.id,
                   }
                 : { limit: rowCount, mode: "tail", sourceId: selectedSource.id };
@@ -186,12 +191,11 @@ export function LogsBrowser() {
         <LogsView
             maintenance={maintenanceQuery.data}
             maintenanceError={maintenanceError}
-            maintenanceLoading={maintenanceQuery.isPending}
-            maintenanceRefreshing={maintenanceQuery.isFetching}
+            maintenanceLoading={maintenanceQuery.isFetching}
             onClearSearch={() => setSearch(undefined)}
             onRefresh={() => void refreshAll()}
-            onRefreshMaintenance={() => void refreshMaintenance()}
             onRequestMaintenance={requestMaintenance}
+            onRetryMaintenance={() => void maintenanceQuery.refetch()}
             onSearch={(query) => {
                 if (selectedSource !== undefined && sourceAvailable) {
                     setSearch({ query, sourceId: selectedSource.id });

@@ -191,9 +191,11 @@ describe("Gateway sessions browser", () => {
             await exhaustUnavailableReadRetries(queryClient);
             jest.useRealTimers();
             await waitFor(() =>
-                expect(screen.getByRole("alert")).toHaveTextContent(
-                    "A background refresh failed"
-                )
+                expect(
+                    screen.getByText(
+                        "A background refresh failed. Showing the most recent session data."
+                    )
+                ).toBeVisible()
             );
             expect(
                 within(

@@ -1,21 +1,12 @@
-import {
-    Activity,
-    Database,
-    Gauge,
-    Magnet,
-    Network,
-    Orbit,
-    ScrollText,
-    Wrench,
-} from "lucide-react";
+import { Activity, Database, Gauge, Magnet, Network, Orbit } from "lucide-react";
 
 import type { DatabaseOverview } from "../../contracts/database.ts";
-import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Heading } from "../ui/Heading.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { MetricCard } from "../ui/MetricCard.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Text } from "../ui/Text.tsx";
@@ -50,14 +41,6 @@ function torrentCountValue(
     return value.state === "available" ? formatCount(value.count) : "Unavailable";
 }
 
-function PostgresqlObservationTime({ timestampMs }: { readonly timestampMs: number }) {
-    return (
-        <time dateTime={new Date(timestampMs).toISOString()}>
-            {formatDashboardDateTime(timestampMs)}
-        </time>
-    );
-}
-
 function maintenanceStatusLabel(
     status: AvailablePostgresqlObservation["summary"]["maintenance"]["status"]
 ): string {
@@ -74,6 +57,15 @@ function maintenanceStatusLabel(
     }
 }
 
+function maintenanceStatusBadge(
+    status: AvailablePostgresqlObservation["summary"]["maintenance"]["status"]
+) {
+    let variant: "default" | "success" | "warning" = "default";
+    if (status === "healthy") variant = "success";
+    else if (status === "review") variant = "warning";
+    return <Badge variant={variant}>{maintenanceStatusLabel(status)}</Badge>;
+}
+
 function postgresqlMaintenanceAttention(
     observation: AvailablePostgresqlObservation
 ): ReadonlyArray<{ readonly message: string; readonly warning: boolean }> {
@@ -81,13 +73,13 @@ function postgresqlMaintenanceAttention(
     const messages: Array<{ readonly message: string; readonly warning: boolean }> = [];
     if (maintenance.requiresBloatReview) {
         messages.push({
-            message: `PostgreSQL has an estimated ${formatByteCount(maintenance.estimatedReclaimableBytes)} (${formatPercent(maintenance.estimatedReclaimablePercent)}) reclaimable table space. Review the affected tables; standard VACUUM makes space reusable internally, while returning disk to the host requires planned compaction or a table rebuild.`,
+            message: `PostgreSQL has an estimated ${formatByteCount(maintenance.estimatedReclaimableBytes)} (${formatPercent(maintenance.estimatedReclaimablePercent)}) reclaimable table space. Review the affected tables. Standard VACUUM makes space reusable internally, while returning disk to the host requires planned compaction or a table rebuild.`,
             warning: true,
         });
     }
     if (maintenance.highDeadTupleTableCount > 0) {
         messages.push({
-            message: `${formatCount(maintenance.highDeadTupleTableCount)} PostgreSQL table${maintenance.highDeadTupleTableCount === 1 ? " exceeds" : "s exceed"} the dead-tuple maintenance threshold. Review autovacuum behavior and plan VACUUM where needed; refresh planner statistics with ANALYZE separately when stale.`,
+            message: `${formatCount(maintenance.highDeadTupleTableCount)} PostgreSQL table${maintenance.highDeadTupleTableCount === 1 ? " exceeds" : "s exceed"} the dead-tuple maintenance threshold. Review autovacuum behavior and plan VACUUM where needed. Refresh planner statistics with ANALYZE separately when stale.`,
             warning: true,
         });
     }
@@ -126,7 +118,7 @@ function MaintenanceSummary({
 }) {
     const maintenance = observation.summary.maintenance;
     const rows = [
-        ["Status", maintenanceStatusLabel(maintenance.status)],
+        ["Status", maintenanceStatusBadge(maintenance.status)],
         ["Bloat assessment", maintenance.assessmentComplete ? "Complete" : "Incomplete"],
         [
             "Estimated reclaimable",
@@ -147,15 +139,25 @@ function MaintenanceSummary({
     ] as const;
     return (
         <Card aria-labelledby="postgresql-maintenance-summary-heading">
-            <Heading id="postgresql-maintenance-summary-heading" level={2} size="section">
-                Maintenance assessment
-            </Heading>
+            <div className="flex items-center gap-2">
+                <Icon icon={Activity} tone="accent" />
+                <Heading
+                    id="postgresql-maintenance-summary-heading"
+                    level={2}
+                    size="section"
+                >
+                    Maintenance assessment
+                </Heading>
+            </div>
             <Text className="mt-1" tone="muted">
                 Aggregate table-health and reclaimability signals for operator review.
             </Text>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {rows.map(([label, value]) => (
-                    <div className="border-primary-700 rounded-lg border p-3" key={label}>
+                    <div
+                        className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
+                        key={label}
+                    >
                         <dt className="text-primary-400 text-sm">{label}</dt>
                         <dd className="text-primary-50 mt-1 font-medium tabular-nums">
                             {value}
@@ -185,15 +187,21 @@ function PgBouncerSummary({
     ] as const;
     return (
         <Card aria-labelledby="pgbouncer-summary-heading">
-            <Heading id="pgbouncer-summary-heading" level={2} size="section">
-                PgBouncer aggregate
-            </Heading>
+            <div className="flex items-center gap-2">
+                <Icon icon={Network} tone="accent" />
+                <Heading id="pgbouncer-summary-heading" level={2} size="section">
+                    PgBouncer aggregate
+                </Heading>
+            </div>
             <Text className="mt-1" tone="muted">
                 Bounded pool totals without users, hosts, ports, or credentials.
             </Text>
             <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {rows.map(([label, value]) => (
-                    <div className="border-primary-700 rounded-lg border p-3" key={label}>
+                    <div
+                        className="border-primary-700 bg-primary-900/40 rounded-lg border p-3"
+                        key={label}
+                    >
                         <dt className="text-primary-400 text-sm">{label}</dt>
                         <dd className="text-primary-50 mt-1 font-medium tabular-nums">
                             {value}
@@ -206,42 +214,60 @@ function PgBouncerSummary({
 }
 
 interface PostgresqlDatabaseOverviewProps {
-    readonly browserCacheRetained: boolean;
     readonly observation: PostgresqlObservation;
+    readonly observationConfirmed: boolean;
+    readonly onRetry: () => void;
+    readonly retryBusy: boolean;
 }
 
 /** @returns Independent PostgreSQL/PgBouncer availability and bounded observations. */
 export function PostgresqlDatabaseOverview({
-    browserCacheRetained,
     observation,
+    observationConfirmed,
+    onRetry,
+    retryBusy,
 }: PostgresqlDatabaseOverviewProps) {
     if (observation.state === "unavailable") {
+        if (!observationConfirmed) {
+            return (
+                <PageState
+                    label="Revalidating PostgreSQL diagnostics…"
+                    size="lg"
+                    status="loading"
+                />
+            );
+        }
         return (
             <PageState
-                description="No previously verified external observation is available. Dashboard SQLite remains available independently."
-                icon={Database}
-                status="empty"
+                message="No previously verified external observation is available. Dashboard SQLite remains available independently."
+                onRetry={onRetry}
+                retryBusy={retryBusy}
+                status="error"
                 title="PostgreSQL diagnostics unavailable"
             />
         );
     }
 
-    const retained = observation.state === "last-known-good";
+    const retained = observationConfirmed && observation.state === "last-known-good";
     const maintenanceAttention = postgresqlMaintenanceAttention(observation);
-    let observationBadgeLabel = "Fresh observation";
-    if (retained) observationBadgeLabel = "Last-known-good";
-    else if (browserCacheRetained) observationBadgeLabel = "Browser cache retained";
     return (
         <PageState status="ready">
-            <section aria-labelledby="postgresql-overview-heading" className="space-y-6">
-                <Heading id="postgresql-overview-heading" level={2} size="section">
-                    PostgreSQL &amp; PgBouncer overview
+            <section
+                aria-labelledby="postgresql-database-details-heading"
+                className="space-y-6"
+            >
+                <Heading
+                    className="sr-only"
+                    id="postgresql-database-details-heading"
+                    level={2}
+                >
+                    PostgreSQL and PgBouncer details
                 </Heading>
                 {retained ? (
                     <Alert
                         focusOnError={false}
                         message="The latest PostgreSQL/PgBouncer collection failed. Showing the most recent server-verified observation."
-                        variant="info"
+                        variant="warning"
                     />
                 ) : null}
                 {maintenanceAttention.map(({ message, warning }) => (
@@ -252,30 +278,6 @@ export function PostgresqlDatabaseOverview({
                         variant={warning ? "warning" : "info"}
                     />
                 ))}
-                <div className="flex flex-wrap items-center gap-3">
-                    <Badge
-                        variant={retained || browserCacheRetained ? "warning" : "success"}
-                    >
-                        {observationBadgeLabel}
-                    </Badge>
-                    {browserCacheRetained && retained ? (
-                        <Badge variant="warning">Browser cache retained</Badge>
-                    ) : null}
-                    <Text size="sm" tone="muted">
-                        Observed{" "}
-                        <PostgresqlObservationTime
-                            timestampMs={observation.observedAtMs}
-                        />
-                    </Text>
-                    {observation.state === "last-known-good" ? (
-                        <Text size="sm" tone="muted">
-                            Retained since{" "}
-                            <PostgresqlObservationTime
-                                timestampMs={observation.staleSinceMs}
-                            />
-                        </Text>
-                    ) : null}
-                </div>
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     <MetricCard
                         description={`${formatCount(observation.databases.length)} bounded database rows.`}
@@ -302,24 +304,6 @@ export function PostgresqlDatabaseOverview({
                         icon={Activity}
                         title="PgBouncer clients"
                         value={formatCount(observation.pgbouncer.clientConnections)}
-                    />
-                    <MetricCard
-                        description={`${formatCount(observation.summary.maintenance.highDeadTupleTableCount)} high-dead-tuple tables · ${formatCount(observation.summary.maintenance.slowStatementCount)} slow statement aggregates.`}
-                        icon={Wrench}
-                        title="Maintenance"
-                        value={maintenanceStatusLabel(
-                            observation.summary.maintenance.status
-                        )}
-                    />
-                    <MetricCard
-                        description={`${formatCount(observation.statements.length)} identity-free ranked rows.`}
-                        icon={ScrollText}
-                        title="Statement metrics"
-                        value={
-                            observation.summary.pgStatStatementsEnabled
-                                ? "Enabled"
-                                : "Unavailable"
-                        }
                     />
                     <MetricCard
                         description="Dedicated count-only Comet projection."

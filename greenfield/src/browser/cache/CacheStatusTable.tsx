@@ -1,10 +1,11 @@
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 
 import type { CacheEntryStatus } from "../../contracts/cache.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer, type VirtualizerRenderState } from "../ui/Virtualizer.tsx";
@@ -16,7 +17,7 @@ import {
 } from "./cachePresentation.ts";
 
 const minimumVirtualizedRows = 50;
-const cacheStatusTableFeatures = tableFeatures({});
+const cacheStatusTableFeatures = dashboardTableFeatures;
 
 interface CacheStatusTableRow {
     readonly entry: CacheEntryStatus;

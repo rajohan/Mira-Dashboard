@@ -1,12 +1,25 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import { Alert } from "./Alert.tsx";
+import { Button } from "./Button.tsx";
 
-const { render, screen } = await import("@testing-library/react");
+const { render, screen, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
 describe("Alert", () => {
+    test("renders an action inside the feedback region", () => {
+        render(
+            <Alert
+                action={<Button>Try again</Button>}
+                message="Retained data is shown."
+                variant="warning"
+            />
+        );
+
+        const status = screen.getByRole("status");
+        expect(within(status).getByRole("button", { name: "Try again" })).toBeVisible();
+    });
     test("keeps dismissal optional", () => {
         render(<Alert message="The schedule could not be saved." />);
 

@@ -82,13 +82,13 @@ function notificationActionFailureMessage(
 ): string | undefined {
     if (error === null) return undefined;
     if (error instanceof NotificationBulkProtocolError) {
-        return "The notification action stopped because the server made no progress. A refresh was requested; confirm the current state before retrying.";
+        return "The notification action stopped because the server made no progress. A refresh was requested. Confirm the current state before retrying.";
     }
     if (classifyDashboardBrowserFailure(error) === "not-found") {
         return "This notification no longer exists.";
     }
     if (bulk) {
-        return "The bulk action may have completed partially. A refresh was requested; confirm the current state before retrying.";
+        return "The bulk action may have completed partially. A refresh was requested. Confirm the current state before retrying.";
     }
     return dashboardBrowserFailureMessage(error);
 }
@@ -370,6 +370,18 @@ export function NotificationPanel({
 
             <Alert className="mt-3" focusOnError={false} message={actionError} />
             <Alert
+                action={
+                    latestError === null ? undefined : (
+                        <Button
+                            disabled={actionsDisabled}
+                            onClick={retryLatest}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            Try again
+                        </Button>
+                    )
+                }
                 className="mt-3"
                 message={
                     latestError === null && history.error === null
@@ -377,17 +389,6 @@ export function NotificationPanel({
                         : dashboardBrowserFailureMessage(latestError ?? history.error)
                 }
             />
-            {latestError !== null && (
-                <Button
-                    className="mt-3"
-                    disabled={actionsDisabled}
-                    onClick={retryLatest}
-                    size="sm"
-                    variant="secondary"
-                >
-                    Try again
-                </Button>
-            )}
             <Alert className="mt-3" message={successMessage} variant="success" />
 
             {!latestReady && latestLoading && (

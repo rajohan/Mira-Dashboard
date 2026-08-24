@@ -14,6 +14,7 @@
 
 | Package | Declared | Resolved | Scope |
 | --- | --- | --- | --- |
+| `@date-fns/tz` | `^1.5.0` | `1.5.0` | runtime |
 | `@daypicker/react` | `10.0.1` | `10.0.1` | runtime |
 | `@dnd-kit/react` | `^0.5.0` | `0.5.0` | runtime |
 | `@headlessui/react` | `^2.2.10` | `2.2.10` | runtime |

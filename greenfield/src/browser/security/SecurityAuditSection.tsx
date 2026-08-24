@@ -1,5 +1,10 @@
-import { useInfiniteQuery, infiniteQueryOptions } from "@tanstack/react-query";
-import { createColumnHelper, tableFeatures, useTable } from "@tanstack/react-table";
+import {
+    useInfiniteQuery,
+    infiniteQueryOptions,
+    queryOptions,
+    useQuery,
+} from "@tanstack/react-query";
+import { createColumnHelper, useTable } from "@tanstack/react-table";
 import { RefreshCw, ScrollText } from "lucide-react";
 import { useRef, type ReactNode, type UIEvent } from "react";
 
@@ -8,12 +13,19 @@ import type {
     ListSecurityAuditEventsResult,
     SecurityAuditEventSummary,
 } from "../../contracts/securityAudit.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+    liveHistoryRowIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { formatDashboardDateTimeParts } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { dashboardTableFeatures } from "../ui/dashboardTableFeatures.ts";
 import { DataTable } from "../ui/DataTable.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -27,7 +39,7 @@ type SecurityAuditCursor = NonNullable<ListSecurityAuditEventsInput["cursor"]>;
 const emptyAuditEvents: readonly SecurityAuditEventSummary[] = Object.freeze([]);
 const minimumVirtualizedAuditRows = 50;
 
-const auditTableFeatures = tableFeatures({});
+const auditTableFeatures = dashboardTableFeatures;
 const auditTableClassName = "min-w-240 table-fixed";
 const auditColumnWidths = Object.freeze({
     action: "17%",
@@ -95,6 +107,7 @@ const auditColumns = auditColumnHelper.columns([
             </div>
         ),
         header: "Event",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor((event) => actorLabel(event.actor), {
         cell: ({ getValue }) => (
@@ -102,6 +115,7 @@ const auditColumns = auditColumnHelper.columns([
         ),
         header: "Who",
         id: "actor",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor((event) => targetLabel(event.target), {
         cell: ({ getValue }) => (
@@ -109,6 +123,7 @@ const auditColumns = auditColumnHelper.columns([
         ),
         header: "Affected item",
         id: "target",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor("occurredAtMs", {
         cell: ({ getValue }) => {
@@ -128,6 +143,7 @@ const auditColumns = auditColumnHelper.columns([
             );
         },
         header: "Time",
+        enableSorting: false,
     }),
     auditColumnHelper.accessor((event) => metadataLabel(event.metadata), {
         cell: ({ getValue }) => (
@@ -135,6 +151,7 @@ const auditColumns = auditColumnHelper.columns([
         ),
         header: "Details",
         id: "metadata",
+        enableSorting: false,
     }),
 ]);
 
@@ -190,16 +207,15 @@ function SecurityAuditTable({
     } else if (loadMoreError !== undefined) {
         footer = (
             <div className="p-3">
-                <Alert message={loadMoreError} />
-                <Button
-                    className="mt-3"
-                    onClick={onLoadMore}
-                    size="sm"
-                    variant="secondary"
-                >
-                    <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                    Try again
-                </Button>
+                <Alert
+                    action={
+                        <Button onClick={onLoadMore} size="sm" variant="secondary">
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Try again
+                        </Button>
+                    }
+                    message={loadMoreError}
+                />
             </div>
         );
     } else if (hasMore && rows.length < minimumVirtualizedAuditRows) {
@@ -264,13 +280,27 @@ export function SecurityAuditSection() {
                     { signal }
                 ),
             getNextPageParam: (lastPage) => lastPage.nextCursor,
-            queryKey: securityAuditQueryKey,
+            queryKey: liveHistoryArchiveQueryKey(securityAuditQueryKey),
+            retry: false,
+            staleTime: Number.POSITIVE_INFINITY,
+        })
+    );
+    const liveHead = useQuery(
+        queryOptions({
+            queryFn: ({ signal }): Promise<ListSecurityAuditEventsResult> =>
+                client.query("securityAudit.listEvents", { limit: 50 }, { signal }),
+            queryKey: liveHistoryHeadQueryKey(securityAuditQueryKey),
             retry: false,
             staleTime: 0,
         })
     );
-    const auditEvents =
-        events.data?.pages.flatMap((page) => page.events) ?? emptyAuditEvents;
+    const auditEvents = useAccumulatedLiveHistoryRows(
+        liveHead.data?.events ?? emptyAuditEvents,
+        events.data?.pages.flatMap((page) => page.events) ?? emptyAuditEvents,
+        liveHistoryRowIdentity,
+        "security-audit"
+    );
+    const initialError = liveHead.error ?? events.error;
 
     return (
         <SecuritySection
@@ -279,28 +309,54 @@ export function SecurityAuditSection() {
             icon={ScrollText}
             title="Security audit"
         >
-            {events.isPending && (
+            {liveHead.isPending && events.isPending && (
                 <LoadingState label="Loading security events…" size="sm" />
             )}
-            {events.isError && auditEvents.length === 0 && (
-                <div>
-                    <Alert message={dashboardBrowserFailureMessage(events.error)} />
-                    <Button
-                        className="mt-3"
-                        onClick={() => void events.refetch()}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Try again
-                    </Button>
-                </div>
+            {initialError !== null && auditEvents.length === 0 && (
+                <Alert
+                    action={
+                        <Button
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    liveHead.refetch(),
+                                    events.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Try again
+                        </Button>
+                    }
+                    message={dashboardBrowserFailureMessage(initialError)}
+                />
             )}
-            {events.isSuccess && auditEvents.length === 0 && (
+            {liveHead.isSuccess && events.isSuccess && auditEvents.length === 0 && (
                 <EmptyState
                     description="Security events will appear here after account or access settings change."
                     icon={ScrollText}
                     title="No security events"
+                />
+            )}
+            {initialError !== null && auditEvents.length > 0 && (
+                <Alert
+                    action={
+                        <Button
+                            onClick={() =>
+                                void Promise.allSettled([
+                                    liveHead.refetch(),
+                                    events.refetch(),
+                                ])
+                            }
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Try again
+                        </Button>
+                    }
+                    message={dashboardBrowserFailureMessage(initialError)}
                 />
             )}
             {auditEvents.length > 0 && (

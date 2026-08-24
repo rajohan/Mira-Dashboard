@@ -219,6 +219,45 @@ describe("database observability service", () => {
         expect(JSON.stringify(result)).not.toContain("validate-only");
     });
 
+    test("captures the response clock after asynchronous lifecycle observations", async () => {
+        const clock = [2000, 2002];
+        const service = createDatabaseObservabilityService({
+            lifecycleReader: {
+                read: () =>
+                    Promise.resolve({
+                        backupInventory: {
+                            backups: [],
+                            observedAtMs: 2001,
+                            state: "available" as const,
+                            totalBytes: 0,
+                        },
+                        maintenance: {
+                            reason: "maintenance-unavailable" as const,
+                            state: "unavailable" as const,
+                        },
+                        restoreVerification: {
+                            reason: "no-verified-backup" as const,
+                            state: "unavailable" as const,
+                        },
+                    }),
+            },
+            nowMs: () => clock.shift() ?? 2002,
+            readDiagnostics: () => Promise.resolve(diagnostics),
+        });
+
+        const result = await service.read();
+        expect(result).toMatchObject({
+            checkedAtMs: 2002,
+            sqlite: {
+                lifecycle: {
+                    backupInventory: { observedAtMs: 2001, state: "available" },
+                },
+                observedAtMs: 2002,
+                state: "fresh",
+            },
+        });
+    });
+
     test("treats an already-validated runtime as fully migrated", async () => {
         const service = createDatabaseObservabilityService({
             nowMs: () => 2000,
@@ -297,6 +336,57 @@ describe("database observability service", () => {
             checkedAtMs: 31_001,
             postgresql: { state: "unavailable" },
             sqlite: { state: "unavailable" },
+        });
+    });
+
+    test("refreshes the fallback response clock after diagnostics reject", async () => {
+        let nowMs = 1000;
+        let readAttempts = 0;
+        const service = createDatabaseObservabilityService({
+            nowMs: () => nowMs,
+            readDiagnostics: () => {
+                readAttempts += 1;
+                if (readAttempts === 1) return Promise.resolve(diagnostics);
+                nowMs = 3000;
+                return Promise.reject(new Error("private SQL failure"));
+            },
+        });
+
+        await service.read();
+        nowMs = 2000;
+        const retained = await service.read();
+
+        expect(retained).toMatchObject({
+            checkedAtMs: 3000,
+            sqlite: {
+                observedAtMs: 1000,
+                staleSinceMs: 3000,
+                state: "last-known-good",
+            },
+        });
+    });
+
+    test("retains SQLite data across a transient failure at the browser poll interval", async () => {
+        let nowMs = 1000;
+        let readAttempts = 0;
+        const service = createDatabaseObservabilityService({
+            nowMs: () => nowMs,
+            readDiagnostics: () => {
+                readAttempts += 1;
+                return readAttempts === 1
+                    ? Promise.resolve(diagnostics)
+                    : Promise.reject(new Error("transient SQLite failure"));
+            },
+        });
+
+        await service.read();
+        nowMs += 60_000;
+        const retained = await service.read();
+
+        expect(retained.sqlite).toMatchObject({
+            observedAtMs: 1000,
+            staleSinceMs: 61_000,
+            state: "last-known-good",
         });
     });
 

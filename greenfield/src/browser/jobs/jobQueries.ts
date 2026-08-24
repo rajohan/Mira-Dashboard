@@ -17,6 +17,11 @@ import type {
     ListSchedulesInput,
     ListSchedulesResult,
 } from "../../contracts/schedules.ts";
+import {
+    liveHistoryArchiveQueryRoot,
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 
 export type JobRunCursor = NonNullable<ListJobRunsInput["cursor"]>;
@@ -37,6 +42,24 @@ export const scheduleRunListQueryRoot = [...scheduleQueryKey, "runs"] as const;
 
 /** Foreground refresh cadence for time-derived queue and live-worker summaries. */
 export const jobQueueSummaryRefreshIntervalMs = 10_000;
+
+/**
+ * @param loadedActiveRunCount Active rows currently represented in loaded history.
+ * @param loadedCompletedRunCount Terminal rows currently represented in loaded history.
+ * @param reportedActiveRunCount Active rows reported by the bounded queue summary.
+ * @returns Whether observer-driven pagination should continue filling history.
+ */
+export function jobHistoryNeedsInitialFill(
+    loadedActiveRunCount: number,
+    loadedCompletedRunCount: number,
+    reportedActiveRunCount?: number
+): boolean {
+    return (
+        (reportedActiveRunCount !== undefined &&
+            loadedActiveRunCount < reportedActiveRunCount) ||
+        (loadedActiveRunCount < 50 && loadedCompletedRunCount < 50)
+    );
+}
 
 /**
  * Removes repeated identities while preserving the first, newest-page occurrence.
@@ -151,8 +174,26 @@ export function jobRunListQueryOptions(
                 { signal }
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
-        queryKey: jobRunListQueryKey(filters),
-        staleTime: 10_000,
+        queryKey: liveHistoryArchiveQueryKey(jobRunListQueryKey(filters)),
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Polling first-page projection for current global runs. */
+export function jobRunLiveHeadQueryOptions(
+    client: DashboardTrpcClient,
+    filters: ListJobRunsInput["filters"]
+) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListJobRunsResult> =>
+            client.query(
+                "jobs.listRuns",
+                { ...(filters === undefined ? {} : { filters }), limit: 100 },
+                { signal }
+            ),
+        queryKey: liveHistoryHeadQueryKey(jobRunListQueryKey(filters)),
+        refetchInterval: jobQueueSummaryRefreshIntervalMs,
+        staleTime: jobQueueSummaryRefreshIntervalMs,
     });
 }
 
@@ -352,8 +393,19 @@ export function scheduleRunListQueryOptions(client: DashboardTrpcClient, id: str
                 { signal }
             ),
         getNextPageParam: (lastPage) => lastPage.nextCursor,
-        queryKey: scheduleRunListQueryKey(id),
-        staleTime: 10_000,
+        queryKey: liveHistoryArchiveQueryKey(scheduleRunListQueryKey(id)),
+        staleTime: Number.POSITIVE_INFINITY,
+    });
+}
+
+/** @returns Polling first-page projection for one schedule's current runs. */
+export function scheduleRunLiveHeadQueryOptions(client: DashboardTrpcClient, id: string) {
+    return queryOptions({
+        queryFn: ({ signal }): Promise<ListScheduleRunsResult> =>
+            client.query("schedules.listRuns", { id, limit: 100 }, { signal }),
+        queryKey: liveHistoryHeadQueryKey(scheduleRunListQueryKey(id)),
+        refetchInterval: jobQueueSummaryRefreshIntervalMs,
+        staleTime: jobQueueSummaryRefreshIntervalMs,
     });
 }
 
@@ -361,7 +413,9 @@ export function scheduleRunListQueryOptions(client: DashboardTrpcClient, id: str
 export async function refreshJobQueries(queryClient: QueryClient): Promise<void> {
     await queryClient.invalidateQueries({
         predicate: ({ queryKey }) =>
-            queryKey[0] === jobQueryKey[0] &&
+            (queryKey[0] === jobQueryKey[0] ||
+                (queryKey[0] === liveHistoryArchiveQueryRoot[0] &&
+                    queryKey[1] === jobQueryKey[0])) &&
             !jobRunEventHistoryQueryRoot.every(
                 (segment, index) => queryKey[index] === segment
             ),
@@ -370,7 +424,12 @@ export async function refreshJobQueries(queryClient: QueryClient): Promise<void>
 
 /** Invalidates the schedule directory, details, and schedule-scoped histories. */
 export async function refreshScheduleQueries(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: scheduleQueryKey });
+    await queryClient.invalidateQueries({
+        predicate: ({ queryKey }) =>
+            queryKey[0] === scheduleQueryKey[0] ||
+            (queryKey[0] === liveHistoryArchiveQueryRoot[0] &&
+                queryKey[1] === scheduleQueryKey[0]),
+    });
 }
 
 /** Invalidates projections shared by durable run and schedule mutations. */

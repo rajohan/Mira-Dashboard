@@ -82,7 +82,7 @@ export const deliveryPullRequestGroupLabels: Readonly<
     Record<DeliveryPullRequestGroupKind, string>
 > = {
     "candidate-stack": "Stack candidates",
-    "native-stack": "Native stacks",
+    "native-stack": "GitHub stacks",
     "read-only-chain": "Read-only chains",
     "standalone-external": "Dependency and external pull requests",
     "standalone-mira": "Mira pull requests",

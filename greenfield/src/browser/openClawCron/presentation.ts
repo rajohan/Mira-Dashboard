@@ -222,7 +222,27 @@ export function editableOpenClawCronPatch(job: OpenClawCronJob): UpdateOpenClawC
 }
 
 export function openClawCronPatchJson(job: OpenClawCronJob): string {
-    return JSON.stringify(editableOpenClawCronPatch(job), null, 2);
+    const patch = editableOpenClawCronPatch(job);
+    if (
+        job.payload.kind === "heartbeat" &&
+        job.scratch !== undefined &&
+        !job.scratch.truncated
+    ) {
+        const { scratch, ...definition } = patch;
+        void scratch;
+        return JSON.stringify(
+            {
+                ...definition,
+                payload: {
+                    kind: "heartbeat",
+                    message: job.scratch.content,
+                },
+            },
+            null,
+            2
+        );
+    }
+    return JSON.stringify(patch, null, 2);
 }
 
 export type OpenClawCronPatchParseResult =
@@ -268,6 +288,31 @@ export function parseOpenClawCronPatchJson(
         decoded = JSON.parse(value) as unknown;
     } catch {
         return { message: "Enter valid JSON.", success: false };
+    }
+    if (
+        job.payload.kind === "heartbeat" &&
+        typeof decoded === "object" &&
+        decoded !== null &&
+        !Array.isArray(decoded)
+    ) {
+        const candidate = decoded as Record<string, unknown>;
+        const payload = candidate.payload;
+        if (
+            typeof payload === "object" &&
+            payload !== null &&
+            !Array.isArray(payload) &&
+            Object.keys(payload).length === 2 &&
+            (payload as Record<string, unknown>).kind === "heartbeat" &&
+            typeof (payload as Record<string, unknown>).message === "string" &&
+            candidate.scratch === undefined
+        ) {
+            const { payload: ignoredPayload, ...definition } = candidate;
+            void ignoredPayload;
+            decoded = {
+                ...definition,
+                scratch: (payload as Record<string, unknown>).message,
+            };
+        }
     }
     const parsed = v.safeParse(updateOpenClawCronPatchObjectSchema, decoded, {
         abortEarly: true,

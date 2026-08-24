@@ -1,8 +1,10 @@
+import { TZDate } from "@date-fns/tz";
 import { isValid, parse as parseDate, setYear } from "date-fns";
 
 import { logLineMaximumCharacters, type LogLine } from "../../contracts/logs.ts";
 
 const detailFieldMaximum = 8;
+const dashboardHostTimeZone = "Europe/Oslo";
 const maximumDateTimestamp = 8_640_000_000_000_000;
 const nestedCollectionItemMaximum = 6;
 const nestedDepthMaximum = 3;
@@ -463,6 +465,29 @@ function textTimestamp(
         : undefined;
 }
 
+function hostLocalTimestamp(value: string): number | undefined {
+    const match =
+        /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?$/u.exec(
+            value
+        );
+    if (match === null) return undefined;
+    const timestamp = TZDate.tz(
+        dashboardHostTimeZone,
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+        Number(match[6]),
+        Number((match[7] ?? "").slice(0, 3).padEnd(3, "0"))
+    ).getTime();
+    return Number.isSafeInteger(timestamp) &&
+        timestamp >= 0 &&
+        timestamp <= maximumDateTimestamp
+        ? timestamp
+        : undefined;
+}
+
 function processPrefix(
     value: string,
     includesHost: boolean
@@ -504,7 +529,22 @@ function severityPrefix(value: string): Readonly<{
 function textPrefix(
     value: string,
     context: RedactedLogLinePresentationContext
-): Pick<TextLogEnvelope, "message" | "source" | "timestampMs"> {
+): Pick<TextLogEnvelope, "level" | "message" | "source" | "timestampMs"> {
+    if (context.sourceId === "host.apport") {
+        const apport =
+            /^(TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL):\s+apport(?:\s+\(pid\s+\d+\))?\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?):\s*(.*)$/iu.exec(
+                value
+            );
+        if (apport !== null) {
+            return {
+                level: normalizeSeverity(apport[1]),
+                message: apport[3] ?? "",
+                source: "apport",
+                timestampMs: hostLocalTimestamp(apport[2]!),
+            };
+        }
+    }
+
     const sourceThenIso =
         /^([A-Za-z0-9_.@/-]{1,80})\s+(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?):\s*(.*)$/u.exec(
             value
@@ -565,7 +605,7 @@ function presentTextEnvelope(
     const sourcePrefix = sourcePrefixFromMessage(severity.message);
     return {
         facility: facilityFromPriority(priority),
-        level: severity.level ?? severityFromPriority(priority),
+        level: prefix.level ?? severity.level ?? severityFromPriority(priority),
         message: sourcePrefix.message,
         source:
             prefix.source ?? sourcePrefix.source ?? sourceHintFromId(context.sourceId),

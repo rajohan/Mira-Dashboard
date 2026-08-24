@@ -146,7 +146,7 @@ describe("RecoveryCodesPresentationProvider", () => {
         expect(screen.getAllByRole("dialog")).toHaveLength(1);
         expect(
             within(dialog).getByText(
-                "These full codes are shown once. Store them offline; do not put them in Dashboard notes or screenshots."
+                "These full codes are shown once. Store them offline. Do not put them in Dashboard notes or screenshots."
             )
         ).toBeTruthy();
         for (const code of codes) expect(within(dialog).getByText(code)).toBeTruthy();

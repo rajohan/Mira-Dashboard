@@ -80,13 +80,11 @@ test("logs route explains the redacted operator surface and composes its browser
     try {
         expect(
             await screen.findByRole("heading", { level: 1, name: "Logs" })
-        ).toBeVisible();
-        expect(screen.getByText("Operations")).toBeVisible();
+        ).toHaveClass("sr-only");
+        expect(screen.queryByText("Operations")).toBeNull();
         expect(
-            screen.getByText(
-                /Sensitive values are removed before display, and queued maintenance jobs require recent multi-factor authentication/u
-            )
-        ).toBeVisible();
+            screen.queryByText(/View recent lines from configured sources/u)
+        ).toBeNull();
         expect(
             await screen.findByRole("heading", { name: "No log sources" })
         ).toBeVisible();

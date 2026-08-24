@@ -19,7 +19,7 @@ import type { DatabaseRuntimeObservation } from "../../database/runtime/database
 import type { SqliteLifecycleReader } from "./sqliteLifecycle.ts";
 
 /** Maximum age of a retained successful SQLite observation after a read failure. */
-export const databaseObservabilityLastKnownGoodMs = 30_000;
+export const databaseObservabilityLastKnownGoodMs = 24 * 60 * 60_000;
 
 export interface DatabaseObservabilityService {
     read(): Promise<DatabaseOverview>;
@@ -222,18 +222,15 @@ export function createDatabaseObservabilityService(
     let staleSinceMs: number | undefined;
 
     const load = async (): Promise<DatabaseOverview> => {
-        let checkedAtMs: number;
+        let checkedAtMs = 0;
         try {
             checkedAtMs = checkedTime(nowMs);
         } catch {
-            checkedAtMs = 0;
+            // An invalid clock is handled by the bounded unavailable fallback.
         }
-        let postgresql: DatabaseOverview["postgresql"] = { state: "unavailable" };
+        let postgresqlRecord: DatabaseObservabilitySnapshotRecord | undefined;
         try {
-            postgresql = projectExternalSnapshot(
-                options.snapshotRepository?.read(),
-                checkedAtMs
-            );
+            postgresqlRecord = options.snapshotRepository?.read();
         } catch {
             // External cache corruption or read failure cannot suppress SQLite.
         }
@@ -260,6 +257,15 @@ export function createDatabaseObservabilityService(
                 }
             }
             const diagnostics = await options.readDiagnostics();
+            // Collection boundaries may timestamp observations while awaiting I/O.
+            // Capture the response clock afterwards so every nested timestamp is causal.
+            checkedAtMs = checkedTime(nowMs);
+            let postgresql: DatabaseOverview["postgresql"] = { state: "unavailable" };
+            try {
+                postgresql = projectExternalSnapshot(postgresqlRecord, checkedAtMs);
+            } catch {
+                // External cache corruption cannot suppress SQLite.
+            }
             const sqlite = projectDiagnostics(diagnostics, checkedAtMs, lifecycle);
             const result = v.parse(databaseOverviewSchema, {
                 checkedAtMs,
@@ -270,6 +276,17 @@ export function createDatabaseObservabilityService(
             staleSinceMs = undefined;
             return result;
         } catch {
+            try {
+                checkedAtMs = checkedTime(nowMs);
+            } catch {
+                // Keep the bounded unavailable fallback timestamp.
+            }
+            let postgresql: DatabaseOverview["postgresql"] = { state: "unavailable" };
+            try {
+                postgresql = projectExternalSnapshot(postgresqlRecord, checkedAtMs);
+            } catch {
+                // External cache corruption cannot suppress SQLite fallback state.
+            }
             const ageMs =
                 lastKnownGood === undefined
                     ? Number.POSITIVE_INFINITY

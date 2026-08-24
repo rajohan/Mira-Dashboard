@@ -1,19 +1,26 @@
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import type {
     OpenClawCronJob,
     UpdateOpenClawCronPatch,
 } from "../../contracts/openClawCron.ts";
+import {
+    liveHistoryRunIdentity,
+    useAccumulatedLiveHistoryRows,
+} from "../api/liveHistory.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { gatewaySessionQueryOptions } from "../sessions/gatewaySessionQueries.ts";
 import type { OpenClawCronDisableDraft } from "./OpenClawCronDisableDialog.tsx";
 import {
     accumulateOpenClawCronInventoryPages,
     accumulateOpenClawCronRunPages,
+    openClawCronDetailQueryOptions,
     openClawCronListQueryOptions,
     openClawCronQueryKey,
+    openClawCronRunsLiveHeadQueryOptions,
     openClawCronRunsQueryOptions,
     reconcileOpenClawCronQueries,
     refreshOpenClawCronQueries,
@@ -73,10 +80,55 @@ export function OpenClawCronBrowser({
         orderedJobs.some((job) => job.id === (selectedJobId ?? selectedId))
             ? (selectedJobId ?? selectedId)
             : undefined) ?? orderedJobs.at(0)?.id;
+    const selectedJob = orderedJobs.find((job) => job.id === effectiveSelectedId);
+    const heartbeatDetail = useQuery({
+        ...openClawCronDetailQueryOptions(client, effectiveSelectedId ?? ""),
+        enabled:
+            effectiveSelectedId !== undefined &&
+            selectedJob?.payload.kind === "heartbeat",
+    });
+    const heartbeatSessions = useQuery({
+        ...gatewaySessionQueryOptions(client),
+        enabled: selectedJob?.payload.kind === "heartbeat",
+    });
+    const heartbeatSession = heartbeatSessions.data?.sessions.find(
+        (session) =>
+            session.key === `agent:${selectedJob?.agentId ?? "main"}:main:heartbeat`
+    );
     const runs = useInfiniteQuery(
         openClawCronRunsQueryOptions(client, effectiveSelectedId)
     );
-    const runsAccumulation = accumulateOpenClawCronRunPages(runs.data?.pages ?? []);
+    const runsLiveHead = useQuery(
+        openClawCronRunsLiveHeadQueryOptions(client, effectiveSelectedId)
+    );
+    const archiveRunsAccumulation = accumulateOpenClawCronRunPages(
+        runs.data?.pages ?? []
+    );
+    const accumulatedRuns = useAccumulatedLiveHistoryRows(
+        runsLiveHead.data?.runs ?? [],
+        archiveRunsAccumulation?.result.runs ?? [],
+        liveHistoryRunIdentity,
+        effectiveSelectedId ?? ""
+    );
+    const runsAccumulation = (() => {
+        const live = runsLiveHead.data;
+        const archive = archiveRunsAccumulation?.result;
+        if (live === undefined) return archiveRunsAccumulation;
+        if (archive === undefined) {
+            return {
+                result: { ...live, runs: accumulatedRuns },
+                stable: true as const,
+            };
+        }
+        return {
+            result: {
+                ...archive,
+                freshness: live.freshness,
+                runs: accumulatedRuns,
+            },
+            stable: archiveRunsAccumulation?.stable ?? true,
+        };
+    })();
     const mutation = useMutation<void, Error, OpenClawCronMutation>({
         mutationFn: (operation) =>
             boundary.run(async (signal) => {
@@ -159,7 +211,26 @@ export function OpenClawCronBrowser({
                 status: "error" as const,
             };
         }
-        return { result: inventoryAccumulation.result, status: "ready" as const };
+        const detailedHeartbeat = heartbeatDetail.data?.job;
+        const detailedHeartbeatFreshness = heartbeatDetail.data?.freshness;
+        return {
+            result:
+                detailedHeartbeat === undefined ||
+                detailedHeartbeat.id !== effectiveSelectedId
+                    ? inventoryAccumulation.result
+                    : {
+                          ...inventoryAccumulation.result,
+                          ...(detailedHeartbeatFreshness?.kind === "last-known-good"
+                              ? { freshness: detailedHeartbeatFreshness }
+                              : {}),
+                          jobs: inventoryAccumulation.result.jobs.map((job) =>
+                              job.id === detailedHeartbeat.id
+                                  ? { ...job, scratch: detailedHeartbeat.scratch }
+                                  : job
+                          ),
+                      },
+            status: "ready" as const,
+        };
     })();
 
     const paginationWarning =
@@ -170,18 +241,36 @@ export function OpenClawCronBrowser({
     if (runsAccumulation?.stable === false) {
         runsError =
             "OpenClaw run history changed while older runs were loading. Refresh before continuing.";
-    } else if (runs.error !== null) {
-        runsError = dashboardBrowserFailureMessage(runs.error);
+    } else if (runsLiveHead.error !== null || runs.error !== null) {
+        runsError = dashboardBrowserFailureMessage(runsLiveHead.error ?? runs.error);
     }
+    const inventoryRefreshFailed =
+        inventory.data !== undefined && inventory.error !== null;
+    const runsRefreshFailed =
+        runsAccumulation?.stable !== false &&
+        (runsLiveHead.error !== null || runs.error !== null);
+    let backgroundError = paginationWarning;
+    if (inventoryRefreshFailed) {
+        backgroundError = runsRefreshFailed
+            ? undefined
+            : dashboardBrowserFailureMessage(inventory.error);
+    }
+    let heartbeatSessionStatus: "loading" | "ready" | "unavailable";
+    if (heartbeatSessions.data !== undefined) heartbeatSessionStatus = "ready";
+    else if (heartbeatSessions.isPending) heartbeatSessionStatus = "loading";
+    else heartbeatSessionStatus = "unavailable";
+    const loadMoreRuns = async () => {
+        const rebased = await runs.refetch();
+        if (rebased.isError) return;
+        await runs.fetchNextPage();
+    };
 
     return (
         <OpenClawCronSection
-            backgroundError={
-                inventory.data !== undefined && inventory.error !== null
-                    ? dashboardBrowserFailureMessage(inventory.error)
-                    : paginationWarning
-            }
+            backgroundError={backgroundError}
             jobsLoadingMore={inventory.isFetchingNextPage}
+            heartbeatSession={heartbeatSession}
+            heartbeatSessionStatus={heartbeatSessionStatus}
             onDelete={(job) => mutation.mutateAsync({ job, kind: "delete" })}
             onLoadMoreJobs={
                 inventory.hasNextPage && inventoryAccumulation?.stable !== false
@@ -189,8 +278,8 @@ export function OpenClawCronBrowser({
                     : undefined
             }
             onLoadMoreRuns={
-                runs.hasNextPage && runsAccumulation?.stable !== false
-                    ? () => void runs.fetchNextPage()
+                runs.hasNextPage && !runs.isFetching && runsAccumulation?.stable !== false
+                    ? () => void loadMoreRuns()
                     : undefined
             }
             onReconcile={async () => {
@@ -202,7 +291,9 @@ export function OpenClawCronBrowser({
                 return boundary.completionIsCurrent() && reconciled;
             }}
             onRetry={() => void inventory.refetch()}
-            onRetryRuns={() => void runs.refetch()}
+            onRetryRuns={() =>
+                void Promise.allSettled([runsLiveHead.refetch(), runs.refetch()])
+            }
             onRun={(job) => mutation.mutateAsync({ job, kind: "run" })}
             onSelectJob={(job) => {
                 setSelectedId(job.id);
@@ -217,8 +308,10 @@ export function OpenClawCronBrowser({
             runs={runsAccumulation?.result}
             runsError={runsError}
             runsJobId={effectiveSelectedId}
-            runsLoading={runs.isFetching && !runs.isFetchingNextPage}
-            runsLoadingMore={runs.isFetchingNextPage}
+            runsLoading={
+                (runsLiveHead.isFetching || runs.isFetching) && !runs.isFetchingNextPage
+            }
+            runsLoadingMore={runs.isFetching && runs.data !== undefined}
             selectedJobId={effectiveSelectedId}
             state={state}
         />
