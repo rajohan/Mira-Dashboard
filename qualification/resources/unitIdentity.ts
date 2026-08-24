@@ -1,0 +1,79 @@
+import path from "node:path";
+
+const unitIdentifierPattern = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
+const unitNamePattern =
+    /^mira-dashboard-sse-memory-[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
+
+/**
+ * Creates a unique systemd unit name without accepting user-controlled fragments.
+ * @param identifier UUID-compatible random identifier.
+ * @returns Valid transient service name without the `.service` suffix.
+ */
+export function createSseMemoryUnitName(
+    identifier: string = crypto.randomUUID()
+): string {
+    if (!unitIdentifierPattern.test(identifier)) {
+        throw new TypeError("SSE memory qualification unit identifier is invalid");
+    }
+    return `mira-dashboard-sse-memory-${identifier}`;
+}
+
+/**
+ * Requires the exact unit-name grammar used by the capped qualification.
+ * @param unitName Candidate transient unit name.
+ */
+export function assertSseMemoryUnitName(unitName: string): void {
+    if (!unitNamePattern.test(unitName)) {
+        throw new TypeError("SSE memory qualification unit name is invalid");
+    }
+}
+
+/**
+ * Requires a process to run inside the transient unit created by its parent.
+ * @param cgroupPath Current process cgroup path.
+ * @param expectedPath Exact cgroup path derived by the parent.
+ */
+export function assertSseMemoryUnitCgroupPath(
+    cgroupPath: string,
+    expectedPath: string
+): void {
+    if (cgroupPath !== expectedPath) {
+        throw new Error(
+            `SSE memory qualification expected cgroup ${expectedPath}; observed ${cgroupPath}`
+        );
+    }
+}
+
+/**
+ * Returns the deterministic cgroup path for an explicitly app.slice-bound user unit.
+ * @param userId POSIX user ID that owns the user manager.
+ * @param unitName Validated transient service name.
+ * @returns Exact unified cgroup path for the transient unit.
+ */
+export function expectedSseMemoryUnitCgroupPath(
+    userId: number,
+    unitName: string
+): string {
+    assertSseMemoryUnitName(unitName);
+    if (!Number.isSafeInteger(userId) || userId < 0) {
+        throw new TypeError("SSE memory qualification user ID is invalid");
+    }
+    return path.posix.join(
+        "/user.slice",
+        `user-${userId}.slice`,
+        `user@${userId}.service`,
+        "app.slice",
+        `${unitName}.service`
+    );
+}
+
+/**
+ * Returns the POSIX user ID required by the Linux cgroup qualification.
+ * @returns Current POSIX user ID.
+ */
+export function currentQualificationUserId(): number {
+    if (process.getuid === undefined) {
+        throw new Error("SSE memory qualification requires a POSIX user ID");
+    }
+    return process.getuid();
+}

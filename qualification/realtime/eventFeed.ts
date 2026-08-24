@@ -1,13 +1,32 @@
 /** Data carried by the qualification event stream. */
 export interface QualificationEventData {
-    kind: "qualification.changed";
-    value: number;
+    readonly kind: "qualification.changed";
+    readonly payload?: string;
+    readonly value: number;
 }
 
 /** A durable-style event record with a monotonically increasing string ID. */
 export interface QualificationEventRecord {
-    data: QualificationEventData;
-    id: string;
+    readonly data: QualificationEventData;
+    readonly id: string;
+}
+
+/** Fixed event and subscriber budgets used by the qualification feed. */
+export const qualificationEventLimits = Object.freeze({
+    maximumPayloadBytes: 8192,
+    maximumRetainedEvents: 128,
+    maximumSubscriberQueueEvents: 16,
+    maximumSubscriberQueuedPayloadBytes: 16 * 8192,
+});
+
+/** Point-in-time operational measurements for a qualification event feed. */
+export interface QualificationEventFeedMetrics {
+    readonly activeSubscribers: number;
+    readonly droppedSlowSubscribers: number;
+    readonly latestSequence: number;
+    readonly maximumObservedQueueDepth: number;
+    readonly maximumObservedQueuedPayloadBytes: number;
+    readonly retainedEvents: number;
 }
 
 interface EventSubscriptionOptions {
@@ -20,17 +39,48 @@ interface PendingRead<T> {
     resolve: (result: IteratorResult<T>) => void;
 }
 
-const maximumSubscriberQueueSize = 16;
-const maximumRetainedEvents = 128;
+interface QueuedValue<T> {
+    readonly payloadBytes: number;
+    readonly value: T;
+}
+
+interface QueuePushResult {
+    readonly accepted: boolean;
+    readonly queuedEventCount: number;
+    readonly queuedPayloadBytes: number;
+}
+
+interface StoredQualificationEvent {
+    readonly payloadBytes: number;
+    readonly record: QualificationEventRecord;
+}
+
+const queueBudgetErrorMessage =
+    "Qualification event subscriber exceeded its queue budget";
+const payloadBudgetErrorMessage = `Qualification event payload exceeds ${qualificationEventLimits.maximumPayloadBytes} UTF-8 bytes`;
+
+/**
+ * Checks an event payload against the shared UTF-8 byte budget.
+ * @param payload Payload text to measure.
+ * @returns Whether the encoded payload fits within the event budget.
+ */
+export function isQualificationEventPayloadWithinLimit(payload: string): boolean {
+    return (
+        encodedPayloadByteLength(payload) <= qualificationEventLimits.maximumPayloadBytes
+    );
+}
 
 class BoundedAsyncQueue<T> {
     readonly #pendingReads: PendingRead<T>[] = [];
-    readonly #values: T[] = [];
+    readonly #values: QueuedValue<T>[] = [];
     #closed = false;
     #failure: Error | undefined;
+    #queuedPayloadBytes = 0;
 
     close(): void {
         this.#closed = true;
+        this.#queuedPayloadBytes = 0;
+        this.#values.length = 0;
         for (const pendingRead of this.#pendingReads.splice(0)) {
             pendingRead.resolve({ done: true, value: undefined });
         }
@@ -39,6 +89,7 @@ class BoundedAsyncQueue<T> {
     fail(error: Error): void {
         this.#closed = true;
         this.#failure = error;
+        this.#queuedPayloadBytes = 0;
         this.#values.length = 0;
         for (const pendingRead of this.#pendingReads.splice(0)) {
             pendingRead.reject(error);
@@ -49,9 +100,10 @@ class BoundedAsyncQueue<T> {
         if (this.#failure) {
             return Promise.reject(this.#failure);
         }
-        const value = this.#values.shift();
-        if (value !== undefined) {
-            return Promise.resolve({ done: false, value });
+        const queuedValue = this.#values.shift();
+        if (queuedValue !== undefined) {
+            this.#queuedPayloadBytes -= queuedValue.payloadBytes;
+            return Promise.resolve({ done: false, value: queuedValue.value });
         }
         if (this.#closed) {
             return Promise.resolve({ done: true, value: undefined });
@@ -62,33 +114,48 @@ class BoundedAsyncQueue<T> {
         });
     }
 
-    push(value: T): boolean {
+    push(value: T, payloadBytes: number): QueuePushResult {
         if (this.#closed) {
-            return false;
+            return this.#pushResult(false);
         }
 
         const pendingRead = this.#pendingReads.shift();
         if (pendingRead) {
             pendingRead.resolve({ done: false, value });
-            return true;
+            return this.#pushResult(true);
         }
 
-        if (this.#values.length >= maximumSubscriberQueueSize) {
-            this.fail(
-                new Error("Qualification event subscriber exceeded its queue budget")
-            );
-            return false;
+        if (
+            this.#values.length >=
+                qualificationEventLimits.maximumSubscriberQueueEvents ||
+            this.#queuedPayloadBytes + payloadBytes >
+                qualificationEventLimits.maximumSubscriberQueuedPayloadBytes
+        ) {
+            this.fail(new Error(queueBudgetErrorMessage));
+            return this.#pushResult(false);
         }
-        this.#values.push(value);
-        return true;
+        this.#values.push({ payloadBytes, value });
+        this.#queuedPayloadBytes += payloadBytes;
+        return this.#pushResult(true);
+    }
+
+    #pushResult(accepted: boolean): QueuePushResult {
+        return {
+            accepted,
+            queuedEventCount: this.#values.length,
+            queuedPayloadBytes: this.#queuedPayloadBytes,
+        };
     }
 }
 
 /** In-memory qualification model for tracked replay and bounded live delivery. */
 export class QualificationEventFeed {
-    readonly #events: QualificationEventRecord[] = [];
-    readonly #subscribers = new Set<(event: QualificationEventRecord) => void>();
+    readonly #events: StoredQualificationEvent[] = [];
+    readonly #subscribers = new Set<(event: StoredQualificationEvent) => void>();
     readonly observedResumeIds: Array<string | undefined> = [];
+    #droppedSlowSubscribers = 0;
+    #maximumObservedQueueDepth = 0;
+    #maximumObservedQueuedPayloadBytes = 0;
     #sequence = 0;
 
     /**
@@ -100,23 +167,45 @@ export class QualificationEventFeed {
     }
 
     /**
+     * Captures current counters and bounded-queue high-water marks.
+     * @returns An immutable metrics snapshot.
+     */
+    metricsSnapshot(): Readonly<QualificationEventFeedMetrics> {
+        return Object.freeze({
+            activeSubscribers: this.#subscribers.size,
+            droppedSlowSubscribers: this.#droppedSlowSubscribers,
+            latestSequence: this.#sequence,
+            maximumObservedQueueDepth: this.#maximumObservedQueueDepth,
+            maximumObservedQueuedPayloadBytes: this.#maximumObservedQueuedPayloadBytes,
+            retainedEvents: this.#events.length,
+        });
+    }
+
+    /**
      * Appends an event and publishes it to attached subscribers.
      * @param data Event payload.
      * @returns The appended event record.
      */
     publish(data: QualificationEventData): QualificationEventRecord {
-        const event = {
-            data,
+        const payloadBytes = encodedPayloadByteLength(data.payload ?? "");
+        if (payloadBytes > qualificationEventLimits.maximumPayloadBytes) {
+            throw new RangeError(payloadBudgetErrorMessage);
+        }
+
+        const eventData = Object.freeze({ ...data });
+        const record = Object.freeze({
+            data: eventData,
             id: String(++this.#sequence),
-        } satisfies QualificationEventRecord;
+        } satisfies QualificationEventRecord);
+        const event = Object.freeze({ payloadBytes, record });
         this.#events.push(event);
-        if (this.#events.length > maximumRetainedEvents) {
+        if (this.#events.length > qualificationEventLimits.maximumRetainedEvents) {
             this.#events.shift();
         }
         for (const subscriber of this.#subscribers) {
             subscriber(event);
         }
-        return event;
+        return record;
     }
 
     /**
@@ -137,7 +226,7 @@ export class QualificationEventFeed {
         }
 
         const firstRetainedSequence = Number(
-            this.#events.at(0)?.id ?? this.#sequence + 1
+            this.#events.at(0)?.record.id ?? this.#sequence + 1
         );
         if (afterSequence > 0 && afterSequence < firstRetainedSequence - 1) {
             throw new Error("Qualification event resume cursor is outside retention");
@@ -145,10 +234,25 @@ export class QualificationEventFeed {
 
         const replayEvents = [...this.#events];
         const queue = new BoundedAsyncQueue<QualificationEventRecord>();
-        const subscriber = (event: QualificationEventRecord): void => {
-            if (Number(event.id) > replayBoundary && !queue.push(event)) {
-                this.#subscribers.delete(subscriber);
+        const subscriber = (event: StoredQualificationEvent): void => {
+            if (Number(event.record.id) <= replayBoundary) {
+                return;
             }
+
+            const result = queue.push(event.record, event.payloadBytes);
+            if (!result.accepted) {
+                this.#droppedSlowSubscribers += 1;
+                this.#subscribers.delete(subscriber);
+                return;
+            }
+            this.#maximumObservedQueueDepth = Math.max(
+                this.#maximumObservedQueueDepth,
+                result.queuedEventCount
+            );
+            this.#maximumObservedQueuedPayloadBytes = Math.max(
+                this.#maximumObservedQueuedPayloadBytes,
+                result.queuedPayloadBytes
+            );
         };
         const abort = (): void => {
             this.#subscribers.delete(subscriber);
@@ -163,9 +267,9 @@ export class QualificationEventFeed {
                 if (options.signal.aborted) {
                     return;
                 }
-                const sequence = Number(event.id);
+                const sequence = Number(event.record.id);
                 if (sequence > afterSequence && sequence <= replayBoundary) {
-                    yield event;
+                    yield event.record;
                 }
             }
 
@@ -182,6 +286,10 @@ export class QualificationEventFeed {
             queue.close();
         }
     }
+}
+
+function encodedPayloadByteLength(payload: string): number {
+    return Buffer.byteLength(payload, "utf8");
 }
 
 function parseResumeSequence(resumeId: string | undefined): number {
