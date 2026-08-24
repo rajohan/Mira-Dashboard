@@ -2,12 +2,26 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 
-import { createGreenfieldServer } from "../../app/server.ts";
+import { createServer } from "../../app/server.ts";
 import { bunRuntimePolicy } from "../../shared/bunRuntimePolicy.ts";
+import {
+    createReadinessController,
+    type ReadinessController,
+} from "../platform/readiness/readinessState.ts";
 import * as runtimeIdentityModule from "../platform/runtime/readRuntimeIdentity.ts";
 import type { AppRouter } from "../trpc/appRouter.ts";
 
-const servers: Array<ReturnType<typeof createGreenfieldServer>> = [];
+const servers: Array<ReturnType<typeof createServer>> = [];
+
+function startServer(): {
+    readiness: ReadinessController;
+    server: ReturnType<typeof createServer>;
+} {
+    const readiness = createReadinessController();
+    const server = createServer({ port: 0, readiness });
+    servers.push(server);
+    return { readiness, server };
+}
 
 afterEach(async () => {
     for (const server of servers.splice(0)) {
@@ -15,10 +29,9 @@ afterEach(async () => {
     }
 });
 
-describe("greenfield system foundation", () => {
+describe("system foundation", () => {
     test("serves typed runtime identity through tRPC", async () => {
-        const server = createGreenfieldServer({ port: 0 });
-        servers.push(server);
+        const { server } = startServer();
         const client = createTRPCClient<AppRouter>({
             links: [httpBatchLink({ url: new URL("/trpc", server.url) })],
         });
@@ -38,8 +51,7 @@ describe("greenfield system foundation", () => {
     });
 
     test("keeps health checks as explicit raw HTTP protocol routes", async () => {
-        const server = createGreenfieldServer({ port: 0 });
-        servers.push(server);
+        const { readiness: readinessController, server } = startServer();
 
         const liveness = await fetch(new URL("/api/health/live", server.url));
         const readiness = await fetch(new URL("/api/health/ready", server.url));
@@ -54,14 +66,24 @@ describe("greenfield system foundation", () => {
 
         expect(liveness.status).toBe(200);
         expect(await liveness.json()).toEqual({ status: "live" });
-        expect(readiness.status).toBe(200);
-        expect(await readiness.json()).toEqual({ status: "ready" });
+        expect(readiness.status).toBe(503);
+        expect(await readiness.json()).toEqual({ status: "not-ready" });
         expect(headLiveness.status).toBe(200);
         expect(await headLiveness.text()).toBe("");
-        expect(headReadiness.status).toBe(200);
+        expect(headReadiness.status).toBe(503);
         expect(await headReadiness.text()).toBe("");
         expect(missing.status).toBe(404);
         expect(misleadingTrpcPrefix.status).toBe(404);
+
+        readinessController.markReady();
+        const ready = await fetch(new URL("/api/health/ready", server.url));
+        expect(ready.status).toBe(200);
+        expect(await ready.json()).toEqual({ status: "ready" });
+
+        readinessController.markUnavailable();
+        const unavailable = await fetch(new URL("/api/health/ready", server.url));
+        expect(unavailable.status).toBe(503);
+        expect(await unavailable.json()).toEqual({ status: "not-ready" });
     });
 
     test("accepts new canary revisions on Bun 1.4", () => {
@@ -99,7 +121,8 @@ describe("greenfield system foundation", () => {
         });
 
         try {
-            expect(() => createGreenfieldServer({ port: 0 })).toThrow(runtimeError);
+            const readiness = createReadinessController();
+            expect(() => createServer({ port: 0, readiness })).toThrow(runtimeError);
             expect(serveSpy).not.toHaveBeenCalled();
         } finally {
             serveSpy.mockRestore();

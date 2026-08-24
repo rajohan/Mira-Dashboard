@@ -23,7 +23,7 @@ const insertIncidentSql = `
     ) VALUES (?, ?, 1000, 1, ?, 'system', 1000, ?, 1, 'warning', 'active', 'Disk pressure')
 `;
 
-describe("greenfield monitoring schema", () => {
+describe("monitoring schema", () => {
     test("enforces incident and notification lifecycle invariants", async () => {
         const database = await openFreshMigratedDatabase();
 

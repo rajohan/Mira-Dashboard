@@ -53,7 +53,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(schemaMigrationInsertSchema, {
                 appliedAt: observedAt,
                 checksum: "a".repeat(64),
-                id: "20260804022252_greenfield-foundation",
+                id: "20260804022252_dashboard-foundation",
                 releaseId: "b".repeat(40),
             })
         ).toBeDefined();
@@ -254,7 +254,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
             v.parse(schemaMigrationInsertSchema, {
                 appliedAt: observedAt,
                 checksum: "A".repeat(64),
-                id: "20260804022252_greenfield-foundation",
+                id: "20260804022252_dashboard-foundation",
                 releaseId: "b".repeat(40),
             })
         ).toThrow();

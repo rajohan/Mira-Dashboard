@@ -73,7 +73,7 @@ export function assertDrizzleKitOutput(
  * Verifies migration-history consistency and schema-to-snapshot drift.
  * @param runCommand Drizzle Kit process adapter.
  */
-export function checkGreenfieldDatabase(
+export function checkDatabaseSchema(
     runCommand: RunDrizzleKitCommand = executeDrizzleKit
 ): void {
     assertDrizzleKitOutput(
@@ -93,4 +93,4 @@ export function checkGreenfieldDatabase(
     );
 }
 
-if (import.meta.main) checkGreenfieldDatabase();
+if (import.meta.main) checkDatabaseSchema();

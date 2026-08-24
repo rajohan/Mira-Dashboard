@@ -27,20 +27,18 @@ const expectedTables: string[] = [
     "schema_migrations",
 ];
 
-describe("greenfield migration graph", () => {
+describe("database migration graph", () => {
     test("is immutable, ordered, and applicable to an empty database", async () => {
         const migrations = await loadVerifiedMigrations({
             directory: migrationsDirectory,
         });
         const foundationMigration = migrations[0];
         if (!foundationMigration) {
-            throw new Error(
-                "Expected the greenfield migration graph to contain one node"
-            );
+            throw new Error("Expected the database migration graph to contain one node");
         }
 
         expect(migrations).toHaveLength(1);
-        expect(foundationMigration.id).toEndWith("_greenfield-foundation");
+        expect(foundationMigration.id).toEndWith("_dashboard-foundation");
         expect(foundationMigration.migrationSha256).toMatch(/^[a-f\d]{64}$/u);
 
         const database = await openFreshMigratedDatabase();
@@ -280,9 +278,7 @@ describe("greenfield migration graph", () => {
         });
         const migration = migrations[0];
         if (!migration) {
-            throw new Error(
-                "Expected the greenfield migration graph to contain one node"
-            );
+            throw new Error("Expected the database migration graph to contain one node");
         }
 
         const database = new Database(":memory:", { strict: true });
