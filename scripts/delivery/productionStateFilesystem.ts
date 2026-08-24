@@ -10,6 +10,8 @@ const directoryOpenFlags =
 const permissionBits = 0o7777n;
 const privateDirectoryMode = 0o700;
 const privateDirectoryModeBigInt = 0o700n;
+const privateFileMode = 0o600;
+const privateFileModeBigInt = 0o600n;
 const otherPrincipalWriteBits = 0o022n;
 const stickyBit = 0o1000n;
 
@@ -22,6 +24,12 @@ const stateChildDirectoryNames = Object.freeze([
     "logs",
     "terminal-broker",
     "workspace-file-uploads",
+] as const);
+const managedDashboardLogFileNames = Object.freeze([
+    "web-stdout.log",
+    "web-stderr.log",
+    "worker-stdout.log",
+    "worker-stderr.log",
 ] as const);
 
 /** Stable paths created beneath one canonical Dashboard project root. */
@@ -416,6 +424,53 @@ async function preparePrivateDirectory(
     return directory;
 }
 
+async function preparePrivateFile(
+    parent: OpenedDirectory,
+    fileName: string,
+    userId: number,
+    resources: FileHandle[]
+): Promise<void> {
+    const anchoredPath = path.join(parent.descriptorPath, fileName);
+    let handle: FileHandle;
+    try {
+        handle = await open(
+            anchoredPath,
+            constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW |
+                constants.O_RDWR,
+            privateFileMode
+        );
+    } catch (error) {
+        if (!isExistingPathFailure(error)) {
+            throw invalidProductionStateFilesystem();
+        }
+        try {
+            handle = await open(
+                anchoredPath,
+                constants.O_NOFOLLOW | constants.O_RDWR | constants.O_NONBLOCK
+            );
+        } catch {
+            throw invalidProductionStateFilesystem();
+        }
+    }
+    resources.push(handle);
+    const [status, parentStatus] = await Promise.all([
+        handle.stat({ bigint: true }),
+        parent.handle.stat({ bigint: true }),
+    ]);
+    if (
+        !status.isFile() ||
+        status.isSymbolicLink() ||
+        status.nlink !== 1n ||
+        status.dev !== parentStatus.dev ||
+        status.uid !== BigInt(userId) ||
+        (status.mode & permissionBits) !== privateFileModeBigInt
+    ) {
+        throw invalidProductionStateFilesystem();
+    }
+}
+
 async function validatePrivateDirectory(
     directory: OpenedDirectory,
     userId: number
@@ -531,6 +586,10 @@ export async function prepareProtectedProductionStatePath(
         ) {
             throw invalidProductionStateFilesystem();
         }
+        for (const fileName of managedDashboardLogFileNames) {
+            await preparePrivateFile(logs, fileName, userId, resources);
+        }
+        await validatePrivateDirectory(logs, userId);
         preparedPaths = Object.freeze({
             backupsDirectory: backups.canonicalPath,
             jobOutputDirectory: jobOutput.canonicalPath,

@@ -34,6 +34,7 @@ export const logMaintenanceProvisioningSupportArtifactPaths = Object.freeze([
     "scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts",
     "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
     "scripts/delivery/provisioning/log-maintenance/policy.ts",
+    "scripts/delivery/provisioning/log-maintenance/provisionManagedContainerLogs.ts",
 ] as const);
 
 /** Complete exact provisioning subtree admitted into an immutable release. */

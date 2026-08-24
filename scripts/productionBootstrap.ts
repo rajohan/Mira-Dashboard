@@ -436,7 +436,7 @@ export async function stageProductionBootstrapRootAuthority(
         `--release-root=${stagedRelease}`,
         `--release-id=${releaseId}`,
     ]);
-    const group = await dependencies.run([
+    let group = await dependencies.run([
         "/usr/bin/getent",
         "group",
         "mira-dashboard-log-maintenance",
@@ -448,7 +448,28 @@ export async function stageProductionBootstrapRootAuthority(
             "--system",
             "mira-dashboard-log-maintenance",
         ]);
+        group = await dependencies.run([
+            "/usr/bin/getent",
+            "group",
+            "mira-dashboard-log-maintenance",
+        ]);
     }
+    const groupMatch =
+        group.exitCode === 0
+            ? /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):[^\n]*\n?$/u.exec(
+                  group.stdout
+              )
+            : null;
+    const groupId = Number(groupMatch?.[1]);
+    if (!groupMatch || !Number.isSafeInteger(groupId)) {
+        throw new Error(failureMessage);
+    }
+    await requireSuccess(dependencies, [
+        sudo,
+        stagedRuntime,
+        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/provisionManagedContainerLogs.ts`,
+        `--group-id=${groupId}`,
+    ]);
     await requireSuccess(dependencies, [
         sudo,
         "/usr/sbin/usermod",

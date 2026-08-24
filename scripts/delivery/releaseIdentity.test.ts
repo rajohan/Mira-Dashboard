@@ -269,6 +269,7 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
+            "scripts/delivery/provisioning/log-maintenance/provisionManagedContainerLogs.ts",
             "scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md",
             "scripts/delivery/provisioning/preview-tailscale/README.md",
             "scripts/delivery/provisioning/preview-tailscale/operator.ts",

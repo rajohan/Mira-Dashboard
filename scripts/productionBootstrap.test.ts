@@ -339,6 +339,7 @@ describe("production bootstrap admission", () => {
 
     test("stages every fixed root authority command without shell interpretation", async () => {
         const commands: string[][] = [];
+        let groupLookupCount = 0;
         const dependencies: ProductionBootstrapDependencies = {
             run: (command) => {
                 commands.push([...command]);
@@ -348,11 +349,16 @@ describe("production bootstrap admission", () => {
                         ? `${"e".repeat(64)}  bun\n`
                         : `${"d".repeat(64)}  release.tar\n`;
                 }
+                const isGroupLookup =
+                    command[0] === "/usr/bin/getent" && command[1] === "group";
+                if (isGroupLookup) {
+                    groupLookupCount += 1;
+                    if (groupLookupCount === 2) {
+                        stdout = "mira-dashboard-log-maintenance:x:986:\n";
+                    }
+                }
                 return Promise.resolve({
-                    exitCode:
-                        command[0] === "/usr/bin/getent" && command[1] === "group"
-                            ? 2
-                            : 0,
+                    exitCode: isGroupLookup && groupLookupCount === 1 ? 2 : 0,
                     stdout,
                 });
             },
@@ -375,6 +381,14 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) =>
                 command.some((argument) => argument.endsWith("/usermod"))
+            )
+        ).toBe(true);
+        expect(
+            commands.some(
+                (command) =>
+                    command.some((argument) =>
+                        argument.endsWith("provisionManagedContainerLogs.ts")
+                    ) && command.includes("--group-id=986")
             )
         ).toBe(true);
         expect(
@@ -483,6 +497,7 @@ describe("production bootstrap admission", () => {
         ]);
         const commands: string[] = [];
         let prerequisitesInspected = false;
+        let groupLookupCount = 0;
         const dependencies: ProductionBootstrapDependencies = {
             inspectPrerequisites: () => {
                 prerequisitesInspected = true;
@@ -527,7 +542,13 @@ describe("production bootstrap admission", () => {
                     command[0] === "/usr/bin/getent" &&
                     command.at(-1) === "mira-dashboard-log-maintenance"
                 ) {
-                    return { exitCode: 2, stdout: "" };
+                    groupLookupCount += 1;
+                    return groupLookupCount === 1
+                        ? { exitCode: 2, stdout: "" }
+                        : {
+                              exitCode: 0,
+                              stdout: "mira-dashboard-log-maintenance:x:986:\n",
+                          };
                 }
                 return { exitCode: 0, stdout: "" };
             },

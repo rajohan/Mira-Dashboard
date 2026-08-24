@@ -119,17 +119,23 @@ export const managedLogManifest: ManagedLogManifest = Object.freeze({
         ),
         managedFile(
             "docker.prowlarr.debug",
-            "/opt/docker/data/prowlarr/logs/prowlarr.debug.txt"
+            "/opt/docker/data/prowlarr/logs/prowlarr.debug.txt",
+            { trustedOwnerIds: Object.freeze([0, 1001]) }
         ),
         managedFile(
             "docker.prowlarr.trace",
-            "/opt/docker/data/prowlarr/logs/prowlarr.trace.txt"
+            "/opt/docker/data/prowlarr/logs/prowlarr.trace.txt",
+            { trustedOwnerIds: Object.freeze([0, 1001]) }
         ),
-        managedFile("docker.prowlarr", "/opt/docker/data/prowlarr/logs/prowlarr.txt"),
+        managedFile("docker.prowlarr", "/opt/docker/data/prowlarr/logs/prowlarr.txt", {
+            trustedOwnerIds: Object.freeze([0, 1001]),
+        }),
         managedFile("docker.submaker", "/opt/docker/data/submaker/logs/app.log", {
             trustedOwnerIds: Object.freeze([0, 1000]),
         }),
-        managedFile("docker.traefik", "/opt/docker/data/traefik/access.log"),
+        managedFile("docker.traefik", "/opt/docker/data/traefik/access.log", {
+            trustedOwnerIds: Object.freeze([0, 1001]),
+        }),
     ]),
     lockPath:
         "/home/ubuntu/projects/mira-dashboard/production/state/log-maintenance/managed.lock",

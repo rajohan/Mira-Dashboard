@@ -42,6 +42,7 @@ describe("log-maintenance provisioning artifact policy", () => {
             "mira-dashboard-log-maintenance",
             "mira-dashboard-log-maintenance@.service",
             "policy.ts",
+            "provisionManagedContainerLogs.ts",
         ]);
         expect(logMaintenanceProvisioningReleaseArtifactPaths).toEqual(
             sourceEntries
