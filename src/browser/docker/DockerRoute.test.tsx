@@ -32,6 +32,7 @@ const firstContainerId = "1".repeat(64);
 const secondContainerId = "2".repeat(64);
 const firstImageId = "sha256:" + "3".repeat(64);
 const secondImageId = "sha256:" + "4".repeat(64);
+const firstContainerImageDigest = "@sha256:" + "5".repeat(64);
 const queuedJobId = "019fdf70-0000-7000-8000-000000000040";
 
 const freshOverview = {
@@ -41,7 +42,7 @@ const freshOverview = {
             createdAtMs: observedAtMs - 8 * 60 * 60_000,
             health: "healthy",
             id: firstContainerId,
-            image: "example/api:1.0.0",
+            image: `example/api:1.0.0${firstContainerImageDigest}`,
             imageId: firstImageId,
             mounts: [
                 {
@@ -546,6 +547,10 @@ describe("DockerRoute", () => {
             expect(screen.getByText(/Inventory only · not opted in/u)).toBeVisible();
             expect(screen.getByText("A newer API image is available.")).toBeVisible();
             expect(within(table).getByText("127.0.0.1:3100 → 3000/tcp")).toBeVisible();
+            expect(screen.getAllByText("example/api:1.0.0")).not.toHaveLength(0);
+            expect(screen.getAllByText(firstContainerImageDigest)).not.toHaveLength(0);
+            expect(table).toHaveClass("table-fixed");
+            expect(table.querySelector("colgroup col")).toHaveClass("w-[22%]");
 
             const imagesTable = screen.getByRole("table", {
                 name: "Docker images",

@@ -390,6 +390,7 @@ export const dockerUpdaterPolicySchema = v.variant("state", [
 ]);
 
 export const dockerUpdaterStatusSchema = v.variant("state", [
+    v.strictObject({ state: v.literal("not-checked") }),
     v.strictObject({ state: v.literal("current") }),
     v.strictObject({
         candidateImage: dockerImageReferenceSchema,

@@ -473,7 +473,7 @@ function updaterServices(
                         prior?.currentImage === service.imageReference &&
                         updaterPoliciesMatch(prior.policy, policy)
                             ? prior.status
-                            : Object.freeze({ state: "unavailable" }),
+                            : Object.freeze({ state: "not-checked" }),
                 });
             })
             .toSorted((left, right) => compareStrings(left.id, right.id))
