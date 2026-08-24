@@ -9,7 +9,6 @@ const meta = {
         children: "queued",
     },
     component: Badge,
-    title: "UI/Badge",
 } satisfies Meta<typeof Badge>;
 
 export default meta;

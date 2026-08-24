@@ -65,7 +65,6 @@ function DataTableStory() {
 const meta = {
     component: DataTableStory,
     parameters: { layout: "fullscreen" },
-    title: "UI/DataTable",
 } satisfies Meta<typeof DataTableStory>;
 
 export default meta;

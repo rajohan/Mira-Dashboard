@@ -75,7 +75,6 @@ const meta = {
     },
     component: TerminalWorkspace,
     parameters: { layout: "fullscreen" },
-    title: "Terminal/TerminalWorkspace",
 } satisfies Meta<typeof TerminalWorkspace>;
 
 export default meta;

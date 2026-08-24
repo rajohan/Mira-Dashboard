@@ -94,7 +94,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Sessions/GatewaySessionsView",
 } satisfies Meta<typeof GatewaySessionsView>;
 
 export default meta;

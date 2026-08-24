@@ -270,6 +270,8 @@ export function sourceRole(filePath: string): SourceRole {
     if (filePath.startsWith("src/worker/")) return "worker";
     if (
         filePath.startsWith("scripts/") ||
+        filePath === "oxfmt.config.ts" ||
+        filePath === "oxlint.config.ts" ||
         filePath === "tailwind.config.ts" ||
         /^drizzle\.config\.(?:cjs|cts|js|jsx|mjs|mts|ts|tsx)$/u.test(filePath)
     ) {

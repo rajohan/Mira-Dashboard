@@ -139,6 +139,8 @@ describe("source-boundary policy", () => {
         ).toBeUndefined();
         expect(validateSourceFile("tailwind.config.ts")).toBeUndefined();
         expect(validateSourceFile("drizzle.config.ts")).toBeUndefined();
+        expect(validateSourceFile("oxfmt.config.ts")).toBeUndefined();
+        expect(validateSourceFile("oxlint.config.ts")).toBeUndefined();
         expect(validateSourceFile(".storybook/main.ts")).toBeUndefined();
         expect(validateSourceFile(".storybook/manager.ts")).toBeUndefined();
         expect(validateSourceFile(".storybook/preview.tsx")).toBeUndefined();

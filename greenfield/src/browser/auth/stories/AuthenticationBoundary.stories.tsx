@@ -150,7 +150,6 @@ function AuthenticationBoundaryStory() {
 const meta = {
     component: AuthenticationBoundaryStory,
     parameters: { layout: "fullscreen" },
-    title: "Authentication/AuthenticationBoundary",
 } satisfies Meta<typeof AuthenticationBoundaryStory>;
 
 export default meta;

@@ -119,7 +119,6 @@ const meta = {
     parameters: {
         layout: "fullscreen",
     },
-    title: "Jobs/ScheduleDisableIntentModal",
 } satisfies Meta<typeof ScheduleDisableIntentModal>;
 
 export default meta;

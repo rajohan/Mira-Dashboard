@@ -26,7 +26,6 @@ const meta = {
             <OneTimeSecretPanel {...properties} />
         </SecuritySection>
     ),
-    title: "Security/OneTimeSecretPanel",
 } satisfies Meta<typeof OneTimeSecretPanel>;
 
 export default meta;

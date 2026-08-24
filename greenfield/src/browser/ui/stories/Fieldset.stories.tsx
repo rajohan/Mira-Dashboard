@@ -12,7 +12,6 @@ const meta = {
         legend: "Delivery contact",
     },
     component: Fieldset,
-    title: "UI/Fieldset",
 } satisfies Meta<typeof Fieldset>;
 
 export default meta;

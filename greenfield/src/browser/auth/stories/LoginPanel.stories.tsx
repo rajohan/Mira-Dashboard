@@ -41,7 +41,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Authentication/LoginPanel",
 } satisfies Meta<typeof LoginPanel>;
 
 export default meta;

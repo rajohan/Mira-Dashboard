@@ -262,6 +262,28 @@ interface ChatBrowserProps {
     readonly requestedSessionKey?: string;
 }
 
+interface SessionSelectionNormalizationProps {
+    readonly onSelectedSessionChange: (sessionKey: string) => void;
+    readonly requestIdentity: string;
+    readonly selectedSessionKey: string;
+}
+
+function SessionSelectionNormalization({
+    onSelectedSessionChange,
+    requestIdentity,
+    selectedSessionKey,
+}: SessionSelectionNormalizationProps) {
+    const [normalizedRequest, setNormalizedRequest] = useState<string>();
+
+    function normalizeSelection(element: HTMLSpanElement | null): void {
+        if (element === null || normalizedRequest === requestIdentity) return;
+        setNormalizedRequest(requestIdentity);
+        onSelectedSessionChange(selectedSessionKey);
+    }
+
+    return <span hidden ref={normalizeSelection} />;
+}
+
 /**
  * Stateful production composition for the URL-addressable `/chat` workspace.
  * @returns The complete chat browser.
@@ -344,26 +366,8 @@ export function ChatBrowser({
         Readonly<Record<string, ChatTaskCancelGate>>
     >({});
     const taskCancelLocks = useRef(new Set<string>());
-    const normalizedRequest = useRef<string | null | undefined>(undefined);
     const olderHistoryLoad = useRef<Promise<boolean> | undefined>(undefined);
     const [olderHistoryLoading, setOlderHistoryLoading] = useState(false);
-
-    useEffect(() => {
-        if (selectedSessionKey === requestedSessionKey) {
-            normalizedRequest.current = undefined;
-            return;
-        }
-        if (!inventoryCanResolveMissingRequest) return;
-        const request = requestedSessionKey ?? null;
-        if (normalizedRequest.current === request) return;
-        normalizedRequest.current = request;
-        onSelectedSessionChange(selectedSessionKey);
-    }, [
-        inventoryCanResolveMissingRequest,
-        onSelectedSessionChange,
-        requestedSessionKey,
-        selectedSessionKey,
-    ]);
 
     useChatRealtimeInvalidation(selectedSessionKey, runtimeStore);
     const runtimeQuery = useChatRuntimeProjection(
@@ -2257,174 +2261,192 @@ export function ChatBrowser({
     };
 
     return (
-        <ChatWorkspace
-            activeRunIds={allActiveRunIds}
-            abortableRunId={abortableRunId}
-            actionBusy={actionBusy}
-            attachmentError={currentDraft.attachmentError}
-            attachments={currentDraft.attachments}
-            canAskCompanion={providerWritesEnabled}
-            canSend={canSend}
-            displaySettings={currentDisplay}
-            draft={currentDraft.text}
-            error={queryError}
-            notice={actionNotice}
-            providerWritesDisabled={providerWritesDisabled}
-            onAbort={(runId) => void abort(runId)}
-            onAskCompanion={(question) => void askCompanion(question)}
-            onAttach={(fileList) => {
-                const proposed = [
-                    ...currentDraft.attachments.map(({ file }) => file),
-                    ...fileList,
-                ];
-                const policy = validateChatAttachmentFiles(proposed);
-                if (policy.message !== undefined) {
+        <>
+            {inventoryCanResolveMissingRequest &&
+                selectedSessionKey !== requestedSessionKey && (
+                    <SessionSelectionNormalization
+                        onSelectedSessionChange={onSelectedSessionChange}
+                        requestIdentity={`${requestedSessionKey ?? "<default>"}->${selectedSessionKey}`}
+                        selectedSessionKey={selectedSessionKey}
+                    />
+                )}
+            <ChatWorkspace
+                activeRunIds={allActiveRunIds}
+                abortableRunId={abortableRunId}
+                actionBusy={actionBusy}
+                attachmentError={currentDraft.attachmentError}
+                attachments={currentDraft.attachments}
+                canAskCompanion={providerWritesEnabled}
+                canSend={canSend}
+                displaySettings={currentDisplay}
+                draft={currentDraft.text}
+                error={queryError}
+                notice={actionNotice}
+                providerWritesDisabled={providerWritesDisabled}
+                onAbort={(runId) => void abort(runId)}
+                onAskCompanion={(question) => void askCompanion(question)}
+                onAttach={(fileList) => {
+                    const proposed = [
+                        ...currentDraft.attachments.map(({ file }) => file),
+                        ...fileList,
+                    ];
+                    const policy = validateChatAttachmentFiles(proposed);
+                    if (policy.message !== undefined) {
+                        updateDraft(selectedSessionKey, (draft) => ({
+                            ...draft,
+                            attachmentError: policy.message,
+                            version: draft.version + 1,
+                        }));
+                        return;
+                    }
+                    const added = createChatDraftAttachments([...fileList]);
                     updateDraft(selectedSessionKey, (draft) => ({
-                        ...draft,
-                        attachmentError: policy.message,
+                        attachments: [...draft.attachments, ...added],
+                        text: draft.text,
                         version: draft.version + 1,
                     }));
-                    return;
+                }}
+                onCancelTask={(taskId) => void cancelTask(taskId)}
+                onCancelVoiceInput={speech.cancelVoiceInput}
+                onChangeDraft={(text) =>
+                    updateDraft(selectedSessionKey, (draft) => ({
+                        ...draft,
+                        text,
+                        version: draft.version + 1,
+                    }))
                 }
-                const added = createChatDraftAttachments([...fileList]);
-                updateDraft(selectedSessionKey, (draft) => ({
-                    attachments: [...draft.attachments, ...added],
-                    text: draft.text,
-                    version: draft.version + 1,
-                }));
-            }}
-            onCancelTask={(taskId) => void cancelTask(taskId)}
-            onCancelVoiceInput={speech.cancelVoiceInput}
-            onChangeDraft={(text) =>
-                updateDraft(selectedSessionKey, (draft) => ({
-                    ...draft,
-                    text,
-                    version: draft.version + 1,
-                }))
-            }
-            onCompact={() => void compact()}
-            onDisplaySettingsChange={(settings) => {
-                setDisplaySettings(settings);
-                writeChatDisplaySettings(settings);
-            }}
-            onDismissReadAloudError={speech.dismissReadAloudError}
-            onDismissVoiceInputError={speech.dismissVoiceInputError}
-            onHydrateMessage={(messageId) => {
-                if (
-                    hydrationTarget?.messageId === messageId &&
-                    hydrationTarget.sessionKey === selectedSessionKey
-                ) {
-                    void hydratedMessageQuery.refetch();
-                    return;
-                }
-                setHydrationTarget({ messageId, sessionKey: selectedSessionKey });
-            }}
-            onLoadMoreTasks={() => {
-                void Promise.all([
-                    ...(activeTasksCanLoadMore ? [activeTasksQuery.fetchNextPage()] : []),
-                    ...(finishedTasksCanLoadMore
-                        ? [finishedTasksQuery.fetchNextPage()]
-                        : []),
-                ]);
-            }}
-            onOpenLocalFile={(reference) => void openLocalFile(reference)}
-            onLoadOlder={async () => {
-                if (!historyQuery.hasNextPage) return false;
-                if (olderHistoryLoad.current !== undefined) {
-                    return olderHistoryLoad.current;
-                }
-                const operation = (async () => {
-                    setOlderHistoryLoading(true);
-                    try {
-                        const result = await historyQuery.fetchNextPage();
-                        return !result.isError;
-                    } finally {
-                        setOlderHistoryLoading(false);
+                onCompact={() => void compact()}
+                onDisplaySettingsChange={(settings) => {
+                    setDisplaySettings(settings);
+                    writeChatDisplaySettings(settings);
+                }}
+                onDismissReadAloudError={speech.dismissReadAloudError}
+                onDismissVoiceInputError={speech.dismissVoiceInputError}
+                onHydrateMessage={(messageId) => {
+                    if (
+                        hydrationTarget?.messageId === messageId &&
+                        hydrationTarget.sessionKey === selectedSessionKey
+                    ) {
+                        void hydratedMessageQuery.refetch();
+                        return;
                     }
-                })();
-                olderHistoryLoad.current = operation;
-                try {
-                    return await operation;
-                } finally {
-                    olderHistoryLoad.current = undefined;
-                }
-            }}
-            onReadAloud={speech.readAloudAvailable ? speech.startReadAloud : undefined}
-            onRemoveAttachment={(id) =>
-                updateDraft(selectedSessionKey, (draft) => ({
-                    ...draft,
-                    attachmentError: undefined,
-                    attachments: draft.attachments.filter(
-                        (attachment) => attachment.id !== id
-                    ),
-                    version: draft.version + 1,
-                }))
-            }
-            onResetCompanion={() => void resetCompanion()}
-            onResetTranscript={(sessionKey) => void resetTranscript(sessionKey)}
-            onRetryCompanion={() => {
-                const gate = companionGates[selectedSessionKey];
-                if (gate === undefined) {
-                    void companionQuery.refetch();
-                    return;
-                }
-                void reconcileCompanionOperation(selectedSessionKey);
-            }}
-            onRetryModels={() => void modelsQuery.refetch()}
-            onRetryTasks={() => {
-                const gates = Object.entries(taskCancelGates);
-                if (gates.length > 0) {
-                    void Promise.all(
-                        gates.map(([taskId, gate]) =>
-                            reconcileTaskCancellation(taskId, gate)
-                        )
-                    );
-                    return;
-                }
-                void Promise.all([
-                    activeTasksQuery.refetch(),
-                    finishedTasksQuery.refetch(),
-                    ...(selectedTaskId === undefined ? [] : [taskDetailQuery.refetch()]),
-                ]);
-            }}
-            onRetry={() => {
-                setActionError(undefined);
-                void (async () => {
-                    await (providerControlGate === undefined
-                        ? sessionsQuery.refetch()
-                        : reconcileProviderControl());
-                    const gates = Object.entries(abortGates);
-                    await Promise.all([
-                        historyQuery.refetch(),
-                        ...(gates.length === 0
-                            ? [runtimeQuery.refetch()]
-                            : gates.map(([runId, gate]) => reconcileAbort(runId, gate))),
+                    setHydrationTarget({ messageId, sessionKey: selectedSessionKey });
+                }}
+                onLoadMoreTasks={() => {
+                    void Promise.all([
+                        ...(activeTasksCanLoadMore
+                            ? [activeTasksQuery.fetchNextPage()]
+                            : []),
+                        ...(finishedTasksCanLoadMore
+                            ? [finishedTasksQuery.fetchNextPage()]
+                            : []),
                     ]);
-                })();
-            }}
-            onSelectSession={onSelectedSessionChange}
-            onSelectTask={(taskId) =>
-                setSelectedTasks((current) => {
-                    const next = { ...current };
-                    if (taskId === undefined) {
-                        delete next[selectedSessionKey];
-                    } else {
-                        next[selectedSessionKey] = taskId;
+                }}
+                onOpenLocalFile={(reference) => void openLocalFile(reference)}
+                onLoadOlder={async () => {
+                    if (!historyQuery.hasNextPage) return false;
+                    if (olderHistoryLoad.current !== undefined) {
+                        return olderHistoryLoad.current;
                     }
-                    return next;
-                })
-            }
-            onSend={() => void send()}
-            onSendSettingsChange={(settings) => void updateProviderSettings(settings)}
-            onStartVoiceInput={speech.startVoiceInput}
-            onStopReadAloud={speech.stopReadAloud}
-            onStopVoiceInput={speech.stopVoiceInput}
-            readAloud={speech.readAloud}
-            selectedTaskId={selectedTaskId}
-            sendSettings={currentSendSettings}
-            taskCancelGatedIds={taskCancelGatedIds}
-            view={view}
-            voiceInput={speech.voiceInput}
-        />
+                    const operation = (async () => {
+                        setOlderHistoryLoading(true);
+                        try {
+                            const result = await historyQuery.fetchNextPage();
+                            return !result.isError;
+                        } finally {
+                            setOlderHistoryLoading(false);
+                        }
+                    })();
+                    olderHistoryLoad.current = operation;
+                    try {
+                        return await operation;
+                    } finally {
+                        olderHistoryLoad.current = undefined;
+                    }
+                }}
+                onReadAloud={
+                    speech.readAloudAvailable ? speech.startReadAloud : undefined
+                }
+                onRemoveAttachment={(id) =>
+                    updateDraft(selectedSessionKey, (draft) => ({
+                        ...draft,
+                        attachmentError: undefined,
+                        attachments: draft.attachments.filter(
+                            (attachment) => attachment.id !== id
+                        ),
+                        version: draft.version + 1,
+                    }))
+                }
+                onResetCompanion={() => void resetCompanion()}
+                onResetTranscript={(sessionKey) => void resetTranscript(sessionKey)}
+                onRetryCompanion={() => {
+                    const gate = companionGates[selectedSessionKey];
+                    if (gate === undefined) {
+                        void companionQuery.refetch();
+                        return;
+                    }
+                    void reconcileCompanionOperation(selectedSessionKey);
+                }}
+                onRetryModels={() => void modelsQuery.refetch()}
+                onRetryTasks={() => {
+                    const gates = Object.entries(taskCancelGates);
+                    if (gates.length > 0) {
+                        void Promise.all(
+                            gates.map(([taskId, gate]) =>
+                                reconcileTaskCancellation(taskId, gate)
+                            )
+                        );
+                        return;
+                    }
+                    void Promise.all([
+                        activeTasksQuery.refetch(),
+                        finishedTasksQuery.refetch(),
+                        ...(selectedTaskId === undefined
+                            ? []
+                            : [taskDetailQuery.refetch()]),
+                    ]);
+                }}
+                onRetry={() => {
+                    setActionError(undefined);
+                    void (async () => {
+                        await (providerControlGate === undefined
+                            ? sessionsQuery.refetch()
+                            : reconcileProviderControl());
+                        const gates = Object.entries(abortGates);
+                        await Promise.all([
+                            historyQuery.refetch(),
+                            ...(gates.length === 0
+                                ? [runtimeQuery.refetch()]
+                                : gates.map(([runId, gate]) =>
+                                      reconcileAbort(runId, gate)
+                                  )),
+                        ]);
+                    })();
+                }}
+                onSelectSession={onSelectedSessionChange}
+                onSelectTask={(taskId) =>
+                    setSelectedTasks((current) => {
+                        const next = { ...current };
+                        if (taskId === undefined) {
+                            delete next[selectedSessionKey];
+                        } else {
+                            next[selectedSessionKey] = taskId;
+                        }
+                        return next;
+                    })
+                }
+                onSend={() => void send()}
+                onSendSettingsChange={(settings) => void updateProviderSettings(settings)}
+                onStartVoiceInput={speech.startVoiceInput}
+                onStopReadAloud={speech.stopReadAloud}
+                onStopVoiceInput={speech.stopVoiceInput}
+                readAloud={speech.readAloud}
+                selectedTaskId={selectedTaskId}
+                sendSettings={currentSendSettings}
+                taskCancelGatedIds={taskCancelGatedIds}
+                view={view}
+                voiceInput={speech.voiceInput}
+            />
+        </>
     );
 }

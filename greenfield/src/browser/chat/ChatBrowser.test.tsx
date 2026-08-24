@@ -1593,11 +1593,19 @@ describe("chat browser", () => {
 
     test("uses an initial page state when no session inventory exists", async () => {
         const view = harness({ sessionsFailure: true });
+        const user = userEvent.setup();
         try {
             expect(
                 await screen.findByRole("heading", { name: "Chat unavailable" })
             ).toBeVisible();
-            expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+            await user.click(screen.getByRole("button", { name: "Try again" }));
+            await waitFor(() =>
+                expect(
+                    view.query.mock.calls.filter(
+                        ([name]) => name === "gatewaySessions.list"
+                    )
+                ).toHaveLength(2)
+            );
             expect(screen.queryByRole("textbox", { name: "Message" })).toBeNull();
         } finally {
             await waitFor(() => expect(view.queryClient.isFetching()).toBe(0));

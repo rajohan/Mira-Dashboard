@@ -35,7 +35,6 @@ function properties(messages: readonly ChatDisplayMessage[]) {
     return {
         display,
         hasOlder: false,
-        historyLoading: false,
         initialLoading: false,
         messages,
         onHydrateMessage: jest.fn(),
@@ -391,7 +390,11 @@ describe("chat transcript", () => {
     });
 
     test("loads one older page at the top and preserves the visible row", async () => {
-        const onLoadOlder = jest.fn();
+        const firstPage = Promise.withResolvers<boolean>();
+        const onLoadOlder = jest
+            .fn<() => boolean | Promise<boolean>>()
+            .mockImplementationOnce(() => firstPage.promise)
+            .mockReturnValue(false);
         const current = message("current", 2);
         const rendered = render(
             <ChatTranscript
@@ -423,11 +426,9 @@ describe("chat transcript", () => {
             <ChatTranscript
                 {...properties([current])}
                 hasOlder
-                historyLoading
                 onLoadOlder={onLoadOlder}
             />
         );
-        await flushAnimationFrames();
         expect(log).toHaveAttribute("aria-busy", "true");
         rendered.rerender(
             <ChatTranscript
@@ -436,6 +437,10 @@ describe("chat transcript", () => {
                 onLoadOlder={onLoadOlder}
             />
         );
+        await act(async () => {
+            firstPage.resolve(true);
+            await firstPage.promise;
+        });
         await flushAnimationFrames();
         expect(log.scrollTop).toBeGreaterThan(32);
         fireEvent.scroll(log);

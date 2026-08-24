@@ -12,7 +12,6 @@ const meta = {
         variant: "secondary",
     },
     component: IconOnlyButton,
-    title: "UI/IconOnlyButton",
 } satisfies Meta<typeof IconOnlyButton>;
 
 export default meta;

@@ -9,7 +9,6 @@ const meta = {
         onClick: fn(),
     },
     component: Button,
-    title: "UI/Button",
 } satisfies Meta<typeof Button>;
 
 export default meta;

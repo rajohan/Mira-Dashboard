@@ -30,7 +30,6 @@ const meta = {
     args: { result },
     component: OverviewNotificationsCard,
     parameters: { layout: "padded" },
-    title: "Overview/OverviewNotificationsCard",
 } satisfies Meta<typeof OverviewNotificationsCard>;
 
 export default meta;

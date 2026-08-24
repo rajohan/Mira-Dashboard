@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
     jobRunEventMessageMaximumLength,
@@ -230,7 +230,9 @@ export interface JobRunDetailProps {
     readonly cancelBusy: boolean;
     readonly cancelDisabled?: boolean;
     readonly detail: JobRunDetailData;
+    readonly focusRequested?: boolean;
     readonly onCancel: (id: string) => void;
+    readonly onFocusHandled?: (id: string) => void;
 }
 
 /** @returns Safe, bounded durable run metadata, result, and newest-first event history. */
@@ -238,7 +240,9 @@ export function JobRunDetail({
     cancelBusy,
     cancelDisabled = false,
     detail,
+    focusRequested = false,
     onCancel,
+    onFocusHandled,
 }: JobRunDetailProps) {
     const { run } = detail;
     const cancellation = cancellationPresentation(run);
@@ -247,43 +251,47 @@ export function JobRunDetail({
         detail.nextEventCursor !== undefined || run.eventCount > events.length;
     const headingId = `job-run-${run.id}-heading`;
     const cancellationActionable = cancellation?.enabled === true;
-    const previousCancellationAction = useRef({
+    const [cancellationFocus, setCancellationFocus] = useState({
         actionable: cancellationActionable,
+        restore: false,
         runId: run.id,
     });
-    const restoreFocusAfterCancellation = useRef(false);
-
-    useEffect(() => {
-        const previous = previousCancellationAction.current;
-        if (previous.runId !== run.id) {
-            restoreFocusAfterCancellation.current = false;
-        } else if (previous.actionable && !cancellationActionable) {
-            restoreFocusAfterCancellation.current = true;
-        }
-        previousCancellationAction.current = {
+    if (
+        cancellationFocus.runId !== run.id ||
+        cancellationFocus.actionable !== cancellationActionable
+    ) {
+        setCancellationFocus((current) => ({
             actionable: cancellationActionable,
+            restore:
+                current.runId === run.id && current.actionable && !cancellationActionable,
             runId: run.id,
-        };
-        if (
-            cancelBusy ||
-            cancellationActionable ||
-            !restoreFocusAfterCancellation.current
-        ) {
-            return;
-        }
-        restoreFocusAfterCancellation.current = false;
-        document.querySelector<HTMLElement>(`#${headingId}`)?.focus();
-    }, [cancelBusy, cancellationActionable, headingId, run.id]);
+        }));
+    }
+    const shouldRestoreCancellationFocus =
+        !cancelBusy && !cancellationActionable && cancellationFocus.restore;
+
+    function restoreCancellationFocus(element: HTMLDivElement | null): void {
+        if (!shouldRestoreCancellationFocus || element === null) return;
+        setCancellationFocus((current) => ({ ...current, restore: false }));
+        element.querySelector<HTMLElement>(`#${headingId}`)?.focus();
+    }
+
+    function focusRequestedHeading(element: HTMLHeadingElement | null): void {
+        if (!focusRequested || element === null) return;
+        element.focus();
+        onFocusHandled?.(run.id);
+    }
 
     return (
         <Card aria-labelledby={headingId}>
             <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
+                <div className="min-w-0" ref={restoreCancellationFocus}>
                     <div className="flex flex-wrap items-center gap-2">
                         <Heading
                             className="wrap-anywhere"
                             id={headingId}
                             level={2}
+                            ref={focusRequestedHeading}
                             tabIndex={-1}
                         >
                             {run.displayName}

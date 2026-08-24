@@ -73,7 +73,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Agents/AgentHistoryTable",
 } satisfies Meta<typeof AgentHistoryTable>;
 
 export default meta;

@@ -95,7 +95,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Jobs/ScheduleTable",
 } satisfies Meta<typeof ScheduleTable>;
 
 export default meta;

@@ -89,7 +89,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Cache/CacheStatusTable",
 } satisfies Meta<typeof CacheStatusTable>;
 
 export default meta;

@@ -96,7 +96,6 @@ const meta = {
         layout: "padded",
     },
     render: RenderControlledReleaseChannel,
-    title: "UI/RadioGroup",
 } satisfies Meta<typeof RadioGroup<ReleaseChannel>>;
 
 export default meta;

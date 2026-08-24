@@ -1,5 +1,4 @@
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
-import { useEffect, useRef } from "react";
 
 import { cn } from "../lib/classNames.ts";
 import { Icon } from "./Icon.tsx";
@@ -24,6 +23,10 @@ const alertStyle = Object.freeze({
     },
 });
 
+function focusElement(element: HTMLDivElement | null): void {
+    element?.focus();
+}
+
 interface AlertProps {
     readonly className?: string;
     readonly dismissLabel?: string;
@@ -45,12 +48,6 @@ export function Alert({
     onDismiss,
     variant = "error",
 }: AlertProps) {
-    const element = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        if (focusOnError && message !== undefined && variant === "error") {
-            element.current?.focus();
-        }
-    }, [focusOnError, message, variant]);
     if (message === undefined) return null;
     const style = alertStyle[variant];
     return (
@@ -60,7 +57,8 @@ export function Alert({
                 style.container,
                 className
             )}
-            ref={element}
+            key={`${variant}:${message}`}
+            ref={focusOnError && variant === "error" ? focusElement : undefined}
             role={variant === "error" ? "alert" : "status"}
             tabIndex={variant === "error" ? -1 : undefined}
         >

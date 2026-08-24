@@ -58,7 +58,6 @@ const meta = {
         layout: "padded",
     },
     render: RenderControlledSearchInput,
-    title: "UI/SearchInput",
 } satisfies Meta<typeof SearchInput>;
 
 export default meta;

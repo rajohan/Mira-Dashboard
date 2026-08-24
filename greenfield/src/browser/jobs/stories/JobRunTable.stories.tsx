@@ -106,7 +106,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Jobs/JobRunTable",
 } satisfies Meta<typeof JobRunTable>;
 
 export default meta;

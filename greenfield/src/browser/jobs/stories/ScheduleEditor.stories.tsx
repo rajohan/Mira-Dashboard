@@ -55,7 +55,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Jobs/ScheduleEditor",
 } satisfies Meta<typeof ScheduleEditor>;
 
 export default meta;

@@ -383,7 +383,6 @@ export function ChatWorkspace({
                             display={displaySettings}
                             hasOlder={view.historyHasNextPage}
                             initialLoading={view.historyInitialLoading}
-                            historyLoading={view.historyLoading}
                             messages={view.messages}
                             onHydrateMessage={onHydrateMessage}
                             onLoadOlder={onLoadOlder}

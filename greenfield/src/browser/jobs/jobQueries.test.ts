@@ -479,22 +479,18 @@ describe("jobs browser queries", () => {
                 cursor: { sequence: 503 },
                 knownSequence: 402,
             };
-            await queryClient.invalidateQueries({
-                exact: true,
-                queryKey: jobRunEventGapQueryKey(run.id),
-            });
-            await queryClient.fetchQuery(
+            const nextGap = await queryClient.fetchQuery(
                 jobRunEventGapQueryOptions(client, run.id, nextRequest)
             );
-            const accumulatedGap = queryClient.getQueryData<{
-                readonly events: readonly { readonly sequence: number }[];
-            }>(jobRunEventGapQueryKey(run.id));
-            if (accumulatedGap === undefined) {
-                throw new TypeError("Missing accumulated event gap");
-            }
-            expect(accumulatedGap.events).toHaveLength(300);
-            expect(accumulatedGap.events.at(0)?.sequence).toBe(502);
-            expect(accumulatedGap.events.at(-1)?.sequence).toBe(103);
+            expect(nextGap.events).toHaveLength(100);
+            expect(nextGap.events.at(0)?.sequence).toBe(502);
+            expect(nextGap.events.at(-1)?.sequence).toBe(403);
+            expect(
+                queryClient.getQueryData(jobRunEventGapQueryKey(run.id, request))
+            ).toEqual(gap);
+            expect(
+                queryClient.getQueryData(jobRunEventGapQueryKey(run.id, nextRequest))
+            ).toEqual(nextGap);
             expect(transport.calls.map(({ input }) => input)).toEqual([
                 {
                     eventCursor: { sequence: 303 },
@@ -514,7 +510,7 @@ describe("jobs browser queries", () => {
             ]);
             expect(
                 jobRunEventGapQueryOptions(client, run.id, nextRequest).queryKey
-            ).toEqual(jobRunEventGapQueryKey(run.id));
+            ).toEqual(jobRunEventGapQueryKey(run.id, nextRequest));
         } finally {
             queryClient.clear();
         }

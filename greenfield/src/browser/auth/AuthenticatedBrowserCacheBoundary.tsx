@@ -1,6 +1,6 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { useObservedQueryData } from "../api/useObservedQueryState.ts";
@@ -60,7 +60,8 @@ export function AuthenticatedBrowserCacheBoundary({
         }));
     }
 
-    useEffect(() => {
+    function startPendingReset(element: HTMLDivElement | null): void {
+        if (element === null) return;
         const pendingIdentity = transition.pendingIdentity;
         if (
             pendingIdentity === undefined ||
@@ -103,7 +104,7 @@ export function AuthenticatedBrowserCacheBoundary({
                         : current
                 );
             });
-    }, [collections, onCacheReset, queryClient, transition]);
+    }
 
     const resetRequired =
         transition.pendingIdentity !== undefined ||
@@ -126,5 +127,9 @@ export function AuthenticatedBrowserCacheBoundary({
             />
         );
     }
-    return <PageState label="Preparing secure session data…" status="loading" />;
+    return (
+        <div ref={startPendingReset}>
+            <PageState label="Preparing secure session data…" status="loading" />
+        </div>
+    );
 }

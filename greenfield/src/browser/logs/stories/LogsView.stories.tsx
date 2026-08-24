@@ -187,7 +187,6 @@ const meta = {
     },
     component: LogsView,
     parameters: { layout: "padded" },
-    title: "Logs/LogsView",
 } satisfies Meta<typeof LogsView>;
 
 export default meta;

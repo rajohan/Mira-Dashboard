@@ -14,7 +14,6 @@ const meta = {
     parameters: {
         layout: "fullscreen",
     },
-    title: "UI/AppErrorFallback",
 } satisfies Meta<typeof AppErrorFallback>;
 
 export default meta;

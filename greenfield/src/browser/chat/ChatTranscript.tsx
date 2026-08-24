@@ -115,7 +115,6 @@ interface ChatTranscriptProps {
     readonly activeRunIds?: readonly string[];
     readonly display: ChatDisplaySettings;
     readonly hasOlder: boolean;
-    readonly historyLoading: boolean;
     readonly initialLoading: boolean;
     readonly messages: readonly ChatDisplayMessage[];
     readonly onDismissReadAloudError?: () => void;
@@ -169,7 +168,6 @@ export function ChatTranscript({
     activeRunIds = [],
     display,
     hasOlder,
-    historyLoading,
     initialLoading,
     messages,
     onDismissReadAloudError,
@@ -183,7 +181,7 @@ export function ChatTranscript({
 }: ChatTranscriptProps) {
     const olderHistoryRequestPending = useRef(false);
     const olderHistoryCycleActive = useRef(false);
-    const [olderHistoryCompletion, setOlderHistoryCompletion] = useState(0);
+    const [, completeOlderHistoryRequest] = useState(0);
     const [olderHistoryCycleLoading, setOlderHistoryCycleLoading] = useState(false);
     const historyViewport = useRef<HTMLDivElement>(null);
     const previousHistoryScrollTop = useRef(0);
@@ -230,7 +228,6 @@ export function ChatTranscript({
             historyViewport.current === null ||
             historyViewport.current.scrollTop > olderHistoryLoadThresholdPx ||
             !hasOlder ||
-            historyLoading ||
             olderHistoryRequestPending.current
         ) {
             return;
@@ -248,12 +245,11 @@ export function ChatTranscript({
             setOlderHistoryCycleLoading(false);
         } finally {
             olderHistoryRequestPending.current = false;
-            setOlderHistoryCompletion((current) => current + 1);
+            requestAnimationFrame(() =>
+                completeOlderHistoryRequest((current) => current + 1)
+            );
         }
     }
-    const continueOlderHistory = useEffectEvent(() => {
-        void requestOlderAtTop();
-    });
     function handleHistoryScroll(): void {
         const scrollTop = historyViewport.current?.scrollTop ?? 0;
         const movedUp = scrollTop + 1 < previousHistoryScrollTop.current;
@@ -322,27 +318,6 @@ export function ChatTranscript({
         );
         return () => globalThis.clearTimeout(timeout);
     }, [nextCompactionExpiry, nowMs]);
-    useEffect(() => {
-        if (
-            !olderHistoryCycleActive.current ||
-            olderHistoryRequestPending.current ||
-            historyLoading
-        ) {
-            return;
-        }
-        const viewport = historyViewport.current;
-        if (
-            viewport === null ||
-            !hasOlder ||
-            viewport.scrollTop > olderHistoryLoadThresholdPx
-        ) {
-            olderHistoryCycleActive.current = false;
-            setOlderHistoryCycleLoading(false);
-            return;
-        }
-        continueOlderHistory();
-    }, [hasOlder, historyLoading, layoutRevision, olderHistoryCompletion]);
-
     if (visibleMessages.length === 0 && initialLoading) {
         return (
             <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -420,7 +395,7 @@ export function ChatTranscript({
                             </output>
                         )}
                         <div
-                            aria-busy={historyLoading || olderHistoryCycleLoading}
+                            aria-busy={olderHistoryCycleLoading}
                             aria-label="Messages"
                             aria-live="off"
                             className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3 sm:px-3"
@@ -429,6 +404,22 @@ export function ChatTranscript({
                                 historyViewport.current = node;
                                 preserveHistoryAnchor.current =
                                     virtualization.preserveVisibleAnchor;
+                                if (
+                                    node === null ||
+                                    !olderHistoryCycleActive.current ||
+                                    olderHistoryRequestPending.current
+                                ) {
+                                    return;
+                                }
+                                if (
+                                    !hasOlder ||
+                                    node.scrollTop > olderHistoryLoadThresholdPx
+                                ) {
+                                    olderHistoryCycleActive.current = false;
+                                    setOlderHistoryCycleLoading(false);
+                                    return;
+                                }
+                                void requestOlderAtTop();
                             }}
                             role="log"
                             onScroll={handleHistoryScroll}

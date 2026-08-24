@@ -11,7 +11,6 @@ const meta = {
         label: "Schedule name",
     },
     component: FormField,
-    title: "UI/FormField",
 } satisfies Meta<typeof FormField>;
 
 export default meta;

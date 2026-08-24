@@ -51,7 +51,6 @@ const meta = {
         layout: "padded",
         tanstack: { router: { path: "/", route: overviewRoute } },
     },
-    title: "Overview/OverviewIncidentsCard",
 } satisfies Meta<typeof OverviewIncidentsCard>;
 
 export default meta;

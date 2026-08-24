@@ -37,7 +37,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Notifications/NotificationListItem",
 } satisfies Meta<typeof NotificationListItem>;
 
 export default meta;

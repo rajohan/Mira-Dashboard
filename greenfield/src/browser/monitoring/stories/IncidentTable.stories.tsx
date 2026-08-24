@@ -102,7 +102,6 @@ const meta = {
     parameters: {
         layout: "padded",
     },
-    title: "Monitoring/IncidentTable",
 } satisfies Meta<typeof IncidentTable>;
 
 export default meta;

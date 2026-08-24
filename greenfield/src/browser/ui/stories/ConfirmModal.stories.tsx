@@ -79,7 +79,6 @@ const meta = {
         layout: "fullscreen",
     },
     render: RenderControlledConfirmModal,
-    title: "UI/ConfirmModal",
 } satisfies Meta<typeof ConfirmModal>;
 
 export default meta;

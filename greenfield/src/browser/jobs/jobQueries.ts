@@ -96,10 +96,17 @@ export function jobRunEventHistoryQueryKey(id: string) {
 
 /**
  * @param id Durable run identity.
+ * @param request Missing interval whose identity should scope the query.
  * @returns Stable key for transient gap repair within one run's immutable events.
  */
-export function jobRunEventGapQueryKey(id: string) {
-    return [...jobRunEventGapQueryRoot, id] as const;
+export function jobRunEventGapQueryKey(id: string, request?: JobRunEventGapRequest) {
+    return [
+        ...jobRunEventGapQueryRoot,
+        id,
+        ...(request === undefined
+            ? []
+            : [request.cursor.sequence, request.knownSequence]),
+    ] as const;
 }
 
 /**
@@ -225,7 +232,7 @@ export interface JobRunEventGapResult {
 
 /**
  * Loads only the missing interval between a moved exact-page cursor and known history.
- * The stable per-run key prevents each realtime cursor from creating another cache.
+ * Each interval has its own key so React Query starts the next repair declaratively.
  * @param client Validated browser tRPC client.
  * @param id Durable run identity.
  * @param request Current gap bounds, or nothing before a gap is observed.
@@ -237,7 +244,7 @@ export function jobRunEventGapQueryOptions(
     request: JobRunEventGapRequest | undefined
 ) {
     return queryOptions({
-        enabled: false,
+        enabled: request !== undefined,
         queryFn: async ({ signal }): Promise<JobRunEventGapResult> => {
             if (request === undefined) {
                 throw new TypeError("Job event gap repair requires exact bounds");
@@ -280,7 +287,7 @@ export function jobRunEventGapQueryOptions(
                 request,
             };
         },
-        queryKey: jobRunEventGapQueryKey(id),
+        queryKey: jobRunEventGapQueryKey(id, request),
         staleTime: Number.POSITIVE_INFINITY,
         structuralSharing: (oldData, newData) => {
             const previous = oldData as JobRunEventGapResult | undefined;
