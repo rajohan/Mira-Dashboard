@@ -28,7 +28,10 @@ import { jobRunSelectSchema } from "../../database/validation/jobRuns.ts";
 import { jobWorkerControlSelectSchema } from "../../database/validation/jobWorkerControl.ts";
 import { scheduledJobSelectSchema } from "../../database/validation/scheduledJobs.ts";
 import { workerInstanceSelectSchema } from "../../database/validation/workerInstances.ts";
-import { findJobActionDefinition, isRegisteredJobSchedule } from "./actionRegistry.ts";
+import {
+    isRegisteredJobSchedule,
+    jobScheduleIsOperatorVisible,
+} from "./actionRegistry.ts";
 
 export type JobDisableIntentRecord = v.InferOutput<typeof jobDisableIntentSelectSchema>;
 export type HostRestartClaimFenceRecord = v.InferOutput<
@@ -206,8 +209,8 @@ export function toScheduleSummary(
             ? {}
             : { latestRun: toJobRunSummary(relations.latestRun) }),
         manualRunAvailable:
-            isRegisteredJobSchedule(record.id, record.actionKey) &&
-            findJobActionDefinition(record.actionKey)?.manualExposure === "jobs-write",
+            jobScheduleIsOperatorVisible(record.id) &&
+            isRegisteredJobSchedule(record.id, record.actionKey),
         name: record.name,
         ...(record.enabled && record.nextRunAt !== null
             ? { nextRunAtMs: getTime(record.nextRunAt) }

@@ -1917,7 +1917,6 @@ describe("Dashboard security composition", () => {
                 "database.sqlite-maintenance",
                 "docker.updater",
                 "maintenance.rotate-managed-logs",
-                "system.worker-smoke",
             ] as const;
             expect(schedules.schedules.map(({ id }) => id)).toEqual(expectedScheduleIds);
             expect(
@@ -1982,11 +1981,7 @@ describe("Dashboard security composition", () => {
             });
             expect(
                 schedules.schedules.find(({ id }) => id === "system.worker-smoke")
-            ).toMatchObject({
-                actionKey: "system.worker-smoke",
-                enabled: false,
-                id: "system.worker-smoke",
-            });
+            ).toBeUndefined();
 
             const cacheStatusResponse = await fetch(
                 new URL(`/trpc/cache.getStatus?input=${listInput}`, server.url),
@@ -2042,13 +2037,18 @@ describe("Dashboard security composition", () => {
                           })
                       )
                     : []
-            ).toEqual(
-                expectedScheduleIds.map((id) => ({
-                    defaultEnabled: id !== "system.worker-smoke",
+            ).toEqual([
+                ...expectedScheduleIds.map((id) => ({
+                    defaultEnabled: true,
                     id,
-                    state: "present",
-                }))
-            );
+                    state: "present" as const,
+                })),
+                {
+                    defaultEnabled: false,
+                    id: "system.worker-smoke",
+                    state: "present" as const,
+                },
+            ]);
 
             const idempotencyKey = "cHJvZHVjdGlvbi1odHRwLWNvbXBvc2l0aW9uLWtleS0x";
             const enqueue = () =>

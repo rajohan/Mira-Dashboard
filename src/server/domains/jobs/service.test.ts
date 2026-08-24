@@ -19,10 +19,11 @@ import {
     dockerUpdaterJobScheduleId,
 } from "./actionRegistry.ts";
 import { JobConflictError, JobValidationError } from "./errors.ts";
-import type {
-    JobRunEventRecord,
-    ScheduledJobRecord,
-    WorkerInstanceRecord,
+import {
+    type JobRunEventRecord,
+    type ScheduledJobRecord,
+    type WorkerInstanceRecord,
+    toScheduleSummary,
 } from "./records.ts";
 import {
     createJobRepository,
@@ -132,6 +133,42 @@ describe("durable jobs service", () => {
             } finally {
                 fixture.database.sqlite.close(true);
             }
+        }
+    });
+
+    test("hides the internal worker smoke while exposing operator schedules", async () => {
+        const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
+        const repository = createJobRepository(
+            fixture.database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const generateId = createIdGenerator();
+
+        try {
+            await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
+            const service = createJobService({
+                generateId,
+                nowMs: serviceNowMs,
+                repository,
+            });
+            const result = await Effect.runPromise(
+                service.listSchedules({ enabled: "all", limit: 100 })
+            );
+
+            expect(result.schedules).not.toHaveLength(0);
+            expect(result.schedules.some(({ id }) => id === "system.worker-smoke")).toBe(
+                false
+            );
+            expect(
+                result.schedules.every(({ manualRunAvailable }) => manualRunAvailable)
+            ).toBe(true);
+            expect(
+                toScheduleSummary(
+                    repository.findSchedule("system.worker-smoke")!.schedule
+                ).manualRunAvailable
+            ).toBe(false);
+        } finally {
+            fixture.database.sqlite.close(true);
         }
     });
 

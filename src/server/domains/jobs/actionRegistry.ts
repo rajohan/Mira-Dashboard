@@ -450,6 +450,14 @@ const workerSmokeDefinition = validateJobActionDefinition({
 });
 
 /**
+ * @param scheduleId Fixed schedule identity.
+ * @returns Whether the schedule belongs in the production operator inventory.
+ */
+export function jobScheduleIsOperatorVisible(scheduleId: string): boolean {
+    return scheduleId !== workerSmokeDefinition.scheduleId;
+}
+
+/**
  * Complete authority surface for an untrusted managed PR preview.
  *
  * The preview worker may prove that its isolated database and worker loop boot, but it
