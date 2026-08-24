@@ -34,6 +34,14 @@ export const securityAuditReasonValues = [
     "webauthn_pending_invalid",
 ] as const;
 
+/** Sanitized settlement states for external adapter audit records. */
+export const securityAuditSettlementValues = [
+    "attempted",
+    "succeeded",
+    "failed",
+    "partial",
+] as const;
+
 const securityAuditTimestampSchema = timestampMillisecondsSchema(
     "Security audit timestamp is invalid"
 );
@@ -75,6 +83,7 @@ export const securityAuditMetadataSchema = v.strictObject({
     revoked: v.optional(v.boolean()),
     revokedCredentials: v.optional(securityAuditCountSchema),
     revokedSessions: v.optional(securityAuditCountSchema),
+    settlement: v.optional(v.picklist(securityAuditSettlementValues)),
 });
 
 const anonymousAuditActorSchema = v.strictObject({

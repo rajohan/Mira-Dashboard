@@ -6,12 +6,19 @@ import path from "node:path";
 
 import { maxTime } from "date-fns/constants";
 
+import { gatewayRealtimeTopics } from "../../../contracts/gatewayRealtime.ts";
 import type { RuntimeOwnedDatabase } from "../../database/runtime/databaseService.ts";
+import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { migrationsDirectory } from "../../test/support/freshDatabase.ts";
 import { withTestTimeout } from "../../test/support/promise.ts";
 import { createTestStructuredLogger } from "../../test/support/requestContext.ts";
+import {
+    PersistentGatewayUnavailableError,
+    type PersistentGatewayListener,
+    type PersistentGatewayTransport,
+} from "../gateway/persistentGatewayTransport.ts";
 import { RealtimeEventPump } from "../realtime/eventPump.ts";
-import { insertEvent } from "../realtime/testSupport/eventPump.ts";
+import { insertEvent, waitForCondition } from "../realtime/testSupport/eventPump.ts";
 import { createDashboardApplicationRuntime } from "./applicationRuntime.ts";
 
 const releaseId = "0".repeat(40);
@@ -41,6 +48,63 @@ async function createTestDashboardRuntime() {
         },
         logger: createTestStructuredLogger(),
     });
+}
+
+function unavailablePersistentGatewayRequest(): Promise<never> {
+    return Promise.reject(new PersistentGatewayUnavailableError());
+}
+
+function createFakePersistentGatewayTransport(): {
+    readonly calls: string[];
+    readonly transport: PersistentGatewayTransport;
+} {
+    const calls: string[] = [];
+    let listener: PersistentGatewayListener | undefined;
+    const transport: PersistentGatewayTransport = {
+        request: unavailablePersistentGatewayRequest,
+        requestAdmin: unavailablePersistentGatewayRequest,
+        snapshot: {
+            connectionGeneration: 0,
+            phase: "stopped",
+            reconnectAttempt: 0,
+        },
+        start() {
+            calls.push("start");
+            listener?.onState?.({
+                connectionGeneration: 1,
+                phase: "connected",
+                reconnectAttempt: 0,
+            });
+            listener?.onEvent?.({
+                connectionGeneration: 1,
+                frame: { event: "sessions.changed", type: "event" },
+                receivedAtMs: 1000,
+            });
+        },
+        stop() {
+            calls.push("stop");
+            listener?.onState?.({
+                connectionGeneration: 1,
+                phase: "stopped",
+                reconnectAttempt: 0,
+            });
+            return Promise.resolve();
+        },
+        subscribe(nextListener) {
+            calls.push("subscribe");
+            listener = nextListener;
+            nextListener.onState?.({
+                connectionGeneration: 0,
+                phase: "stopped",
+                reconnectAttempt: 0,
+            });
+            return () => {
+                calls.push("unsubscribe");
+                if (listener === nextListener) listener = undefined;
+            };
+        },
+    };
+    return { calls, transport };
 }
 
 afterEach(async () => {
@@ -138,6 +202,75 @@ describe("Dashboard application runtime", () => {
                 databaseCloseSpy.mockRestore();
                 pumpCloseSpy.mockRestore();
             }
+        }
+    });
+
+    test("owns the durable Gateway bridge across transport startup and shutdown", async () => {
+        const stateDirectory = await privateTemporaryDirectory();
+        const databaseFilePath = path.join(stateDirectory, "mira-dashboard.db");
+        const gateway = createFakePersistentGatewayTransport();
+        const runtime = createDashboardApplicationRuntime({
+            database: {
+                migrationsDirectory,
+                releaseId,
+                startupMode: "initialize-empty",
+                stateDirectory,
+            },
+            logger: createTestStructuredLogger(),
+            persistentGatewayTransport: gateway.transport,
+        });
+
+        try {
+            await runtime.initialize();
+            const orm = await runtime.database.orm();
+            await waitForCondition(
+                () => orm.select().from(realtimeEvents).all().length === 3,
+                "Gateway startup realtime events"
+            );
+            expect(
+                orm
+                    .select({ topic: realtimeEvents.topic })
+                    .from(realtimeEvents)
+                    .orderBy(realtimeEvents.id)
+                    .all()
+            ).toEqual([
+                { topic: gatewayRealtimeTopics.connection },
+                { topic: gatewayRealtimeTopics.sessions },
+                { topic: gatewayRealtimeTopics.cron },
+            ]);
+
+            await runtime.dispose();
+            expect(gateway.calls).toEqual(["subscribe", "start", "stop", "unsubscribe"]);
+
+            const verificationDatabase = new Database(databaseFilePath, {
+                readonly: true,
+                strict: true,
+            });
+            try {
+                const topics = verificationDatabase
+                    .query("SELECT topic FROM realtime_events ORDER BY id")
+                    .all() as Array<{ topic: string }>;
+                expect(topics.slice(0, 3)).toEqual([
+                    { topic: gatewayRealtimeTopics.connection },
+                    { topic: gatewayRealtimeTopics.sessions },
+                    { topic: gatewayRealtimeTopics.cron },
+                ]);
+                expect(
+                    topics
+                        .slice(3)
+                        .toSorted((left, right) => left.topic.localeCompare(right.topic))
+                ).toEqual(
+                    [
+                        { topic: gatewayRealtimeTopics.connection },
+                        { topic: gatewayRealtimeTopics.sessions },
+                        { topic: gatewayRealtimeTopics.cron },
+                    ].toSorted((left, right) => left.topic.localeCompare(right.topic))
+                );
+            } finally {
+                verificationDatabase.close(true);
+            }
+        } finally {
+            await runtime.dispose();
         }
     });
 

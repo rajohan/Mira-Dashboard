@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { createMemoryHistory } from "@tanstack/react-router";
 
-import type { AgentConfiguration, AgentStatus } from "../../contracts/agentModel.ts";
+import type {
+    AgentConfiguration,
+    AgentStatusProjection,
+} from "../../contracts/agentModel.ts";
 import type { ListAgentStatusesResult } from "../../contracts/agents.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type {
@@ -261,16 +264,24 @@ const agentConfiguration = Object.freeze({
 const mainAgentStatus = Object.freeze({
     agentId: "main",
     currentTask: "Complete the core operations overview",
+    freshness: "fresh",
+    gatewayAvailability: "active",
+    hasActiveRun: true,
     lastActivityAtMs: timestampMs,
+    lastSeenAtMs: timestampMs,
+    observedAtMs: timestampMs,
+    sessionKey: "agent:main:main",
     startedAtMs: timestampMs - 60_000,
     state: "working",
-} as const satisfies AgentStatus);
+} as const satisfies AgentStatusProjection);
 
 const agentStatusPage = Object.freeze({
     statuses: [
         mainAgentStatus,
         {
             agentId: "researcher",
+            freshness: "unavailable",
+            gatewayAvailability: "disconnected",
             lastActivityAtMs: timestampMs - 120_000,
             state: "idle",
         },

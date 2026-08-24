@@ -11,6 +11,7 @@ import {
     realtimeStreamOutputSchema,
     realtimeTopicDefinitions,
 } from "./events.ts";
+import { gatewayRealtimeTopics } from "./gatewayRealtime.ts";
 import {
     monitoringRealtimeRoutingSchema,
     monitoringRealtimeTopics,
@@ -21,6 +22,7 @@ describe("realtime transport contracts", () => {
         expect(realtimeStreamCapabilities).toEqual([
             "agents:read",
             "cache:read",
+            "gateway-sessions:read",
             "jobs:read",
             "notifications:read",
             "reports:read",
@@ -91,6 +93,35 @@ describe("realtime transport contracts", () => {
                 id: "1",
             })
         ).toMatchObject({ id: "1" });
+    });
+
+    test("accepts only bounded Gateway snapshot invalidations", () => {
+        expect(
+            v.parse(realtimeStreamDataSchema, {
+                event: {
+                    entityId: "current",
+                    entityType: "gateway-sessions",
+                    occurredAtMs: 1000,
+                    operation: "snapshot-required",
+                    payload: { kind: "snapshot-required" },
+                    topic: gatewayRealtimeTopics.sessions,
+                },
+                kind: "change",
+            })
+        ).toBeDefined();
+        expect(
+            v.safeParse(realtimeStreamDataSchema, {
+                event: {
+                    entityId: "current",
+                    entityType: "gateway-sessions",
+                    occurredAtMs: 1000,
+                    operation: "snapshot-required",
+                    payload: { kind: "snapshot-required", sessionKey: "secret" },
+                    topic: gatewayRealtimeTopics.sessions,
+                },
+                kind: "change",
+            }).success
+        ).toBeFalse();
     });
 
     test("requires matching cache envelope and payload identities", () => {

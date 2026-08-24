@@ -14,5 +14,418 @@
         "wake"
     ],
     "schemaVersion": 1,
+    "adapter": {
+        "delivery": {
+            "full": {
+                "completionDestination": {
+                    "mode": "webhook",
+                    "requiredFields": ["mode", "to"]
+                },
+                "failureDestination": {
+                    "modes": ["announce", "webhook"],
+                    "optionalFields": ["accountId", "channel", "mode", "to"]
+                },
+                "modes": ["announce", "none", "webhook"],
+                "sharedFields": [
+                    "accountId",
+                    "bestEffort",
+                    "channel",
+                    "failureDestination",
+                    "threadId"
+                ],
+                "variantFields": {
+                    "announce": ["completionDestination", "to"],
+                    "none": ["to"],
+                    "webhookRequired": ["to"]
+                }
+            },
+            "merge": {
+                "explicitNullClears": [
+                    "accountId",
+                    "channel",
+                    "completionDestination",
+                    "failureDestination",
+                    "threadId",
+                    "to"
+                ],
+                "failureDestinationNullClearsWholeDestination": true,
+                "modeSwitchAcrossWebhookBoundaryClearsTo": true,
+                "noneOrWebhookModeClearsOmittedCompletionDestination": true,
+                "webhookModeClears": ["accountId", "channel", "threadId"]
+            },
+            "patch": {
+                "fields": [
+                    "accountId",
+                    "bestEffort",
+                    "channel",
+                    "completionDestination",
+                    "failureDestination",
+                    "mode",
+                    "threadId",
+                    "to"
+                ],
+                "failureDestinationNullableFields": [
+                    "accountId",
+                    "channel",
+                    "mode",
+                    "to"
+                ],
+                "nonNullableFields": ["bestEffort", "mode"],
+                "nullableFields": [
+                    "accountId",
+                    "channel",
+                    "completionDestination",
+                    "failureDestination",
+                    "threadId",
+                    "to"
+                ]
+            }
+        },
+        "event": {
+            "delivery": "best-effort-drop-if-slow",
+            "name": "cron"
+        },
+        "jobProjection": {
+            "deliveryFields": [
+                "accountId",
+                "bestEffort",
+                "channel",
+                "completionDestination",
+                "failureDestination",
+                "mode",
+                "threadId",
+                "to"
+            ],
+            "fields": [
+                "agentId",
+                "configRevision",
+                "createdAtMs",
+                "delivery",
+                "description",
+                "enabled",
+                "id",
+                "name",
+                "payload",
+                "schedule",
+                "sessionTarget",
+                "state",
+                "updatedAtMs",
+                "wakeMode"
+            ],
+            "payloadFields": [
+                "argv",
+                "kind",
+                "lightContext",
+                "message",
+                "model",
+                "script",
+                "text",
+                "thinking",
+                "timeoutSeconds"
+            ],
+            "scheduleFields": [
+                "anchorMs",
+                "at",
+                "batchMs",
+                "command",
+                "cwd",
+                "everyMs",
+                "expr",
+                "kind",
+                "match",
+                "maxBatchBytes",
+                "mode",
+                "staggerMs",
+                "tz"
+            ],
+            "stateFields": [
+                "consecutiveErrors",
+                "lastDeliveryStatus",
+                "lastDurationMs",
+                "lastErrorReason",
+                "lastRunAtMs",
+                "lastRunStatus",
+                "nextRunAtMs",
+                "runningAtMs",
+                "streamStatus"
+            ]
+        },
+        "methodAccess": [
+            {
+                "lane": "persistent",
+                "method": "cron.get",
+                "scope": "operator.read"
+            },
+            {
+                "lane": "persistent",
+                "method": "cron.list",
+                "scope": "operator.read"
+            },
+            {
+                "lane": "one-shot-admin",
+                "method": "cron.remove",
+                "scope": "operator.admin"
+            },
+            {
+                "lane": "one-shot-admin",
+                "method": "cron.run",
+                "scope": "operator.admin"
+            },
+            {
+                "lane": "persistent",
+                "method": "cron.runs",
+                "scope": "operator.read"
+            },
+            {
+                "lane": "one-shot-admin",
+                "method": "cron.update",
+                "scope": "operator.admin"
+            },
+            {
+                "lane": "persistent",
+                "method": "system.info",
+                "scope": "operator.read"
+            }
+        ],
+        "operations": {
+            "get": {
+                "acceptedParams": ["id", "jobId"],
+                "method": "cron.get",
+                "requestParams": ["id"],
+                "result": "job-projection"
+            },
+            "list": {
+                "acceptedParams": [
+                    "agentId",
+                    "compact",
+                    "enabled",
+                    "includeDeliveryPreviews",
+                    "includeDisabled",
+                    "lastRunStatus",
+                    "limit",
+                    "offset",
+                    "query",
+                    "scheduleKind",
+                    "sortBy",
+                    "sortDir"
+                ],
+                "compactJobFields": [
+                    "declarationKey",
+                    "displayName",
+                    "enabled",
+                    "id",
+                    "lastDelivered",
+                    "lastDeliveryError",
+                    "lastDeliveryStatus",
+                    "lastFailureNotificationDelivered",
+                    "lastFailureNotificationDeliveryError",
+                    "lastFailureNotificationDeliveryStatus",
+                    "lastRunAtMs",
+                    "lastRunError",
+                    "lastRunStatus",
+                    "name",
+                    "nextRunAtMs",
+                    "owner",
+                    "scheduleKind",
+                    "trigger"
+                ],
+                "compactOmittedJobFields": [
+                    "agentId",
+                    "configRevision",
+                    "createdAtMs",
+                    "delivery",
+                    "description",
+                    "payload",
+                    "schedule",
+                    "sessionTarget",
+                    "state",
+                    "updatedAtMs",
+                    "wakeMode"
+                ],
+                "fullJobProjectionRequiresCompactFalse": true,
+                "method": "cron.list",
+                "requestLiterals": {
+                    "compact": false,
+                    "includeDeliveryPreviews": false
+                },
+                "requestParams": [
+                    "compact",
+                    "enabled",
+                    "includeDeliveryPreviews",
+                    "lastRunStatus",
+                    "limit",
+                    "offset",
+                    "query",
+                    "scheduleKind",
+                    "sortBy",
+                    "sortDir"
+                ],
+                "resultFields": [
+                    "hasMore",
+                    "jobs",
+                    "limit",
+                    "nextOffset",
+                    "offset",
+                    "snapshotRevision",
+                    "total"
+                ]
+            },
+            "remove": {
+                "acknowledgement": {
+                    "removed": true
+                },
+                "acceptedParams": ["id", "jobId"],
+                "method": "cron.remove",
+                "requestParams": ["id"],
+                "resultFields": ["removed"]
+            },
+            "run": {
+                "acceptedParams": ["expectedProcessInstanceId", "id", "jobId", "mode"],
+                "acknowledgementVariants": [
+                    {
+                        "fields": ["enqueued", "ok", "processInstanceId", "runId"],
+                        "kind": "enqueued"
+                    },
+                    {
+                        "fields": ["ok", "ran", "reason"],
+                        "kind": "invalid-spec-fallback"
+                    },
+                    {
+                        "fields": ["ok", "processInstanceId", "ran", "reason"],
+                        "kind": "not-run"
+                    }
+                ],
+                "method": "cron.run",
+                "requestLiterals": {
+                    "mode": "force"
+                },
+                "requestParams": ["expectedProcessInstanceId", "id", "mode"]
+            },
+            "runs": {
+                "acceptedParams": [
+                    "agentId",
+                    "deliveryStatus",
+                    "deliveryStatuses",
+                    "id",
+                    "jobId",
+                    "limit",
+                    "offset",
+                    "query",
+                    "runId",
+                    "scope",
+                    "sortDir",
+                    "status",
+                    "statuses"
+                ],
+                "entryFields": [
+                    "deliveryStatus",
+                    "durationMs",
+                    "errorReason",
+                    "jobId",
+                    "model",
+                    "provider",
+                    "runAtMs",
+                    "runId",
+                    "status",
+                    "summary",
+                    "ts",
+                    "usage"
+                ],
+                "method": "cron.runs",
+                "requestLiterals": {
+                    "scope": "job"
+                },
+                "requestParams": [
+                    "deliveryStatuses",
+                    "id",
+                    "limit",
+                    "offset",
+                    "scope",
+                    "sortDir",
+                    "statuses"
+                ],
+                "resultFields": [
+                    "entries",
+                    "hasMore",
+                    "limit",
+                    "nextOffset",
+                    "offset",
+                    "total"
+                ],
+                "usageFields": [
+                    "cache_read_tokens",
+                    "cache_write_tokens",
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens"
+                ]
+            },
+            "systemInfo": {
+                "method": "system.info",
+                "processInstanceId": {
+                    "minimumCharacters": 1,
+                    "optional": true
+                },
+                "requestParams": [],
+                "responseFields": [
+                    "arch",
+                    "cpuCount",
+                    "cpuModel",
+                    "defaultAgentUtilityModel",
+                    "diskAvailableBytes",
+                    "diskPath",
+                    "diskTotalBytes",
+                    "hostname",
+                    "lanAddress",
+                    "loadAverage",
+                    "machineName",
+                    "memoryFreeBytes",
+                    "memoryTotalBytes",
+                    "nodeVersion",
+                    "osLabel",
+                    "pid",
+                    "platform",
+                    "port",
+                    "processInstanceId",
+                    "release",
+                    "uptimeMs"
+                ],
+                "responseSchema": "closed-object"
+            },
+            "update": {
+                "acceptedParams": ["expectedConfigRevision", "id", "jobId", "patch"],
+                "acceptedPatchFields": [
+                    "agentId",
+                    "deleteAfterRun",
+                    "delivery",
+                    "description",
+                    "displayName",
+                    "enabled",
+                    "failureAlert",
+                    "name",
+                    "pacing",
+                    "payload",
+                    "schedule",
+                    "sessionKey",
+                    "sessionTarget",
+                    "state",
+                    "trigger",
+                    "wakeMode"
+                ],
+                "method": "cron.update",
+                "requestParams": ["expectedConfigRevision", "id", "patch"],
+                "requestPatchFields": [
+                    "delivery",
+                    "description",
+                    "enabled",
+                    "name",
+                    "payload",
+                    "schedule",
+                    "wakeMode"
+                ],
+                "result": "job-projection"
+            }
+        }
+    },
     "domain": "cron"
 }

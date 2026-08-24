@@ -1,7 +1,11 @@
 import { Bot } from "lucide-react";
 import { useId } from "react";
 
-import type { AgentDefinition, AgentStatus } from "../../contracts/agentModel.ts";
+import {
+    type AgentDefinition,
+    type AgentStatusProjection,
+    isWorkingAgentStatusProjection,
+} from "../../contracts/agentModel.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -12,7 +16,7 @@ import { Text } from "../ui/Text.tsx";
 
 export interface OverviewAgentsCardProps {
     readonly agents: readonly AgentDefinition[];
-    readonly statuses: readonly AgentStatus[];
+    readonly statuses: readonly AgentStatusProjection[];
 }
 
 /**
@@ -22,18 +26,35 @@ export interface OverviewAgentsCardProps {
  */
 export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps) {
     const headingId = useId();
+    const gatewayHeadingId = useId();
     const workingHeadingId = useId();
     const configuredAgentIds = new Set(agents.map(({ id }) => id));
     const configuredStatuses = statuses.filter(({ agentId }) =>
         configuredAgentIds.has(agentId)
     );
-    const workingStatuses = configuredStatuses.filter(
-        (status): status is Extract<AgentStatus, { readonly state: "working" }> =>
-            status.state === "working"
+    const workingStatuses = configuredStatuses.filter((status) =>
+        isWorkingAgentStatusProjection(status)
     );
     const idleCount = configuredStatuses.filter(({ state }) => state === "idle").length;
     const missingProjectionCount = Math.max(0, agents.length - configuredStatuses.length);
     const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+    const gatewayCounts = Object.freeze({
+        active: configuredStatuses.filter(
+            ({ gatewayAvailability }) => gatewayAvailability === "active"
+        ).length,
+        disconnected: configuredStatuses.filter(
+            ({ gatewayAvailability }) => gatewayAvailability === "disconnected"
+        ).length,
+        idle: configuredStatuses.filter(
+            ({ gatewayAvailability }) => gatewayAvailability === "idle"
+        ).length,
+        stale: configuredStatuses.filter(
+            ({ gatewayAvailability }) => gatewayAvailability === "stale"
+        ).length,
+        unknown: configuredStatuses.filter(
+            ({ gatewayAvailability }) => gatewayAvailability === "unknown"
+        ).length,
+    });
 
     return (
         <Card aria-labelledby={headingId} className="h-full">
@@ -47,8 +68,9 @@ export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps
                             Agent activity
                         </Heading>
                         <Text className="mt-1" size="sm" tone="muted">
-                            Dashboard-owned current tasks from the latest paired
-                            projections. Gateway presence and sessions are not included.
+                            Dashboard-owned current tasks paired with separate Gateway
+                            session availability. Availability is not online status or
+                            health.
                         </Text>
                     </div>
                 </div>
@@ -75,6 +97,31 @@ export function OverviewAgentsCard({ agents, statuses }: OverviewAgentsCardProps
                     </div>
                 ))}
             </dl>
+
+            <section aria-labelledby={gatewayHeadingId} className="mt-5">
+                <Heading id={gatewayHeadingId} level={3}>
+                    Gateway session availability
+                </Heading>
+                <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5 xl:grid-cols-2">
+                    {[
+                        ["Active", gatewayCounts.active],
+                        ["Idle sessions", gatewayCounts.idle],
+                        ["Stale", gatewayCounts.stale],
+                        ["Disconnected", gatewayCounts.disconnected],
+                        ["Unknown", gatewayCounts.unknown],
+                    ].map(([label, value]) => (
+                        <div
+                            className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
+                            key={label}
+                        >
+                            <dt className="text-primary-400 text-xs">{label}</dt>
+                            <dd className="text-primary-50 mt-2 text-xl font-semibold tabular-nums">
+                                {value}
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
+            </section>
 
             {workingStatuses.length === 0 ? (
                 <div className="border-primary-700 bg-primary-900/35 mt-4 rounded-lg border p-4">

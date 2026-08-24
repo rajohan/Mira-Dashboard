@@ -6,6 +6,7 @@ import {
     Home,
     ListTodo,
     Menu,
+    MessagesSquare,
     Newspaper,
     ShieldCheck,
     X,
@@ -31,6 +32,7 @@ interface NavigationItem {
 const navigationItems: readonly NavigationItem[] = Object.freeze([
     { icon: Home, label: "Dashboard", to: "/" },
     { icon: Bot, label: "Agents", to: "/agents" },
+    { icon: MessagesSquare, label: "Sessions", to: "/sessions" },
     { icon: ListTodo, label: "Tasks", to: "/tasks" },
     { icon: CalendarClock, label: "Jobs", to: "/jobs" },
     { icon: Newspaper, label: "Reports", to: "/reports" },

@@ -67,6 +67,7 @@ const processOptions = Object.freeze({
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: "example.com",
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard",
         NODE_ENV: "production",
+        OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
         PORT: "3100",
     },

@@ -33,6 +33,10 @@ const sourceProjectRoot = path.resolve(import.meta.dir, "../../../..");
 const releaseId = "d".repeat(40);
 const temporaryDirectories: string[] = [];
 const excludedBuildEntries = new Set([".git", "coverage", "dist", "node_modules"]);
+const gatewayTestEnvironment = Object.freeze({
+    OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
+    OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:65530",
+});
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
@@ -100,7 +104,7 @@ function webEnvironment(projectRoot: string, port: number): Record<string, strin
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: "example.com",
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard",
         NODE_ENV: "production",
-        OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:65530",
+        ...gatewayTestEnvironment,
         PORT: String(port),
     };
 }
@@ -263,6 +267,7 @@ class DirectProcessController implements ProductionServiceController {
                     MIRA_DASHBOARD_LOG_LEVEL: "debug",
                     MIRA_DASHBOARD_PROJECT_ROOT: this.#projectRoot,
                     NODE_ENV: "production",
+                    ...gatewayTestEnvironment,
                 },
             }
         );

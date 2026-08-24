@@ -6,7 +6,10 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { listAutomationPrincipalsResultSchema } from "../contracts/automationSecurity.ts";
-import { cacheStatusResultSchema } from "../contracts/cache.ts";
+import {
+    cacheHeartbeatResultSchema,
+    cacheStatusResultSchema,
+} from "../contracts/cache.ts";
 import { jobRunSummarySchema } from "../contracts/jobModel.ts";
 import { listJobRunsResultSchema } from "../contracts/jobs.ts";
 import {
@@ -16,6 +19,8 @@ import {
 import { listSchedulesResultSchema } from "../contracts/schedules.ts";
 import { automationPrincipalCapabilities } from "../server/database/schema/automationPrincipalCapabilities.ts";
 import { automationPrincipalCapabilityInsertSchema } from "../server/database/validation/automationPrincipalCapabilities.ts";
+import type { OpenClawCronExpiryReconciler } from "../server/domains/openClawCron/expiryReconciler.ts";
+import { OpenClawCronProviderError } from "../server/domains/openClawCron/provider.ts";
 import { createWebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import {
     authenticationTestNow,
@@ -23,6 +28,7 @@ import {
     seedAuthenticationTestDatabase,
     testTotpSecretCipher,
 } from "../server/domains/security/testSupport/authentication.ts";
+import type { PersistentOpenClawCronTransport } from "../server/platform/gateway/persistentOpenClawCronProvider.ts";
 import { createReadinessController } from "../server/platform/readiness/readinessState.ts";
 import { createDashboardApplicationRuntime } from "../server/platform/runtime/applicationRuntime.ts";
 import { dashboardSessionCookieName } from "../server/rawHttp/authenticationCredentials.ts";
@@ -33,9 +39,218 @@ import {
     createTestStructuredLogger,
 } from "../server/test/support/requestContext.ts";
 import {
+    createDashboardOpenClawCronProvider,
     createDashboardServer,
+    startDashboardOpenClawCronExpiryReconciliation,
     validateDashboardWebAuthnBrowserOrigin,
 } from "./dashboardServer.ts";
+
+describe("Dashboard OpenClaw cron composition", () => {
+    test("owns expiry reconciliation across ordered, idempotent server shutdown", async () => {
+        const events: string[] = [];
+        const server = Object.freeze({
+            port: 31_000,
+            stop: (force = false) => {
+                events.push(`server:${String(force)}`);
+                return Promise.resolve();
+            },
+            url: new URL("http://127.0.0.1:31000"),
+        });
+        const reconciler: OpenClawCronExpiryReconciler = Object.freeze({
+            reconcile: () =>
+                Promise.resolve({
+                    attempted: 0,
+                    failed: 0,
+                    hasMore: false,
+                    reconciled: 0,
+                }),
+            start: () => {
+                events.push("reconciler:start");
+            },
+            stop: () => {
+                events.push("reconciler:stop");
+                return Promise.resolve();
+            },
+        });
+
+        const ownedServer = await startDashboardOpenClawCronExpiryReconciliation(
+            server,
+            reconciler
+        );
+        expect(ownedServer.port).toBe(server.port);
+        expect(ownedServer.url).toBe(server.url);
+        expect(events).toEqual(["reconciler:start"]);
+
+        const firstStop = ownedServer.stop(false);
+        const secondStop = ownedServer.stop(false);
+        expect(secondStop).toBe(firstStop);
+        await firstStop;
+        expect(events).toEqual(["reconciler:start", "reconciler:stop", "server:false"]);
+    });
+
+    test("escalates a stalled reconciler and server on a forced second stop", async () => {
+        const events: string[] = [];
+        let releaseReconciler!: () => void;
+        const reconcilerStopped = new Promise<void>((resolve) => {
+            releaseReconciler = resolve;
+        });
+        const server = Object.freeze({
+            port: 31_000,
+            stop: (force = false) => {
+                events.push(`server:${String(force)}`);
+                return Promise.resolve();
+            },
+            url: new URL("http://127.0.0.1:31000"),
+        });
+        const reconciler: OpenClawCronExpiryReconciler = Object.freeze({
+            reconcile: () =>
+                Promise.resolve({
+                    attempted: 0,
+                    failed: 0,
+                    hasMore: false,
+                    reconciled: 0,
+                }),
+            start: () => {
+                events.push("reconciler:start");
+            },
+            stop: (force = false) => {
+                events.push(`reconciler:${String(force)}`);
+                if (force) releaseReconciler();
+                return reconcilerStopped;
+            },
+        });
+        const ownedServer = await startDashboardOpenClawCronExpiryReconciliation(
+            server,
+            reconciler
+        );
+
+        const gracefulStop = ownedServer.stop();
+        await Promise.resolve();
+        expect(events).toEqual(["reconciler:start", "reconciler:false"]);
+
+        expect(ownedServer.stop(true)).toBe(gracefulStop);
+        await gracefulStop;
+        expect(events).toEqual([
+            "reconciler:start",
+            "reconciler:false",
+            "reconciler:true",
+            "server:true",
+        ]);
+    });
+
+    test("contains a reconciler startup failure by force-stopping the server", () => {
+        const failure = new Error("expiry startup failed");
+        const stopCalls: boolean[] = [];
+        const server = Object.freeze({
+            port: 31_000,
+            stop: (force = false) => {
+                stopCalls.push(force);
+                return Promise.resolve();
+            },
+            url: new URL("http://127.0.0.1:31000"),
+        });
+        const reconciler: OpenClawCronExpiryReconciler = Object.freeze({
+            reconcile: () =>
+                Promise.resolve({
+                    attempted: 0,
+                    failed: 0,
+                    hasMore: false,
+                    reconciled: 0,
+                }),
+            start: () => {
+                throw failure;
+            },
+            stop: () => Promise.resolve(),
+        });
+
+        expect(
+            startDashboardOpenClawCronExpiryReconciliation(server, reconciler)
+        ).rejects.toBe(failure);
+        expect(stopCalls).toEqual([true]);
+    });
+
+    test("selects the persistent adapter when the runtime owns a Gateway transport", async () => {
+        const calls: unknown[] = [];
+        const transport: PersistentOpenClawCronTransport = {
+            request: (method, parameters, options) => {
+                calls.push({ method, options, parameters });
+                return Promise.resolve({
+                    hasMore: false,
+                    jobs: [],
+                    limit: 1,
+                    nextOffset: null,
+                    offset: 0,
+                    snapshotRevision: `sha256:${"a".repeat(43)}`,
+                    total: 0,
+                });
+            },
+            requestAdmin: () =>
+                Promise.reject(new Error("Admin lane must not be reached")),
+            snapshot: {
+                connectedAtMs: 1_800_000_000_000,
+                connectionGeneration: 1,
+                phase: "connected",
+                reconnectAttempt: 0,
+            },
+        };
+
+        const provider = createDashboardOpenClawCronProvider(transport);
+        expect(
+            await provider.list({
+                compact: false,
+                enabled: "all",
+                includeDeliveryPreviews: false,
+                lastRunStatus: "all",
+                limit: 1,
+                offset: 0,
+                scheduleKind: "all",
+                sortBy: "nextRunAtMs",
+                sortDir: "asc",
+            })
+        ).toMatchObject({ jobs: [], limit: 1, total: 0 });
+        expect(calls).toEqual([
+            {
+                method: "cron.list",
+                options: { timeoutMs: 15_000 },
+                parameters: {
+                    compact: false,
+                    enabled: "all",
+                    includeDeliveryPreviews: false,
+                    lastRunStatus: "all",
+                    limit: 1,
+                    offset: 0,
+                    scheduleKind: "all",
+                    sortBy: "nextRunAtMs",
+                    sortDir: "asc",
+                },
+            },
+        ]);
+    });
+
+    test("keeps transport-free test runtimes fail closed", () => {
+        const provider = createDashboardOpenClawCronProvider();
+        return provider
+            .list({
+                compact: false,
+                enabled: "all",
+                includeDeliveryPreviews: false,
+                lastRunStatus: "all",
+                limit: 1,
+                offset: 0,
+                scheduleKind: "all",
+                sortBy: "nextRunAtMs",
+                sortDir: "asc",
+            })
+            .then(
+                () => {
+                    throw new Error("Expected the unavailable provider to fail");
+                },
+                (error: unknown) => {
+                    expect(error).toEqual(new OpenClawCronProviderError("unavailable"));
+                }
+            );
+    });
+});
 
 describe("Dashboard security composition", () => {
     test("requires the HTTP browser origin in the WebAuthn allowlist", () => {
@@ -330,6 +545,28 @@ describe("Dashboard security composition", () => {
             expect(
                 v.parse(cacheStatusResultSchema, cacheStatusBody.result?.data?.json)
             ).toMatchObject({ entries: [], totalCount: 0, truncated: false });
+
+            const heartbeatResponse = await fetch(
+                new URL(`/trpc/cache.getHeartbeat?input=${listInput}`, server.url),
+                { headers }
+            );
+            const heartbeatBody = (await heartbeatResponse.json()) as {
+                readonly error?: unknown;
+                readonly result?: { readonly data?: { readonly json?: unknown } };
+            };
+            expect(heartbeatResponse.status).toBe(200);
+            expect(heartbeatBody.error).toBeUndefined();
+            expect(
+                v.parse(cacheHeartbeatResultSchema, heartbeatBody.result?.data?.json)
+            ).toMatchObject({
+                cache: { entries: [], totalCount: 0, truncated: false },
+                gateway: {
+                    connection: { freshness: "unavailable", phase: "stopped" },
+                    sessions: { state: "unavailable" },
+                },
+                openClawCron: { pendingSync: "unknown", state: "unavailable" },
+                schemaVersion: 1,
+            });
 
             const idempotencyKey = "cHJvZHVjdGlvbi1odHRwLWNvbXBvc2l0aW9uLWtleS0x";
             const enqueue = () =>

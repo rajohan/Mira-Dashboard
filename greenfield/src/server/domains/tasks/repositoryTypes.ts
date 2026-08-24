@@ -55,6 +55,11 @@ export interface TaskAggregateRecord {
     readonly task: TaskRecord;
 }
 
+export interface TaskOpenCronLinkRecord {
+    readonly cronJobId: string;
+    readonly task: TaskRecord;
+}
+
 export interface VersionedTaskMutationInput {
     readonly changes: TaskMutableUpdate;
     readonly expectedVersion: number;
@@ -76,6 +81,7 @@ export interface TaskRepositoryReader {
     findTaskProgress(taskId: string, updateId: string): TaskProgressRecord | undefined;
     listTaskProgress(input: ListTaskProgressInput): TaskProgressRecord[];
     listTasks(input: ListTasksInput): TaskAggregateRecord[];
+    listOpenTasksByCronJobIds(cronJobIds: readonly string[]): TaskOpenCronLinkRecord[];
 }
 
 /** Synchronous writes owned by one admitted SQLite IMMEDIATE transaction. */

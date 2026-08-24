@@ -119,6 +119,135 @@
                   "type": "object",
                   "properties": {
                     "entityId": {
+                      "const": "current"
+                    },
+                    "entityType": {
+                      "const": "gateway-connection"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "snapshot-required"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "snapshot-required"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "gateway.connection"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "const": "current"
+                    },
+                    "entityType": {
+                      "const": "gateway-sessions"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "snapshot-required"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "snapshot-required"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "gateway.sessions"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
+                      "const": "current"
+                    },
+                    "entityType": {
+                      "const": "openclaw-cron"
+                    },
+                    "occurredAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 8640000000000000
+                    },
+                    "operation": {
+                      "const": "snapshot-required"
+                    },
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "const": "snapshot-required"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "topic": {
+                      "const": "openclaw-cron.records"
+                    }
+                  },
+                  "required": [
+                    "entityId",
+                    "entityType",
+                    "occurredAtMs",
+                    "operation",
+                    "payload",
+                    "topic"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entityId": {
                       "type": "string",
                       "minLength": 36,
                       "maxLength": 36,

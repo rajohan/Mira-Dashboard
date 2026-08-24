@@ -269,6 +269,12 @@ deploys, builds, Git mutations, Docker mutations, backups, restores, systemd cha
 restarts, or unbounded shell commands. Those operations become durable `job_runs` consumed by
 the worker.
 
+The `cache:read` automation heartbeat is a separate sanitized projection, not a shortcut around
+session or cron detail authorization. It reads only process-local validated summaries and bounded
+payload-free cache status, performs no upstream refresh, and discloses no session/cron identity,
+payload, credential, endpoint, or raw failure. Missing and last-known-good projection states remain
+explicit so an empty count is never inferred from unavailable upstream state.
+
 Queue behavior is explicit:
 
 - a strict singleton `job_worker_control` row persists cross-process claim pause state and
@@ -466,6 +472,10 @@ proxy mode names exact proxies and requires them to overwrite forwarded identity
 - File and media operations resolve against named allowlisted roots, reject traversal, verify
   containment after symlink resolution, avoid following unsafe links, and enforce size/MIME
   limits before parsing or preview.
+- Log rotation uses reviewed per-file policies rather than treating an approved directory as a
+  recursive wildcard. Its host-log profile may rotate only named regular text logs beneath
+  `/var/log`; it excludes journald storage, binary login/audit databases, sockets, devices, and
+  symlinks. Managed Docker logs retain their separate `/opt/docker/data` policy and retention.
 - Markdown and HTML are sanitized at the rendering boundary. A raw HTML feature is not an
   authorization boundary.
 - Exec, terminal, Git, Docker, systemd, backup, restore, and OpenClaw adapters each have a

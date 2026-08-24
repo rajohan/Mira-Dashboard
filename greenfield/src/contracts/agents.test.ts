@@ -35,7 +35,7 @@ describe("agent procedure contracts", () => {
             },
             {
                 access: {
-                    capabilities: ["agents:read"],
+                    capabilities: ["agents:read", "gateway-sessions:read"],
                     capabilityPolicy: "all",
                     kind: "authenticated",
                 },
@@ -44,7 +44,7 @@ describe("agent procedure contracts", () => {
             },
             {
                 access: {
-                    capabilities: ["agents:read"],
+                    capabilities: ["agents:read", "gateway-sessions:read"],
                     capabilityPolicy: "all",
                     kind: "authenticated",
                 },
@@ -126,8 +126,18 @@ describe("agent procedure contracts", () => {
         expect(
             v.safeParse(listAgentStatusesResultSchema, {
                 statuses: [
-                    { agentId: "researcher", state: "idle" },
-                    { agentId: "main", state: "idle" },
+                    {
+                        agentId: "researcher",
+                        freshness: "unavailable",
+                        gatewayAvailability: "disconnected",
+                        state: "idle",
+                    },
+                    {
+                        agentId: "main",
+                        freshness: "unavailable",
+                        gatewayAvailability: "disconnected",
+                        state: "idle",
+                    },
                 ],
             }).success
         ).toBeFalse();

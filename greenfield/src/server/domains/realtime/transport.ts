@@ -6,6 +6,7 @@ import {
     realtimeStreamOutputSchema,
     type RealtimeStreamOutput,
 } from "../../../contracts/events.ts";
+import type { RealtimeTopicDefinition } from "../../../contracts/realtime.ts";
 import type { AuthenticatedPrincipal } from "../../../contracts/security.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
 
@@ -28,6 +29,13 @@ export function authorizeRealtimeTopics(
             });
         }
         if (!principal.capabilities.includes(definition.capability)) {
+            throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "Realtime topic access is forbidden",
+            });
+        }
+        const principalKinds = (definition as RealtimeTopicDefinition).principalKinds;
+        if (principalKinds !== undefined && !principalKinds.includes(principal.kind)) {
             throw new TRPCError({
                 code: "FORBIDDEN",
                 message: "Realtime topic access is forbidden",

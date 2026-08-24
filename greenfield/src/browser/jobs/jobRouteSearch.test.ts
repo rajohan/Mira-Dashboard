@@ -18,6 +18,22 @@ describe("jobs route search", () => {
         });
     });
 
+    test("preserves OpenClaw source and bounded cron selection beside Dashboard links", () => {
+        expect(
+            parseJobsRouteSearch({
+                cronJobId: "nightly-report",
+                runId,
+                scheduleId: "system.worker-smoke",
+                source: "openclaw",
+            })
+        ).toEqual({
+            cronJobId: "nightly-report",
+            runId,
+            scheduleId: "system.worker-smoke",
+            source: "openclaw",
+        });
+    });
+
     test("drops malformed selections independently", () => {
         expect(
             parseJobsRouteSearch({
@@ -32,5 +48,12 @@ describe("jobs route search", () => {
         expect(parseJobsRouteSearch(null)).toEqual({});
         expect(parseJobsRouteSearch([runId, "system.worker-smoke"])).toEqual({});
         expect(parseJobsRouteSearch({ runId: 1, scheduleId: false })).toEqual({});
+        expect(
+            parseJobsRouteSearch({
+                cronJobId: "x".repeat(257),
+                runId,
+                source: "external",
+            })
+        ).toEqual({ runId });
     });
 });

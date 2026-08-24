@@ -21,6 +21,8 @@
           "agents:write",
           "cache:read",
           "cache:write",
+          "gateway-sessions:read",
+          "gateway-sessions:write",
           "jobs:read",
           "jobs:write",
           "monitoring:write",
@@ -33,7 +35,7 @@
         ],
         "type": "string"
       },
-      "maxItems": 13,
+      "maxItems": 15,
       "uniqueItems": true
     }
   },

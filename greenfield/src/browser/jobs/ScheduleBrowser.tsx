@@ -192,7 +192,16 @@ export function ScheduleBrowser({ onRequestRunFocus }: ScheduleBrowserProps) {
         query.data?.pages.flatMap((page) => page.schedules) ?? []
     );
     const select = (selection: { runId?: string; scheduleId?: string }) => {
-        void navigate({ replace: true, search: selection });
+        void navigate({
+            replace: true,
+            search: {
+                ...(search.cronJobId === undefined
+                    ? {}
+                    : { cronJobId: search.cronJobId }),
+                ...selection,
+                ...(search.source === undefined ? {} : { source: search.source }),
+            },
+        });
     };
     const selectSchedule = (scheduleId: string | undefined) => {
         setFocusScheduleId(scheduleId);

@@ -20,6 +20,8 @@ describe("request authentication contract", () => {
             "agents:write",
             "cache:read",
             "cache:write",
+            "gateway-sessions:read",
+            "gateway-sessions:write",
             "jobs:read",
             "jobs:write",
             "monitoring:write",

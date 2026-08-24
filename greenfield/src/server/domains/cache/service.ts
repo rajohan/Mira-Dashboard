@@ -4,9 +4,12 @@ import * as v from "valibot";
 
 import {
     type CacheEntry,
+    type CacheHeartbeatResult,
     type CacheStatusResult,
     type GetCacheEntryInput,
     type RefreshCacheEntryInput,
+    cacheHeartbeatResultSchema,
+    cacheHeartbeatSchemaVersion,
     cacheStatusResultSchema,
 } from "../../../contracts/cache.ts";
 import { type JobRunSummary, jobTimestampSchema } from "../../../contracts/jobModel.ts";
@@ -95,10 +98,43 @@ function mutationEffect<T>(
     );
 }
 
+function demoteSessionsWhenDisconnected(
+    projection: CacheHeartbeatResult["gateway"]["sessions"],
+    connection: CacheHeartbeatResult["gateway"]["connection"]
+): CacheHeartbeatResult["gateway"]["sessions"] {
+    if (connection.freshness === "fresh" || projection.state !== "fresh") {
+        return projection;
+    }
+    return {
+        count: projection.count,
+        observedAtMs: projection.observedAtMs,
+        staleSinceMs: Math.max(connection.checkedAtMs, projection.observedAtMs),
+        state: "last-known-good",
+        truncated: projection.truncated,
+    };
+}
+
+function demoteCronWhenDisconnected(
+    projection: CacheHeartbeatResult["openClawCron"],
+    connection: CacheHeartbeatResult["gateway"]["connection"]
+): CacheHeartbeatResult["openClawCron"] {
+    if (connection.freshness === "fresh" || projection.state !== "fresh") {
+        return projection;
+    }
+    return {
+        count: projection.count,
+        observedAtMs: projection.observedAtMs,
+        pendingSync: projection.pendingSync,
+        staleSinceMs: Math.max(connection.checkedAtMs, projection.observedAtMs),
+        state: "last-known-good",
+    };
+}
+
 export interface CacheServiceShape {
     readonly getEntry: (
         input: GetCacheEntryInput
     ) => Effect.Effect<CacheEntry, CacheNotFoundError>;
+    readonly getHeartbeat: () => Effect.Effect<CacheHeartbeatResult>;
     readonly getStatus: () => Effect.Effect<CacheStatusResult>;
     readonly refreshEntry: (
         principal: AuthenticatedPrincipal,
@@ -115,6 +151,9 @@ export interface CacheServiceDependencies {
     readonly generateId?: () => string;
     readonly jobRepository: JobRepository;
     readonly nowMs?: () => number;
+    readonly readGatewayConnection?: () => CacheHeartbeatResult["gateway"]["connection"];
+    readonly readGatewaySessionsProjection?: () => CacheHeartbeatResult["gateway"]["sessions"];
+    readonly readOpenClawCronProjection?: () => CacheHeartbeatResult["openClawCron"];
     readonly wakeEventPump?: () => Promise<void> | void;
 }
 
@@ -128,6 +167,68 @@ export function createCacheService(
 ): CacheService["Service"] {
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
     const nowMs = dependencies.nowMs ?? Date.now;
+
+    function readCacheStatus(candidateNowMs = nowMs()): CacheStatusResult {
+        const snapshot = dependencies.cacheRepository.readStatus();
+        const generatedAtMs = v.parse(
+            jobTimestampSchema,
+            Math.max(
+                candidateNowMs,
+                ...snapshot.entries.map((entry) => getTime(entry.updatedAt))
+            )
+        );
+        return v.parse(cacheStatusResultSchema, {
+            entries: snapshot.entries.map((entry) =>
+                toCacheEntryStatus(entry, generatedAtMs)
+            ),
+            generatedAtMs,
+            totalCount: snapshot.totalCount,
+            truncated: snapshot.totalCount > snapshot.entries.length,
+        });
+    }
+
+    function readConnection(
+        checkedAtMs: number
+    ): CacheHeartbeatResult["gateway"]["connection"] {
+        try {
+            const connection = dependencies.readGatewayConnection?.();
+            if (connection !== undefined) {
+                return {
+                    checkedAtMs: connection.checkedAtMs,
+                    freshness: connection.freshness,
+                    phase: connection.phase,
+                };
+            }
+        } catch {
+            // Heartbeat reports the projection as unavailable without raw failure data.
+        }
+        return { checkedAtMs, freshness: "unavailable", phase: "stopped" };
+    }
+
+    function readSessionsProjection(): CacheHeartbeatResult["gateway"]["sessions"] {
+        try {
+            return (
+                dependencies.readGatewaySessionsProjection?.() ?? {
+                    state: "unavailable",
+                }
+            );
+        } catch {
+            return { state: "unavailable" };
+        }
+    }
+
+    function readCronProjection(): CacheHeartbeatResult["openClawCron"] {
+        try {
+            return (
+                dependencies.readOpenClawCronProjection?.() ?? {
+                    pendingSync: "unknown",
+                    state: "unavailable",
+                }
+            );
+        } catch {
+            return { pendingSync: "unknown", state: "unavailable" };
+        }
+    }
 
     async function wake(): Promise<void> {
         if (dependencies.wakeEventPump === undefined) return;
@@ -158,26 +259,53 @@ export function createCacheService(
                 (error): error is CacheNotFoundError =>
                     error instanceof CacheNotFoundError
             ),
-        getStatus: () =>
+        getHeartbeat: () =>
             readEffect(
                 () => {
-                    const snapshot = dependencies.cacheRepository.readStatus();
-                    const generatedAtMs = v.parse(
-                        jobTimestampSchema,
-                        Math.max(
-                            nowMs(),
-                            ...snapshot.entries.map((entry) => getTime(entry.updatedAt))
-                        )
+                    const requestedAtMs = v.parse(jobTimestampSchema, nowMs());
+                    const cache = readCacheStatus(requestedAtMs);
+                    const connection = readConnection(requestedAtMs);
+                    const sessions = demoteSessionsWhenDisconnected(
+                        readSessionsProjection(),
+                        connection
                     );
-                    return v.parse(cacheStatusResultSchema, {
-                        entries: snapshot.entries.map((entry) =>
-                            toCacheEntryStatus(entry, generatedAtMs)
-                        ),
-                        generatedAtMs,
-                        totalCount: snapshot.totalCount,
-                        truncated: snapshot.totalCount > snapshot.entries.length,
+                    const openClawCron = demoteCronWhenDisconnected(
+                        readCronProjection(),
+                        connection
+                    );
+                    const projectionTimestamps = [
+                        cache.generatedAtMs,
+                        connection.checkedAtMs,
+                        ...(sessions.state === "unavailable"
+                            ? []
+                            : [
+                                  sessions.observedAtMs,
+                                  ...(sessions.state === "last-known-good"
+                                      ? [sessions.staleSinceMs]
+                                      : []),
+                              ]),
+                        ...(openClawCron.state === "unavailable"
+                            ? []
+                            : [
+                                  openClawCron.observedAtMs,
+                                  ...(openClawCron.state === "last-known-good"
+                                      ? [openClawCron.staleSinceMs]
+                                      : []),
+                              ]),
+                    ];
+                    return v.parse(cacheHeartbeatResultSchema, {
+                        cache,
+                        gateway: { connection, sessions },
+                        generatedAtMs: Math.max(requestedAtMs, ...projectionTimestamps),
+                        openClawCron,
+                        schemaVersion: cacheHeartbeatSchemaVersion,
                     });
                 },
+                (_error): _error is never => false
+            ),
+        getStatus: () =>
+            readEffect(
+                () => readCacheStatus(),
                 (_error): _error is never => false
             ),
         refreshEntry: (principal, input) =>

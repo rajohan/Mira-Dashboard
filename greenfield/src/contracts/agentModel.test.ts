@@ -4,6 +4,7 @@ import * as v from "valibot";
 
 import {
     agentConfigurationSchema,
+    agentStatusProjectionSchema,
     agentStatusSchema,
     agentTaskRunSchema,
 } from "./agentModel.ts";
@@ -57,6 +58,55 @@ describe("agent model contracts", () => {
                 startedAtMs: 1000,
                 status: "completed",
                 task: "Implement agent status",
+            }).success
+        ).toBeFalse();
+    });
+
+    test("keeps Gateway availability fields separate and state-consistent", () => {
+        expect(
+            v.parse(agentStatusProjectionSchema, {
+                agentId: "main",
+                currentTask: "Implement availability",
+                freshness: "stale",
+                gatewayAvailability: "stale",
+                hasActiveRun: true,
+                lastActivityAtMs: 2000,
+                observedAtMs: 3000,
+                sessionKey: "agent:main:main",
+                startedAtMs: 1000,
+                state: "working",
+            })
+        ).toMatchObject({
+            gatewayAvailability: "stale",
+            state: "working",
+        });
+        expect(
+            v.safeParse(agentStatusProjectionSchema, {
+                agentId: "main",
+                freshness: "fresh",
+                gatewayAvailability: "active",
+                hasActiveRun: false,
+                observedAtMs: 3000,
+                sessionKey: "agent:main:main",
+                state: "idle",
+            }).success
+        ).toBeFalse();
+        expect(
+            v.safeParse(agentStatusProjectionSchema, {
+                agentId: "main",
+                freshness: "stale",
+                gatewayAvailability: "unknown",
+                observedAtMs: 3000,
+                state: "idle",
+            }).success
+        ).toBeTrue();
+        expect(
+            v.safeParse(agentStatusProjectionSchema, {
+                agentId: "main",
+                freshness: "unavailable",
+                gatewayAvailability: "disconnected",
+                observedAtMs: 3000,
+                state: "idle",
             }).success
         ).toBeFalse();
     });

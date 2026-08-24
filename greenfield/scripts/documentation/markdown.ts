@@ -5,6 +5,23 @@ import type {
     RealtimeEventContract,
 } from "../../src/contracts/registry.ts";
 
+function authenticatedPrincipalLabel(
+    capabilities: readonly string[],
+    principalKinds?: readonly ("automation" | "session")[]
+): string {
+    const principalKind = principalKinds?.length === 1 ? principalKinds[0] : undefined;
+    if (principalKind !== undefined) {
+        const principalLabel =
+            principalKind === "session" ? "browser session" : "automation principal";
+        return capabilities.length === 0
+            ? `Authenticated ${principalLabel}`
+            : `Authenticated ${principalLabel}: ${capabilities.join(", ")}`;
+    }
+    return capabilities.length === 0
+        ? "Authenticated"
+        : `Authenticated: ${capabilities.join(", ")}`;
+}
+
 function accessLabel(access: ContractAccess): string {
     switch (access.kind) {
         case "public": {
@@ -20,26 +37,26 @@ function accessLabel(access: ContractAccess): string {
                 session: "Browser session when MFA is disabled",
             } as const;
             const disabledState = disabledStateLabels[access.whenMfaDisabled];
-            return `${disabledState}; recent MFA when enabled`;
+            const recentAuthentication = `${disabledState}; recent MFA when enabled`;
+            if (
+                access.capabilities === undefined &&
+                access.principalKinds === undefined
+            ) {
+                return recentAuthentication;
+            }
+            return `${authenticatedPrincipalLabel(
+                access.capabilities ?? [],
+                access.principalKinds
+            )}; ${recentAuthentication}`;
         }
         case "authenticated": {
             if (access.capabilityPolicy === "per-topic") {
                 return `Authenticated; per-topic: ${access.capabilities.join(", ")}`;
             }
-            const principalKind =
-                access.principalKinds?.length === 1
-                    ? access.principalKinds[0]
-                    : undefined;
-            if (principalKind !== undefined) {
-                const principalLabel =
-                    principalKind === "session"
-                        ? "browser session"
-                        : "automation principal";
-                return access.capabilities.length === 0
-                    ? `Authenticated ${principalLabel}`
-                    : `Authenticated ${principalLabel}: ${access.capabilities.join(", ")}`;
-            }
-            return `Authenticated: ${access.capabilities.join(", ")}`;
+            return authenticatedPrincipalLabel(
+                access.capabilities,
+                access.principalKinds
+            );
         }
         default: {
             const unsupportedAccess: never = access;

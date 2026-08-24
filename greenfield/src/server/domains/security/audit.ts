@@ -5,11 +5,17 @@ import {
     securityRecordIdSchema,
     type ApplicationCapability,
 } from "../../../contracts/security.ts";
-import { securityAuditReasonValues } from "../../../contracts/securityAudit.ts";
+import {
+    securityAuditReasonValues,
+    securityAuditSettlementValues,
+} from "../../../contracts/securityAudit.ts";
 import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
 
 type SecurityAuditReason = (typeof securityAuditReasonValues)[number];
 const securityAuditReasons: ReadonlySet<string> = new Set(securityAuditReasonValues);
+const securityAuditSettlements: ReadonlySet<string> = new Set(
+    securityAuditSettlementValues
+);
 
 export interface SecurityAuditMetadata {
     readonly addedCapabilities?: readonly ApplicationCapability[];
@@ -22,6 +28,7 @@ export interface SecurityAuditMetadata {
     readonly revoked?: boolean;
     readonly revokedCredentials?: number;
     readonly revokedSessions?: number;
+    readonly settlement?: (typeof securityAuditSettlementValues)[number];
 }
 
 export interface SecurityAuditActor {
@@ -121,6 +128,12 @@ export function serializeRedactedAuditMetadata(
         metadata.revokedSessions >= 0
     ) {
         sanitized.revokedSessions = metadata.revokedSessions;
+    }
+    if (
+        typeof metadata.settlement === "string" &&
+        securityAuditSettlements.has(metadata.settlement)
+    ) {
+        sanitized.settlement = metadata.settlement;
     }
     return JSON.stringify(sanitized);
 }

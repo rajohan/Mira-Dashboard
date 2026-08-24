@@ -8,12 +8,12 @@ interface RealtimeQueryInvalidationOptions {
     readonly fallbackRefreshIntervalMs: number;
     readonly refreshDelayMs: number;
     readonly refreshQueries: (queryClient: QueryClient) => Promise<void>;
-    readonly topic: DashboardRealtimeTopic;
+    readonly topic: DashboardRealtimeTopic | readonly DashboardRealtimeTopic[];
 }
 
 /**
- * Coalesces one feature topic into query invalidation with terminal-stream fallback.
- * @param options Stable feature topic, timing policy, and cache invalidator.
+ * Coalesces one stable feature topic set into query invalidation with terminal fallback.
+ * @param options Stable feature topic or topic array, timing policy, and cache invalidator.
  */
 export function useRealtimeQueryInvalidation({
     fallbackRefreshIntervalMs,
@@ -30,6 +30,7 @@ export function useRealtimeQueryInvalidation({
     }, [refreshQueries]);
 
     useEffect(() => {
+        const topics = typeof topic === "string" ? [topic] : topic;
         let disposed = false;
         let refreshTimer: ReturnType<typeof setTimeout> | undefined;
         let fallbackTimer: ReturnType<typeof setInterval> | undefined;
@@ -65,13 +66,13 @@ export function useRealtimeQueryInvalidation({
             scheduleRefresh();
             fallbackTimer ??= setInterval(scheduleRefresh, fallbackRefreshIntervalMs);
         };
-        const subscription = hub.subscribe([topic], {
+        const subscription = hub.subscribe(topics, {
             onData(output) {
                 if (output.data.kind === "resync-required") {
                     startFallbackRefresh();
                     return;
                 }
-                if (output.data.event.topic === topic) scheduleRefresh();
+                if (topics.includes(output.data.event.topic)) scheduleRefresh();
             },
             onError: startFallbackRefresh,
         });

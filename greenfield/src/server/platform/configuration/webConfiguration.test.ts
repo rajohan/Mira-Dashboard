@@ -37,6 +37,7 @@ function validEnvironment(): Record<string, unknown> {
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: "example.com",
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard",
         NODE_ENV: "production",
+        OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
         PORT: "3100",
     };
@@ -89,6 +90,12 @@ describe("web application configuration", () => {
         expect(Redacted.value(configuration.totpKeyring)).toBe(
             environment.MIRA_DASHBOARD_TOTP_KEYRING as string
         );
+        expect(Redacted.value(configuration.gatewayToken)).toBe(
+            environment.OPENCLAW_GATEWAY_TOKEN as string
+        );
+        expect(JSON.stringify(configuration.gatewayToken)).toBe(
+            '"<redacted:gateway-token>"'
+        );
         expect(JSON.stringify(configuration.totpKeyring)).toBe(
             '"<redacted:totp-keyring>"'
         );
@@ -100,6 +107,7 @@ describe("web application configuration", () => {
             true
         );
         expect(Object.isFrozen(configuration.totpKeyring)).toBe(true);
+        expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
     });
 
     test("observes only registered keys and ignores unrelated host variables", () => {
@@ -211,6 +219,7 @@ describe("web application configuration", () => {
             "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
             "MIRA_DASHBOARD_WEBAUTHN_ORIGINS",
             "MIRA_DASHBOARD_TOTP_KEYRING",
+            "OPENCLAW_GATEWAY_TOKEN",
         ] as const) {
             const environment = validEnvironment();
             delete environment[field];

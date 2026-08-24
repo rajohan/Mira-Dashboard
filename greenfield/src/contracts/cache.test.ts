@@ -4,6 +4,7 @@ import * as v from "valibot";
 
 import {
     cacheEntrySchema,
+    cacheHeartbeatResultSchema,
     cacheStatusMaximumEntries,
     cacheStatusResultSchema,
     refreshCacheEntryInputSchema,
@@ -129,6 +130,70 @@ describe("cache contracts", () => {
                 truncated: false,
             }).success
         ).toBeFalse();
+    });
+
+    test("keeps heartbeat projections compact and freshness-consistent", () => {
+        const heartbeat = {
+            cache: {
+                entries: [],
+                generatedAtMs: 2000,
+                totalCount: 0,
+                truncated: false,
+            },
+            gateway: {
+                connection: {
+                    checkedAtMs: 2000,
+                    freshness: "stale",
+                    phase: "degraded",
+                },
+                sessions: {
+                    count: 2,
+                    observedAtMs: 1000,
+                    staleSinceMs: 1500,
+                    state: "last-known-good",
+                    truncated: true,
+                },
+            },
+            generatedAtMs: 2000,
+            openClawCron: {
+                count: 5,
+                observedAtMs: 900,
+                pendingSync: "unknown",
+                staleSinceMs: 1500,
+                state: "last-known-good",
+            },
+            schemaVersion: 1,
+        } as const;
+        expect(v.parse(cacheHeartbeatResultSchema, heartbeat)).toEqual(heartbeat);
+
+        for (const invalid of [
+            {
+                ...heartbeat,
+                gateway: {
+                    ...heartbeat.gateway,
+                    sessions: {
+                        count: 2,
+                        observedAtMs: 1000,
+                        state: "fresh",
+                        truncated: false,
+                    },
+                },
+            },
+            {
+                ...heartbeat,
+                openClawCron: {
+                    ...heartbeat.openClawCron,
+                    staleSinceMs: 800,
+                },
+            },
+            { ...heartbeat, generatedAtMs: 1999 },
+            {
+                ...heartbeat,
+                openClawCron: { pendingSync: "none", state: "unavailable" },
+            },
+        ]) {
+            expect(v.safeParse(cacheHeartbeatResultSchema, invalid).success).toBeFalse();
+        }
     });
 
     test("accepts only canonical lost-response-safe refresh requests", () => {

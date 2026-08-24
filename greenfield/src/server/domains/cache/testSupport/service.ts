@@ -19,6 +19,7 @@ export function createTestCacheService(
 ): CacheService["Service"] {
     return CacheService.of({
         getEntry: unexpectedCacheServiceCall("getEntry"),
+        getHeartbeat: unexpectedCacheServiceCall("getHeartbeat"),
         getStatus: unexpectedCacheServiceCall("getStatus"),
         refreshEntry: unexpectedCacheServiceCall("refreshEntry"),
         ...overrides,

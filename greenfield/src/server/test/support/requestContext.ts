@@ -9,6 +9,19 @@ import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
 import type { CacheService } from "../../domains/cache/service.ts";
 import { createTestCacheService } from "../../domains/cache/testSupport/service.ts";
+import {
+    createGatewayConnectionService,
+    type GatewayConnectionService,
+    unavailableGatewayConnectionStateProvider,
+} from "../../domains/gatewayConnection/service.ts";
+import type {
+    GatewaySessionProviderCompactOutcome,
+    GatewaySessionsProvider,
+} from "../../domains/gatewaySessions/provider.ts";
+import {
+    createGatewaySessionsService,
+    type GatewaySessionsService,
+} from "../../domains/gatewaySessions/service.ts";
 import type { JobService } from "../../domains/jobs/service.ts";
 import { createTestJobService } from "../../domains/jobs/testSupport/service.ts";
 import type { MonitoringCatalogService } from "../../domains/monitoring/catalogService.ts";
@@ -17,6 +30,7 @@ import {
     createTestMonitoringCatalogService,
     createTestMonitoringService,
 } from "../../domains/monitoring/testSupport/services.ts";
+import type { OpenClawCronService } from "../../domains/openClawCron/service.ts";
 import type { AuthenticationLifecycleService } from "../../domains/security/authenticationLifecycle.ts";
 import type { AuthenticationResolution } from "../../domains/security/authenticationResolution.ts";
 import type {
@@ -59,6 +73,54 @@ export const testAutomationCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4"
 const inertStructuredLogSink = Object.freeze({
     write(): undefined {},
 });
+
+const inertGatewaySessionsProvider: GatewaySessionsProvider = Object.freeze({
+    compactSession: (): Promise<GatewaySessionProviderCompactOutcome> =>
+        Promise.resolve("compacted"),
+    deleteSessionTranscript: () => Promise.resolve(),
+    listCurrentSessions: () => Promise.resolve({ sessions: [], truncated: false }),
+    resetSession: () => Promise.resolve(),
+});
+
+function unavailableOpenClawCronCall(): Promise<never> {
+    return Promise.reject(new Error("OpenClaw cron unavailable"));
+}
+
+/**
+ * Creates a stable empty Gateway-session service for generic request and server tests.
+ * @returns An inert current-session service.
+ */
+export function createTestGatewaySessionsService(): GatewaySessionsService {
+    return createGatewaySessionsService({ provider: inertGatewaySessionsProvider });
+}
+
+/**
+ * Creates a stable unavailable Gateway-connection projection for generic request tests.
+ * @returns An inert sanitized connection service.
+ */
+export function createTestGatewayConnectionService(): GatewayConnectionService {
+    return createGatewayConnectionService({
+        nowMs: () => 1_800_000_000_000,
+        provider: unavailableGatewayConnectionStateProvider,
+    });
+}
+
+/**
+ * Creates a stable fail-closed OpenClaw cron service for generic request tests.
+ * @returns An inert cron service.
+ */
+export function createTestOpenClawCronService(): OpenClawCronService {
+    return Object.freeze({
+        delete: unavailableOpenClawCronCall,
+        get: unavailableOpenClawCronCall,
+        list: unavailableOpenClawCronCall,
+        listRuns: unavailableOpenClawCronCall,
+        reconcileExpired: unavailableOpenClawCronCall,
+        run: unavailableOpenClawCronCall,
+        setEnabled: unavailableOpenClawCronCall,
+        update: unavailableOpenClawCronCall,
+    });
+}
 
 /**
  * Creates an inert process logger for tests that compose runtime or server roots.
@@ -245,6 +307,7 @@ export function createTestAuthenticationLifecycleService(
     overrides: Partial<AuthenticationLifecycleService> = {}
 ): AuthenticationLifecycleService {
     return Object.freeze({
+        authorizeRecentMfa: overrides.authorizeRecentMfa ?? (() => "authorized" as const),
         bootstrap:
             overrides.bootstrap ?? (() => Promise.resolve({ status: "closed" as const })),
         changePassword:
@@ -406,11 +469,14 @@ export interface TestServerSecurityServices {
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly cacheService: CacheService["Service"];
+    readonly gatewayConnectionService: GatewayConnectionService;
+    readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
     readonly mfaLoginLifecycle: MfaLoginLifecycleService;
     readonly jobService: JobService["Service"];
     readonly monitoringCatalogService: MonitoringCatalogService["Service"];
     readonly monitoringService: MonitoringService["Service"];
+    readonly openClawCronService: OpenClawCronService;
     readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly taskService: TaskService["Service"];
 }
@@ -435,6 +501,10 @@ export function createTestServerSecurityServices(
             overrides.automationSecurityLifecycle ??
             createTestAutomationSecurityLifecycleService(),
         cacheService: overrides.cacheService ?? createTestCacheService(),
+        gatewayConnectionService:
+            overrides.gatewayConnectionService ?? createTestGatewayConnectionService(),
+        gatewaySessionsService:
+            overrides.gatewaySessionsService ?? createTestGatewaySessionsService(),
         mfaAccountLifecycle:
             overrides.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
@@ -443,6 +513,8 @@ export function createTestServerSecurityServices(
         monitoringCatalogService:
             overrides.monitoringCatalogService ?? createTestMonitoringCatalogService(),
         monitoringService: overrides.monitoringService ?? createTestMonitoringService(),
+        openClawCronService:
+            overrides.openClawCronService ?? createTestOpenClawCronService(),
         securityAuditLifecycle:
             overrides.securityAuditLifecycle ?? createTestSecurityAuditLifecycleService(),
         taskService: overrides.taskService ?? createTestTaskService(),
@@ -528,11 +600,14 @@ export function createTestRequestContext(
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
         readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
         readonly cacheService?: CacheService["Service"];
+        readonly gatewayConnectionService?: GatewayConnectionService;
+        readonly gatewaySessionsService?: GatewaySessionsService;
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
         readonly mfaLoginLifecycle?: MfaLoginLifecycleService;
         readonly jobService?: JobService["Service"];
         readonly monitoringCatalogService?: MonitoringCatalogService["Service"];
         readonly monitoringService?: MonitoringService["Service"];
+        readonly openClawCronService?: OpenClawCronService;
         readonly request?: Request;
         readonly requestId?: string;
         readonly responseHeaders?: Headers;
@@ -555,6 +630,10 @@ export function createTestRequestContext(
             createTestAutomationSecurityLifecycleService(),
         authenticateCredential: () => createTestAuthenticationResolution(authentication),
         cacheService: options.cacheService ?? createTestCacheService(),
+        gatewayConnectionService:
+            options.gatewayConnectionService ?? createTestGatewayConnectionService(),
+        gatewaySessionsService:
+            options.gatewaySessionsService ?? createTestGatewaySessionsService(),
         mfaAccountLifecycle:
             options.mfaAccountLifecycle ?? createTestMfaAccountLifecycleService(),
         mfaLoginLifecycle:
@@ -563,6 +642,8 @@ export function createTestRequestContext(
         monitoringCatalogService:
             options.monitoringCatalogService ?? createTestMonitoringCatalogService(),
         monitoringService: options.monitoringService ?? createTestMonitoringService(),
+        openClawCronService:
+            options.openClawCronService ?? createTestOpenClawCronService(),
         pendingLoginCredential: credentials.pendingLogin,
         request,
         requestId: options.requestId ?? "test-request-id",

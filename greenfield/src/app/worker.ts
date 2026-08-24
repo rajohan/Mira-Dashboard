@@ -14,6 +14,11 @@ import {
     resolveDashboardProjectLayout,
 } from "../server/platform/filesystem/projectLayout.ts";
 import {
+    createPersistentGatewayTaskNotificationTransport,
+    type PersistentGatewayTaskNotificationTransport,
+    type PersistentGatewayTransportOptions,
+} from "../server/platform/gateway/persistentGatewayTransport.ts";
+import {
     createProjectFileLogDestination,
     type ProjectFileLogDestination,
 } from "../server/platform/observability/projectFileLogSink.ts";
@@ -30,6 +35,7 @@ import {
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
 import { type DashboardWorkerRuntime } from "../worker/runtime.ts";
+import { taskNotificationWorkerLoop } from "../worker/taskNotifications.ts";
 import { environmentSource } from "./environmentSource.ts";
 
 /** Explicit inputs owned by the executable worker composition root. */
@@ -40,15 +46,18 @@ export interface DashboardWorkerProcessOptions {
 
 /** Injectable process boundaries used by deterministic composition tests. */
 export interface DashboardWorkerProcessDependencies {
+    readonly createGatewayTransport: (
+        options: PersistentGatewayTransportOptions
+    ) => PersistentGatewayTaskNotificationTransport;
     readonly createLogDestination: (
         logsDirectory: string,
         processRole: "worker"
     ) => ProjectFileLogDestination;
     readonly createRuntime: (
-        configuration: WorkerConfiguration,
         layout: DashboardProjectLayout,
         release: RuntimeRelease,
-        logger: StructuredLogger
+        logger: StructuredLogger,
+        persistentGatewayTransport: PersistentGatewayTaskNotificationTransport
     ) => DashboardWorkerRuntime;
     readonly createTerminationController: () => ProcessTerminationController;
     readonly loadRelease: (
@@ -62,9 +71,10 @@ export interface DashboardWorkerProcessDependencies {
 }
 
 const defaultDependencies = Object.freeze({
+    createGatewayTransport: createPersistentGatewayTaskNotificationTransport,
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
-    createRuntime: (_configuration, layout, release) =>
+    createRuntime: (layout, release, _logger, gatewayTransport) =>
         createDashboardWorkerRuntime({
             database: {
                 migrationsDirectory: path.join(release.releaseRoot, "migrations"),
@@ -72,9 +82,11 @@ const defaultDependencies = Object.freeze({
                 startupMode: "validate-only",
                 stateDirectory: layout.production.state.root,
             },
+            persistentGatewayTransport: gatewayTransport,
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
             sideEffects: createSystemJobWorkerSideEffects(),
+            taskNotificationLoop: taskNotificationWorkerLoop,
             workerInstanceId: Bun.randomUUIDv7(),
         }),
     createTerminationController: createProcessTerminationController,
@@ -132,9 +144,15 @@ export async function runDashboardWorkerProcess(
     const logger = createWorkerLogger(configuration, release, destination);
     const termination = dependencies.createTerminationController();
     let runtime: DashboardWorkerRuntime | undefined;
+    let gatewayTransport: PersistentGatewayTaskNotificationTransport | undefined;
     let failure: Error | undefined;
     try {
-        runtime = dependencies.createRuntime(configuration, layout, release, logger);
+        gatewayTransport = dependencies.createGatewayTransport({
+            clientVersion: release.manifest.source.commitSha,
+            token: configuration.gatewayToken,
+            url: configuration.gatewayUrl,
+        });
+        runtime = dependencies.createRuntime(layout, release, logger, gatewayTransport);
         const runtimeCompletion = runtime.completion.then(
             () => ({ kind: "stopped" as const }),
             (error: unknown) => ({ error, kind: "failed" as const })
@@ -169,6 +187,12 @@ export async function runDashboardWorkerProcess(
                 await runtime.dispose(termination.forceSignal);
             } catch {
                 // Preserve the initiating process failure.
+            }
+        } else if (gatewayTransport) {
+            try {
+                await gatewayTransport.stop();
+            } catch {
+                // Preserve the initiating composition failure.
             }
         }
         logger.fatal({

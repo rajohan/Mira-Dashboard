@@ -44,6 +44,7 @@ const reviewedApplicationServerTargets: ReadonlyMap<
             "src/server/domains/jobs/workerRuntime.ts",
             "src/server/platform/configuration/workerConfiguration.ts",
             "src/server/platform/filesystem/projectLayout.ts",
+            "src/server/platform/gateway/persistentGatewayTransport.ts",
             "src/server/platform/observability/projectFileLogSink.ts",
             "src/server/platform/observability/structuredLogger.ts",
             "src/server/platform/release/runtimeRelease.ts",

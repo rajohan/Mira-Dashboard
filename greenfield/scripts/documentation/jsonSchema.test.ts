@@ -8,7 +8,10 @@ import {
     isValidFactorLabel,
     totpFactorLabelSchema,
 } from "../../src/contracts/accountSecurity.ts";
-import { agentConfigurationSchema } from "../../src/contracts/agentModel.ts";
+import {
+    agentConfigurationSchema,
+    agentStatusProjectionSchema,
+} from "../../src/contracts/agentModel.ts";
 import { listAgentTaskHistoryResultSchema } from "../../src/contracts/agents.ts";
 import {
     authPasswordMaximumLength,
@@ -30,6 +33,7 @@ import {
     monitoringJsonObjectSchema,
 } from "../../src/contracts/monitoring.ts";
 import { listNotificationsResultSchema } from "../../src/contracts/notifications.ts";
+import { openClawCronJobSchema } from "../../src/contracts/openClawCron.ts";
 import { listReportsResultSchema } from "../../src/contracts/reports.ts";
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
 import { listSecurityAuditEventsResultSchema } from "../../src/contracts/securityAudit.ts";
@@ -127,6 +131,16 @@ describe("contract JSON Schema conversion", () => {
         });
     });
 
+    test("documents the runtime-only OpenClaw cron projection invariants", () => {
+        const document = JSON.stringify(
+            convertContractSchema(openClawCronJobSchema, "test.openClawCronJob", "output")
+        );
+
+        expect(document).toContain(
+            "delivery metadata and desired enabled-state synchronization"
+        );
+    });
+
     test("documents automation normalization and runtime-only cross-field checks", () => {
         expect(
             convertContractSchema(
@@ -141,6 +155,8 @@ describe("contract JSON Schema conversion", () => {
                     "agents:write",
                     "cache:read",
                     "cache:write",
+                    "gateway-sessions:read",
+                    "gateway-sessions:write",
                     "jobs:read",
                     "jobs:write",
                     "monitoring:write",
@@ -152,7 +168,7 @@ describe("contract JSON Schema conversion", () => {
                     "tasks:write",
                 ],
             },
-            maxItems: 13,
+            maxItems: 15,
             type: "array",
             uniqueItems: true,
         });
@@ -284,6 +300,17 @@ describe("contract JSON Schema conversion", () => {
             )
         );
         expect(directoryDocument).toContain("reviewed agent ID to be unique");
+
+        const statusDocument = JSON.stringify(
+            convertContractSchema(
+                agentStatusProjectionSchema,
+                "test.agentStatusProjection",
+                "output"
+            )
+        );
+        expect(statusDocument).toContain(
+            "keeps Dashboard task state and Gateway session availability separate"
+        );
 
         const historyDocument = JSON.stringify(
             convertContractSchema(

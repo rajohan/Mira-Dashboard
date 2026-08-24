@@ -1,14 +1,20 @@
-import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
-import { ManagedRuntime } from "effect";
+import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
+import type {
+    TaskNotificationChatSender,
+    TaskNotificationQueue,
+} from "../../../shared/taskNotifications.ts";
 import type { DashboardWorkerRuntime } from "../../../shared/workerRuntime.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import {
     databaseRuntimeLayer,
     DatabaseRuntimeService,
     type DatabaseRuntimeLayerOptions,
+    type RuntimeOwnedDatabase,
 } from "../../database/runtime/databaseService.ts";
+import type { PersistentGatewayTaskNotificationTransport } from "../../platform/gateway/persistentGatewayTransport.ts";
 import { createCacheRepository, type CacheRepository } from "../cache/repository.ts";
+import { createTaskNotificationQueue } from "../tasks/taskNotificationQueue.ts";
 import { findJobWorkerAction } from "./actionExecutors.ts";
 import { jobActionDefinitions } from "./actionRegistry.ts";
 import {
@@ -25,14 +31,29 @@ import {
 
 export interface DashboardWorkerRuntimeOptions {
     readonly database: DatabaseRuntimeLayerOptions;
+    readonly persistentGatewayTransport: PersistentGatewayTaskNotificationTransport;
     readonly pid: number;
     readonly releaseId: string;
     readonly sideEffects: JobWorkerSideEffectFactory;
+    /** Internal bounded wait for an interrupted notification claim to settle durably. */
+    readonly taskNotificationShutdownTimeoutMs?: number;
+    readonly taskNotificationLoop: (
+        dependencies: TaskNotificationLoopDependencies
+    ) => Effect.Effect<never, unknown>;
     readonly workerInstanceId: string;
 }
 
+const defaultTaskNotificationShutdownTimeoutMs = 5000;
+
+/** Narrow loop inputs kept shared between the server runtime and worker implementation. */
+export interface TaskNotificationLoopDependencies {
+    readonly queue: TaskNotificationQueue;
+    readonly sender: TaskNotificationChatSender;
+    readonly workerId: string;
+}
+
 interface WorkerDatabaseRuntimeContext {
-    readonly database: SQLiteBunDatabase;
+    readonly database: RuntimeOwnedDatabase;
     readonly writeAdmission: ImmediateDatabaseWriteAdmission;
 }
 
@@ -43,7 +64,7 @@ interface WorkerDatabaseRuntime {
 
 export interface DashboardWorkerRuntimeDependencies {
     readonly createCacheRepository: (
-        database: SQLiteBunDatabase,
+        database: RuntimeOwnedDatabase,
         writeAdmission: ImmediateDatabaseWriteAdmission
     ) => CacheRepository;
     readonly createCoordinator: typeof createJobWorkerCoordinator;
@@ -51,9 +72,10 @@ export interface DashboardWorkerRuntimeDependencies {
         options: DatabaseRuntimeLayerOptions
     ) => WorkerDatabaseRuntime;
     readonly createRepository: (
-        database: SQLiteBunDatabase,
+        database: RuntimeOwnedDatabase,
         writeAdmission: ImmediateDatabaseWriteAdmission
     ) => JobRepository;
+    readonly createTaskNotificationQueue: typeof createTaskNotificationQueue;
 }
 
 function createWorkerDatabaseRuntime(
@@ -91,12 +113,54 @@ const defaultDependencies: DashboardWorkerRuntimeDependencies = Object.freeze({
     createCoordinator: createJobWorkerCoordinator,
     createDatabaseRuntime: createWorkerDatabaseRuntime,
     createRepository: createJobRepository,
+    createTaskNotificationQueue,
 });
 
 function normalizeWorkerRuntimeFailure(error: unknown): Error {
     return error instanceof Error
         ? error
         : new Error("Dashboard worker runtime failed", { cause: error });
+}
+
+function requiredTaskNotificationShutdownTimeoutMs(value: number | undefined): number {
+    const resolved = value ?? defaultTaskNotificationShutdownTimeoutMs;
+    if (!Number.isSafeInteger(resolved) || resolved < 1) {
+        throw new RangeError("Task notification shutdown timeout is invalid");
+    }
+    return resolved;
+}
+
+async function waitForBoundedNotificationStop(
+    stop: Promise<void>,
+    forceSignal: AbortSignal | undefined,
+    timeoutMs: number
+): Promise<"forced" | "settled" | "timed-out"> {
+    let onForce: (() => void) | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const forced = new Promise<"forced">((resolve) => {
+        if (forceSignal === undefined) return;
+        if (forceSignal.aborted) {
+            resolve("forced");
+            return;
+        }
+        onForce = () => resolve("forced");
+        forceSignal.addEventListener("abort", onForce, { once: true });
+    });
+    const timedOut = new Promise<"timed-out">((resolve) => {
+        timeout = setTimeout(() => resolve("timed-out"), timeoutMs);
+    });
+    try {
+        return await Promise.race([
+            stop.then(() => "settled" as const),
+            forced,
+            timedOut,
+        ]);
+    } finally {
+        if (onForce !== undefined) {
+            forceSignal?.removeEventListener("abort", onForce);
+        }
+        if (timeout !== undefined) clearTimeout(timeout);
+    }
 }
 
 async function preservePrimaryFailure(
@@ -201,7 +265,7 @@ export function createSystemJobWorkerSideEffects(
 }
 
 /**
- * Creates the worker's ordered database and durable-coordinator ownership scope.
+ * Creates the worker's ordered database, Gateway, durable-job, and notification scope.
  * @param options Exact release/database identity and required atomic side effects.
  * @param dependencies Injectable construction boundaries for focused lifecycle tests.
  * @returns One idempotent runtime whose completion rejects on loop failure.
@@ -210,8 +274,13 @@ export function createDashboardWorkerRuntime(
     options: DashboardWorkerRuntimeOptions,
     dependencies: DashboardWorkerRuntimeDependencies = defaultDependencies
 ): DashboardWorkerRuntime {
+    const taskNotificationShutdownTimeoutMs = requiredTaskNotificationShutdownTimeoutMs(
+        options.taskNotificationShutdownTimeoutMs
+    );
     const databaseRuntime = dependencies.createDatabaseRuntime(options.database);
     let coordinator: JobWorkerCoordinator | undefined;
+    let notificationFiber: Fiber.Fiber<never, unknown> | undefined;
+    let notificationExitPromise: Promise<Exit.Exit<never, unknown>> | undefined;
     let initializePromise: Promise<void> | undefined;
     let disposePromise: Promise<void> | undefined;
     let resolveCompletion: (() => void) | undefined;
@@ -220,6 +289,85 @@ export function createDashboardWorkerRuntime(
         resolveCompletion = resolve;
         rejectCompletion = reject;
     });
+
+    const observeOwnedCompletion = (
+        ownedCompletion: Promise<void>,
+        stoppedMessage: string
+    ): void => {
+        void ownedCompletion.then(
+            () => {
+                if (disposePromise === undefined) {
+                    rejectCompletion?.(new Error(stoppedMessage));
+                }
+                return;
+            },
+            (error: unknown) => {
+                if (disposePromise === undefined) rejectCompletion?.(error);
+                return;
+            }
+        );
+    };
+
+    const stopNotificationLoop = async (forceSignal?: AbortSignal): Promise<void> => {
+        const fiber = notificationFiber;
+        const exitPromise = notificationExitPromise;
+        if (fiber === undefined || exitPromise === undefined) return;
+        const gracefulStop = (async () => {
+            await Effect.runPromise(Fiber.interrupt(fiber));
+            const exit = await exitPromise;
+            if (
+                Exit.isFailure(exit) &&
+                (Cause.hasFails(exit.cause) || Cause.hasDies(exit.cause))
+            ) {
+                throw normalizeWorkerRuntimeFailure(Cause.squash(exit.cause));
+            }
+        })();
+        const outcome = await waitForBoundedNotificationStop(
+            gracefulStop,
+            forceSignal,
+            taskNotificationShutdownTimeoutMs
+        );
+        if (outcome === "settled") return;
+
+        // Effect interruption has already requested a durable retry. If that
+        // admitted write itself stalls, teardown proceeds and the unacknowledged
+        // claim becomes recoverable when its existing lease expires.
+        void gracefulStop.catch(() => {});
+        if (outcome === "timed-out") {
+            throw new Error("Task notification shutdown exceeded its bounded wait");
+        }
+    };
+
+    const disposeOwnedResources = async (
+        forceSignal?: AbortSignal
+    ): Promise<Error | undefined> => {
+        let failure: Error | undefined;
+        // Interruption aborts any send and durably retries its claim while both
+        // the Gateway sender and admitted database runtime are still available.
+        try {
+            await stopNotificationLoop(forceSignal);
+        } catch (error) {
+            failure = normalizeWorkerRuntimeFailure(error);
+        }
+        if (coordinator !== undefined) {
+            try {
+                await coordinator.dispose(forceSignal);
+            } catch (error) {
+                failure ??= normalizeWorkerRuntimeFailure(error);
+            }
+        }
+        try {
+            await options.persistentGatewayTransport.stop();
+        } catch (error) {
+            failure ??= normalizeWorkerRuntimeFailure(error);
+        }
+        try {
+            await databaseRuntime.dispose();
+        } catch (error) {
+            failure ??= normalizeWorkerRuntimeFailure(error);
+        }
+        return failure;
+    };
 
     const initialize = async (): Promise<void> => {
         try {
@@ -242,31 +390,51 @@ export function createDashboardWorkerRuntime(
                 sideEffects: options.sideEffects,
                 workerInstanceId: options.workerInstanceId,
             });
-            void coordinator.completion.then(resolveCompletion, rejectCompletion);
+            const notificationQueue = dependencies.createTaskNotificationQueue(
+                database.database,
+                database.writeAdmission
+            );
+            observeOwnedCompletion(
+                coordinator.completion,
+                "Durable job coordinator stopped unexpectedly"
+            );
             await coordinator.initialize();
+            options.persistentGatewayTransport.start();
+            notificationFiber = Effect.runFork(
+                options.taskNotificationLoop({
+                    queue: notificationQueue,
+                    sender: options.persistentGatewayTransport.taskNotificationSender,
+                    workerId: options.workerInstanceId,
+                })
+            );
+            notificationExitPromise = Effect.runPromise(Fiber.await(notificationFiber));
+            observeOwnedCompletion(
+                notificationExitPromise.then((exit) => {
+                    if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
+                    return;
+                }),
+                "Task notification worker loop stopped unexpectedly"
+            );
         } catch (error) {
             rejectCompletion?.(error);
-            return preservePrimaryFailure(error, () => databaseRuntime.dispose());
+            return preservePrimaryFailure(error, async () => {
+                await disposeOwnedResources();
+            });
         }
     };
 
     const dispose = async (forceSignal?: AbortSignal): Promise<void> => {
-        let failure: unknown;
+        let failure: Error | undefined;
         if (initializePromise !== undefined) {
             try {
                 await initializePromise;
-                await coordinator?.dispose(forceSignal);
             } catch (error) {
-                failure = error;
+                failure = normalizeWorkerRuntimeFailure(error);
             }
         }
-        try {
-            await databaseRuntime.dispose();
-        } catch (error) {
-            failure ??= error;
-        }
-        if (failure !== undefined) throw normalizeWorkerRuntimeFailure(failure);
+        failure ??= await disposeOwnedResources(forceSignal);
         resolveCompletion?.();
+        if (failure !== undefined) throw failure;
     };
 
     return Object.freeze({

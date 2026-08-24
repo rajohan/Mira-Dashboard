@@ -3,7 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act } from "react";
 
-import type { AgentStatus } from "../../contracts/agentModel.ts";
+import type { AgentStatusProjection } from "../../contracts/agentModel.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
@@ -51,10 +51,17 @@ const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
 class AgentTransport implements DashboardTrpcTransport {
     configurationQueryCount = 0;
     configurationQueryResponse: Promise<unknown> | undefined;
-    mainStatus: AgentStatus = {
+    mainStatus: AgentStatusProjection = {
         agentId: "main",
         currentTask: "Implement agents route",
+        freshness: "fresh",
+        gatewayAvailability: "active",
+        hasActiveRun: true,
         lastActivityAtMs: timestampMs,
+        lastSeenAtMs: timestampMs,
+        observedAtMs: timestampMs,
+        providerModel: "openai/gpt-5.6-sol",
+        sessionKey: "agent:main:main",
         startedAtMs: timestampMs,
         state: "working",
     };
@@ -98,7 +105,15 @@ class AgentTransport implements DashboardTrpcTransport {
                     return this.statusQueryResponse;
                 }
                 return Promise.resolve({
-                    statuses: [this.mainStatus],
+                    statuses: [
+                        this.mainStatus,
+                        {
+                            agentId: "researcher",
+                            freshness: "unavailable",
+                            gatewayAvailability: "disconnected",
+                            state: "idle",
+                        },
+                    ],
                 });
             }
             case "agents.listTaskHistory": {
@@ -301,19 +316,35 @@ describe("Dashboard agents route", () => {
         ).toBeTruthy();
         await expectAgentShellReady();
         expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
-        expect(screen.getByText("unavailable")).toBeTruthy();
+        expect(screen.getByLabelText("Dashboard task state: working")).toBeTruthy();
+        expect(
+            screen.getByLabelText("Gateway session availability: active")
+        ).toBeTruthy();
+        expect(
+            screen.getByLabelText("Gateway session availability: disconnected")
+        ).toBeTruthy();
+        expect(screen.getByText("agent:main:main")).toBeTruthy();
+        expect(screen.getByText("openai/gpt-5.6-sol")).toBeTruthy();
+        expect(screen.getAllByText(/not online status or health/u)).toHaveLength(2);
         expect(screen.getByRole("table", { name: "Agent task history" })).toBeTruthy();
         expect(screen.getByRole("link", { name: /Agents/u })).toBeTruthy();
 
         transport.mainStatus = {
             agentId: "main",
+            freshness: "stale",
+            gatewayAvailability: "stale",
+            hasActiveRun: true,
             lastActivityAtMs: timestampMs + 1000,
+            lastSeenAtMs: timestampMs,
+            observedAtMs: timestampMs,
+            sessionKey: "agent:main:main",
             state: "idle",
         };
         await act(async () => {
             await collections.agents.statuses.utils.refetch();
         });
-        expect(screen.getByText("idle")).toBeTruthy();
+        expect(screen.getAllByLabelText("Dashboard task state: idle")).toHaveLength(2);
+        expect(screen.getByLabelText("Gateway session availability: stale")).toBeTruthy();
     });
 
     test("loads an older keyset page without replacing the newest history", async () => {
@@ -445,6 +476,8 @@ describe("Dashboard agents route", () => {
             consoleError.mockRestore();
         }
         expect(await screen.findByRole("alert")).toBeTruthy();
+        expect(screen.getAllByText("Implement agents route")).toHaveLength(2);
+        expect(screen.queryByText(/redacted status failure/u)).toBeNull();
         await waitFor(() =>
             expect(screen.queryByRole("button", { name: "Refreshing…" })).toBeNull()
         );

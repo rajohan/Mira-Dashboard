@@ -6,6 +6,7 @@ export type ConfigurationBrowserExposure = "none" | "presence-only" | "value";
 
 /** Shared parser/documentation limits for immutable application configuration. */
 export const applicationConfigurationLimits = Object.freeze({
+    gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
     port: Object.freeze({ maximum: 65_535, minimum: 1 }),
     projectRootMaximumLength: 4096,
@@ -25,6 +26,7 @@ export const applicationConfigurationLimits = Object.freeze({
 
 /** Stable field names used by typed server configuration. */
 export type ApplicationConfigurationField =
+    | "gatewayToken"
     | "gatewayUrl"
     | "logLevel"
     | "nodeEnvironment"
@@ -46,6 +48,7 @@ export const applicationConfigurationEnvironmentNames = [
     "PORT",
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
+    "OPENCLAW_GATEWAY_TOKEN",
     "OPENCLAW_GATEWAY_URL",
     "MIRA_DASHBOARD_WEBAUTHN_RP_ID",
     "MIRA_DASHBOARD_WEBAUTHN_ORIGINS",
@@ -86,6 +89,7 @@ export interface ApplicationConfigurationMetadata {
         | "ip-address-list"
         | "json-secret"
         | "log-level"
+        | "opaque-secret"
         | "relying-party-name"
         | "tcp-port"
         | "websocket-url";
@@ -189,16 +193,32 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             browserExposure: "none",
             defaultValue: "ws://127.0.0.1:18789",
             description:
-                "Direct-loopback OpenClaw Gateway endpoint for bootstrap verification.",
+                "Direct-loopback OpenClaw Gateway endpoint for bootstrap verification and the persistent operator connection.",
             environmentName: "OPENCLAW_GATEWAY_URL",
             field: "gatewayUrl",
             operationalEffect:
-                "Selects the one-shot native Gateway verification endpoint.",
+                "Selects the native Gateway endpoint used by credential verification and persistent operator traffic.",
             restartRequired: true,
-            roles: Object.freeze(["web"]),
+            roles: Object.freeze(["web", "worker"]),
             secret: false,
             validationConstraints: `Canonical direct-loopback WebSocket URL at most ${applicationConfigurationLimits.gatewayUrlMaximumLength} code units.`,
             valueType: "websocket-url",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Server-only OpenClaw Gateway operator token for the persistent native connection.",
+            environmentName: "OPENCLAW_GATEWAY_TOKEN",
+            field: "gatewayToken",
+            operationalEffect:
+                "Authenticates the web and worker processes to the direct-loopback OpenClaw Gateway.",
+            restartRequired: true,
+            roles: Object.freeze(["web", "worker"]),
+            secret: true,
+            validationConstraints: `Trimmed nonblank control-safe token at most ${applicationConfigurationLimits.gatewayTokenMaximumLength} code units; values are never persisted or browser-exposed.`,
+            valueType: "opaque-secret",
         }),
         metadata({
             allowedValues: null,

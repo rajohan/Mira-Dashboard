@@ -15,6 +15,11 @@ import {
     cacheRealtimeTopicDefinition,
 } from "./cacheRealtime.ts";
 import {
+    gatewayRealtimeChangeSchemas,
+    gatewayRealtimeTopicDefinitions,
+    gatewayRealtimeTopics,
+} from "./gatewayRealtime.ts";
+import {
     jobRealtimeChangeSchemas,
     jobRealtimeTopicDefinitions,
     jobRealtimeTopics,
@@ -37,6 +42,7 @@ import {
 export const realtimeTopicDefinitions = Object.freeze([
     agentRealtimeTopicDefinition,
     cacheRealtimeTopicDefinition,
+    ...gatewayRealtimeTopicDefinitions,
     ...jobRealtimeTopicDefinitions,
     ...monitoringRealtimeTopicDefinitions,
     taskRealtimeTopicDefinition,
@@ -55,6 +61,7 @@ export function findRealtimeTopicDefinition(topic: string) {
 export const realtimeStreamCapabilities = Object.freeze([
     "agents:read",
     "cache:read",
+    "gateway-sessions:read",
     "jobs:read",
     "notifications:read",
     "reports:read",
@@ -65,6 +72,9 @@ export const realtimeStreamCapabilities = Object.freeze([
 export const realtimeStreamTopics = Object.freeze([
     agentRealtimeTopic,
     cacheRealtimeTopic,
+    gatewayRealtimeTopics.connection,
+    gatewayRealtimeTopics.cron,
+    gatewayRealtimeTopics.sessions,
     jobRealtimeTopics.runs,
     jobRealtimeTopics.schedules,
     monitoringRealtimeTopics.incidents,
@@ -106,6 +116,7 @@ export const realtimeStreamDataSchema = v.variant("kind", [
         event: v.union([
             agentRealtimeChangeSchema,
             cacheRealtimeChangeSchema,
+            ...gatewayRealtimeChangeSchemas,
             ...jobRealtimeChangeSchemas,
             ...monitoringRealtimeChangeSchemas,
             taskRealtimeChangeSchema,

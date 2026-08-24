@@ -72,6 +72,10 @@ Gateway client, chat, production credential cutover, and complete rewrite remain
   the native persistent Gateway client, session operations, chat state machine/journal, adapters,
   attachments, reconciliation, recovery, and the full virtualized frontend. Current-production
   Dashboard Gateway/chat/session/agent/cron code is parity evidence, not protocol authority.
+- expose a versioned compact automation heartbeat from process-owned state: bounded payload-free
+  cache status, sanitized Gateway phase/freshness, identity-free current-session count/truncation,
+  and global OpenClaw-cron count/pending-sync state. It must not perform an extra upstream refresh,
+  expose raw errors or identities, or claim legacy schema-v3 task/job-row parity.
 
 **Exit gate:** recorded Gateway fixtures and live smoke tests cover every chat parity item,
 including restart during streaming.
@@ -80,6 +84,10 @@ including restart during streaming.
 
 - implement files/logs/media/STT/TTS, Docker, database, Moltbook, settings, terminal/exec,
   GitHub/PR/release/deploy/rollback, backup, and OpenClaw operations through worker adapters.
+- make the privileged log-rotation adapter own separate reviewed policies for managed Docker
+  regular-file logs beneath `/opt/docker/data` and allowlisted host text logs beneath `/var/log`.
+  The host policy must not recursively discover files or rotate journald storage, binary login/audit
+  databases, sockets, devices, or symlink escapes.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

@@ -96,6 +96,8 @@ export const applicationCapabilities = [
     "agents:write",
     "cache:read",
     "cache:write",
+    "gateway-sessions:read",
+    "gateway-sessions:write",
     "jobs:read",
     "jobs:write",
     "monitoring:write",

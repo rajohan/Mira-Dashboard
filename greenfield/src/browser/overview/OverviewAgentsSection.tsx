@@ -1,6 +1,9 @@
 import { useLiveQuery } from "@tanstack/react-db";
 
-import type { AgentDefinition, AgentStatus } from "../../contracts/agentModel.ts";
+import type {
+    AgentDefinition,
+    AgentStatusProjection,
+} from "../../contracts/agentModel.ts";
 import { useAgentCollectionQueryState } from "../agents/useAgentCollectionQueryState.ts";
 import { useAgentRealtimeInvalidation } from "../agents/useAgentRealtimeInvalidation.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
@@ -11,7 +14,7 @@ import { PageState } from "../ui/PageState.tsx";
 import { OverviewAgentsCard } from "./OverviewAgentsCard.tsx";
 
 const emptyAgents: readonly AgentDefinition[] = Object.freeze([]);
-const emptyStatuses: readonly AgentStatus[] = Object.freeze([]);
+const emptyStatuses: readonly AgentStatusProjection[] = Object.freeze([]);
 
 /** @returns Realtime-refreshed complete configured-agent projection for the overview. */
 export function OverviewAgentsSection() {

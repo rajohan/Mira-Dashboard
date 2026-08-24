@@ -3,6 +3,7 @@ import * as v from "valibot";
 import {
     contractAuthenticationErrorReasons,
     contractErrorCodes,
+    contractOperationErrorReasons,
 } from "../../contracts/registry.ts";
 import { DashboardProtocolError } from "./trpcClient.ts";
 
@@ -19,7 +20,12 @@ const clientErrorSchema = v.object({
     data: v.nullish(
         v.object({
             code: v.optional(clientErrorCodeSchema),
-            reason: v.optional(v.picklist(contractAuthenticationErrorReasons)),
+            reason: v.optional(
+                v.picklist([
+                    ...contractAuthenticationErrorReasons,
+                    ...contractOperationErrorReasons,
+                ])
+            ),
         })
     ),
 });
@@ -113,6 +119,19 @@ const browserFailureMessages: Readonly<Record<DashboardBrowserFailure, string>> 
     unavailable: "The Dashboard is temporarily unavailable. Try again shortly.",
     unknown: "The request could not be completed. Try again.",
 };
+
+/**
+ * Detects the single allowlisted operation-outcome reason without exposing a
+ * server-controlled message or broadening shared failure classifications.
+ * @param error Unknown rejection.
+ * @returns Whether the server explicitly reported an indeterminate operation outcome.
+ */
+export function isDashboardOperationOutcomeUnknown(error: unknown): boolean {
+    const parsed = v.safeParse(clientErrorSchema, error);
+    return parsed.success
+        ? parsed.output.data?.reason === "operation_outcome_unknown"
+        : false;
+}
 
 /**
  * Formats one fixed, non-sensitive browser message.

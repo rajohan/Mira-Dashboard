@@ -5,8 +5,14 @@ import {
     sessionActivityWriteIntervalMs,
     type AuthenticationLifecycleContext,
 } from "./authenticationLifecycleContext.ts";
-import type { AuthenticationLifecycleUnitOfWork } from "./authenticationLifecycleRepository.ts";
-import type { AuthenticationLifecycleService } from "./authenticationLifecycleTypes.ts";
+import type {
+    AuthenticationLifecycleReader,
+    AuthenticationLifecycleUnitOfWork,
+} from "./authenticationLifecycleRepository.ts";
+import type {
+    AuthenticationLifecycleService,
+    RecentMfaAuthorization,
+} from "./authenticationLifecycleTypes.ts";
 import {
     authSession,
     authUser,
@@ -26,6 +32,35 @@ type SessionsContext = Pick<
 >;
 
 type SessionMutationAccess = "authorized" | "session-changed" | "step-up-required";
+
+function recentMfaAccess(
+    context: SessionsContext,
+    unit: AuthenticationLifecycleReader,
+    identity: AuthenticatedBrowserIdentity,
+    checkedAt: Date
+): RecentMfaAuthorization {
+    const user = unit.findUserById(identity.userId);
+    const actorSession = unit.findSession(identity.userId, identity.sessionId);
+    if (
+        user === undefined ||
+        user.disabledAt !== null ||
+        actorSession === undefined ||
+        actorSession.authenticationVersion !== user.authenticationVersion ||
+        !sessionIsActive(actorSession, checkedAt, context.sessionIdleDurationMs)
+    ) {
+        return "session-changed";
+    }
+    if (user.mfaEnabledAt === null) return "mfa-enrollment-required";
+    return evaluateRecentAuthentication({
+        checkedAt,
+        mfaEnabledAt: user.mfaEnabledAt,
+        mfaVerifiedAt: actorSession.mfaVerifiedAt,
+        passwordVerifiedAt: actorSession.passwordVerifiedAt,
+        windowMs: context.recentAuthenticationWindowMs,
+    }).mfa.recent
+        ? "authorized"
+        : "step-up-required";
+}
 
 function sessionMutationAccess(
     context: SessionsContext,
@@ -65,6 +100,7 @@ export function createAuthenticationSessionOperations(
     context: SessionsContext
 ): Pick<
     AuthenticationLifecycleService,
+    | "authorizeRecentMfa"
     | "listSessions"
     | "logout"
     | "revokeAllSessions"
@@ -74,6 +110,11 @@ export function createAuthenticationSessionOperations(
     | "touchSession"
 > {
     return {
+        authorizeRecentMfa(identity) {
+            return context.repository.withReadTransaction((reader) =>
+                recentMfaAccess(context, reader, identity, context.now())
+            );
+        },
         listSessions(identity) {
             return context.repository.withReadTransaction((reader) => {
                 const checkedAt = context.now();

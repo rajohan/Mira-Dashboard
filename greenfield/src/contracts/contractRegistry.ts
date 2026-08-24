@@ -6,12 +6,16 @@ import { automationSecurityProcedureContracts } from "./automationSecurity.ts";
 import { cacheProcedureContracts } from "./cache.ts";
 import { cacheRealtimeEventContract } from "./cacheRealtime.ts";
 import { eventsStreamContract } from "./events.ts";
+import { gatewayConnectionProcedureContracts } from "./gatewayConnection.ts";
+import { gatewayRealtimeEventContracts } from "./gatewayRealtime.ts";
+import { gatewaySessionProcedureContracts } from "./gatewaySessions.ts";
 import { incidentProcedureContracts } from "./incidents.ts";
 import { jobRealtimeEventContracts } from "./jobRealtime.ts";
 import { jobProcedureContracts } from "./jobs.ts";
 import { monitoringProcedureContracts } from "./monitoringIngestion.ts";
 import { monitoringRealtimeEventContracts } from "./monitoringRealtime.ts";
 import { notificationProcedureContracts } from "./notifications.ts";
+import { openClawCronProcedureContracts } from "./openClawCron.ts";
 import {
     assertProcedureContractErrors,
     type ProcedureContract,
@@ -33,10 +37,13 @@ const registeredProcedureContracts = [
     ...automationSecurityProcedureContracts,
     ...cacheProcedureContracts,
     eventsStreamContract,
+    ...gatewayConnectionProcedureContracts,
+    ...gatewaySessionProcedureContracts,
     ...incidentProcedureContracts,
     ...jobProcedureContracts,
     ...monitoringProcedureContracts,
     ...notificationProcedureContracts,
+    ...openClawCronProcedureContracts,
     ...reportProcedureContracts,
     ...scheduleProcedureContracts,
     ...securityAuditProcedureContracts,
@@ -54,7 +61,9 @@ export const procedureContracts = Object.freeze(
             "capabilities" in contract.access
                 ? Object.freeze({
                       ...contract.access,
-                      capabilities: Object.freeze([...contract.access.capabilities]),
+                      capabilities: Object.freeze([
+                          ...(contract.access.capabilities ?? []),
+                      ]),
                       ...(contract.access.principalKinds === undefined
                           ? {}
                           : {
@@ -83,6 +92,7 @@ export const rawHttpContracts: readonly RawHttpContract[] = [...systemRawHttpCon
 export const realtimeEventContracts: readonly RealtimeEventContract[] = Object.freeze([
     agentRealtimeEventContract,
     cacheRealtimeEventContract,
+    ...gatewayRealtimeEventContracts,
     ...jobRealtimeEventContracts,
     ...monitoringRealtimeEventContracts,
     taskRealtimeEventContract,

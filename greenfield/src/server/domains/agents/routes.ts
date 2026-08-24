@@ -3,6 +3,7 @@ import { Effect } from "effect";
 
 import {
     agentConfigurationSchema,
+    agentStatusProjectionSchema,
     agentStatusSchema,
 } from "../../../contracts/agentModel.ts";
 import {
@@ -32,6 +33,15 @@ async function runAgentEffect<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
 }
 
 const readProcedure = capabilityProcedure("agents:read");
+const gatewayStatusReadProcedure = readProcedure.use(({ ctx, next }) => {
+    if (!ctx.principal.capabilities.includes("gateway-sessions:read")) {
+        throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Required application capability is not granted",
+        });
+    }
+    return next({ ctx });
+});
 const writeProcedure = principalKindProcedure(
     "agents:write",
     "automation",
@@ -49,14 +59,18 @@ export const agentRoutes = {
             );
             return { agents: configuration.agents.map((agent) => ({ ...agent })) };
         }),
-    getStatus: readProcedure
+    getStatus: gatewayStatusReadProcedure
         .input(getAgentStatusInputSchema)
-        .output(agentStatusSchema)
-        .query(({ ctx, input }) => runAgentEffect(ctx.agentService.getStatus(input))),
-    listStatuses: readProcedure
+        .output(agentStatusProjectionSchema)
+        .query(({ ctx, input, signal }) =>
+            runAgentEffect(ctx.agentService.getStatus(input, signal))
+        ),
+    listStatuses: gatewayStatusReadProcedure
         .input(emptyAgentInputSchema)
         .output(listAgentStatusesResultSchema)
-        .query(({ ctx }) => runAgentEffect(ctx.agentService.listStatuses())),
+        .query(({ ctx, signal }) =>
+            runAgentEffect(ctx.agentService.listStatuses(signal))
+        ),
     listTaskHistory: readProcedure
         .input(listAgentTaskHistoryInputSchema)
         .output(listAgentTaskHistoryResultSchema)

@@ -48,6 +48,23 @@ export interface StructuredLogEvent {
 
 export type StructuredLogFields =
     | {
+          readonly action: "compact" | "delete" | "reset";
+          readonly auditOutcome: "failed" | "succeeded";
+          readonly kind: "gateway-session-audit-settlement";
+          readonly targetFingerprint: string;
+      }
+    | {
+          readonly kind: "openclaw-cron-audit-settlement";
+          readonly operation:
+              | "delete"
+              | "reconcile-expired"
+              | "run"
+              | "set-enabled"
+              | "update";
+          readonly settlement: "failed" | "partial" | "succeeded";
+          readonly targetFingerprint: string;
+      }
+    | {
           readonly kind: "http-request";
           readonly method: string;
       }
@@ -108,9 +125,13 @@ const sinkFailureLine =
 
 const structuredEventComponents = Object.freeze({
     "effect.log": "effect",
+    "gateway.realtime.bridge_failed": "gateway-realtime-bridge",
+    "gateway.session.audit_settlement_failed": "gateway-session-audit",
     "http.request.cancelled": "http",
     "http.request.failed": "http",
     "http.response.created": "http",
+    "openclaw_cron.audit_settlement.failed": "openclaw-cron-audit",
+    "openclaw_cron.expiry_reconciliation.failed": "openclaw-cron-expiry",
     "realtime.runner.failed": "realtime-event-pump",
     "realtime.wake.failed": "realtime-event-pump",
     "runtime.logger.connected": "application-runtime",
@@ -218,6 +239,24 @@ function safeEventFields(
 ): StructuredLogValue | undefined {
     if (fields === undefined) return undefined;
     switch (fields.kind) {
+        case "gateway-session-audit-settlement": {
+            if (
+                eventName !== "gateway.session.audit_settlement_failed" ||
+                (fields.action !== "compact" &&
+                    fields.action !== "delete" &&
+                    fields.action !== "reset") ||
+                (fields.auditOutcome !== "failed" &&
+                    fields.auditOutcome !== "succeeded") ||
+                !/^sha256:[0-9a-f]{64}$/u.test(fields.targetFingerprint)
+            ) {
+                return undefined;
+            }
+            return {
+                action: fields.action,
+                auditOutcome: fields.auditOutcome,
+                targetFingerprint: fields.targetFingerprint,
+            };
+        }
         case "http-request": {
             if (
                 eventName !== "http.request.cancelled" &&
@@ -239,6 +278,27 @@ function safeEventFields(
             }
             const method = safeHttpMethod(fields.method);
             return method === undefined ? undefined : { method, status: fields.status };
+        }
+        case "openclaw-cron-audit-settlement": {
+            if (
+                eventName !== "openclaw_cron.audit_settlement.failed" ||
+                (fields.operation !== "delete" &&
+                    fields.operation !== "reconcile-expired" &&
+                    fields.operation !== "run" &&
+                    fields.operation !== "set-enabled" &&
+                    fields.operation !== "update") ||
+                (fields.settlement !== "failed" &&
+                    fields.settlement !== "partial" &&
+                    fields.settlement !== "succeeded") ||
+                !/^sha256:[0-9a-f]{64}$/u.test(fields.targetFingerprint)
+            ) {
+                return undefined;
+            }
+            return {
+                operation: fields.operation,
+                settlement: fields.settlement,
+                targetFingerprint: fields.targetFingerprint,
+            };
         }
         case "realtime-runner-failure": {
             return eventName === "realtime.runner.failed" &&

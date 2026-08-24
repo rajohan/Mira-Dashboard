@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Bot, Pencil, Trash2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
@@ -115,11 +116,19 @@ export function TaskDetailModal({ onClose, taskId }: TaskDetailModalProps) {
                             <Badge key={label}>{label}</Badge>
                         ))}
                         {task.data.automation !== undefined && (
-                            <Badge variant="info">
+                            <Link
+                                aria-label={`Open OpenClaw cron job ${task.data.automation.cronJobId}`}
+                                className="border-accent-500/30 bg-accent-500/15 text-accent-300 hover:border-accent-400/50 hover:text-accent-200 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium"
+                                search={{
+                                    cronJobId: task.data.automation.cronJobId,
+                                    source: "openclaw",
+                                }}
+                                to="/jobs"
+                            >
                                 <Icon icon={Bot} size="sm" tone="inherit" />
                                 {task.data.automation.scheduleSummary ??
                                     task.data.automation.cronJobId}
-                            </Badge>
+                            </Link>
                         )}
                     </div>
                     <div className="border-primary-700 mt-5 border-t pt-5">

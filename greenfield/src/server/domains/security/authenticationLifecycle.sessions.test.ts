@@ -7,6 +7,42 @@ import {
 } from "./testSupport/authenticationLifecycle.ts";
 
 describe("authentication lifecycle sessions", () => {
+    test("authorizes external controls only after recent MFA", async () => {
+        const harness = await createAuthenticationLifecycleHarness({
+            recentAuthenticationWindowMs: 60_000,
+        });
+
+        try {
+            const created = await bootstrapAuthenticationLifecycle(harness);
+            const identity = {
+                sessionId: created.session.id,
+                userId: created.user.id,
+            };
+
+            expect(harness.service.authorizeRecentMfa(identity)).toBe(
+                "mfa-enrollment-required"
+            );
+            harness.database.sqlite.run(
+                "UPDATE users SET mfa_enabled_at = created_at WHERE id = ?",
+                [created.user.id]
+            );
+            harness.database.sqlite.run(
+                "UPDATE auth_sessions SET auth_method = 'totp', mfa_verified_at = created_at WHERE id = ?",
+                [created.session.id]
+            );
+            expect(harness.service.authorizeRecentMfa(identity)).toBe("authorized");
+
+            harness.advanceSeconds(61);
+            expect(harness.service.authorizeRecentMfa(identity)).toBe("step-up-required");
+            harness.database.sqlite.run("DELETE FROM auth_sessions WHERE id = ?", [
+                created.session.id,
+            ]);
+            expect(harness.service.authorizeRecentMfa(identity)).toBe("session-changed");
+        } finally {
+            harness.database.sqlite.close(true);
+        }
+    });
+
     test("prunes inactive sessions and caps retained sessions transactionally", async () => {
         const harness = await createAuthenticationLifecycleHarness();
 

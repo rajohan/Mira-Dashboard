@@ -24,9 +24,39 @@ test("rejects duplicate procedure names and invalid error metadata", () => {
     for (const contract of invalid) {
         expect(() =>
             assertProcedureContractErrors([
-                contract as unknown as Pick<ProcedureContract, "errors" | "name">,
+                contract as unknown as Pick<
+                    ProcedureContract,
+                    "errorReasons" | "errors" | "name"
+                >,
             ])
         ).toThrow(`Procedure contract errors are invalid for ${contract.name}`);
+    }
+
+    for (const contract of [
+        {
+            errorReasons: ["step_up_required", "mfa_enrollment_required"],
+            errors: [],
+            name: "unsorted-reasons",
+        },
+        {
+            errorReasons: ["step_up_required", "step_up_required"],
+            errors: [],
+            name: "duplicate-reasons",
+        },
+        {
+            errorReasons: ["unknown_policy_reason"],
+            errors: [],
+            name: "unregistered-reason",
+        },
+    ]) {
+        expect(() =>
+            assertProcedureContractErrors([
+                contract as unknown as Pick<
+                    ProcedureContract,
+                    "errorReasons" | "errors" | "name"
+                >,
+            ])
+        ).toThrow(`Procedure contract error reasons are invalid for ${contract.name}`);
     }
 
     expect(() =>

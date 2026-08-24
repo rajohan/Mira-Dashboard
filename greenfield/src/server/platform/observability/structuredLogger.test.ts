@@ -83,6 +83,138 @@ test("records realtime wake failures without exposing raw failure text", () => {
     expect(lines[0]).not.toContain("never-log-this");
 });
 
+test("preserves Gateway realtime bridge failures without exposing raw causes", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.error({
+        component: "gateway-realtime-bridge",
+        event: "gateway.realtime.bridge_failed",
+        failure: new Error("wss://gateway.invalid/?token=never-log-this"),
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "gateway-realtime-bridge",
+        event: "gateway.realtime.bridge_failed",
+        level: "error",
+    });
+    expect(lines[0]).not.toContain("never-log-this");
+});
+
+test("preserves the reviewed cron expiry failure event", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+
+    logger.warn({
+        component: "openclaw-cron-expiry",
+        event: "openclaw_cron.expiry_reconciliation.failed",
+        failure: new Error("OpenClaw cron expiry reconciliation failed: conflict"),
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "openclaw-cron-expiry",
+        event: "openclaw_cron.expiry_reconciliation.failed",
+        level: "warn",
+        outcome: "server-error",
+    });
+});
+
+test("records only fingerprinted session-audit settlement failures", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+    const sensitiveKey = "agent:private-person:main";
+    const targetFingerprint = `sha256:${"a".repeat(64)}`;
+
+    logger.error({
+        component: "gateway-session-audit",
+        event: "gateway.session.audit_settlement_failed",
+        failure: new Error(`database failed for ${sensitiveKey}`),
+        fields: {
+            action: "delete",
+            auditOutcome: "succeeded",
+            kind: "gateway-session-audit-settlement",
+            targetFingerprint,
+        },
+        outcome: "server-error",
+        requestId: "01900000-0000-7000-8000-000000000001",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "gateway-session-audit",
+        event: "gateway.session.audit_settlement_failed",
+        fields: {
+            action: "delete",
+            auditOutcome: "succeeded",
+            targetFingerprint,
+        },
+        level: "error",
+        outcome: "server-error",
+    });
+    expect(lines[0]).not.toContain(sensitiveKey);
+});
+
+test("records only classified OpenClaw cron audit settlement fields", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+        identity,
+        sink: {
+            write(line) {
+                lines.push(line);
+            },
+        },
+    });
+    const sensitiveId = "private-nightly-provider-id";
+    const targetFingerprint = `sha256:${"b".repeat(64)}`;
+
+    logger.warn({
+        component: "openclaw-cron-audit",
+        event: "openclaw_cron.audit_settlement.failed",
+        failure: new Error(`database failed for ${sensitiveId}`),
+        fields: {
+            kind: "openclaw-cron-audit-settlement",
+            operation: "reconcile-expired",
+            settlement: "partial",
+            targetFingerprint,
+        },
+        outcome: "server-error",
+    });
+
+    expect(JSON.parse(lines[0] ?? "null")).toMatchObject({
+        component: "openclaw-cron-audit",
+        event: "openclaw_cron.audit_settlement.failed",
+        fields: {
+            operation: "reconcile-expired",
+            settlement: "partial",
+            targetFingerprint,
+        },
+        level: "warn",
+        outcome: "server-error",
+    });
+    expect(lines[0]).not.toContain(sensitiveId);
+});
+
 test("normalizes unknown events and drops extra fields instead of relying on secret names", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

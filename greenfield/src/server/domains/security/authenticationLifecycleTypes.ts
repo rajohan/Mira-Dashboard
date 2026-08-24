@@ -104,7 +104,15 @@ export type AuthenticationStatus =
           readonly user: AuthUser;
       };
 
+/** Session-bound authorization result for controls that require recently verified MFA. */
+export type RecentMfaAuthorization =
+    | "authorized"
+    | "mfa-enrollment-required"
+    | "session-changed"
+    | "step-up-required";
+
 export interface AuthenticationLifecycleService {
+    authorizeRecentMfa(identity: AuthenticatedBrowserIdentity): RecentMfaAuthorization;
     bootstrap(
         input: FirstUserBootstrapInput,
         metadata: AuthenticationRequestMetadata

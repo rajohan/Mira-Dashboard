@@ -104,7 +104,7 @@
             "purpose": "Deletes/removes a session.",
             "section": "Sessions And Chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["gatewaySessions.delete"],
                 "phase": "phase-4"
@@ -891,7 +891,7 @@
             "purpose": "Normalized session snapshot from Gateway.",
             "section": "Health",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["gatewaySessions.list"],
                 "phase": "phase-4"
@@ -904,7 +904,7 @@
             "purpose": "Lists Gateway sessions with optional filters.",
             "section": "Sessions And Chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["gatewaySessions.list"],
                 "phase": "phase-4"
@@ -917,9 +917,9 @@
             "purpose": "Returns session stats.",
             "section": "Sessions And Chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["gatewaySessions.stats"],
+                "names": ["gatewaySessions.list"],
                 "phase": "phase-4"
             }
         },
@@ -1855,9 +1855,9 @@
             "purpose": "Sends a session action.",
             "section": "Sessions And Chat",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
-                "names": ["gatewaySessions.performAction"],
+                "names": ["gatewaySessions.compact", "gatewaySessions.reset"],
                 "phase": "phase-4"
             }
         },

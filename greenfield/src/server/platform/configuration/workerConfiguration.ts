@@ -1,6 +1,11 @@
+import { Redacted } from "effect";
 import * as v from "valibot";
 
 import { configurationEnvironmentNamesForRole } from "../../../shared/configuration/applicationConfigurationRegistry.ts";
+import {
+    configurationGatewayToken,
+    configurationGatewayUrl,
+} from "./gatewayConfiguration.ts";
 import {
     configurationChoice,
     configurationProjectRoot,
@@ -11,6 +16,8 @@ import {
 
 /** Immutable, validated configuration consumed by the greenfield worker process. */
 export interface WorkerConfiguration {
+    readonly gatewayToken: Redacted.Redacted<string>;
+    readonly gatewayUrl: string;
     readonly logLevel: ApplicationLogLevel;
     readonly nodeEnvironment: ApplicationNodeEnvironment;
     readonly projectRoot: string;
@@ -23,6 +30,8 @@ export const workerConfigurationEnvironmentSchema = v.object({
     MIRA_DASHBOARD_LOG_LEVEL: optionalEnvironmentValueSchema,
     MIRA_DASHBOARD_PROJECT_ROOT: optionalEnvironmentValueSchema,
     NODE_ENV: optionalEnvironmentValueSchema,
+    OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
+    OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
 });
 
 /** Registered environment names consumed by the worker-process parser. */
@@ -32,7 +41,7 @@ export const workerConfigurationEnvironmentNames =
 /**
  * Parses an injected untrusted environment record into immutable worker configuration.
  * @param source Untrusted injected environment-like record.
- * @returns Frozen worker configuration containing no web-only or secret fields.
+ * @returns Frozen worker configuration with a redacted Gateway credential and no web-only fields.
  */
 export function parseWorkerConfiguration(
     source: Readonly<Record<string, unknown>>
@@ -44,6 +53,8 @@ export function parseWorkerConfiguration(
         (projection) => v.parse(workerConfigurationEnvironmentSchema, projection)
     );
     return Object.freeze({
+        gatewayToken: configurationGatewayToken(input),
+        gatewayUrl: configurationGatewayUrl(input),
         logLevel: configurationChoice(input, "MIRA_DASHBOARD_LOG_LEVEL", [
             "debug",
             "error",

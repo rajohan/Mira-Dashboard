@@ -1,6 +1,14 @@
 import { agentProcedureNames, agentRouter } from "../domains/agents/procedures.ts";
 import { cacheProcedureNames, cacheRouter } from "../domains/cache/procedures.ts";
 import {
+    gatewayProcedureNames,
+    gatewayRouter,
+} from "../domains/gatewayConnection/procedures.ts";
+import {
+    gatewaySessionProcedureNames,
+    gatewaySessionsRouter,
+} from "../domains/gatewaySessions/procedures.ts";
+import {
     jobProcedureNames,
     jobRouter,
     scheduleProcedureNames,
@@ -16,6 +24,10 @@ import {
     reportProcedureNames,
     reportRouter,
 } from "../domains/monitoring/procedures.ts";
+import {
+    openClawCronProcedureNames,
+    openClawCronRouter,
+} from "../domains/openClawCron/procedures.ts";
 import { eventsProcedureNames, eventsRouter } from "../domains/realtime/procedures.ts";
 import {
     automationSecurityProcedureNames,
@@ -49,10 +61,13 @@ export const appRouter = router({
     automationSecurity: automationSecurityRouter,
     cache: cacheRouter,
     events: eventsRouter,
+    gateway: gatewayRouter,
+    gatewaySessions: gatewaySessionsRouter,
     incidents: incidentRouter,
     jobs: jobRouter,
     monitoring: monitoringRouter,
     notifications: notificationRouter,
+    openClawCron: openClawCronRouter,
     reports: reportRouter,
     schedules: scheduleRouter,
     securityAudit: securityAuditRouter,
@@ -68,10 +83,13 @@ export const appRouterProcedureNames = Object.freeze([
     ...namespacedProcedureNames("automationSecurity", automationSecurityProcedureNames),
     ...namespacedProcedureNames("cache", cacheProcedureNames),
     ...namespacedProcedureNames("events", eventsProcedureNames),
+    ...namespacedProcedureNames("gateway", gatewayProcedureNames),
+    ...namespacedProcedureNames("gatewaySessions", gatewaySessionProcedureNames),
     ...namespacedProcedureNames("incidents", incidentProcedureNames),
     ...namespacedProcedureNames("jobs", jobProcedureNames),
     ...namespacedProcedureNames("monitoring", monitoringProcedureNames),
     ...namespacedProcedureNames("notifications", notificationProcedureNames),
+    ...namespacedProcedureNames("openClawCron", openClawCronProcedureNames),
     ...namespacedProcedureNames("reports", reportProcedureNames),
     ...namespacedProcedureNames("schedules", scheduleProcedureNames),
     ...namespacedProcedureNames("securityAudit", securityAuditProcedureNames),

@@ -74,6 +74,210 @@
         "sessions.viewers.set"
     ],
     "schemaVersion": 1,
+    "adapter": {
+        "acknowledgements": {
+            "compact": {
+                "optionalFields": ["archived", "kept", "reason", "result"],
+                "requiredFields": ["compacted", "key", "ok"],
+                "successfulRpcCanReportOkFalse": true
+            },
+            "delete": {
+                "okLiteral": true,
+                "optionalFields": ["worktreePreserved"],
+                "requiredFields": ["archived", "deleted", "key", "ok"],
+                "worktreePreservedFields": ["branch", "id", "path"]
+            },
+            "reset": {
+                "okLiteral": true,
+                "optionalFields": ["deleted", "entry", "resolved"],
+                "requiredFields": ["key", "ok"]
+            }
+        },
+        "deleteLifecycle": {
+            "acceptedParams": [
+                "agentId",
+                "archivedOnly",
+                "deleteTranscript",
+                "emitLifecycleHooks",
+                "expectedLifecycleRevision",
+                "expectedSessionId",
+                "expectedSessionUpdatedAt",
+                "key"
+            ],
+            "conflict": {
+                "code": "INVALID_REQUEST",
+                "reason": "session-changed"
+            },
+            "generationFields": [
+                "expectedLifecycleRevision",
+                "expectedSessionId",
+                "expectedSessionUpdatedAt"
+            ],
+            "generationGuardedScope": "operator.admin",
+            "mainSessionProtection": {
+                "canonicalKeyComparison": true,
+                "configuredKeyResolver": "resolveMainSessionKey",
+                "errorCode": "INVALID_REQUEST",
+                "selectedNonDefaultGlobalException": true
+            },
+            "requestParams": [
+                "deleteTranscript",
+                "expectedSessionId",
+                "expectedSessionUpdatedAt",
+                "key"
+            ]
+        },
+        "event": {
+            "backpressurePaths": [
+                {
+                    "event": "sessions.changed",
+                    "path": "session-change",
+                    "slowClient": "drop-event"
+                },
+                {
+                    "event": "sessions.changed",
+                    "path": "transcript-fallback",
+                    "slowClient": "drop-event"
+                },
+                {
+                    "event": "session.message",
+                    "path": "transcript-message",
+                    "slowClient": "close-socket"
+                },
+                {
+                    "event": "sessions.changed",
+                    "path": "transcript-snapshot",
+                    "slowClient": "close-socket"
+                }
+            ],
+            "delivery": "path-dependent-drop-or-close",
+            "name": "sessions.changed",
+            "sequence": "omitted",
+            "targeted": true
+        },
+        "list": {
+            "acceptedParams": [
+                "activeMinutes",
+                "agentId",
+                "archived",
+                "boardFace",
+                "configuredAgentsOnly",
+                "creatorId",
+                "includeDerivedTitles",
+                "includeGlobal",
+                "includeLastMessage",
+                "includeUnknown",
+                "label",
+                "limit",
+                "offset",
+                "requireLastInteraction",
+                "search",
+                "sortBy",
+                "spawnedBy"
+            ],
+            "derivedRowFields": ["activeRunIds", "hasActiveRun"],
+            "requestParams": [
+                "archived",
+                "includeGlobal",
+                "includeUnknown",
+                "limit",
+                "sortBy"
+            ],
+            "responseMetadata": [
+                "count",
+                "creators",
+                "defaults",
+                "hasMore",
+                "limitApplied",
+                "nextOffset",
+                "offset",
+                "path",
+                "totalCount",
+                "ts"
+            ],
+            "rowFields": [
+                "activeRunIds",
+                "channel",
+                "contextTokens",
+                "createdAt",
+                "createdVia",
+                "displayName",
+                "effectiveFastMode",
+                "elevatedLevel",
+                "endedAt",
+                "fastMode",
+                "hasActiveRun",
+                "key",
+                "kind",
+                "label",
+                "model",
+                "modelProvider",
+                "parentSessionKey",
+                "reasoningLevel",
+                "runtimeMs",
+                "sessionId",
+                "spawnedBy",
+                "startedAt",
+                "status",
+                "thinkingDefault",
+                "thinkingLevel",
+                "thinkingLevels",
+                "thinkingOptions",
+                "totalTokens",
+                "totalTokensFresh",
+                "updatedAt",
+                "verboseLevel"
+            ]
+        },
+        "methodAccess": [
+            {
+                "lane": "one-shot-admin",
+                "method": "sessions.compact",
+                "scope": "operator.admin"
+            },
+            {
+                "lane": "one-shot-admin",
+                "method": "sessions.delete",
+                "scope": "dynamic"
+            },
+            {
+                "lane": "persistent",
+                "method": "sessions.list",
+                "scope": "operator.read"
+            },
+            {
+                "lane": "one-shot-admin",
+                "method": "sessions.reset",
+                "scope": "operator.admin"
+            },
+            {
+                "lane": "persistent",
+                "method": "sessions.subscribe",
+                "scope": "operator.read"
+            }
+        ],
+        "subscription": {
+            "acknowledgementField": "subscribed",
+            "acknowledgementValue": "Boolean(connId)",
+            "connectionIdSource": "client.connId.trim",
+            "effectiveWithSessionScopedCap": [
+                "session.message",
+                "session.operation",
+                "session.tool",
+                "sessions.changed"
+            ],
+            "registration": "subscribeSessionEvents",
+            "registryTargetedEvents": [
+                "session.message",
+                "session.observer",
+                "session.operation",
+                "session.tool",
+                "sessions.changed"
+            ],
+            "requestParams": [],
+            "requiredAcknowledgement": true
+        }
+    },
     "companion": {
         "authority": {
             "askResultDelivery": "requester-only",

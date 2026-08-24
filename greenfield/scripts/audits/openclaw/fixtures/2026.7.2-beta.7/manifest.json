@@ -6,19 +6,19 @@
         },
         {
             "file": "chat.json",
-            "sha256": "e7a2520f9506b64b5acd6083e15aef8890be26c625bf7630341284e063a50ccc"
+            "sha256": "a9db688ef4a3aad8b0697ee2986c4f4fe6cfdc1782ced38dd12e6af761a85749"
         },
         {
             "file": "cron.json",
-            "sha256": "1a7916667cba1e13bf830ae6e92f7a027beb28d22d1235f73fa0b77f92f826b9"
+            "sha256": "f6071ac2f5e54ba42530cbd74f5aa58bd56fab46fe54d95cb5aba54069880783"
         },
         {
             "file": "gateway.json",
-            "sha256": "4b3bfa47e9bb0f8e96e519acbb6bdce18ba7c303778980216109a369a6086137"
+            "sha256": "dbd4311e4e31b71855527459aa0f7f389c99dba58ba79c066f77334c1d1cf6e3"
         },
         {
             "file": "sessions.json",
-            "sha256": "a335ae2b415016e805246dc2650e43158eddb4e6f36df6996fd69dad01d06074"
+            "sha256": "0bd23fffe375d7f261d8f2b7232add4c0e90b7601981383bda39b1dab5cd7cf2"
         },
         {
             "file": "tasks.json",
@@ -54,6 +54,12 @@
             "sha256": "a1c96ee4d16954fee214ab43fa1528a2f5650231fa64e9db9562cf9580cf6891"
         },
         {
+            "bytes": 246674,
+            "path": "dist/chat-D4aVqkFx.js",
+            "role": "chat-send-handler",
+            "sha256": "d442908306d32305b9d219cc2370e898d7e9e1ee47f175fc17d436168e4b8635"
+        },
+        {
             "bytes": 43792,
             "path": "dist/server-chat-CdNm7sYZ.js",
             "role": "chat-streaming",
@@ -76,6 +82,66 @@
             "path": "dist/control-ui/assets/chat-message-0eXitjaF.js",
             "role": "control-ui-plan-renderer",
             "sha256": "a42e193f44dd1066309961c94aafdbe116efa419aa8416a60166bc686dbefb2c"
+        },
+        {
+            "bytes": 59695,
+            "path": "dist/jobs-9gfdV7xU.js",
+            "role": "cron-delivery-merge",
+            "sha256": "dd8f271911b3c88bf5b1950fec5e5459853f42acdae878314556d19261bb4235"
+        },
+        {
+            "bytes": 20540,
+            "path": "dist/normalize-NR0gqs-b.js",
+            "role": "cron-delivery-normalization",
+            "sha256": "9de1cd59fd5a7ce23dfc4cb3859b54dc9aefaf719764c006c10f1c2f4d902340"
+        },
+        {
+            "bytes": 127635,
+            "path": "dist/server-cron-e3c2BqaV.js",
+            "role": "cron-events",
+            "sha256": "6dcd4676d6ab521e45adc3c812a80afc5ed4008a0ace7e3ee50287f8d23d143a"
+        },
+        {
+            "bytes": 47903,
+            "path": "dist/cron-C94yZczr.js",
+            "role": "cron-handlers",
+            "sha256": "e52f86e44575272cfa8c8c6a831682d6f914f656716a706dadeb9dca708f33f4"
+        },
+        {
+            "bytes": 5137,
+            "path": "dist/list-snapshot-revision-wYGGwpvG.js",
+            "role": "cron-run-history",
+            "sha256": "309e8786ecbee49d0c9284302de333a946533adb94943e8cb68febc85833d2e0"
+        },
+        {
+            "bytes": 175721,
+            "path": "dist/service-DpbVa51F.js",
+            "role": "cron-service",
+            "sha256": "34b2b66ffb45c2a11a37982ea222422c956dacb8e9fd3dcb422848dc6a18b174"
+        },
+        {
+            "bytes": 177839,
+            "path": "dist/server.impl-BinHyN0g.js",
+            "role": "gateway-broadcaster",
+            "sha256": "8e57a9b5709054ba2840fc217538b5815f24d8cbaca283ad2c33893436cc67e0"
+        },
+        {
+            "bytes": 3064,
+            "path": "dist/client-info-Dlrmm4mP.js",
+            "role": "gateway-client-caps",
+            "sha256": "7fee74468040c28942a17f3e8c14ae0c19a7a55e9690a54829122590ffda0dd6"
+        },
+        {
+            "bytes": 7933,
+            "path": "dist/error-codes-P4fBo0lR.js",
+            "role": "gateway-client-modes",
+            "sha256": "83f308aec1baac7a53cd0ebce1b1b37903a5bab2a4c45bd30215ec2a44567c90"
+        },
+        {
+            "bytes": 124387,
+            "path": "dist/message-handler-BadrOway.js",
+            "role": "gateway-connect-handler",
+            "sha256": "df8bc336e34d3a9e7a6ea57267f81608df4454b35ddd72bee8f1140389515223"
         },
         {
             "bytes": 2735,
@@ -106,6 +172,12 @@
             "path": "dist/core-descriptors-BbSqaxhR.js",
             "role": "method-descriptors",
             "sha256": "9f67a7220b8753996feb74a9bf76529b955b39983667f57565aa2cb977770e04"
+        },
+        {
+            "bytes": 11423,
+            "path": "dist/method-scopes-_t_OJmWQ.js",
+            "role": "method-scopes",
+            "sha256": "2661f2c38b368caa72604e4cea1f798da91844699566d7666ddeba3abea66912"
         },
         {
             "bytes": 113599,
@@ -144,6 +216,12 @@
             "sha256": "171c52bd6a3d10e8555fdaf00aed3ce225fd465911ef8958ce8235751a4c6f7b"
         },
         {
+            "bytes": 2077,
+            "path": "dist/session-change-event-B7AM9yTQ.js",
+            "role": "session-change-event",
+            "sha256": "3fa61e8f0664d4943c474f22d680dc391cff689044328129a02e9fc21b7ce0ea"
+        },
+        {
             "bytes": 3364,
             "path": "dist/session-companion-rpc-BItcEiDG.js",
             "role": "session-companion-rpc",
@@ -156,10 +234,52 @@
             "sha256": "9a7057f9fb6e44ef642f9a6413bb716076c5633cbc68f186d3da81cfb8e5dce1"
         },
         {
+            "bytes": 5972,
+            "path": "dist/lifecycle-NEea4PLq.js",
+            "role": "session-lifecycle",
+            "sha256": "0dfc7e5e117698801ae77d6c61f38053354b6b227627817973d37d8fd4fc00a9"
+        },
+        {
+            "bytes": 21481,
+            "path": "dist/session-utils-list-DjMXRYTe.js",
+            "role": "session-list-projection",
+            "sha256": "f0025237779a8fd3ea2ac3f79b9f45c12ccf05850995dd525014b9321b1d5328"
+        },
+        {
+            "bytes": 7598,
+            "path": "dist/sessions-shared-DiPcjD6h.js",
+            "role": "session-operation-event",
+            "sha256": "c6f1e0ae60b0172a9a72147efc95e28402a438b559775f8f51881259840c2377"
+        },
+        {
+            "bytes": 76698,
+            "path": "dist/session-utils-row-C4w_qnzs.js",
+            "role": "session-row-projection",
+            "sha256": "c59418aa2e76bfd3bd3e7bdf5256ac5d0f49dfcc5e051a845597ed26cdd7c58f"
+        },
+        {
+            "bytes": 13651,
+            "path": "dist/server-session-events-7o2Looat.js",
+            "role": "session-subscription-events",
+            "sha256": "b59ae7b67cc7e983b7a1525054f685f78b9bb2d8313a69a7523b6c80ad89c2d3"
+        },
+        {
+            "bytes": 179933,
+            "path": "dist/sessions-CmKwhxCv.js",
+            "role": "sessions-handlers",
+            "sha256": "e910562b7368817a01f4285dbf94306bf09deb50dcec5e686a189913efa42b24"
+        },
+        {
             "bytes": 24828,
             "path": "dist/subagent-control-BLCfdEdC.js",
             "role": "subagent-control",
             "sha256": "216871a7c7e5aa26644425f2daf9e238961f84ee0aa95c89fb21c68090e93b88"
+        },
+        {
+            "bytes": 11017,
+            "path": "dist/system-BDN8qssa.js",
+            "role": "system-info-handler",
+            "sha256": "57654bcf5228d8af8c640edb77f13a1f4fd825df61597cf80038f96c998c789d"
         },
         {
             "bytes": 102984,
