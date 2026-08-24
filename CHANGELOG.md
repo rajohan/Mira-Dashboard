@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.1...v0.2.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **bootstrap:** admit root-owned Bun runtime ([#444](https://github.com/rajohan/Mira-Dashboard/issues/444)) ([2b85c9a](https://github.com/rajohan/Mira-Dashboard/commit/2b85c9a78259b226f40d8d77e64addecff22ecce))
+
 ## [0.2.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.0...v0.2.1) (2026-08-24)
 
 
