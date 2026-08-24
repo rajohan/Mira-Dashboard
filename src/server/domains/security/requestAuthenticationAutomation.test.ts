@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import { addDays } from "date-fns";
 
+import type { RawAuthenticationCredential } from "../../rawHttp/authenticationCredentials.ts";
+import { parseOpaqueToken } from "../../shared/opaqueToken.ts";
 import { parseAuthenticationResolution } from "./authenticationResolution.ts";
 import {
     createRequestAuthenticator,
-    dashboardSessionCookieName,
+    type RequestAuthenticator,
 } from "./requestAuthentication.ts";
 import {
     authenticationTestNow,
@@ -14,10 +16,17 @@ import {
     openAuthenticationTestDatabase,
 } from "./testSupport/authentication.ts";
 
-function automationRequest(token: string, scheme = "Bearer"): Request {
-    return new Request("https://dashboard.example/trpc/events.stream", {
-        headers: { authorization: `${scheme} ${token}` },
-    });
+function automationCredential(token: string): RawAuthenticationCredential {
+    const parsed = parseOpaqueToken(token, "automation");
+    if (parsed === undefined) throw new Error("Expected a valid automation fixture");
+    return { kind: "automation", token: parsed };
+}
+
+function authenticateCredential(
+    authenticator: RequestAuthenticator,
+    credential: RawAuthenticationCredential
+) {
+    return authenticator.authenticate(credential).authentication;
 }
 
 describe("automation request authentication", () => {
@@ -30,7 +39,7 @@ describe("automation request authentication", () => {
                 repository: fixture.repository,
             });
             const resolution = authenticator.authenticate(
-                automationRequest(fixture.automation.token, "bEaReR")
+                automationCredential(fixture.automation.token)
             );
             const credential = fixture.database.sqlite
                 .query<{ last_used_at: number | null }, []>(
@@ -63,7 +72,7 @@ describe("automation request authentication", () => {
                 repository: fixture.repository,
             });
             const resolution = authenticator.authenticate(
-                automationRequest(fixture.automation.token)
+                automationCredential(fixture.automation.token)
             );
             fixture.database.orm.transaction((transaction) => {
                 transaction.run(
@@ -95,7 +104,7 @@ describe("automation request authentication", () => {
         }
     });
 
-    test("rejects mixed automation and browser credentials", async () => {
+    test("preserves invalid and anonymous credential boundaries", async () => {
         const fixture = await openAuthenticationTestDatabase();
 
         try {
@@ -103,52 +112,42 @@ describe("automation request authentication", () => {
                 now: () => authenticationTestNow,
                 repository: fixture.repository,
             });
-            const malformedBearer = new Request("https://dashboard.example/trpc", {
-                headers: {
-                    authorization: "Basic malformed",
-                    cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
-                },
+            expect(
+                authenticator.authenticate({ kind: "invalid" }).authentication
+            ).toEqual({ kind: "invalid" });
+            expect(
+                authenticator.authenticate({ kind: "anonymous" }).authentication
+            ).toEqual({ kind: "anonymous" });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
+    test("fails closed when automation state is ahead of the process clock", async () => {
+        const fixture = await openAuthenticationTestDatabase();
+
+        try {
+            const authenticator = createRequestAuthenticator({
+                now: () => authenticationTestNow,
+                repository: fixture.repository,
             });
-            const validBearer = new Request("https://dashboard.example/trpc", {
-                headers: {
-                    authorization: `Bearer ${fixture.automation.token}`,
-                    cookie: `${dashboardSessionCookieName}=${fixture.session.token}`,
-                },
-            });
-            const malformedDashboardCookie = new Request(
-                "https://dashboard.example/trpc",
-                {
-                    headers: {
-                        authorization: `Bearer ${fixture.automation.token}`,
-                        cookie: dashboardSessionCookieName,
-                    },
-                }
+            const credential = automationCredential(fixture.automation.token);
+
+            fixture.database.sqlite.run(
+                "UPDATE automation_credentials SET created_at = created_at + 60000"
             );
-            const unrelatedCookie = new Request("https://dashboard.example/trpc", {
-                headers: {
-                    authorization: `Bearer ${fixture.automation.token}`,
-                    cookie: "theme=dark",
-                },
+            expect(authenticateCredential(authenticator, credential)).toEqual({
+                kind: "invalid",
             });
 
-            expect(authenticator.authenticate(malformedBearer).authentication).toEqual({
+            fixture.database.sqlite.run(
+                "UPDATE automation_credentials SET created_at = created_at - 60000"
+            );
+            fixture.database.sqlite.run(
+                "UPDATE automation_principals SET updated_at = updated_at + 60000"
+            );
+            expect(authenticateCredential(authenticator, credential)).toEqual({
                 kind: "invalid",
-            });
-            expect(authenticator.authenticate(validBearer).authentication).toEqual({
-                kind: "invalid",
-            });
-            expect(
-                authenticator.authenticate(malformedDashboardCookie).authentication
-            ).toEqual({ kind: "invalid" });
-            expect(authenticator.authenticate(unrelatedCookie).authentication).toEqual({
-                kind: "authenticated",
-                principal: {
-                    authorizationVersion: 1,
-                    capabilities: ["reports:read"],
-                    authenticatorId: authenticationTestCredentialId,
-                    id: authenticationTestPrincipalId,
-                    kind: "automation",
-                },
             });
         } finally {
             fixture.database.sqlite.close(true);
@@ -182,7 +181,7 @@ describe("automation request authentication", () => {
                         : fixture.automation.token;
 
                 expect(
-                    authenticator.authenticate(automationRequest(token)).authentication
+                    authenticateCredential(authenticator, automationCredential(token))
                 ).toEqual({ kind: "invalid" });
             } finally {
                 fixture.database.sqlite.close(true);

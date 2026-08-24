@@ -25,6 +25,7 @@ interface TextPrimaryKeyRow {
 
 const expectedTables: string[] = [
     "audit_events",
+    "auth_pending_logins",
     "auth_rate_limit_buckets",
     "auth_sessions",
     "automation_credentials",
@@ -37,6 +38,8 @@ const expectedTables: string[] = [
     "realtime_events",
     "reports",
     "schema_migrations",
+    "user_recovery_codes",
+    "user_totp_factors",
     "users",
 ];
 describe("database migration graph", () => {

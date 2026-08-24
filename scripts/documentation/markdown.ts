@@ -6,20 +6,40 @@ import type {
 } from "../../src/contracts/registry.ts";
 
 function accessLabel(access: ContractAccess): string {
-    if (access.kind === "public") {
-        return "Public";
+    switch (access.kind) {
+        case "public": {
+            return "Public";
+        }
+        case "pending-login": {
+            return "Pending MFA login";
+        }
+        case "recent-auth": {
+            const disabledStateLabels = {
+                deny: "MFA enrollment required",
+                password: "Recent password when MFA is disabled",
+                session: "Browser session when MFA is disabled",
+            } as const;
+            const disabledState = disabledStateLabels[access.whenMfaDisabled];
+            return `${disabledState}; recent MFA when enabled`;
+        }
+        case "authenticated": {
+            if (access.capabilityPolicy === "per-topic") {
+                return `Authenticated; per-topic: ${access.capabilities.join(", ")}`;
+            }
+            if (
+                access.principalKinds?.length === 1 &&
+                access.principalKinds[0] === "session" &&
+                access.capabilities.length === 0
+            ) {
+                return "Authenticated browser session";
+            }
+            return `Authenticated: ${access.capabilities.join(", ")}`;
+        }
+        default: {
+            const unsupportedAccess: never = access;
+            throw new Error(`Unsupported contract access: ${String(unsupportedAccess)}`);
+        }
     }
-    if (access.capabilityPolicy === "per-topic") {
-        return `Authenticated; per-topic: ${access.capabilities.join(", ")}`;
-    }
-    if (
-        access.principalKinds?.length === 1 &&
-        access.principalKinds[0] === "session" &&
-        access.capabilities.length === 0
-    ) {
-        return "Authenticated browser session";
-    }
-    return `Authenticated: ${access.capabilities.join(", ")}`;
 }
 
 function documentHeader(title: string, source: string): string {
@@ -30,6 +50,10 @@ function errorsLabel(errors: readonly string[]): string {
     return errors.length === 0
         ? "None"
         : errors.map((error) => `\`${error}\``).join(", ");
+}
+
+function errorReasonsLabel(contract: ProcedureContract): string {
+    return errorsLabel(contract.errorReasons ?? []);
 }
 
 /**
@@ -50,10 +74,10 @@ export function renderProcedures(contracts: readonly ProcedureContract[]): strin
         .toSorted((left, right) => left.name.localeCompare(right.name))
         .map(
             (contract) =>
-                `| \`${contract.name}\` | ${contract.kind} | ${contract.domain} | ${accessLabel(contract.access)} | [input](./schemas/${contract.inputSchemaId}.schema.json) | [output](./schemas/${contract.outputSchemaId}.schema.json) | ${errorsLabel(contract.errors)} | ${contract.summary} |`
+                `| \`${contract.name}\` | ${contract.kind} | ${contract.domain} | ${accessLabel(contract.access)} | [input](./schemas/${contract.inputSchemaId}.schema.json) | [output](./schemas/${contract.outputSchemaId}.schema.json) | ${errorsLabel(contract.errors)} | ${errorReasonsLabel(contract)} | ${contract.summary} |`
         );
 
-    return `${documentHeader("tRPC Procedures", "bun run docs:generate")}| Procedure | Kind | Domain | Access | Input | Output | Expected errors | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
+    return `${documentHeader("tRPC Procedures", "bun run docs:generate")}| Procedure | Kind | Domain | Access | Input | Output | Expected errors | Client action reasons | Summary |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n`;
 }
 
 /**

@@ -1,9 +1,13 @@
 import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
+import { hasUniqueArrayItems } from "../shared/validation.ts";
 import type { ProcedureContract } from "./registry.ts";
 import {
     authenticationMethodSchema,
+    type MultiFactorAuthenticationMethod,
+    multiFactorAuthenticationMethodSchema,
+    multiFactorAuthenticationMethods,
     opaqueSelectorSchema,
     securityRecordIdSchema,
     securityUsernameSchema,
@@ -18,6 +22,7 @@ export const browserSessionMaximumPerUser = 16;
 export const browserSessionUserAgentMaximumLength = 512;
 export const authPasswordMinimumLength = 8;
 export const authPasswordMaximumLength = 256;
+export const recoveryCodeLength = 65;
 
 function hasUnicodeCodePointLengthBetween(
     value: string,
@@ -78,6 +83,28 @@ export const authPasswordInputSchema = v.pipe(
     v.check(hasValidAuthPasswordLength, "Password is invalid")
 );
 
+/** Exact six-digit authenticator-app proof. */
+export const totpCodeInputSchema = v.pipe(
+    v.string("Authenticator code is invalid"),
+    v.length(6, "Authenticator code is invalid"),
+    v.regex(/^\d{6}$/u, "Authenticator code is invalid")
+);
+
+/** Canonical one-time recovery code returned only at generation time. */
+export const recoveryCodeSchema = v.pipe(
+    v.string("Recovery code is invalid"),
+    v.length(recoveryCodeLength, "Recovery code is invalid"),
+    v.regex(/^[0-9a-f]{32}-[0-9a-f]{32}$/u, "Recovery code is invalid")
+);
+
+/** Recovery proof normalized only after its exact shape has been validated. */
+export const recoveryCodeInputSchema = v.pipe(
+    v.string("Recovery code is invalid"),
+    v.maxLength(128, "Recovery code is invalid"),
+    v.regex(/^\s*[0-9A-Fa-f]{32}-[0-9A-Fa-f]{32}\s*$/u, "Recovery code is invalid"),
+    v.transform((code) => code.trim().toLowerCase())
+);
+
 const gatewayCredentialInputSchema = v.pipe(
     v.string("Gateway credential is invalid"),
     v.minLength(1, "Gateway credential is invalid"),
@@ -104,6 +131,14 @@ export const firstUserBootstrapInputSchema = v.strictObject({
 export const passwordLoginInputSchema = v.strictObject({
     password: authPasswordInputSchema,
     username: authUsernameInputSchema,
+});
+
+export const totpLoginInputSchema = v.strictObject({
+    code: totpCodeInputSchema,
+});
+
+export const recoveryLoginInputSchema = v.strictObject({
+    code: recoveryCodeInputSchema,
 });
 
 export const passwordChangeInputSchema = v.strictObject({
@@ -136,19 +171,61 @@ export const authenticatedSessionResultSchema = v.strictObject({
     user: authUserSchema,
 });
 
+const pendingLoginMethodsSchema = v.pipe(
+    v.array(multiFactorAuthenticationMethodSchema, "Pending login methods are invalid"),
+    v.minLength(1, "Pending login requires at least one method"),
+    v.maxLength(
+        multiFactorAuthenticationMethods.length,
+        "Pending login has too many methods"
+    ),
+    v.check(
+        hasUniqueArrayItems<MultiFactorAuthenticationMethod>,
+        "Pending login methods must be unique"
+    )
+);
+
+export const pendingLoginSummarySchema = v.strictObject({
+    expiresAtMs: authTimestampSchema,
+    methods: pendingLoginMethodsSchema,
+    username: securityUsernameSchema,
+});
+
+const authenticatedPasswordLoginResultSchema = v.strictObject({
+    session: authSessionSummarySchema,
+    status: v.literal("authenticated"),
+    user: authUserSchema,
+});
+const pendingPasswordLoginResultSchema = v.strictObject({
+    pendingLogin: pendingLoginSummarySchema,
+    status: v.literal("mfa-required"),
+});
+
+export const passwordLoginResultSchema = v.variant("status", [
+    authenticatedPasswordLoginResultSchema,
+    pendingPasswordLoginResultSchema,
+]);
+
+const bootstrapRequiredAuthStatusSchema = v.strictObject({
+    state: v.literal("bootstrap-required"),
+});
 const anonymousAuthStatusSchema = v.strictObject({
-    authenticated: v.literal(false),
-    isBootstrapRequired: v.boolean(),
+    state: v.literal("anonymous"),
+});
+const pendingAuthStatusSchema = v.strictObject({
+    pendingLogin: pendingLoginSummarySchema,
+    state: v.literal("pending-mfa"),
 });
 const authenticatedAuthStatusSchema = v.strictObject({
-    authenticated: v.literal(true),
-    isBootstrapRequired: v.literal(false),
+    pendingLogin: v.optional(pendingLoginSummarySchema),
     session: authSessionSummarySchema,
+    state: v.literal("authenticated"),
     user: authUserSchema,
 });
 
-export const authStatusSchema = v.variant("authenticated", [
+export const authStatusSchema = v.variant("state", [
+    bootstrapRequiredAuthStatusSchema,
     anonymousAuthStatusSchema,
+    pendingAuthStatusSchema,
     authenticatedAuthStatusSchema,
 ]);
 
@@ -175,11 +252,32 @@ export const passwordChangeResultSchema = v.strictObject({
 export const okResultSchema = v.strictObject({ isOk: v.literal(true) });
 
 const publicAccess = { kind: "public" } as const;
+const pendingLoginAccess = { kind: "pending-login" } as const;
 const sessionAccess = {
     capabilities: [],
     capabilityPolicy: "all",
     kind: "authenticated",
     principalKinds: ["session"],
+} as const;
+const passwordChangeAccess = {
+    kind: "recent-auth",
+    whenMfaDisabled: "session",
+    whenMfaEnabled: "mfa",
+} as const;
+const sessionMutationAccess = {
+    kind: "recent-auth",
+    whenMfaDisabled: "password",
+    whenMfaEnabled: "mfa",
+} as const;
+const authenticationReadTransport = {
+    batching: "adapter-default",
+    handler: "authentication",
+    requestBody: "authentication",
+} as const;
+const authenticationMutationTransport = {
+    batching: "forbidden",
+    handler: "authentication",
+    requestBody: "authentication",
 } as const;
 
 /** Implemented browser authentication procedure metadata. */
@@ -194,7 +292,8 @@ export const authProcedureContracts = [
         name: "auth.status",
         output: authStatusSchema,
         outputSchemaId: "auth.status.output",
-        summary: "Returns bootstrap state and the current browser session.",
+        summary: "Returns bootstrap, pending MFA, and current browser-session state.",
+        transport: authenticationReadTransport,
     },
     {
         access: publicAccess,
@@ -207,18 +306,49 @@ export const authProcedureContracts = [
         output: authenticatedSessionResultSchema,
         outputSchemaId: "auth.bootstrap.output",
         summary: "Verifies the Gateway credential and creates the sole first user.",
+        transport: authenticationMutationTransport,
     },
     {
         access: publicAccess,
         domain: "auth",
-        errors: ["CONFLICT", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+        errors: ["CONFLICT", "SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
         input: passwordLoginInputSchema,
         inputSchemaId: "auth.login.input",
         kind: "mutation",
         name: "auth.login",
-        output: authenticatedSessionResultSchema,
+        output: passwordLoginResultSchema,
         outputSchemaId: "auth.login.output",
-        summary: "Creates a browser session after password verification.",
+        summary:
+            "Creates a session or a five-minute pending MFA login after password verification.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: pendingLoginAccess,
+        domain: "auth",
+        errors: ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+        input: totpLoginInputSchema,
+        inputSchemaId: "auth.loginTotp.input",
+        kind: "mutation",
+        name: "auth.loginTotp",
+        output: authenticatedSessionResultSchema,
+        outputSchemaId: "auth.loginTotp.output",
+        summary:
+            "Consumes a pending login with a TOTP proof and creates the browser session.",
+        transport: authenticationMutationTransport,
+    },
+    {
+        access: pendingLoginAccess,
+        domain: "auth",
+        errors: ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
+        input: recoveryLoginInputSchema,
+        inputSchemaId: "auth.loginRecovery.input",
+        kind: "mutation",
+        name: "auth.loginRecovery",
+        output: authenticatedSessionResultSchema,
+        outputSchemaId: "auth.loginRecovery.output",
+        summary:
+            "Consumes a pending login and one recovery code to create the browser session.",
+        transport: authenticationMutationTransport,
     },
     {
         access: publicAccess,
@@ -230,7 +360,9 @@ export const authProcedureContracts = [
         name: "auth.logout",
         output: okResultSchema,
         outputSchemaId: "auth.logout.output",
-        summary: "Revokes the current browser session and clears its cookie.",
+        summary:
+            "Revokes current session and pending-login state and clears both cookies.",
+        transport: authenticationMutationTransport,
     },
     {
         access: sessionAccess,
@@ -243,6 +375,7 @@ export const authProcedureContracts = [
         output: authSessionListSchema,
         outputSchemaId: "auth.sessions.output",
         summary: "Lists the current user's browser sessions without validators.",
+        transport: authenticationReadTransport,
     },
     {
         access: sessionAccess,
@@ -255,10 +388,12 @@ export const authProcedureContracts = [
         output: authSessionTouchResultSchema,
         outputSchemaId: "auth.touch.output",
         summary: "Records explicit browser activity for the current session.",
+        transport: authenticationMutationTransport,
     },
     {
-        access: sessionAccess,
+        access: sessionMutationAccess,
         domain: "auth",
+        errorReasons: ["step_up_required"],
         errors: ["FORBIDDEN", "UNAUTHORIZED"],
         input: sessionRevokeInputSchema,
         inputSchemaId: "auth.revokeSession.input",
@@ -267,10 +402,12 @@ export const authProcedureContracts = [
         output: authSessionRevokeResultSchema,
         outputSchemaId: "auth.revokeSession.output",
         summary: "Revokes one browser session owned by the current user.",
+        transport: authenticationMutationTransport,
     },
     {
-        access: sessionAccess,
+        access: passwordChangeAccess,
         domain: "auth",
+        errorReasons: ["step_up_required"],
         errors: ["CONFLICT", "FORBIDDEN", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
         input: passwordChangeInputSchema,
         inputSchemaId: "auth.changePassword.input",
@@ -280,11 +417,19 @@ export const authProcedureContracts = [
         outputSchemaId: "auth.changePassword.output",
         summary:
             "Changes the password, rotates the current session, and revokes the rest.",
+        transport: authenticationMutationTransport,
     },
 ] as const satisfies readonly ProcedureContract[];
 
 export type AuthSessionSummary = v.InferOutput<typeof authSessionSummarySchema>;
+export type AuthStatus = v.InferOutput<typeof authStatusSchema>;
 export type AuthUser = v.InferOutput<typeof authUserSchema>;
 export type FirstUserBootstrapInput = v.InferOutput<typeof firstUserBootstrapInputSchema>;
+export type PasswordLoginResult = v.InferOutput<typeof passwordLoginResultSchema>;
 export type PasswordChangeInput = v.InferOutput<typeof passwordChangeInputSchema>;
 export type PasswordLoginInput = v.InferOutput<typeof passwordLoginInputSchema>;
+export type PendingLoginSummary = v.InferOutput<typeof pendingLoginSummarySchema>;
+export type RecoveryCode = v.InferOutput<typeof recoveryCodeSchema>;
+export type RecoveryCodeInput = v.InferOutput<typeof recoveryCodeInputSchema>;
+export type RecoveryLoginInput = v.InferOutput<typeof recoveryLoginInputSchema>;
+export type TotpLoginInput = v.InferOutput<typeof totpLoginInputSchema>;

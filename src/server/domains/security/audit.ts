@@ -8,6 +8,10 @@ const securityAuditReasons = new Set([
     "invalid_credentials",
     "invalid_current_password",
     "invalid_gateway",
+    "recovery_invalid",
+    "recovery_pending_invalid",
+    "totp_invalid",
+    "totp_pending_invalid",
 ]);
 
 export interface SecurityAuditMetadata {
@@ -16,7 +20,13 @@ export interface SecurityAuditMetadata {
         | "identity_changed"
         | "invalid_credentials"
         | "invalid_current_password"
-        | "invalid_gateway";
+        | "invalid_gateway"
+        | "recovery_invalid"
+        | "recovery_pending_invalid"
+        | "totp_invalid"
+        | "totp_pending_invalid";
+    readonly method?: "password" | "recovery" | "totp";
+    readonly pendingMfa?: boolean;
     readonly revoked?: boolean;
     readonly revokedSessions?: number;
 }
@@ -62,6 +72,16 @@ export function serializeRedactedAuditMetadata(
     }
     if (typeof metadata.revoked === "boolean") {
         sanitized.revoked = metadata.revoked;
+    }
+    if (
+        metadata.method === "password" ||
+        metadata.method === "recovery" ||
+        metadata.method === "totp"
+    ) {
+        sanitized.method = metadata.method;
+    }
+    if (typeof metadata.pendingMfa === "boolean") {
+        sanitized.pendingMfa = metadata.pendingMfa;
     }
     if (
         typeof metadata.revokedSessions === "number" &&

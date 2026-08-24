@@ -13,6 +13,7 @@ const userRefinements = {
     createdAt: nonnegativeDateSchema,
     disabledAt: nonnegativeDateSchema,
     id: uuidV7TextSchema,
+    mfaEnabledAt: nonnegativeDateSchema,
     passwordHash: () => argon2idPasswordHashSchema,
     updatedAt: nonnegativeDateSchema,
     username: () => securityUsernameSchema,
@@ -21,13 +22,17 @@ const userRefinements = {
 function userTimesAreOrdered(user: {
     readonly createdAt: Date;
     readonly disabledAt?: Date | null;
+    readonly mfaEnabledAt?: Date | null;
     readonly updatedAt: Date;
 }): boolean {
     return (
         compareAsc(user.updatedAt, user.createdAt) >= 0 &&
         (user.disabledAt == null ||
             (compareAsc(user.disabledAt, user.createdAt) >= 0 &&
-                compareAsc(user.disabledAt, user.updatedAt) <= 0))
+                compareAsc(user.disabledAt, user.updatedAt) <= 0)) &&
+        (user.mfaEnabledAt == null ||
+            (compareAsc(user.mfaEnabledAt, user.createdAt) >= 0 &&
+                compareAsc(user.mfaEnabledAt, user.updatedAt) <= 0))
     );
 }
 
@@ -47,6 +52,7 @@ export const userInsertSchema = v.pipe(
         createdAt: generatedUserInsertSchema.entries.createdAt,
         disabledAt: generatedUserInsertSchema.entries.disabledAt,
         id: generatedUserInsertSchema.entries.id,
+        mfaEnabledAt: generatedUserInsertSchema.entries.mfaEnabledAt,
         passwordHash: generatedUserInsertSchema.entries.passwordHash,
         updatedAt: generatedUserInsertSchema.entries.updatedAt,
         username: generatedUserInsertSchema.entries.username,

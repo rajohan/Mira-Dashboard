@@ -3,20 +3,67 @@ import { describe, expect, test } from "bun:test";
 import { TRPCError } from "@trpc/server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 
-import { publicProcedure, router } from "../../trpc/trpc.ts";
+import { contractAuthenticationErrorReasons } from "../../../contracts/registry.ts";
+import { authenticationPolicyError, publicProcedure, router } from "../../trpc/trpc.ts";
 import { createTestRequestContext } from "../support/requestContext.ts";
 
-async function queryWireBody(procedure: "expected" | "unexpected"): Promise<{
+const sentinel = "secret /home/ubuntu/private-stack-path";
+
+type ErrorProcedure =
+    | (typeof contractAuthenticationErrorReasons)[number]
+    | "expected"
+    | "forged-policy-cause"
+    | "tampered-policy-cause"
+    | "unexpected";
+
+async function queryWireBody(procedure: ErrorProcedure): Promise<{
     response: Response;
     text: string;
 }> {
-    const sentinel = "secret /home/ubuntu/private-stack-path";
     const errorRouter = router({
         expected: publicProcedure.query(() => {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Safe client error" });
         }),
+        "forged-policy-cause": publicProcedure.query(() => {
+            throw new TRPCError({
+                cause: Object.assign(new Error(sentinel), {
+                    reason: "step_up_required",
+                }),
+                code: "FORBIDDEN",
+                message: "Safe client error",
+            });
+        }),
+        mfa_enrollment_required: publicProcedure.query(() => {
+            throw authenticationPolicyError(
+                "mfa_enrollment_required",
+                "Multi-factor authentication enrollment is required"
+            );
+        }),
+        "tampered-policy-cause": publicProcedure.query(() => {
+            const error = authenticationPolicyError(
+                "step_up_required",
+                "Recent authentication is required"
+            );
+            const { cause } = error;
+            if (cause === undefined) {
+                throw new Error("Authentication policy cause is missing");
+            }
+            Object.assign(cause, {
+                message: sentinel,
+                reason: "unknown_policy_reason",
+            });
+            throw error;
+        }),
+        step_up_required: publicProcedure.query(() => {
+            throw authenticationPolicyError(
+                "step_up_required",
+                "Recent authentication is required"
+            );
+        }),
         unexpected: publicProcedure.query(() => {
-            throw new Error(sentinel);
+            throw Object.assign(new Error(sentinel), {
+                reason: "step_up_required",
+            });
         }),
     });
     const response = await fetchRequestHandler({
@@ -35,6 +82,7 @@ describe("tRPC error transport", () => {
         expect(response.status).toBe(500);
         expect(text).toContain("Internal server error");
         expect(text).not.toContain("secret /home/ubuntu/private-stack-path");
+        expect(text).not.toContain('"reason"');
         expect(text).not.toContain('"stack"');
         expect(text).not.toContain('"path"');
     });
@@ -44,6 +92,39 @@ describe("tRPC error transport", () => {
 
         expect(response.status).toBe(400);
         expect(text).toContain("Safe client error");
+        expect(text).not.toContain('"stack"');
+        expect(text).not.toContain('"path"');
+    });
+
+    for (const reason of contractAuthenticationErrorReasons) {
+        test(`exposes the allowlisted ${reason} policy reason`, async () => {
+            const { response, text } = await queryWireBody(reason);
+
+            expect(response.status).toBe(403);
+            expect(text).toContain(`"reason":"${reason}"`);
+            expect(text).not.toContain('"stack"');
+            expect(text).not.toContain('"path"');
+        });
+    }
+
+    test("does not trust an arbitrary cause with an allowlisted-looking reason", async () => {
+        const { response, text } = await queryWireBody("forged-policy-cause");
+
+        expect(response.status).toBe(403);
+        expect(text).toContain("Safe client error");
+        expect(text).not.toContain(sentinel);
+        expect(text).not.toContain('"reason"');
+        expect(text).not.toContain('"stack"');
+        expect(text).not.toContain('"path"');
+    });
+
+    test("does not expose a tampered internal policy cause", async () => {
+        const { response, text } = await queryWireBody("tampered-policy-cause");
+
+        expect(response.status).toBe(403);
+        expect(text).toContain("Recent authentication is required");
+        expect(text).not.toContain(sentinel);
+        expect(text).not.toContain('"reason"');
         expect(text).not.toContain('"stack"');
         expect(text).not.toContain('"path"');
     });

@@ -1,0 +1,93 @@
+{
+  "$id": "urn:mira-dashboard:auth.loginRecovery.output",
+  "type": "object",
+  "properties": {
+    "session": {
+      "type": "object",
+      "properties": {
+        "authenticatedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "authMethod": {
+          "enum": [
+            "password",
+            "recovery",
+            "totp"
+          ],
+          "type": "string"
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "id": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 32,
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "isCurrent": {
+          "type": "boolean"
+        },
+        "lastSeenAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8640000000000000
+        },
+        "userAgent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000]*$"
+        }
+      },
+      "required": [
+        "authenticatedAtMs",
+        "authMethod",
+        "createdAtMs",
+        "expiresAtMs",
+        "id",
+        "isCurrent",
+        "lastSeenAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "user": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        }
+      },
+      "required": [
+        "id",
+        "username"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "session",
+    "user"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

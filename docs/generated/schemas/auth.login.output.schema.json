@@ -1,94 +1,149 @@
 {
   "$id": "urn:mira-dashboard:auth.login.output",
-  "type": "object",
-  "properties": {
-    "session": {
+  "oneOf": [
+    {
       "type": "object",
       "properties": {
-        "authenticatedAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
-        },
-        "authMethod": {
-          "enum": [
-            "password",
-            "recovery",
-            "totp",
-            "webauthn"
+        "session": {
+          "type": "object",
+          "properties": {
+            "authenticatedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "authMethod": {
+              "enum": [
+                "password",
+                "recovery",
+                "totp"
+              ],
+              "type": "string"
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "id": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "isCurrent": {
+              "type": "boolean"
+            },
+            "lastSeenAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "userAgent": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "authenticatedAtMs",
+            "authMethod",
+            "createdAtMs",
+            "expiresAtMs",
+            "id",
+            "isCurrent",
+            "lastSeenAtMs"
           ],
-          "type": "string"
+          "additionalProperties": false
         },
-        "createdAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
+        "status": {
+          "const": "authenticated"
         },
-        "expiresAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
-        },
-        "id": {
-          "type": "string",
-          "minLength": 32,
-          "maxLength": 32,
-          "pattern": "^[0-9a-f]{32}$"
-        },
-        "isCurrent": {
-          "type": "boolean"
-        },
-        "lastSeenAtMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 8640000000000000
-        },
-        "userAgent": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 512,
-          "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000]*$"
+        "user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "username": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 32,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            }
+          },
+          "required": [
+            "id",
+            "username"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
-        "authenticatedAtMs",
-        "authMethod",
-        "createdAtMs",
-        "expiresAtMs",
-        "id",
-        "isCurrent",
-        "lastSeenAtMs"
+        "session",
+        "status",
+        "user"
       ],
       "additionalProperties": false
     },
-    "user": {
+    {
       "type": "object",
       "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 36,
-          "maxLength": 36,
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        "pendingLogin": {
+          "type": "object",
+          "properties": {
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "recovery",
+                  "totp"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true
+            },
+            "username": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 32,
+              "pattern": "^[a-z0-9][a-z0-9._-]*$"
+            }
+          },
+          "required": [
+            "expiresAtMs",
+            "methods",
+            "username"
+          ],
+          "additionalProperties": false
         },
-        "username": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 32,
-          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        "status": {
+          "const": "mfa-required"
         }
       },
       "required": [
-        "id",
-        "username"
+        "pendingLogin",
+        "status"
       ],
       "additionalProperties": false
     }
-  },
-  "required": [
-    "session",
-    "user"
   ],
-  "additionalProperties": false,
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

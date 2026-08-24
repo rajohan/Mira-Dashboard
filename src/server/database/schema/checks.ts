@@ -3,6 +3,8 @@ import { sql, type SQLWrapper } from "drizzle-orm";
 
 const sqliteWhitespace = sql`char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)`;
 
+const controlOrFormatGlob = sql`('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')`;
+
 /**
  * Builds a SQLite check that rejects embedded NUL characters.
  * @param column SQLite text column to validate.
@@ -32,6 +34,17 @@ export function lowercaseHexTextCheck(column: SQLWrapper, exactLength: 32 | 64) 
 export function boundedNonBlankTextCheck(column: SQLWrapper, maximumLength: number) {
     const maximumLengthSql = sql.raw(String(maximumLength));
     return sql`length(${column}) BETWEEN 1 AND ${maximumLengthSql} AND ${nulFreeTextCheck(column)} AND length(trim(${column}, ${sqliteWhitespace})) > 0`;
+}
+
+/**
+ * Builds a SQLite check for bounded human text without Unicode controls or formats.
+ * NUL is checked separately because SQLite string functions stop at embedded NUL bytes.
+ * @param column SQLite text column to validate.
+ * @param maximumLength Maximum accepted Unicode code-point length.
+ * @returns Drizzle SQL expression for the storage constraint.
+ */
+export function boundedControlSafeTextCheck(column: SQLWrapper, maximumLength: number) {
+    return sql`${boundedNonBlankTextCheck(column, maximumLength)} AND ${column} NOT GLOB ${controlOrFormatGlob}`;
 }
 
 /**

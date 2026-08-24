@@ -21,9 +21,35 @@ CREATE TABLE `audit_events` (
 	CONSTRAINT "audit_events_target_check" CHECK(length("target_type") BETWEEN 1 AND 64 AND instr("target_type", char(0)) = 0 AND substr("target_type", 1, 1) GLOB '[a-z0-9]' AND "target_type" = lower("target_type") AND "target_type" NOT GLOB '*[^a-z0-9._-]*' AND length("target_id") BETWEEN 1 AND 256 AND instr("target_id", char(0)) = 0 AND length(trim("target_id", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)
 ) STRICT, WITHOUT ROWID;
 --> statement-breakpoint
+CREATE TABLE `auth_pending_logins` (
+	`allows_recovery` integer NOT NULL,
+	`allows_totp` integer NOT NULL,
+	`attempt_count` integer DEFAULT 0 NOT NULL,
+	`authentication_version` integer NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`id` text PRIMARY KEY,
+	`password_verified_at` integer NOT NULL,
+	`replaced_session_id` text,
+	`user_agent` text,
+	`user_id` text NOT NULL,
+	`validator_hash` text NOT NULL,
+	`validator_version` integer DEFAULT 1 NOT NULL,
+	CONSTRAINT `fk_auth_pending_logins_replaced_session_id_auth_sessions_id_fk` FOREIGN KEY (`replaced_session_id`) REFERENCES `auth_sessions`(`id`) ON DELETE SET NULL,
+	CONSTRAINT `fk_auth_pending_logins_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "auth_pending_logins_methods_check" CHECK("allows_recovery" IN (0, 1) AND "allows_totp" IN (0, 1) AND ("allows_recovery" + "allows_totp") >= 1),
+	CONSTRAINT "auth_pending_logins_attempt_count_check" CHECK("attempt_count" BETWEEN 0 AND 8),
+	CONSTRAINT "auth_pending_logins_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
+	CONSTRAINT "auth_pending_logins_id_check" CHECK(length("id") = 32 AND instr("id", char(0)) = 0 AND "id" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_pending_logins_time_check" CHECK("password_verified_at" BETWEEN 0 AND 8640000000000000 AND "created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "password_verified_at" <= "created_at" AND "expires_at" > "created_at" AND "expires_at" <= "password_verified_at" + 300000),
+	CONSTRAINT "auth_pending_logins_user_agent_check" CHECK("user_agent" IS NULL OR (length("user_agent") BETWEEN 1 AND 512 AND instr("user_agent", char(0)) = 0 AND length(trim("user_agent", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)),
+	CONSTRAINT "auth_pending_logins_validator_hash_check" CHECK(length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "auth_pending_logins_validator_version_check" CHECK("validator_version" = 1)
+) STRICT;
+--> statement-breakpoint
 CREATE TABLE `auth_rate_limit_buckets` (
 	`blocked_until` integer,
-	`bucket_key` text PRIMARY KEY NOT NULL,
+	`bucket_key` text PRIMARY KEY,
 	`failure_count` integer NOT NULL,
 	`first_failed_at` integer NOT NULL,
 	`kind` text NOT NULL,
@@ -31,7 +57,7 @@ CREATE TABLE `auth_rate_limit_buckets` (
 	CONSTRAINT "auth_rate_limit_buckets_blocked_until_check" CHECK("blocked_until" IS NULL OR ("blocked_until" BETWEEN 0 AND 8640000000000000 AND "blocked_until" > "updated_at")),
 	CONSTRAINT "auth_rate_limit_buckets_bucket_key_check" CHECK(length("bucket_key") = 64 AND instr("bucket_key", char(0)) = 0 AND "bucket_key" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "auth_rate_limit_buckets_failure_count_check" CHECK("failure_count" BETWEEN 1 AND 9007199254740991),
-	CONSTRAINT "auth_rate_limit_buckets_kind_check" CHECK("kind" IN ('account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-password-global', 'login-password-source')),
+	CONSTRAINT "auth_rate_limit_buckets_kind_check" CHECK("kind" IN ('account-mfa', 'account-password', 'bootstrap-gateway-global', 'bootstrap-gateway-source', 'login-mfa-global', 'login-mfa-source', 'login-password-global', 'login-password-source')),
 	CONSTRAINT "auth_rate_limit_buckets_timestamps_check" CHECK("first_failed_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "first_failed_at")
 ) STRICT;
 --> statement-breakpoint
@@ -40,25 +66,24 @@ CREATE TABLE `auth_sessions` (
 	`authentication_version` integer NOT NULL,
 	`auth_method` text NOT NULL,
 	`created_at` integer NOT NULL,
-	`elevated_at` integer,
-	`elevated_method` text,
 	`expires_at` integer NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`last_seen_at` integer NOT NULL,
 	`mfa_verified_at` integer,
+	`password_verified_at` integer NOT NULL,
 	`user_agent` text,
 	`user_id` text NOT NULL,
 	`validator_hash` text NOT NULL,
 	`validator_version` integer DEFAULT 1 NOT NULL,
 	CONSTRAINT `fk_auth_sessions_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
 	CONSTRAINT "auth_sessions_authentication_version_check" CHECK("authentication_version" BETWEEN 1 AND 9007199254740991),
-	CONSTRAINT "auth_sessions_auth_method_check" CHECK("auth_method" IN ('password', 'recovery', 'totp', 'webauthn')),
-	CONSTRAINT "auth_sessions_elevated_method_check" CHECK("elevated_method" IS NULL OR "elevated_method" IN ('password', 'recovery', 'totp', 'webauthn')),
+	CONSTRAINT "auth_sessions_auth_method_check" CHECK("auth_method" IN ('password', 'recovery', 'totp')),
 	CONSTRAINT "auth_sessions_expiry_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" BETWEEN 0 AND 8640000000000000 AND "expires_at" > "created_at"),
 	CONSTRAINT "auth_sessions_authentication_time_check" CHECK("authenticated_at" BETWEEN 0 AND 8640000000000000 AND "authenticated_at" <= "created_at"),
 	CONSTRAINT "auth_sessions_last_seen_check" CHECK("last_seen_at" BETWEEN 0 AND 8640000000000000 AND "last_seen_at" >= "created_at" AND "last_seen_at" < "expires_at"),
-	CONSTRAINT "auth_sessions_mfa_time_check" CHECK("mfa_verified_at" IS NULL OR ("mfa_verified_at" BETWEEN 0 AND 8640000000000000 AND "mfa_verified_at" >= "authenticated_at" AND "mfa_verified_at" < "expires_at")),
-	CONSTRAINT "auth_sessions_elevation_check" CHECK(("elevated_at" IS NULL AND "elevated_method" IS NULL) OR ("elevated_at" IS NOT NULL AND "elevated_method" IS NOT NULL AND "elevated_at" BETWEEN 0 AND 8640000000000000 AND "elevated_at" >= "authenticated_at" AND "elevated_at" < "expires_at")),
+	CONSTRAINT "auth_sessions_mfa_time_check" CHECK("mfa_verified_at" IS NULL OR ("mfa_verified_at" BETWEEN 0 AND 8640000000000000 AND "mfa_verified_at" >= "authenticated_at" AND "mfa_verified_at" <= "created_at")),
+	CONSTRAINT "auth_sessions_password_time_check" CHECK("password_verified_at" BETWEEN 0 AND 8640000000000000 AND "password_verified_at" >= "authenticated_at" AND "password_verified_at" <= "created_at"),
+	CONSTRAINT "auth_sessions_mfa_method_check" CHECK("auth_method" = 'password' OR "mfa_verified_at" IS NOT NULL),
 	CONSTRAINT "auth_sessions_id_check" CHECK(length("id") = 32 AND instr("id", char(0)) = 0 AND "id" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "auth_sessions_user_agent_check" CHECK("user_agent" IS NULL OR (length("user_agent") BETWEEN 1 AND 512 AND instr("user_agent", char(0)) = 0 AND length(trim("user_agent", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0)),
 	CONSTRAINT "auth_sessions_validator_hash_check" CHECK(length("validator_hash") = 64 AND instr("validator_hash", char(0)) = 0 AND "validator_hash" NOT GLOB '*[^0-9a-f]*'),
@@ -68,7 +93,7 @@ CREATE TABLE `auth_sessions` (
 CREATE TABLE `automation_credentials` (
 	`created_at` integer NOT NULL,
 	`expires_at` integer,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`label` text NOT NULL,
 	`last_used_at` integer,
 	`prefix` text NOT NULL,
@@ -99,7 +124,7 @@ CREATE TABLE `automation_principals` (
 	`authorization_version` integer DEFAULT 1 NOT NULL,
 	`created_at` integer NOT NULL,
 	`disabled_at` integer,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`label` text NOT NULL,
 	`updated_at` integer NOT NULL,
 	CONSTRAINT "automation_principals_authorization_version_check" CHECK("authorization_version" BETWEEN 1 AND 9007199254740991),
@@ -130,7 +155,7 @@ CREATE TABLE `incidents` (
 	`fingerprint` text NOT NULL,
 	`first_seen_at` integer NOT NULL,
 	`generation` integer DEFAULT 1 NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`kind` text NOT NULL,
 	`last_seen_at` integer NOT NULL,
 	`monitor_key` text NOT NULL,
@@ -153,7 +178,7 @@ CREATE TABLE `incidents` (
 CREATE TABLE `monitor_runs` (
 	`completed_at` integer,
 	`complete_snapshot` integer NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`monitor_key` text NOT NULL,
 	`report_id` text,
 	`started_at` integer NOT NULL,
@@ -169,7 +194,7 @@ CREATE TABLE `monitor_runs` (
 --> statement-breakpoint
 CREATE TABLE `notifications` (
 	`channel` text NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`incident_generation` integer,
 	`incident_id` text,
 	`kind` text NOT NULL,
@@ -203,7 +228,7 @@ CREATE TABLE `realtime_events` (
 --> statement-breakpoint
 CREATE TABLE `reports` (
 	`body_markdown` text NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`kind` text NOT NULL,
 	`metadata_json` text DEFAULT '{}' NOT NULL,
 	`occurred_at` integer NOT NULL,
@@ -216,15 +241,49 @@ CREATE TABLE `reports` (
 CREATE TABLE `schema_migrations` (
 	`applied_at` integer NOT NULL,
 	`checksum` text NOT NULL,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
 	`release_id` text NOT NULL
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `user_recovery_codes` (
+	`created_at` integer NOT NULL,
+	`id` text PRIMARY KEY,
+	`selector` text NOT NULL,
+	`used_at` integer,
+	`user_id` text NOT NULL,
+	`validator_hash` text NOT NULL,
+	CONSTRAINT `fk_user_recovery_codes_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "user_recovery_codes_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "user_recovery_codes_selector_check" CHECK(length("selector") = 32 AND instr("selector", char(0)) = 0 AND "selector" NOT GLOB '*[^0-9a-f]*'),
+	CONSTRAINT "user_recovery_codes_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND ("used_at" IS NULL OR ("used_at" BETWEEN 0 AND 8640000000000000 AND "used_at" >= "created_at"))),
+	CONSTRAINT "user_recovery_codes_validator_hash_check" CHECK(length("validator_hash") = 118 AND instr("validator_hash", char(0)) = 0 AND substr("validator_hash", 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr("validator_hash", 75, 1) = '$' AND substr("validator_hash", 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("validator_hash", 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("validator_hash", 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr("validator_hash", 118, 1) GLOB '[AEIMQUYcgkosw048]')
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `user_totp_factors` (
+	`confirmed_at` integer,
+	`created_at` integer NOT NULL,
+	`encrypted_secret` text NOT NULL,
+	`enrollment_expires_at` integer NOT NULL,
+	`id` text PRIMARY KEY,
+	`label` text NOT NULL,
+	`last_used_step` integer,
+	`secret_key_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	CONSTRAINT `fk_user_totp_factors_user_id_users_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	CONSTRAINT "user_totp_factors_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "user_totp_factors_label_check" CHECK(length("label") BETWEEN 1 AND 128 AND instr("label", char(0)) = 0 AND length(trim("label", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))) > 0 AND "label" NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || char(173) || char(1536) || '-' || char(1541) || char(1564) || char(1757) || char(1807) || char(2192) || '-' || char(2193) || char(2274) || char(6158) || char(8203) || '-' || char(8207) || char(8234) || '-' || char(8238) || char(8288) || '-' || char(8292) || char(8294) || '-' || char(8303) || char(65279) || char(65529) || '-' || char(65531) || char(69821) || char(69837) || char(78896) || '-' || char(78911) || char(113824) || '-' || char(113827) || char(119155) || '-' || char(119162) || char(917505) || char(917536) || '-' || char(917631) || ']*')),
+	CONSTRAINT "user_totp_factors_secret_key_id_check" CHECK(length("secret_key_id") BETWEEN 1 AND 32 AND instr("secret_key_id", char(0)) = 0 AND "secret_key_id" = lower("secret_key_id") AND substr("secret_key_id", 1, 1) GLOB '[a-z0-9]' AND "secret_key_id" NOT GLOB '*[^a-z0-9_-]*'),
+	CONSTRAINT "user_totp_factors_encrypted_secret_check" CHECK(length("encrypted_secret") = 84 AND instr("encrypted_secret", char(0)) = 0 AND substr("encrypted_secret", 1, 3) = 'v1.' AND substr("encrypted_secret", 4, 16) NOT GLOB '*[^A-Za-z0-9_-]*' AND substr("encrypted_secret", 20, 1) = '.' AND substr("encrypted_secret", 21, 64) NOT GLOB '*[^A-Za-z0-9_-]*'),
+	CONSTRAINT "user_totp_factors_enrollment_time_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "enrollment_expires_at" BETWEEN 0 AND 8640000000000000 AND "enrollment_expires_at" > "created_at" AND "enrollment_expires_at" <= "created_at" + 300000),
+	CONSTRAINT "user_totp_factors_confirmation_check" CHECK(("confirmed_at" IS NULL AND "last_used_step" IS NULL) OR ("confirmed_at" IS NOT NULL AND "last_used_step" IS NOT NULL AND "confirmed_at" BETWEEN 0 AND 8640000000000000 AND "confirmed_at" >= "created_at" AND "confirmed_at" < "enrollment_expires_at" AND "last_used_step" BETWEEN 0 AND 9007199254740991))
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `users` (
 	`authentication_version` integer DEFAULT 1 NOT NULL,
 	`created_at` integer NOT NULL,
 	`disabled_at` integer,
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY,
+	`mfa_enabled_at` integer,
 	`password_hash` text NOT NULL,
 	`updated_at` integer NOT NULL,
 	`username` text NOT NULL,
@@ -232,6 +291,7 @@ CREATE TABLE `users` (
 	CONSTRAINT "users_created_at_check" CHECK("created_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" BETWEEN 0 AND 8640000000000000 AND "updated_at" >= "created_at"),
 	CONSTRAINT "users_disabled_at_check" CHECK("disabled_at" IS NULL OR ("disabled_at" BETWEEN 0 AND 8640000000000000 AND "disabled_at" >= "created_at" AND "disabled_at" <= "updated_at")),
 	CONSTRAINT "users_id_check" CHECK(length("id") = 36 AND instr("id", char(0)) = 0 AND length(replace("id", '-', '')) = 32 AND replace("id", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr("id", 9, 1) = '-' AND substr("id", 14, 1) = '-' AND substr("id", 15, 1) = '7' AND substr("id", 19, 1) = '-' AND substr("id", 20, 1) GLOB '[89ab]' AND substr("id", 24, 1) = '-'),
+	CONSTRAINT "users_mfa_enabled_at_check" CHECK("mfa_enabled_at" IS NULL OR ("mfa_enabled_at" BETWEEN 0 AND 8640000000000000 AND "mfa_enabled_at" >= "created_at" AND "mfa_enabled_at" <= "updated_at")),
 	CONSTRAINT "users_password_hash_check" CHECK(length("password_hash") = 118 AND instr("password_hash", char(0)) = 0 AND substr("password_hash", 1, 31) = '$argon2id$v=19$m=65536,t=3,p=1$' AND substr("password_hash", 75, 1) = '$' AND substr("password_hash", 32, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 76, 43) NOT GLOB '*[^A-Za-z0-9+/]*' AND substr("password_hash", 74, 1) GLOB '[AEIMQUYcgkosw048]' AND substr("password_hash", 118, 1) GLOB '[AEIMQUYcgkosw048]'),
 	CONSTRAINT "users_username_check" CHECK(length("username") BETWEEN 3 AND 32 AND instr("username", char(0)) = 0 AND "username" = lower("username") AND substr("username", 1, 1) GLOB '[a-z0-9]' AND "username" NOT GLOB '*[^a-z0-9._-]*')
 ) STRICT;
@@ -239,6 +299,10 @@ CREATE TABLE `users` (
 CREATE INDEX `audit_events_occurred_id_idx` ON `audit_events` (`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `audit_events_request_occurred_idx` ON `audit_events` (`request_id`,`occurred_at`,`id`) WHERE "audit_events"."request_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `audit_events_target_occurred_idx` ON `audit_events` (`target_type`,`target_id`,`occurred_at`,`id`);--> statement-breakpoint
+CREATE INDEX `auth_pending_logins_expires_at_idx` ON `auth_pending_logins` (`expires_at`,`id`);--> statement-breakpoint
+CREATE INDEX `auth_pending_logins_replaced_session_id_idx` ON `auth_pending_logins` (`replaced_session_id`);--> statement-breakpoint
+CREATE INDEX `auth_pending_logins_user_expires_at_idx` ON `auth_pending_logins` (`user_id`,`expires_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `auth_pending_logins_validator_hash_unique` ON `auth_pending_logins` (`validator_hash`);--> statement-breakpoint
 CREATE INDEX `auth_rate_limit_buckets_kind_updated_at_idx` ON `auth_rate_limit_buckets` (`kind`,`updated_at`,`bucket_key`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_expires_at_idx` ON `auth_sessions` (`expires_at`);--> statement-breakpoint
 CREATE INDEX `auth_sessions_user_last_seen_idx` ON `auth_sessions` (`user_id`,`last_seen_at`,`created_at`,`id`);--> statement-breakpoint
@@ -258,6 +322,11 @@ CREATE INDEX `realtime_events_expires_id_idx` ON `realtime_events` (`expires_at`
 CREATE INDEX `realtime_events_topic_id_idx` ON `realtime_events` (`topic`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_kind_occurred_id_idx` ON `reports` (`kind`,`occurred_at`,`id`);--> statement-breakpoint
 CREATE INDEX `reports_source_job_occurred_id_idx` ON `reports` (`source`,`source_job_id`,`occurred_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `user_recovery_codes_user_selector_unique` ON `user_recovery_codes` (`user_id`,`selector`);--> statement-breakpoint
+CREATE INDEX `user_recovery_codes_user_used_created_idx` ON `user_recovery_codes` (`user_id`,`used_at`,`created_at`,`id`);--> statement-breakpoint
+CREATE INDEX `user_totp_factors_pending_user_expiry_idx` ON `user_totp_factors` (`user_id`,`enrollment_expires_at`,`id`) WHERE ("user_totp_factors"."confirmed_at" is null);--> statement-breakpoint
+CREATE INDEX `user_totp_factors_confirmed_user_created_idx` ON `user_totp_factors` (`user_id`,`created_at`,`id`) WHERE ("user_totp_factors"."confirmed_at" is not null);--> statement-breakpoint
+CREATE INDEX `user_totp_factors_pending_expiry_idx` ON `user_totp_factors` (`enrollment_expires_at`,`id`) WHERE ("user_totp_factors"."confirmed_at" is null);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`);--> statement-breakpoint
 CREATE TRIGGER reports_validate_metadata_insert
 BEFORE INSERT ON reports
