@@ -1,43 +1,81 @@
 import { Database } from "bun:sqlite";
 
+import { addMilliseconds, getTime } from "date-fns";
+import * as v from "valibot";
+
+import { timestampMillisecondsSchema } from "../../../shared/dateTime.ts";
+import {
+    fullCommitShaSchema,
+    lowercaseSha256Schema,
+    parseSchemaWithRangeError,
+} from "../../../shared/validation.ts";
+import { sha256Hex } from "../../shared/crypto.ts";
 import {
     drizzleStatementBreakpoint,
     type VerifiedMigration,
 } from "./loadVerifiedMigrations.ts";
 import { migrationManifest } from "./manifest.ts";
+import { migrationIdSchema } from "./validation.ts";
 import {
     assertConstraintEnforcement,
     assertDatabaseIntegrity,
 } from "./verifyDatabaseIntegrity.ts";
-
-interface AppliedMigrationRow {
-    checksum: string;
-    id: string;
-}
-
-interface SchemaObjectRow {
-    name: string;
-    sql: string | null;
-    tableName: string;
-    type: string;
-}
 
 export interface ApplyVerifiedMigrationsOptions {
     appliedAt?: Date;
     releaseId: string;
 }
 
-const releaseIdPattern = /^[a-f\d]{40}$/u;
+const migrationHistoryMismatchError =
+    "Database migration history does not match the reviewed manifest";
+const schemaHistoryMismatchError =
+    "Database schema does not match reviewed migration history";
+const migrationAppliedAtSchema = timestampMillisecondsSchema(
+    "Migration appliedAt must be valid Date milliseconds"
+);
+const appliedMigrationRowSchema = v.strictObject(
+    {
+        appliedAt: timestampMillisecondsSchema(migrationHistoryMismatchError),
+        checksum: lowercaseSha256Schema(migrationHistoryMismatchError),
+        id: migrationIdSchema(migrationHistoryMismatchError),
+        releaseId: fullCommitShaSchema(migrationHistoryMismatchError),
+    },
+    migrationHistoryMismatchError
+);
+const appliedMigrationRowsSchema = v.array(
+    appliedMigrationRowSchema,
+    migrationHistoryMismatchError
+);
+const schemaObjectRowSchema = v.strictObject(
+    {
+        name: v.string(schemaHistoryMismatchError),
+        sql: v.nullable(v.string(schemaHistoryMismatchError)),
+        tableName: v.string(schemaHistoryMismatchError),
+        type: v.string(schemaHistoryMismatchError),
+    },
+    schemaHistoryMismatchError
+);
+const schemaObjectRowsSchema = v.array(schemaObjectRowSchema, schemaHistoryMismatchError);
+
+type AppliedMigrationRow = v.InferOutput<typeof appliedMigrationRowSchema>;
+type SchemaObjectRow = v.InferOutput<typeof schemaObjectRowSchema>;
 
 function applicationSchemaObjects(database: Database): SchemaObjectRow[] {
-    return database
-        .query<SchemaObjectRow, []>(`
+    const rows: unknown = database
+        .query(`
             SELECT name, sql, tbl_name AS tableName, type
             FROM sqlite_schema
             WHERE name NOT GLOB 'sqlite_*'
             ORDER BY type, name
         `)
         .all();
+    const validation = v.safeParse(schemaObjectRowsSchema, rows, {
+        abortEarly: true,
+    });
+    if (!validation.success) {
+        throw new Error(schemaHistoryMismatchError);
+    }
+    return validation.output;
 }
 
 function expectedSchemaObjects(
@@ -73,13 +111,24 @@ function assertSchemaMatchesReviewedHistory(
 }
 
 function readAppliedMigrations(database: Database): AppliedMigrationRow[] {
-    return database
-        .query<AppliedMigrationRow, []>(`
-            SELECT checksum, id
+    const rows: unknown = database
+        .query(`
+            SELECT
+                applied_at AS appliedAt,
+                checksum,
+                id,
+                release_id AS releaseId
             FROM schema_migrations
             ORDER BY id
         `)
         .all();
+    const validation = v.safeParse(appliedMigrationRowsSchema, rows, {
+        abortEarly: true,
+    });
+    if (!validation.success) {
+        throw new Error(migrationHistoryMismatchError);
+    }
+    return validation.output;
 }
 
 function assertAppliedPrefix(
@@ -97,9 +146,7 @@ function assertAppliedPrefix(
             appliedMigration.id !== expectedMigration.id ||
             appliedMigration.checksum !== expectedMigration.migrationSha256
         ) {
-            throw new Error(
-                "Database migration history does not match the reviewed manifest"
-            );
+            throw new Error(migrationHistoryMismatchError);
         }
     }
 }
@@ -110,9 +157,7 @@ function assertCanonicalVerifiedGraph(migrations: readonly VerifiedMigration[]):
         migrations.some((migration, index) => {
             const manifestEntry = migrationManifest[index];
             const migrationSql = migration.statements.join(drizzleStatementBreakpoint);
-            const statementChecksum = new Bun.CryptoHasher("sha256")
-                .update(migrationSql)
-                .digest("hex");
+            const statementChecksum = sha256Hex(migrationSql);
 
             return (
                 !manifestEntry ||
@@ -137,7 +182,14 @@ export function applyVerifiedMigrations(
     options: ApplyVerifiedMigrationsOptions
 ): number {
     assertCanonicalVerifiedGraph(migrations);
-    if (!releaseIdPattern.test(options.releaseId)) {
+    if (
+        !v.safeParse(
+            fullCommitShaSchema(
+                "Migration release id must be a full lowercase commit SHA"
+            ),
+            options.releaseId
+        ).success
+    ) {
         throw new Error("Migration release id must be a full lowercase commit SHA");
     }
     assertConstraintEnforcement(database);
@@ -159,7 +211,10 @@ export function applyVerifiedMigrations(
         assertSchemaMatchesReviewedHistory(database, migrations, applied.length);
 
         const pending = migrations.slice(applied.length);
-        const baseAppliedAt = options.appliedAt?.getTime() ?? Date.now();
+        const baseAppliedAt = parseSchemaWithRangeError(
+            migrationAppliedAtSchema,
+            getTime(options.appliedAt ?? Date.now())
+        );
 
         for (const [pendingIndex, migration] of pending.entries()) {
             for (const statement of migration.statements) {
@@ -168,6 +223,10 @@ export function applyVerifiedMigrations(
                 }
             }
 
+            const appliedAt = parseSchemaWithRangeError(
+                migrationAppliedAtSchema,
+                getTime(addMilliseconds(baseAppliedAt, pendingIndex))
+            );
             database.run(
                 `INSERT INTO schema_migrations (
                     applied_at,
@@ -175,12 +234,7 @@ export function applyVerifiedMigrations(
                     id,
                     release_id
                 ) VALUES (?, ?, ?, ?)`,
-                [
-                    baseAppliedAt + pendingIndex,
-                    migration.migrationSha256,
-                    migration.id,
-                    options.releaseId,
-                ]
+                [appliedAt, migration.migrationSha256, migration.id, options.releaseId]
             );
         }
 

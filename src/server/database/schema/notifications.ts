@@ -41,6 +41,10 @@ export const notifications = sqliteTable(
             sql`${table.incidentGeneration} IS NULL OR ${table.incidentGeneration} >= 1`
         ),
         check(
+            "notifications_read_order_check",
+            sql`${table.readAt} IS NULL OR ${table.readAt} >= ${table.occurredAt}`
+        ),
+        check(
             "notifications_severity_check",
             sql`${table.severity} IN ('critical', 'error', 'info', 'warning')`
         ),

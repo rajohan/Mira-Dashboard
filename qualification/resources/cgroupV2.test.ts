@@ -73,6 +73,14 @@ describe("cgroup v2 snapshot parsing", () => {
         expect(snapshot.pidsMax).toBe("max");
     });
 
+    test("preserves accepted decimal strings with leading zeroes", () => {
+        const snapshot = parseCgroupV2Snapshot(
+            fileContents({ memoryCurrent: "0001048576\n" })
+        );
+
+        expect(snapshot.memoryCurrentBytes).toBe(1_048_576);
+    });
+
     test("rejects non-unified and unsafe process membership paths", () => {
         for (const selfCgroup of [
             "2:cpu:/legacy\n0::/unified",
@@ -89,6 +97,7 @@ describe("cgroup v2 snapshot parsing", () => {
     test("rejects malformed numeric and binary controller values", () => {
         const invalidFiles: Array<Partial<CgroupV2FileContents>> = [
             { memoryCurrent: "-1" },
+            { memoryCurrent: String(Number.MAX_SAFE_INTEGER + 1) },
             { memoryPeak: "1.5" },
             { memoryHigh: "unlimited" },
             { pidsCurrent: "NaN" },

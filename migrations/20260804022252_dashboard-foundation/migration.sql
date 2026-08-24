@@ -30,6 +30,7 @@ CREATE TABLE `incidents` (
 	`state` text NOT NULL,
 	`title` text NOT NULL,
 	CONSTRAINT "incidents_details_json_check" CHECK(CASE WHEN json_valid("details_json") THEN json_type("details_json") = 'object' ELSE 0 END),
+	CONSTRAINT "incidents_fingerprint_check" CHECK(length("fingerprint") = 64 AND "fingerprint" NOT GLOB '*[^0-9a-f]*'),
 	CONSTRAINT "incidents_generation_check" CHECK("generation" >= 1),
 	CONSTRAINT "incidents_occurrence_count_check" CHECK("occurrence_count" >= 1),
 	CONSTRAINT "incidents_severity_check" CHECK("severity" IN ('critical', 'error', 'info', 'warning')),
@@ -72,6 +73,7 @@ CREATE TABLE `notifications` (
 	CONSTRAINT "notifications_channel_check" CHECK("channel" = 'dashboard'),
 	CONSTRAINT "notifications_incident_pair_check" CHECK(("incident_id" IS NULL AND "incident_generation" IS NULL) OR ("incident_id" IS NOT NULL AND "incident_generation" IS NOT NULL)),
 	CONSTRAINT "notifications_incident_generation_check" CHECK("incident_generation" IS NULL OR "incident_generation" >= 1),
+	CONSTRAINT "notifications_read_order_check" CHECK("read_at" IS NULL OR "read_at" >= "occurred_at"),
 	CONSTRAINT "notifications_severity_check" CHECK("severity" IN ('critical', 'error', 'info', 'warning'))
 ) STRICT;
 --> statement-breakpoint

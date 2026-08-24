@@ -6,6 +6,9 @@ import { createQualificationRouter } from "./router.ts";
 
 const trpcEndpoint = "/trpc";
 
+/** Transport ceiling covering the escaped 8 KiB qualification payload contract. */
+export const qualificationRequestBodyMaximumBytes = 64 * 1024;
+
 /** Runtime options for one ephemeral qualification release. */
 export interface QualificationServerOptions {
     eventFeed: QualificationEventFeed;
@@ -92,6 +95,7 @@ export function startQualificationServer(options: QualificationServerOptions) {
             return new Response("Not found", { status: 404 });
         },
         hostname: options.hostname,
+        maxRequestBodySize: qualificationRequestBodyMaximumBytes,
         port: options.port ?? 0,
     });
     let stopPromise: Promise<void> | undefined;

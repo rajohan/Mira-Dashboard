@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import * as v from "valibot";
+
 /** A finite cgroup value or the kernel's unbounded marker. */
 export type CgroupV2Limit = number | "max";
 
@@ -53,22 +55,24 @@ const requiredMemoryEventNames = [
     "oom_group_kill",
     "oom_kill",
 ] as const;
+const cgroupNonnegativeIntegerSchema = v.pipe(
+    v.string(),
+    v.regex(/^\d+$/u),
+    v.transform(Number),
+    v.safeInteger(),
+    v.minValue(0)
+);
 
 function invalidValue(label: string, value: string): Error {
     return new Error(`Invalid cgroup v2 ${label}: ${JSON.stringify(value)}`);
 }
 
 function parseNonnegativeInteger(value: string, label: string): number {
-    const normalized = value.trim();
-    if (!/^\d+$/u.test(normalized)) {
+    const result = v.safeParse(cgroupNonnegativeIntegerSchema, value.trim());
+    if (!result.success) {
         throw invalidValue(label, value);
     }
-
-    const parsed = Number(normalized);
-    if (!Number.isSafeInteger(parsed) || parsed < 0) {
-        throw invalidValue(label, value);
-    }
-    return parsed;
+    return result.output;
 }
 
 function parsePositiveInteger(value: string, label: string): number {

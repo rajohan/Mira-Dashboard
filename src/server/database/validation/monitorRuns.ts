@@ -1,3 +1,4 @@
+import { compareAsc } from "date-fns";
 import {
     createInsertSchema,
     createSelectSchema,
@@ -5,18 +6,35 @@ import {
 } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
+import { monitoringMonitorKeySchema } from "../../../contracts/monitoring.ts";
+import { lowercaseSha256Action } from "../../../shared/validation.ts";
 import { monitorRuns } from "../schema/monitorRuns.ts";
-import { uuidV7Action } from "./scalars.ts";
+import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
+
+function monitorRunCompletionMatchesState(run: {
+    readonly completedAt?: Date | null;
+    readonly state: string;
+}): boolean {
+    return run.state === "running"
+        ? run.completedAt == null
+        : run.completedAt instanceof Date;
+}
+
+function monitorRunCompletionOrderIsValid(run: {
+    readonly completedAt?: Date | null;
+    readonly startedAt: Date;
+}): boolean {
+    return run.completedAt == null || compareAsc(run.completedAt, run.startedAt) >= 0;
+}
 
 const monitorRunRefinements = {
-    id: (schema: v.StringSchema<undefined>) => v.pipe(schema, v.uuid(), uuidV7Action),
-    reportId: (schema: v.StringSchema<undefined>) =>
-        v.pipe(schema, v.uuid(), uuidV7Action),
+    completedAt: nonnegativeDateSchema,
+    id: uuidV7TextSchema,
+    monitorKey: () => monitoringMonitorKeySchema,
+    reportId: uuidV7TextSchema,
+    startedAt: nonnegativeDateSchema,
     submissionSha256: (schema: v.StringSchema<undefined>) =>
-        v.pipe(
-            schema,
-            v.regex(/^[0-9a-f]{64}$/, "Expected a lowercase SHA-256 checksum.")
-        ),
+        v.pipe(schema, lowercaseSha256Action()),
 };
 
 const generatedMonitorRunSelectSchema = createSelectSchema(
@@ -25,8 +43,16 @@ const generatedMonitorRunSelectSchema = createSelectSchema(
 );
 
 /** Validates rows read from the monitor_runs table. */
-export const monitorRunSelectSchema = v.strictObject(
-    generatedMonitorRunSelectSchema.entries
+export const monitorRunSelectSchema = v.pipe(
+    v.strictObject(generatedMonitorRunSelectSchema.entries),
+    v.check(
+        (run) => monitorRunCompletionMatchesState(run),
+        "Expected monitor run state and completion timestamp to agree."
+    ),
+    v.check(
+        (run) => monitorRunCompletionOrderIsValid(run),
+        "Expected monitor run completedAt to be at or after startedAt."
+    )
 );
 
 const generatedMonitorRunInsertSchema = createInsertSchema(
@@ -35,8 +61,16 @@ const generatedMonitorRunInsertSchema = createInsertSchema(
 );
 
 /** Validates values before a monitor run insert. */
-export const monitorRunInsertSchema = v.strictObject(
-    generatedMonitorRunInsertSchema.entries
+export const monitorRunInsertSchema = v.pipe(
+    v.strictObject(generatedMonitorRunInsertSchema.entries),
+    v.check(
+        (run) => monitorRunCompletionMatchesState(run),
+        "Expected monitor run state and completion timestamp to agree."
+    ),
+    v.check(
+        (run) => monitorRunCompletionOrderIsValid(run),
+        "Expected monitor run completedAt to be at or after startedAt."
+    )
 );
 
 const generatedMonitorRunUpdateSchema = createUpdateSchema(

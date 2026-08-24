@@ -1,6 +1,10 @@
 import * as v from "valibot";
 
 import {
+    fullCommitShaSchema,
+    nonnegativeSafeIntegerSchema,
+} from "../../src/shared/validation.ts";
+import {
     type QualificationEventFeedMetrics,
     qualificationEventLimits,
 } from "../realtime/eventFeed.ts";
@@ -59,7 +63,8 @@ export interface SseMemoryQualificationEvidence extends SseMemoryEvidenceCandida
 }
 
 const nonnegativeNumberSchema = v.pipe(v.number(), v.finite(), v.minValue(0));
-const nonnegativeIntegerSchema = v.pipe(nonnegativeNumberSchema, v.safeInteger());
+const nonnegativeIntegerSchema = nonnegativeSafeIntegerSchema();
+const bunRevisionSchema = fullCommitShaSchema();
 const cgroupLimitSchema = v.union([nonnegativeIntegerSchema, v.literal("max")]);
 const memoryEventsSchema = v.strictObject({
     high: nonnegativeIntegerSchema,
@@ -478,7 +483,7 @@ export function validateSseMemoryEvidence(
     if (candidate.runtime.version !== "1.4.0") {
         throw new Error(`Expected Bun 1.4.0; observed ${candidate.runtime.version}`);
     }
-    if (!/^[\da-f]{40}$/u.test(candidate.runtime.revision)) {
+    if (!v.safeParse(bunRevisionSchema, candidate.runtime.revision).success) {
         throw new Error("Bun revision is not a full commit SHA");
     }
 

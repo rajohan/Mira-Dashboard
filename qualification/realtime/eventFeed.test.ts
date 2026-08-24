@@ -126,6 +126,23 @@ describe("qualification event feed", () => {
         expect(eventFeed.activeSubscriberCount).toBe(0);
     });
 
+    test("rejects a malformed or oversized resume cursor", async () => {
+        for (const afterId of ["01", "-1", "9".repeat(10_000)]) {
+            const eventFeed = new QualificationEventFeed();
+            const subscription = eventFeed.subscribe({
+                afterId,
+                signal: new AbortController().signal,
+            });
+
+            expect(
+                await subscription.next().catch((error: unknown) => error)
+            ).toMatchObject({
+                message: "Qualification event resume cursor is invalid",
+            });
+            expect(eventFeed.activeSubscriberCount).toBe(0);
+        }
+    });
+
     test("accepts a resume cursor at the feed tail", async () => {
         const eventFeed = new QualificationEventFeed();
         const abortController = new AbortController();

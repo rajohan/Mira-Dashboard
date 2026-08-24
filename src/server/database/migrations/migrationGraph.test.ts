@@ -1,11 +1,11 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
-import { applyVerifiedMigrations } from "./applyVerifiedMigrations.ts";
 import {
     migrationsDirectory,
     openFreshMigratedDatabase,
-} from "./freshDatabaseFixture.ts";
+} from "../../test/support/freshDatabase.ts";
+import { applyVerifiedMigrations } from "./applyVerifiedMigrations.ts";
 import { loadVerifiedMigrations } from "./loadVerifiedMigrations.ts";
 
 interface IntegrityRow {
@@ -103,6 +103,57 @@ describe("database migration graph", () => {
             ).toThrow("Database migration history does not match the reviewed manifest");
         } finally {
             database.sqlite.close(true);
+        }
+    });
+
+    test("rejects malformed raw migration history rows", async () => {
+        const migrations = await loadVerifiedMigrations({
+            directory: migrationsDirectory,
+        });
+        const database = new Database(":memory:", { strict: true });
+
+        try {
+            database.run("PRAGMA foreign_keys = ON");
+            database.run(
+                "CREATE TABLE schema_migrations (applied_at, checksum, id, release_id)"
+            );
+            database.run(
+                "INSERT INTO schema_migrations (applied_at, checksum, id, release_id) VALUES (0, 1, 2, 3)"
+            );
+
+            expect(() =>
+                applyVerifiedMigrations(database, migrations, {
+                    releaseId: "1".repeat(40),
+                })
+            ).toThrow("Database migration history does not match the reviewed manifest");
+        } finally {
+            database.close(true);
+        }
+    });
+
+    test("rejects a malformed release id before changing the database", async () => {
+        const migrations = await loadVerifiedMigrations({
+            directory: migrationsDirectory,
+        });
+        const database = new Database(":memory:", { strict: true });
+
+        try {
+            expect(() =>
+                applyVerifiedMigrations(database, migrations, {
+                    releaseId: "A".repeat(40),
+                })
+            ).toThrow("Migration release id must be a full lowercase commit SHA");
+            expect(
+                database
+                    .query<{ name: string }, []>(`
+                        SELECT name
+                        FROM sqlite_schema
+                        WHERE name NOT GLOB 'sqlite_*'
+                    `)
+                    .all()
+            ).toEqual([]);
+        } finally {
+            database.close(true);
         }
     });
 

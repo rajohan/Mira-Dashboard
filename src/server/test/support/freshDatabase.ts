@@ -1,10 +1,11 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 
+import { parseISO } from "date-fns";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 
-import { applyVerifiedMigrations } from "./applyVerifiedMigrations.ts";
-import { loadVerifiedMigrations } from "./loadVerifiedMigrations.ts";
+import { applyVerifiedMigrations } from "../../database/migrations/applyVerifiedMigrations.ts";
+import { loadVerifiedMigrations } from "../../database/migrations/loadVerifiedMigrations.ts";
 
 const testReleaseId = "0".repeat(40);
 
@@ -28,7 +29,7 @@ export async function openFreshMigratedDatabase() {
             directory: migrationsDirectory,
         });
         applyVerifiedMigrations(sqlite, migrations, {
-            appliedAt: new Date("2026-08-03T23:32:57.000Z"),
+            appliedAt: parseISO("2026-08-03T23:32:57.000Z"),
             releaseId: testReleaseId,
         });
 
