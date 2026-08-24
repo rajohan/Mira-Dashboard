@@ -2,6 +2,7 @@ import { describe, expect, jest, test } from "bun:test";
 
 import { safeChatMarkdownLink } from "./chatMarkdownPolicy.ts";
 import { ChatMessageBubble } from "./ChatMessageBubble.tsx";
+import { toolDisplayName } from "./chatToolPresentation.ts";
 
 const { render, screen, waitFor, within } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -15,6 +16,54 @@ const display = {
 };
 
 describe("chat message bubble", () => {
+    test("renders active and completed activity rows as explicit statuses", () => {
+        render(
+            <>
+                <ChatMessageBubble
+                    display={display}
+                    message={{
+                        attachments: [],
+                        id: "activity-running",
+                        parts: [
+                            {
+                                activity: "running",
+                                kind: "control",
+                                text: "Thinking…",
+                                tone: "muted",
+                            },
+                        ],
+                        role: "assistant",
+                        sequence: 1,
+                        sessionKey: "agent:main:main",
+                    }}
+                />
+                <ChatMessageBubble
+                    display={display}
+                    message={{
+                        attachments: [],
+                        id: "activity-complete",
+                        parts: [
+                            {
+                                activity: "complete",
+                                kind: "control",
+                                text: "Context compacted",
+                                tone: "muted",
+                            },
+                        ],
+                        role: "assistant",
+                        sequence: 2,
+                        sessionKey: "agent:main:main",
+                    }}
+                />
+            </>
+        );
+
+        const running = screen.getByRole("status", { name: "Thinking…" });
+        expect(running).toBeVisible();
+        expect(running.textContent).toBe("Thinking...");
+        expect(screen.getByRole("status", { name: "Context compacted" })).toBeVisible();
+    });
+
     test("presents provider-neutral send admission without claiming queued state", () => {
         render(
             <ChatMessageBubble
@@ -170,12 +219,15 @@ describe("chat message bubble", () => {
         const tool = screen.getByRole("region", {
             name: "Bash, completed",
         });
-        const toggle = screen.getByRole("button", { name: /Bash completed/iu });
+        const toggle = screen.getByRole("button", {
+            name: "Bash bun test (mira-dashboard) completed",
+        });
         expect(toggle).toHaveAttribute("aria-expanded", "false");
+        expect(within(tool).getByText("bun test (mira-dashboard)")).toBeVisible();
         expect(within(tool).queryByText("Tool output")).toBeNull();
         await user.click(toggle);
         expect(within(tool).getByText("Description")).toBeVisible();
-        expect(within(tool).getByText("bun test (mira-dashboard)")).toBeVisible();
+        expect(within(tool).getAllByText("bun test (mira-dashboard)")).toHaveLength(2);
         expect(within(tool).getByText("Tool input")).toBeVisible();
         expect(within(tool).getByText("Tool output")).toBeVisible();
         expect(within(tool).getByText(/8 pass/iu)).toBeVisible();
@@ -190,6 +242,120 @@ describe("chat message bubble", () => {
         expect(outputRegion).toHaveAttribute("data-virtualizer-scroll-region");
         expect(outputRegion).toHaveAttribute("tabindex", "0");
         expect(within(tool).queryByText("running")).toBeNull();
+    });
+
+    test("bounds collapsed tool summaries without exposing unrelated input or output", () => {
+        const command = `bun test ${"safe ".repeat(40)}`;
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-bounded-tool-summary",
+                    parts: [
+                        {
+                            callId: "call-bounded",
+                            input: {
+                                cmd: `  ${command}\n`,
+                                secret: "input-secret",
+                            },
+                            kind: "tool",
+                            name: "functions.exec_command",
+                            output: "output-secret",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", { name: "Bash, completed" });
+        const summary = within(tool).getByText(/^bun test safe/iu);
+        expect(summary.textContent).not.toContain("\n");
+        // oxlint-disable-next-line unicorn/prefer-spread -- The summary contract is explicitly bounded in Unicode code points.
+        expect(Array.from(summary.textContent ?? "")).toHaveLength(120);
+        expect(within(tool).queryByText("input-secret")).toBeNull();
+        expect(within(tool).queryByText("output-secret")).toBeNull();
+        expect(tool.getAttribute("aria-label")).toBe("Bash, completed");
+    });
+
+    test("strips Unicode controls from summaries while retaining full tool input", async () => {
+        const user = userEvent.setup();
+        const command = "bun\u202E test\u0007 --safe";
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-controlled-tool-summary",
+                    parts: [
+                        {
+                            callId: "call-controlled",
+                            input: { cmd: command },
+                            kind: "tool",
+                            name: "functions.exec_command",
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", { name: "Bash, completed" });
+        const toggle = within(tool).getByRole("button", {
+            name: "Bash bun test --safe completed",
+        });
+        expect(toggle.textContent).not.toContain("\u202E");
+        expect(toggle.textContent).not.toContain("\u0007");
+        await user.click(toggle);
+        const fullInput = within(tool).getByRole("region", {
+            name: "Bash tool input",
+        }).textContent;
+        expect(fullInput).toContain("\u202E");
+        expect(fullInput).toContain(String.raw`\u0007`);
+    });
+
+    test("bounds and strips Unicode controls from tool names and accessible labels", () => {
+        const name = `functions.unsafe\u202E_tool\u0007_${"x".repeat(160)}`;
+        const label = toolDisplayName(name);
+        expect(label).toHaveLength(120);
+        expect(label).not.toContain("\u202E");
+        expect(label).not.toContain("\u0007");
+        const expandingLabel = toolDisplayName(`ß${"x".repeat(119)}`);
+        expect(expandingLabel).toHaveLength(120);
+        expect(expandingLabel.startsWith("SS")).toBeTrue();
+        expect(expandingLabel.endsWith("…")).toBeTrue();
+        render(
+            <ChatMessageBubble
+                display={display}
+                message={{
+                    attachments: [],
+                    id: "message-controlled-tool-name",
+                    parts: [
+                        {
+                            callId: "call-controlled-name",
+                            kind: "tool",
+                            name,
+                            status: "completed",
+                        },
+                    ],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey: "agent:main:main",
+                }}
+            />
+        );
+
+        const tool = screen.getByRole("region", { name: `${label}, completed` });
+        expect(within(tool).getByRole("button")).toHaveAccessibleName(
+            `${label} completed`
+        );
     });
 
     test("derives tool descriptions only from valid structured string input", () => {

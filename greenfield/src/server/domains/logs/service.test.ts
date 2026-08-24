@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { JobRunSummary } from "../../../contracts/jobModel.ts";
 import type {
     LogMaintenancePolicyId,
     RequestLogMaintenanceInput,
@@ -12,6 +13,7 @@ import { createLogsService, LogsServiceError } from "./service.ts";
 const digest = "a".repeat(64);
 const jobRunId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 const input: RequestLogMaintenanceInput = {
+    dryRun: false,
     idempotencyKey: "log-maintenance:019fc968-1a9b-7770-8f1b-d5b863b0e7b4",
     policyId: "host-rsyslog",
 };
@@ -24,12 +26,39 @@ const auditContext = {
     requestId: "request-1",
 };
 
+function maintenanceRun(id: string, state: "running" | "succeeded"): JobRunSummary {
+    const terminal = state === "succeeded";
+    return {
+        actionKey: "maintenance.rotate-logs",
+        attemptCount: 1,
+        attemptLimit: 1,
+        availableAtMs: 100,
+        cancellationPolicy: "cooperative",
+        displayName: "Managed log maintenance",
+        eventCount: terminal ? 3 : 2,
+        ...(terminal ? { finishedAtMs: 300 } : {}),
+        firstStartedAtMs: 200,
+        id,
+        lastAttemptStartedAtMs: 200,
+        priority: 0,
+        queuedAtMs: 100,
+        resourceClass: "host-heavy",
+        resourceKeys: ["host.logs"],
+        retrySafe: false,
+        state,
+        stateVersion: terminal ? 3 : 2,
+        timeoutMs: 300_000,
+        triggerType: "system",
+        updatedAtMs: terminal ? 300 : 200,
+    };
+}
+
 function dependencies(
     options: {
         readonly auditEvents?: LogMaintenanceAuditEvent[];
         readonly auditFailure?: "attempted" | "queued";
         readonly enqueueFailure?: boolean;
-        readonly settlements?: string[];
+        readonly settlements?: Array<{ dryRun: boolean; settlement: string }>;
     } = {}
 ) {
     const auditEvents = options.auditEvents ?? [];
@@ -81,9 +110,11 @@ function dependencies(
                     options.enqueueFailure
                         ? Promise.reject(new Error("private queue failure"))
                         : Promise.resolve({ jobRunId }),
+                runStatuses: () => Promise.resolve([]),
             },
             now: () => 200,
-            onAuditSettlementFailure: ({ settlement }) => settlements.push(settlement),
+            onAuditSettlementFailure: ({ dryRun, settlement }) =>
+                settlements.push({ dryRun, settlement }),
             reader,
         }),
         settlements,
@@ -112,16 +143,58 @@ describe("logs service", () => {
         );
     });
 
+    test("projects an active run without hiding the latest terminal run", async () => {
+        const activeRunId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b5";
+        const terminalRunId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b6";
+        const service = createLogsService({
+            auditWriter: { record: () => Promise.resolve() },
+            catalog: {
+                list: () => Promise.resolve({ observedAtMs: 1, sources: [] }),
+                resolve: () => Promise.resolve(undefined),
+            },
+            maintenanceQueue: {
+                queueablePolicies: () => Promise.resolve(["host-rsyslog"]),
+                enqueue: () => Promise.resolve({ jobRunId }),
+                runStatuses: () =>
+                    Promise.resolve([
+                        {
+                            activeRun: maintenanceRun(activeRunId, "running"),
+                            lastRun: {
+                                run: maintenanceRun(terminalRunId, "succeeded"),
+                            },
+                            policyId: "host-rsyslog",
+                        },
+                    ]),
+            },
+            reader: {
+                search: () => Promise.reject(new Error("unused")),
+                tail: () => Promise.reject(new Error("unused")),
+            },
+        });
+
+        const status = await service.maintenanceStatus();
+        expect(status.policies.find(({ id }) => id === "host-rsyslog")).toMatchObject({
+            activeRun: { id: activeRunId, state: "running" },
+            lastRun: { run: { id: terminalRunId, state: "succeeded" } },
+        });
+    });
+
     test("durably records attempted before worker queue dispatch and a sanitized settlement", async () => {
         const fixture = dependencies();
         expect(await fixture.service.requestMaintenance(input, auditContext)).toEqual({
+            dryRun: false,
             jobRunId,
             policyId: "host-rsyslog",
             queued: true,
         });
         expect(fixture.auditEvents).toMatchObject([
-            { policyId: "host-rsyslog", settlement: "attempted" },
-            { jobRunId, policyId: "host-rsyslog", settlement: "queued" },
+            { dryRun: false, policyId: "host-rsyslog", settlement: "attempted" },
+            {
+                dryRun: false,
+                jobRunId,
+                policyId: "host-rsyslog",
+                settlement: "queued",
+            },
         ]);
     });
 
@@ -140,6 +213,7 @@ describe("logs service", () => {
                     enqueued = true;
                     return Promise.resolve({ jobRunId });
                 },
+                runStatuses: () => Promise.resolve([]),
             },
             reader: {
                 search: () => Promise.reject(new Error("unused")),
@@ -161,7 +235,26 @@ describe("logs service", () => {
         ).toMatchObject({
             queued: true,
         });
-        expect(fixture.settlements).toEqual(["queued"]);
+        expect(fixture.settlements).toEqual([{ dryRun: false, settlement: "queued" }]);
+    });
+
+    test("preserves dry-run identity in audit settlement fallback", async () => {
+        const fixture = dependencies({ auditFailure: "queued" });
+        expect(
+            await fixture.service.requestMaintenance(
+                {
+                    dryRun: true,
+                    idempotencyKey:
+                        "log-maintenance:019fc968-1a9b-7770-8f1b-d5b863b0e7b5",
+                    policyId: "docker-managed",
+                },
+                auditContext
+            )
+        ).toMatchObject({ dryRun: true, policyId: "docker-managed", queued: true });
+        expect(fixture.auditEvents).toMatchObject([
+            { dryRun: true, policyId: "docker-managed", settlement: "attempted" },
+        ]);
+        expect(fixture.settlements).toEqual([{ dryRun: true, settlement: "queued" }]);
     });
 
     test("sanitizes queue failures after recording a failed terminal outcome", async () => {

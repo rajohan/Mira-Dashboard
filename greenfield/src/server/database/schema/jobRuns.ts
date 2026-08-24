@@ -14,6 +14,10 @@ import {
     jobRunPayloadEventMaximum,
 } from "../../../contracts/jobModel.ts";
 import {
+    logMaintenanceJobActionKey,
+    logMaintenanceJobPayloadIndexMaximumBytes,
+} from "../../../shared/logMaintenanceUnits.ts";
+import {
     boundedCanonicalBase64UrlTextCheck,
     boundedControlSafeTextCheck,
     lowercaseHexTextCheck,
@@ -205,6 +209,14 @@ export const jobRuns = sqliteTable(
             .on(table.scheduledJobId)
             .where(
                 sql`${table.scheduledJobId} IS NOT NULL AND ${table.state} IN ('queued', 'running')`
+            ),
+        index("job_runs_action_active_idx")
+            .on(table.actionKey, desc(table.state), desc(table.queuedAt), desc(table.id))
+            .where(sql`${table.state} IN ('queued', 'running')`),
+        index("job_runs_action_payload_terminal_idx")
+            .on(table.actionKey, table.payloadJson, desc(table.queuedAt), desc(table.id))
+            .where(
+                sql`${table.actionKey} = ${sql.raw(`'${logMaintenanceJobActionKey}'`)} AND length(CAST(${table.payloadJson} AS BLOB)) <= ${sql.raw(String(logMaintenanceJobPayloadIndexMaximumBytes))} AND ${table.state} IN ('cancelled', 'failed', 'succeeded', 'timed-out')`
             ),
         index("job_runs_queued_id_idx").on(table.queuedAt, table.id),
         index("job_runs_schedule_queued_id_idx").on(

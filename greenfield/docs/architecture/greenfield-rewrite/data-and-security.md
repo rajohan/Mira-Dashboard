@@ -201,6 +201,8 @@ queryable lifecycle.
 | Incident notification         | unique `(incident_id, incident_generation, channel)` when incident is non-null            |
 | Queue claim                   | partial `job_runs(available_at, priority DESC, queued_at, id) WHERE state = 'queued'`     |
 | One active scheduled run      | unique partial `job_runs(scheduled_job_id) WHERE state IN ('queued', 'running')`          |
+| Active action status          | partial `job_runs_action_active_idx`; exact predicate below                               |
+| Terminal maintenance status   | partial `job_runs_action_payload_terminal_idx`; exact predicate below                     |
 | Worker expiry                 | `worker_instances(heartbeat_at, id)`                                                      |
 | Job timeline                  | `job_run_events(job_run_id, sequence)`                                                    |
 | Realtime catch-up             | `realtime_events(topic, id)`                                                              |
@@ -209,6 +211,16 @@ queryable lifecycle.
 | Docker history                | `docker_update_events(managed_service_id, created_at_ms DESC)`                            |
 | Cache refresh/expiry          | `cache_entries(last_attempt_status, expires_at_ms, key)`                                  |
 | Audit cursor                  | `audit_events(occurred_at_ms DESC, id DESC)` plus request/target indexes                  |
+
+The action-status indexes intentionally mirror the repository's literal predicates:
+
+- `job_runs_action_active_idx` indexes `(action_key, state DESC, queued_at DESC, id DESC)`
+  where `state IN ('queued', 'running')`. Maintenance payload equality is filtered after
+  this globally single-flight action lookup.
+- `job_runs_action_payload_terminal_idx` indexes
+  `(action_key, payload_json, queued_at DESC, id DESC)` where
+  `action_key = 'maintenance.rotate-logs'`, `length(CAST(payload_json AS BLOB)) <= 128`,
+  and `state IN ('cancelled', 'failed', 'succeeded', 'timed-out')`.
 
 Primary keys and unique constraints already create indexes; the schema does not add redundant
 copies. Partial-index predicates must match query predicates exactly enough for SQLite to use

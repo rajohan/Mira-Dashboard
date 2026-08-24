@@ -15,6 +15,7 @@ import {
     mergeChatToolPart,
     projectChatContractMessage,
 } from "./chatContractAdapter.ts";
+import { sortChatDisplayMessages } from "./chatMessageOrdering.ts";
 import type {
     ChatDisplayMessage,
     ChatMessageAttachment,
@@ -274,6 +275,12 @@ export function projectChatHistory(
     return foldHistoryToolResults(projectedMessages);
 }
 
+function chatDisplayMessageText(message: ChatDisplayMessage): string {
+    return message.parts
+        .flatMap((part) => (part.kind === "text" ? [part.text] : []))
+        .join("");
+}
+
 /**
  * Combines canonical history and ephemeral runtime rows without duplicate identities.
  * @param history Canonical provider transcript.
@@ -288,17 +295,99 @@ export function mergeChatMessages(
 ): readonly ChatDisplayMessage[] {
     const canonicalIds = new Set(history.map(({ id }) => id));
     const canonical = history.filter((message) => !hiddenMessageIds.has(message.id));
-    const ephemeral = runtime
-        .filter(
-            (message) =>
-                !canonicalIds.has(message.id) && !hiddenMessageIds.has(message.id)
+    const canonicalIdempotencyKeys = new Set(
+        canonical.flatMap((message) =>
+            message.idempotencyKey === undefined ? [] : [message.idempotencyKey]
         )
-        .toSorted(
-            (left, right) =>
-                (left.timestampMs ?? Number.MAX_SAFE_INTEGER) -
-                    (right.timestampMs ?? Number.MAX_SAFE_INTEGER) ||
-                left.sequence - right.sequence ||
-                left.id.localeCompare(right.id)
-        );
-    return [...canonical, ...ephemeral];
+    );
+    const canonicalAssistantProviderRunIds = new Set(
+        canonical.flatMap((message) =>
+            message.role === "assistant" && message.providerRunId !== undefined
+                ? [message.providerRunId]
+                : []
+        )
+    );
+    const ephemeral = sortChatDisplayMessages(
+        runtime.filter(
+            (message) =>
+                !canonicalIds.has(message.id) &&
+                !hiddenMessageIds.has(message.id) &&
+                !(
+                    message.role === "user" &&
+                    message.idempotencyKey !== undefined &&
+                    canonicalIdempotencyKeys.has(message.idempotencyKey)
+                ) &&
+                !(
+                    message.role === "assistant" &&
+                    message.providerRunId !== undefined &&
+                    canonicalAssistantProviderRunIds.has(message.providerRunId)
+                )
+        )
+    );
+    const externalGroups = Map.groupBy(
+        ephemeral.filter(
+            (message) =>
+                message.role === "assistant" &&
+                message.providerRunId !== undefined &&
+                message.id.startsWith("external:")
+        ),
+        (message) => message.providerRunId as string
+    );
+    const beforeCanonical = new Map<string, ChatDisplayMessage[]>();
+    const afterCanonical = new Map<string, ChatDisplayMessage[]>();
+    const anchoredExternalIds = new Set<string>();
+    const claimedCanonicalUsers = new Set<string>();
+    for (const [providerRunId, messages] of externalGroups) {
+        let chunkStart = 0;
+        let previousAnchorId: string | undefined;
+        for (const [index, message] of messages.entries()) {
+            const anchor = message.precedingUserTextAnchor;
+            if (anchor === undefined) continue;
+            const matchingUsers = canonical.filter(
+                (candidate) =>
+                    candidate.role === "user" &&
+                    !claimedCanonicalUsers.has(candidate.id) &&
+                    chatDisplayMessageText(candidate) === anchor
+            );
+            const canonicalUser =
+                matchingUsers.find(
+                    (candidate) => candidate.providerRunId === providerRunId
+                ) ??
+                matchingUsers.find((candidate) => candidate.providerRunId === undefined);
+            if (canonicalUser === undefined) continue;
+            claimedCanonicalUsers.add(canonicalUser.id);
+            const chunk = messages.slice(chunkStart, index);
+            if (previousAnchorId === undefined) {
+                beforeCanonical.set(canonicalUser.id, [
+                    ...(beforeCanonical.get(canonicalUser.id) ?? []),
+                    ...chunk,
+                ]);
+            } else {
+                afterCanonical.set(previousAnchorId, [
+                    ...(afterCanonical.get(previousAnchorId) ?? []),
+                    ...chunk,
+                ]);
+            }
+            for (const item of chunk) anchoredExternalIds.add(item.id);
+            previousAnchorId = canonicalUser.id;
+            chunkStart = index;
+        }
+        if (previousAnchorId !== undefined) {
+            const tail = messages.slice(chunkStart);
+            afterCanonical.set(previousAnchorId, [
+                ...(afterCanonical.get(previousAnchorId) ?? []),
+                ...tail,
+            ]);
+            for (const item of tail) anchoredExternalIds.add(item.id);
+        }
+    }
+    const mergedCanonical = canonical.flatMap((message) => [
+        ...(beforeCanonical.get(message.id) ?? []),
+        message,
+        ...(afterCanonical.get(message.id) ?? []),
+    ]);
+    const unanchored = ephemeral.filter(
+        (message) => !anchoredExternalIds.has(message.id)
+    );
+    return [...mergedCanonical, ...unanchored];
 }

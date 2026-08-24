@@ -36,7 +36,7 @@ const successfulExecutor = () => Effect.succeed({});
 describe("worker-only job executor registry", () => {
     test("matches every pure definition with one exact executor", () => {
         const findAction = createJobWorkerActionResolver({
-            run: () => Promise.resolve(),
+            run: () => Promise.resolve(undefined),
         });
         expect(findAction("system.worker-smoke")).toBeDefined();
         expect(findAction("cache.refresh.system-host")).toBeDefined();
@@ -71,13 +71,32 @@ describe("worker-only job executor registry", () => {
 
     test("validates a fixed log policy and propagates Effect cancellation", async () => {
         const calls: Array<{
+            dryRun: boolean;
             policyId: string;
             signal: AbortSignal | undefined;
         }> = [];
         const executor = createLogMaintenanceJobExecutor({
-            run(policyId, signal) {
-                calls.push({ policyId, signal });
-                return Promise.resolve();
+            run(policyId, dryRun, signal) {
+                calls.push({ dryRun, policyId, signal });
+                return Promise.resolve(
+                    policyId === "docker-managed"
+                        ? {
+                              actionCounts: {
+                                  compressed: 0,
+                                  deleted: 0,
+                                  error: 0,
+                                  missing: 0,
+                                  rotated: 1,
+                                  skipped: 0,
+                              },
+                              checkedTargets: 1,
+                              dryRun,
+                              finishedAtMs: 4900,
+                              ok: true,
+                              startedAtMs: 4800,
+                          }
+                        : undefined
+                );
             },
         });
         expect(
@@ -86,12 +105,29 @@ describe("worker-only job executor registry", () => {
             )
         ).toEqual({
             completedAtMs: 5000,
+            dryRun: false,
             policyId: "docker-managed",
             status: "completed",
+            summary: expect.objectContaining({ dryRun: false }),
         });
         expect(calls).toHaveLength(1);
-        expect(calls[0]?.policyId).toBe("docker-managed");
+        expect(calls[0]).toMatchObject({
+            dryRun: false,
+            policyId: "docker-managed",
+        });
         expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
+
+        expect(
+            await Effect.runPromise(
+                executor(executionContext([]), {
+                    dryRun: true,
+                    policyId: "docker-managed",
+                })
+            )
+        ).toMatchObject({
+            dryRun: true,
+            summary: { actionCounts: { rotated: 1 }, dryRun: true },
+        });
 
         expect(
             Effect.runPromise(
@@ -100,7 +136,45 @@ describe("worker-only job executor registry", () => {
                 })
             )
         ).rejects.toBeInstanceOf(Error);
-        expect(calls).toHaveLength(1);
+        expect(
+            Effect.runPromise(
+                executor(executionContext([]), {
+                    dryRun: true,
+                    policyId: "host-rsyslog",
+                })
+            )
+        ).rejects.toBeInstanceOf(Error);
+        expect(calls).toHaveLength(2);
+
+        expect(
+            Effect.runPromise(
+                createLogMaintenanceJobExecutor({
+                    run: () => Promise.resolve(undefined),
+                })(executionContext([]), { policyId: "docker-managed" })
+            )
+        ).rejects.toBeInstanceOf(Error);
+        expect(
+            Effect.runPromise(
+                createLogMaintenanceJobExecutor({
+                    run: () =>
+                        Promise.resolve({
+                            actionCounts: {
+                                compressed: 0,
+                                deleted: 0,
+                                error: 0,
+                                missing: 0,
+                                rotated: 1,
+                                skipped: 0,
+                            },
+                            checkedTargets: 1,
+                            dryRun: false,
+                            finishedAtMs: 4900,
+                            ok: true,
+                            startedAtMs: 4800,
+                        }),
+                })(executionContext([]), { policyId: "host-rsyslog" })
+            )
+        ).rejects.toBeInstanceOf(Error);
     });
 
     test("keeps the dynamic workspace write executor worker-only and path-free", async () => {
@@ -150,7 +224,7 @@ describe("worker-only job executor registry", () => {
         ]);
 
         const findAction = createJobWorkerActionResolver(
-            { run: () => Promise.resolve() },
+            { run: () => Promise.resolve(undefined) },
             writer
         );
         expect(findAction("workspace-files.apply-write")).toBeDefined();

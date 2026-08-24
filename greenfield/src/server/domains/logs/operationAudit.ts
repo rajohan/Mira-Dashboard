@@ -14,11 +14,22 @@ export interface LogMaintenanceAuditContext {
     readonly requestId: string;
 }
 
-export interface LogMaintenanceAuditEvent extends LogMaintenanceAuditContext {
-    readonly jobRunId?: string;
+interface LogMaintenanceAuditEventFields extends LogMaintenanceAuditContext {
+    readonly dryRun: boolean;
     readonly policyId: LogMaintenancePolicyId;
-    readonly settlement: "attempted" | "failed" | "queued";
 }
+
+export type LogMaintenanceAuditEvent = LogMaintenanceAuditEventFields &
+    (
+        | {
+              readonly jobRunId?: never;
+              readonly settlement: "attempted" | "failed";
+          }
+        | {
+              readonly jobRunId: string;
+              readonly settlement: "queued";
+          }
+    );
 
 /** Durable audit append port supplied by the central database composition. */
 export interface LogMaintenanceAuditWriter {
@@ -40,7 +51,7 @@ function classifiedSettlement(
 }
 
 /**
- * Creates a short admitted audit append containing policy identity but no log data.
+ * Creates a short admitted audit append linking each request to its policy or queued run.
  * @returns Durable, redacted log-maintenance audit writer.
  */
 export function createSqliteLogMaintenanceAuditWriter({
@@ -52,18 +63,20 @@ export function createSqliteLogMaintenanceAuditWriter({
     return Object.freeze({
         record(input: LogMaintenanceAuditEvent) {
             const event = createSecurityAuditEvent({
-                action: "logs.maintenance.request",
+                action: input.dryRun
+                    ? "logs.maintenance.dry-run.request"
+                    : "logs.maintenance.request",
                 actor: input.actor,
                 id: generateId(),
                 metadata: {
-                    ...(input.jobRunId === undefined ? {} : { jobRunId: input.jobRunId }),
                     settlement: classifiedSettlement(input.settlement),
                 },
                 occurredAt: clock(),
                 outcome: classifiedSettlement(input.settlement),
                 requestId: input.requestId,
-                targetId: input.policyId,
-                targetType: "log-maintenance-policy",
+                targetId: input.settlement === "queued" ? input.jobRunId : input.policyId,
+                targetType:
+                    input.settlement === "queued" ? "job-run" : "log-maintenance-policy",
             });
             return writeAdmission.run((markTransactionStarted) =>
                 database.transaction(

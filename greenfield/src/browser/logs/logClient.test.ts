@@ -22,6 +22,7 @@ describe("logClient", () => {
 
         await detachedQuery("logs.listSources", {});
         await detachedMutation("logs.requestMaintenance", {
+            dryRun: false,
             idempotencyKey: "a".repeat(32),
             policyId: "docker-managed",
         });
@@ -29,6 +30,7 @@ describe("logClient", () => {
         expect(Object.isFrozen(client)).toBeTrue();
         expect(query).toHaveBeenCalledWith("logs.listSources", {});
         expect(mutation).toHaveBeenCalledWith("logs.requestMaintenance", {
+            dryRun: false,
             idempotencyKey: "a".repeat(32),
             policyId: "docker-managed",
         });

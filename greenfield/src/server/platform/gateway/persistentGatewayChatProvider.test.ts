@@ -1823,6 +1823,74 @@ describe("persistent Gateway chat provider", () => {
         ]);
     });
 
+    test("projects the installed compaction lifecycle without false completion", async () => {
+        const harness = createHarness({});
+        const projected: unknown[] = [];
+        await harness.provider.subscribeChat({
+            onEvent: (event) => {
+                projected.push(event);
+            },
+            onGap: () => {},
+            onReconciliationRequired: () => {},
+            runWatermarks: [],
+            sessionKey,
+        });
+        const deliver = async (
+            data: Readonly<Record<string, unknown>>,
+            seq: number
+        ): Promise<void> =>
+            harness.deliverChat({
+                connectionGeneration: 1,
+                frame: {
+                    event: "agent",
+                    payload: {
+                        data,
+                        runId: "compaction-run",
+                        seq,
+                        sessionKey,
+                        stream: "compaction",
+                        ts: seq,
+                    },
+                },
+                receivedAtMs: 1000 + seq,
+            });
+
+        await deliver({ phase: "start" }, 1);
+        await deliver({ completed: false, phase: "end", willRetry: true }, 2);
+        await deliver({ phase: "start" }, 3);
+        await deliver({ completed: true, phase: "end", willRetry: false }, 4);
+        await deliver({ completed: false, phase: "end", willRetry: false }, 5);
+
+        expect(projected).toEqual([
+            expect.objectContaining({
+                kind: "compaction",
+                phase: "active",
+                providerRunId: "compaction-run",
+                providerSequence: 1,
+            }),
+            expect.objectContaining({
+                kind: "compaction",
+                phase: "active",
+                providerSequence: 2,
+            }),
+            expect.objectContaining({
+                kind: "compaction",
+                phase: "active",
+                providerSequence: 3,
+            }),
+            expect.objectContaining({
+                kind: "compaction",
+                phase: "complete",
+                providerSequence: 4,
+            }),
+            expect.objectContaining({
+                kind: "compaction",
+                phase: "inactive",
+                providerSequence: 5,
+            }),
+        ]);
+    });
+
     test("projects Codex preamble progress items onto the thinking stream", async () => {
         const harness = createHarness({});
         const projected: unknown[] = [];

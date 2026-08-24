@@ -40,7 +40,7 @@ import {
 import { createJobRealtimeSideEffects } from "./sideEffects.ts";
 
 const findJobWorkerAction = createJobWorkerActionResolver({
-    run: () => Promise.resolve(),
+    run: () => Promise.resolve(undefined),
 });
 
 const releaseId = "a".repeat(40);
@@ -1385,6 +1385,48 @@ describe("durable job worker coordinator", () => {
             scheduledJobId: schedule.id,
             scheduledJobVersion: schedule.version,
             triggerType: "schedule",
+        });
+    });
+
+    test("requests global admission for the managed log-maintenance schedule", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const definition = jobActionDefinitions.find(
+            ({ actionKey }) => actionKey === "maintenance.rotate-logs"
+        );
+        if (definition === undefined)
+            throw new Error("Missing log-maintenance definition");
+        if (definition.defaultSchedule.kind !== "interval") {
+            throw new Error("Expected an interval log-maintenance cadence");
+        }
+        const schedule = intervalSchedule({
+            actionKey: definition.actionKey,
+            actionPayloadJson: JSON.stringify(definition.actionPayload),
+            attemptLimit: definition.attemptLimit,
+            cancellationPolicy: definition.cancellationPolicy,
+            description: definition.description,
+            id: definition.scheduleId,
+            intervalMs: definition.defaultSchedule.intervalMs,
+            name: definition.displayName,
+            priority: definition.priority,
+            resourceClass: definition.resourceClass,
+            resourceKeysJson: JSON.stringify(definition.resourceKeys),
+            retrySafe: definition.retrySafe,
+            timeoutMs: definition.timeoutMs,
+        });
+        const fixture = repositoryFixture({ dueSchedules: [schedule] });
+        const baseOptions = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...baseOptions,
+            actionDefinitions: [definition],
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.enqueues.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.enqueues[0]).toMatchObject({
+            rejectWhenActionActive: true,
+            scheduleId: definition.scheduleId,
         });
     });
 

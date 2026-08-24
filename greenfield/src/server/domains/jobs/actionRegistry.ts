@@ -22,6 +22,7 @@ import {
 } from "../../../contracts/jobModel.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import type { JsonObject } from "../../../shared/json.ts";
+import { logMaintenanceJobActionKey } from "../../../shared/logMaintenanceUnits.ts";
 import { boundedControlSafeTextSchema } from "../../../shared/validation.ts";
 
 export type JobInitialDuePolicy = "immediate" | "next-occurrence";
@@ -29,8 +30,7 @@ export type JobManualExposure = "cache-write" | "jobs-write" | "none";
 export type JobActionEventWriteResult = "appended" | "dropped" | "truncated";
 export type JobCacheAttemptWriteResult = "committed" | "lost-claim";
 
-/** Exact durable action identity for worker-owned fixed-policy log maintenance. */
-export const logMaintenanceJobActionKey = "maintenance.rotate-logs";
+export { logMaintenanceJobActionKey } from "../../../shared/logMaintenanceUnits.ts";
 /** Automatic schedule runs only the custom managed application/container policy. */
 export const logMaintenanceJobScheduleId = "maintenance.rotate-managed-logs";
 /** Worker-only dynamic action used for one already-spooled structural file write. */

@@ -593,6 +593,9 @@ const chatRuntimeProjectionPartVariantSchema = v.variant("kind", [
     v.strictObject({
         id: boundedControlSafeTextSchema(256, "Chat item id is invalid"),
         kind: v.literal("item"),
+        occurredAtMs: v.optional(
+            timestampMillisecondsSchema("Chat item timestamp is invalid")
+        ),
         sequence: chatRuntimeEventSequenceSchema,
         text: v.optional(chatDiagnosticTextSchema),
         type: boundedControlSafeTextSchema(128, "Chat item type is invalid"),

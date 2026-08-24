@@ -161,7 +161,7 @@
             "searchNormalizer": null,
             "sourceRouteName": "logs",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "path": "/logs",
                 "phase": "phase-5"
             }

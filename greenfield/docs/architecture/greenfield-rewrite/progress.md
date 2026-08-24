@@ -14,7 +14,7 @@ closes a phase; dated entries below provide the evidence, not a second status so
 | 2 — Trust and transport             | Complete for the stated server scope | Authentication, MFA, WebAuthn, automation credentials, audit, authenticated renewable SSE, one-shot native Gateway bootstrap verification, and the consolidated [threat model](../../security/greenfield-phase-two-threat-model.md) have executable evidence. Browser UI and production cutover remain later gates.                                                                                                                                                                                                                                                                                                                                                          |
 | 3 — Core operator domains           | Started                              | Task and agent-directory parity are implemented with durable history, realtime invalidation, and browser workflows. Monitoring ingestion plus report, incident, and notification server/browser parity are implemented. Dashboard-local durable schedules/jobs, real worker execution, their `/jobs` operator UI, the first claim-fenced `system.host` cache provider, its cache browser, and bounded system metrics are implemented. Root composition covers every implemented Phase 3 operator domain, and Phase 4A now supplies the OpenClaw-cron half of `/jobs`. Full root parity and privileged/external providers remain later gates, so the Phase 3 exit stays open. |
 | 4 — Gateway and chat                | Started                              | The current installed OpenClaw source is hash-pinned for the persistent sessions, cron, chat, companion, task, and media surfaces. Process-owned Gateway lifecycle, durable realtime invalidation, sessions and agent availability, OpenClaw cron/tasks, the compact heartbeat, the durable chat journal/runtime, bounded history and reconciliation, attachments/media proxy, and the `/chat` frontend are implemented. Recorded contract, protocol, service, browser, restart, load-boundary, and security tests cover the slice; live Gateway smoke/restart evidence and the Phase 4 exit gate remain open.                                                               |
-| 5 — Privileged and external domains | Started                              | Files now has named-root browsing, ticketed raw transfer, bounded spooling, CAS writes, worker execution, and browser workflows. Logs has redacted named-source reads plus separate custom app/container rotation and fixed host-logrotate policies. Terminal is a worker-owned interactive PTY over a hardened WebSocket with bounded reconnect replay. Docker control, database, Moltbook, settings, GitHub, deployment, backup, and the remaining privileged adapters stay open; the Phase 5 exit gate is not claimed.                                                                                                                                                    |
+| 5 — Privileged and external domains | Started                              | Files now has named-root browsing, ticketed raw transfer, bounded spooling, CAS writes, worker execution, and browser workflows. Logs has redacted named-source reads, durable active/latest-terminal maintenance status, worker-owned managed dry runs, separate custom app/container rotation, fixed host-logrotate policies, and closed reviewed `/logs` parity. Terminal is a worker-owned interactive PTY over a hardened WebSocket with bounded reconnect replay. Docker control, database, Moltbook, settings, GitHub, deployment, backup, full Files parity, and the remaining privileged adapters stay open; the Phase 5 exit gate is not claimed.                  |
 | 6 — Parity, hardening, and cutover  | Not started                          | Full UI parity, generated `/docs`, load/resource/restore evidence, cutover rehearsal, fresh production database, and legacy removal remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ### 2026-08-03 — Phase 0 started
@@ -1274,9 +1274,10 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
 - Logs exposes a path-free catalog for exact Dashboard files, exact host text logs, and bounded
   dated OpenClaw files. Descriptor reads enforce owner, mode, link, type, size, and partial-read
   checks before centralized secret redaction; stable line identities derive only from redacted
-  text. Tail and search remain bounded and browser-session-only. The `/logs` route retains validated
-  data through safe failures and queues only fixed reviewed maintenance policy IDs after recent
-  MFA, durable audit, and job admission. The worker periodically probes its managed rotation engine
+  text. Tail and search remain bounded and browser-session-only. The `/logs` route hides cached
+  snapshots after source-availability or read-refresh failures rather than rendering or exporting
+  stale lines, and queues only fixed reviewed maintenance policy IDs after recent MFA, durable
+  audit, and job admission. The worker periodically probes its managed rotation engine
   and only `LoadState` for the four fixed host units, then atomically publishes a private,
   contract-ordered policy-ID projection under project-local log-maintenance state. The web process
   has no process or rotation-state authority: it reads only that bounded `0600` projection and
@@ -1309,3 +1310,28 @@ full-browser parity, production rehearsal, cutover, and legacy deletion remain o
   reviewed PTY replacement as implemented; `/files`, `/logs`, and legacy rotation-status parity
   remain planned until their outstanding full-parity behavior and real runtime status exist. The
   other Phase 5 domains and the aggregate privileged-operation exit gate remain open.
+
+### 2026-08-10 — Phase 5 Logs parity closed
+
+- Maintenance status now reads the five exact real-run payloads plus managed dry-run activity
+  through one bounded repository snapshot. Each policy exposes a running-preferred active run
+  separately from its latest terminal real run, while successful managed results project only
+  bounded path-free aggregate counts. Dry-run jobs remain independently observable and do not
+  replace the policy's real-run history.
+- `docker-managed` dry runs use the same durable recent-MFA, audit, admission, worker execution,
+  and settlement path as real maintenance. Host dry runs fail closed before invoking the fixed
+  system broker. Unknown worker result content never crosses the contract boundary.
+- The `/logs` browser keeps maintenance controls available even with no configured read sources,
+  locks all policies while the shared `host.logs` resource is active, follows the requested run
+  through realtime invalidation with a bounded polling fallback, and renders only the validated
+  terminal summary. Failed detail reads recover without leaving the controls permanently locked.
+- Credential redaction consumes complete scalar, structured, malformed, authorization, and cookie
+  values before search matching. Search inspects at most 4,000 newest physical lines per request,
+  and line identities use framed, redacted generation tuples. Managed copy-truncate publishes a
+  source-specific `rotating` marker before truncation and commits the pending epoch only after file
+  sync; a fresh worker instance safely completes interrupted pre-truncate, empty, and below-threshold
+  regrowth cases while web reads remain fail-closed. Queued maintenance audit rows retain only the
+  public policy target, request identity, and classified settlement metadata.
+- The reviewed `/logs` route plus legacy maintenance status, managed dry-run, and real-run
+  operations are now recorded as implemented. `/files`, Docker control, database, Moltbook,
+  settings, GitHub, delivery, backup, and the aggregate Phase 5 exit gate remain open.

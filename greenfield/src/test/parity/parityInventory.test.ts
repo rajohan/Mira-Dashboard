@@ -57,6 +57,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "/agents",
             "/chat",
             "/login",
+            "/logs",
             "/reports",
             "/sessions",
             "/tasks",
@@ -156,5 +157,28 @@ describe("reviewed pre-cutover parity inventory", () => {
                 )
                 .map(({ id }) => id)
         ).toEqual([]);
+    });
+
+    test("keeps the reviewed Phase 5 Logs slice closed", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const logsRoute = reviewed.frontend.routes.find(({ path }) => path === "/logs");
+        const logMaintenanceEndpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ id }) =>
+                id === "GET /api/ops/log-rotation/status" ||
+                id === "POST /api/ops/log-rotation/dry-run" ||
+                id === "POST /api/ops/log-rotation/run"
+        );
+
+        expect(logsRoute?.target.delivery).toBe("implemented");
+        expect(logMaintenanceEndpoints.map(({ id }) => id)).toEqual([
+            "GET /api/ops/log-rotation/status",
+            "POST /api/ops/log-rotation/dry-run",
+            "POST /api/ops/log-rotation/run",
+        ]);
+        expect(
+            logMaintenanceEndpoints.map(({ target }) =>
+                target.kind === "reviewed-removal" ? target.kind : target.delivery
+            )
+        ).toEqual(["implemented", "implemented", "implemented"]);
     });
 });

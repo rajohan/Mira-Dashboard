@@ -21,6 +21,8 @@ import * as v from "valibot";
 
 import {
     jobActionKeySchema,
+    jobPayloadMaximumBytes,
+    jobPayloadSchema,
     jobRunEventMaximum,
     jobRunEventMessageMaximumBytes,
     jobRunPayloadEventMaximum,
@@ -45,6 +47,10 @@ import {
 } from "../../../contracts/schedules.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import {
+    logMaintenanceJobActionKey,
+    logMaintenanceJobPayloadIndexMaximumBytes,
+} from "../../../shared/logMaintenanceUnits.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import { auditEvents } from "../../database/schema/auditEvents.ts";
 import { jobDisableIntents } from "../../database/schema/jobDisableIntents.ts";
@@ -164,6 +170,18 @@ export interface ActiveActionPayloadPage {
     readonly truncated: boolean;
 }
 
+export interface ReadActionPayloadRunSnapshotsInput {
+    readonly actionKey: string;
+    readonly payloadJsons: readonly string[];
+}
+
+/** Latest active and terminal runs for one exact canonical action payload. */
+export interface ActionPayloadRunSnapshot {
+    readonly activeRun?: JobRunRecord;
+    readonly lastRun?: JobRunRecord;
+    readonly payloadJson: string;
+}
+
 export interface ReadQueueStateInput {
     readonly minimumHeartbeatAt: Date;
 }
@@ -188,6 +206,7 @@ export interface ReconcileSchedulesInput {
 
 export interface EnqueueManualRunInput extends JobMutationSideEffects {
     readonly queuedEvent: JobRunEventInsert;
+    readonly rejectWhenActionActive?: boolean;
     readonly run: JobRunInsert;
 }
 
@@ -234,6 +253,7 @@ export interface DueScheduleEnqueueInput extends JobMutationSideEffects {
     readonly at: Date;
     readonly nextRunAt: Date;
     readonly observedNextRunAt: Date;
+    readonly rejectWhenActionActive?: boolean;
     readonly run: JobRunInsert;
     readonly scheduleId: string;
 }
@@ -451,6 +471,9 @@ export interface JobRepositoryReader {
     listScheduleRuns(input: ListScheduleRunsInput): JobRunRecord[];
     listSchedules(input: ListSchedulesInput): ScheduleRecordWithRelations[];
     readClaimCancellation(input: ClaimFenceInput): JobClaimCancellation;
+    readActionPayloadRunSnapshots(
+        input: ReadActionPayloadRunSnapshotsInput
+    ): readonly ActionPayloadRunSnapshot[];
     readQueueState(input: ReadQueueStateInput): JobQueueState;
     readWorkerControl(): JobWorkerControlRecord;
 }
@@ -495,12 +518,25 @@ export interface JobRepository extends JobRepositoryReader {
 const claimCandidateMaximum = 32;
 const recoveryBatchMaximum = 32;
 const activeActionPayloadMaximum = 256;
-const terminalRunStates = new Set<JobRunState>([
+const actionPayloadRunSnapshotMaximum = 32;
+const activeRunStateList = [
+    "queued",
+    "running",
+] as const satisfies readonly JobRunState[];
+const terminalRunStateList = [
     "cancelled",
     "failed",
     "succeeded",
     "timed-out",
-]);
+] as const satisfies readonly JobRunState[];
+// SQLite partial-index matching requires the same literal state predicates as the DDL.
+function literalStateList(states: readonly JobRunState[]): SQL {
+    return sql.raw(states.map((state) => `'${state}'`).join(", "));
+}
+const activeStateFilter = sql`${jobRuns.state} IN (${literalStateList(activeRunStateList)})`;
+const terminalStateFilter = sql`${jobRuns.state} IN (${literalStateList(terminalRunStateList)})`;
+const logMaintenanceSnapshotScopeFilter = sql`${jobRuns.actionKey} = ${sql.raw(`'${logMaintenanceJobActionKey}'`)} AND length(CAST(${jobRuns.payloadJson} AS BLOB)) <= ${sql.raw(String(logMaintenanceJobPayloadIndexMaximumBytes))}`;
+const terminalRunStates = new Set<JobRunState>(terminalRunStateList);
 
 function requiredRow<T>(row: T | undefined, operation: string): T {
     if (row === undefined) {
@@ -758,13 +794,87 @@ class DrizzleJobReader implements JobRepositoryReader {
                     inArray(jobRuns.state, ["queued", "running"])
                 )
             )
-            .orderBy(asc(jobRuns.queuedAt), asc(jobRuns.id))
+            .orderBy(desc(jobRuns.state), desc(jobRuns.queuedAt), desc(jobRuns.id))
             .limit(input.limit + 1)
             .all();
         return {
             payloads: rows.slice(0, input.limit).map(({ payloadJson }) => payloadJson),
             truncated: rows.length > input.limit,
         };
+    }
+
+    /**
+     * Executes every bounded payload lookup inside this reader's one deferred snapshot.
+     * @returns Input-ordered active and terminal observations for each payload.
+     */
+    public readActionPayloadRunSnapshots(
+        input: ReadActionPayloadRunSnapshotsInput
+    ): readonly ActionPayloadRunSnapshot[] {
+        const actionKey = v.parse(jobActionKeySchema, input.actionKey);
+        assertLimit(
+            input.payloadJsons.length,
+            actionPayloadRunSnapshotMaximum,
+            "action payload run snapshot"
+        );
+        const usesMaintenanceStatusIndex = actionKey === logMaintenanceJobActionKey;
+        const payloadJsons = input.payloadJsons.map((payloadJson) => {
+            if (utf8ByteLength(payloadJson) > jobPayloadMaximumBytes) {
+                throw new TypeError(
+                    "Jobs repository action payload is outside its budget"
+                );
+            }
+            const canonical = JSON.stringify(
+                v.parse(jobPayloadSchema, parseJsonText(payloadJson))
+            );
+            if (
+                usesMaintenanceStatusIndex &&
+                utf8ByteLength(canonical) > logMaintenanceJobPayloadIndexMaximumBytes
+            ) {
+                throw new TypeError(
+                    "Jobs repository log-maintenance payload is outside its status budget"
+                );
+            }
+            return canonical;
+        });
+        if (new Set(payloadJsons).size !== payloadJsons.length) {
+            throw new TypeError(
+                "Jobs repository action payload run snapshots must be unique"
+            );
+        }
+        return payloadJsons.map((payloadJson) => {
+            const actionCondition = eq(jobRuns.actionKey, actionKey);
+            const activeRow = this.database
+                .select()
+                .from(jobRuns)
+                .where(
+                    and(
+                        actionCondition,
+                        eq(jobRuns.payloadJson, payloadJson),
+                        activeStateFilter
+                    )
+                )
+                .orderBy(desc(jobRuns.state), desc(jobRuns.queuedAt), desc(jobRuns.id))
+                .get();
+            const lastRow = this.database
+                .select()
+                .from(jobRuns)
+                .where(
+                    and(
+                        usesMaintenanceStatusIndex
+                            ? logMaintenanceSnapshotScopeFilter
+                            : actionCondition,
+                        eq(jobRuns.payloadJson, payloadJson),
+                        terminalStateFilter
+                    )
+                )
+                .orderBy(desc(jobRuns.queuedAt), desc(jobRuns.id))
+                .get();
+            return {
+                ...(activeRow === undefined ? {} : { activeRun: parseRun(activeRow) }),
+                ...(lastRow === undefined ? {} : { lastRun: parseRun(lastRow) }),
+                payloadJson,
+            };
+        });
     }
 
     public findRunDetail(input: ListJobRunEventsInput): JobRunDetailRecord | undefined {
@@ -1241,6 +1351,14 @@ class DrizzleJobWriter extends DrizzleJobReader {
             const active = this.findActiveRunForSchedule(run.scheduledJobId);
             if (active !== undefined) return { kind: "active", run: active };
         }
+        if (input.rejectWhenActionActive === true) {
+            const active = this.#transaction
+                .select()
+                .from(jobRuns)
+                .where(and(eq(jobRuns.actionKey, run.actionKey), activeStateFilter))
+                .get();
+            if (active !== undefined) return { kind: "active", run: parseRun(active) };
+        }
         const inserted = this.#transaction.insert(jobRuns).values(run).returning().get();
         const record = parseRun(requiredRow(inserted, "manual run insert"));
         this.#insertSuppliedEvent(input.queuedEvent);
@@ -1393,6 +1511,18 @@ class DrizzleJobWriter extends DrizzleJobReader {
         }
         const active = this.findActiveRunForSchedule(schedule.id);
         if (active !== undefined) return { kind: "active", run: active };
+        if (input.rejectWhenActionActive === true) {
+            const activeActionRun = this.#transaction
+                .select()
+                .from(jobRuns)
+                .where(
+                    and(eq(jobRuns.actionKey, validatedRun.actionKey), activeStateFilter)
+                )
+                .get();
+            if (activeActionRun !== undefined) {
+                return { kind: "active", run: parseRun(activeActionRun) };
+            }
+        }
         if (
             validatedRun.triggerType !== "schedule" ||
             validatedRun.scheduledJobId !== schedule.id ||
@@ -2571,6 +2701,8 @@ export function createJobRepository(
             read((reader) => reader.listSchedules(input)),
         readClaimCancellation: (input: ClaimFenceInput) =>
             read((reader) => reader.readClaimCancellation(input)),
+        readActionPayloadRunSnapshots: (input: ReadActionPayloadRunSnapshotsInput) =>
+            read((reader) => reader.readActionPayloadRunSnapshots(input)),
         readQueueState: (input: ReadQueueStateInput) =>
             read((reader) => reader.readQueueState(input)),
         readWorkerControl: () => read((reader) => reader.readWorkerControl()),

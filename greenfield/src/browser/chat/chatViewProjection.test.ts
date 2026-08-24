@@ -6,6 +6,7 @@ import {
     type GatewaySession,
     type ListGatewaySessionsResult,
 } from "../../contracts/gatewaySessions.ts";
+import { sortChatDisplayMessages } from "./chatMessageOrdering.ts";
 import {
     mergeChatMessages,
     projectChatHistory,
@@ -936,5 +937,194 @@ describe("chat view projection", () => {
         expect(
             mergeChatMessages(canonical, runtime, new Set()).map(({ id }) => id)
         ).toEqual(["message-1", "message-2", "runtime-1", "runtime-2"]);
+    });
+
+    test("sorts provider groups transitively and independently of input order", () => {
+        const providerLaterSequence = {
+            attachments: [],
+            id: "provider-later-sequence",
+            parts: [],
+            providerRunId: "provider-group",
+            role: "assistant" as const,
+            sequence: 2,
+            sessionKey,
+            timestampMs: 100,
+        };
+        const providerEarlierSequence = {
+            ...providerLaterSequence,
+            id: "provider-earlier-sequence",
+            sequence: 1,
+            timestampMs: 300,
+        };
+        const ordinary = {
+            ...providerLaterSequence,
+            id: "ordinary",
+            providerRunId: undefined,
+            sequence: 3,
+            timestampMs: 200,
+        };
+        const permutations = [
+            [providerLaterSequence, providerEarlierSequence, ordinary],
+            [providerLaterSequence, ordinary, providerEarlierSequence],
+            [providerEarlierSequence, providerLaterSequence, ordinary],
+            [providerEarlierSequence, ordinary, providerLaterSequence],
+            [ordinary, providerLaterSequence, providerEarlierSequence],
+            [ordinary, providerEarlierSequence, providerLaterSequence],
+        ];
+
+        expect(
+            permutations.map((messages) =>
+                sortChatDisplayMessages(messages).map(({ id }) => id)
+            )
+        ).toEqual(
+            Array.from({ length: permutations.length }, () => [
+                "provider-earlier-sequence",
+                "provider-later-sequence",
+                "ordinary",
+            ])
+        );
+    });
+
+    test("orders canonically equivalent distinct ids and run groups deterministically", () => {
+        const nfc = "é";
+        const nfd = "e\u0301";
+        const messageWith = (id: string, providerRunId: string) => ({
+            attachments: [],
+            id,
+            parts: [],
+            providerRunId,
+            role: "assistant" as const,
+            sequence: 1,
+            sessionKey,
+            timestampMs: 100,
+        });
+        const equivalentIds = [
+            messageWith(`message-${nfc}`, "same-run"),
+            messageWith(`message-${nfd}`, "same-run"),
+        ];
+        const equivalentGroups = [
+            messageWith("shared-message", `run-${nfc}`),
+            messageWith("shared-message", `run-${nfd}`),
+        ];
+
+        for (const input of [equivalentIds, equivalentIds.toReversed()]) {
+            expect(sortChatDisplayMessages(input).map(({ id }) => id)).toEqual([
+                `message-${nfd}`,
+                `message-${nfc}`,
+            ]);
+        }
+        for (const input of [equivalentGroups, equivalentGroups.toReversed()]) {
+            expect(
+                sortChatDisplayMessages(input).map(({ providerRunId }) => providerRunId)
+            ).toEqual([`run-${nfd}`, `run-${nfc}`]);
+        }
+    });
+
+    test("anchors repeated same-text steers to the exact provider run", () => {
+        const canonicalUser = (id: string, providerRunId: string, sequence: number) => ({
+            attachments: [],
+            id,
+            parts: [{ kind: "text" as const, text: "Continue" }],
+            providerRunId,
+            role: "user" as const,
+            sequence,
+            sessionKey,
+        });
+        const external = (
+            id: string,
+            sequence: number,
+            precedingUserTextAnchor?: string
+        ) => ({
+            attachments: [],
+            id,
+            parts: [{ kind: "thinking" as const, status: "running" as const, text: id }],
+            ...(precedingUserTextAnchor === undefined ? {} : { precedingUserTextAnchor }),
+            providerRunId: "provider-current",
+            role: "assistant" as const,
+            sequence,
+            sessionKey,
+        });
+        const activityBeforeId = "external:provider-current:segment:activity-before";
+        const activityAfterId = "external:provider-current:segment:activity-after";
+        const merged = mergeChatMessages(
+            [
+                canonicalUser("older-same-text", "provider-older", 1),
+                canonicalUser("current-steer", "provider-current", 3),
+            ],
+            [external(activityBeforeId, 2), external(activityAfterId, 4, "Continue")],
+            new Set()
+        );
+
+        expect(merged.map(({ id }) => id)).toEqual([
+            "older-same-text",
+            activityBeforeId,
+            "current-steer",
+            activityAfterId,
+        ]);
+    });
+
+    test("retires every external segment only when canonical assistant coverage arrives", () => {
+        const runtime = [
+            {
+                attachments: [],
+                id: "external:provider:segment:thinking",
+                parts: [
+                    {
+                        kind: "thinking" as const,
+                        status: "running" as const,
+                        text: "Working",
+                    },
+                ],
+                providerRunId: "provider-covered",
+                role: "assistant" as const,
+                sequence: 1,
+                sessionKey,
+            },
+            {
+                attachments: [],
+                id: "external:provider:segment:tool",
+                parts: [
+                    {
+                        callId: "call-1",
+                        kind: "tool" as const,
+                        name: "bash",
+                        status: "completed" as const,
+                    },
+                ],
+                providerRunId: "provider-covered",
+                role: "assistant" as const,
+                sequence: 2,
+                sessionKey,
+            },
+        ];
+        const canonicalUser = {
+            attachments: [],
+            id: "canonical-user",
+            parts: [{ kind: "text" as const, text: "Prompt" }],
+            providerRunId: "provider-covered",
+            role: "user" as const,
+            sequence: 1,
+            sessionKey,
+        };
+        expect(
+            mergeChatMessages([canonicalUser], runtime, new Set()).map(({ id }) => id)
+        ).toContain("external:provider:segment:tool");
+
+        expect(
+            mergeChatMessages(
+                [
+                    canonicalUser,
+                    {
+                        ...canonicalUser,
+                        id: "canonical-assistant",
+                        parts: [{ kind: "text" as const, text: "Done" }],
+                        role: "assistant" as const,
+                        sequence: 2,
+                    },
+                ],
+                runtime,
+                new Set()
+            ).map(({ id }) => id)
+        ).toEqual(["canonical-user", "canonical-assistant"]);
     });
 });

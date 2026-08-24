@@ -1,29 +1,72 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { LogMaintenancePolicyId } from "../../contracts/logs.ts";
+import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
+import type {
+    LogMaintenancePolicyId,
+    LogMaintenanceStatusOutput,
+    RequestLogMaintenanceOutput,
+} from "../../contracts/logs.ts";
+import { logTailDefaultRows } from "../../contracts/logs.ts";
+import { logMaintenanceAvailabilityMaximumAgeMs } from "../../shared/logMaintenanceAvailabilityProjection.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { useRealtimeQueryInvalidation } from "../api/useRealtimeQueryInvalidation.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
-import { PageState } from "../ui/PageState.tsx";
+import { jobRunDetailQueryOptions } from "../jobs/jobQueries.ts";
 import { logClient } from "./logClient.ts";
 import { logFailureMessage } from "./logPresentation.ts";
 import {
-    logMaintenanceQueryKey,
     logMaintenanceQueryOptions,
+    logMaintenanceQueryKey,
+    logMaintenanceRealtimeFallbackRefreshIntervalMs,
+    logMaintenanceRealtimeRefreshDelayMs,
     logSnapshotQueryOptions,
     logSourcesQueryOptions,
+    refreshLogMaintenanceQueries,
     type LogSnapshotSelection,
 } from "./logQueries.ts";
 import { LogsView } from "./LogsView.tsx";
 
+const disabledRunId = "00000000-0000-7000-8000-000000000000";
+const unavailableMaintenanceAuthorityMessage =
+    "Maintenance status is temporarily unavailable.";
+
+interface RequestedRunTracking {
+    readonly maintenanceDataUpdatedAt: number;
+    readonly maintenanceObservedAtMs?: number;
+    readonly request: RequestLogMaintenanceOutput;
+}
+
 /** @returns Session-scoped source inventory, redacted snapshots, and maintenance actions. */
 export function LogsBrowser() {
-    const client = logClient(useDashboardTrpcClient());
+    const dashboardClient = useDashboardTrpcClient();
+    const client = logClient(dashboardClient);
     const queryClient = useQueryClient();
     const mutationBoundary = useAuthenticatedMutationBoundary();
     const sourcesQuery = useQuery(logSourcesQueryOptions(client));
     const maintenanceQuery = useQuery(logMaintenanceQueryOptions(client));
+    const [maintenanceAuthorityNowMs, setMaintenanceAuthorityNowMs] = useState(() =>
+        Date.now()
+    );
+    const [requestedRunTracking, setRequestedRunTracking] =
+        useState<RequestedRunTracking>();
+    const requestedRunRequest = requestedRunTracking?.request;
+    const requestedRunQuery = useQuery({
+        ...jobRunDetailQueryOptions(
+            dashboardClient,
+            requestedRunRequest?.jobRunId ?? disabledRunId
+        ),
+        enabled: requestedRunRequest !== undefined,
+    });
+    useRealtimeQueryInvalidation({
+        fallbackRefreshIntervalMs: logMaintenanceRealtimeFallbackRefreshIntervalMs,
+        refreshDelayMs: logMaintenanceRealtimeRefreshDelayMs,
+        refreshQueries: (cache) =>
+            refreshLogMaintenanceQueries(cache, requestedRunRequest?.jobRunId),
+        topic: jobRealtimeTopics.runs,
+    });
     const [selectedSourceId, setSelectedSourceId] = useState<string>();
+    const [rowCount, setRowCount] = useState(logTailDefaultRows);
     const [search, setSearch] =
         useState<Readonly<{ readonly query: string; readonly sourceId: string }>>();
     const sources = sourcesQuery.data?.sources ?? [];
@@ -37,36 +80,39 @@ export function LogsBrowser() {
         selection =
             search?.sourceId === selectedSource.id
                 ? {
+                      limit: rowCount,
                       mode: "search",
                       query: search.query,
                       sourceId: selectedSource.id,
                   }
-                : { mode: "tail", sourceId: selectedSource.id };
+                : { limit: rowCount, mode: "tail", sourceId: selectedSource.id };
     }
     const snapshotQuery = useQuery(
         logSnapshotQueryOptions(client, selection, sourceAvailable)
     );
 
-    if (sourcesQuery.isPending && sourcesQuery.data === undefined) {
-        return <PageState label="Loading log sources…" status="loading" />;
-    }
-    if (sourcesQuery.data === undefined) {
-        return (
-            <PageState
-                message={logFailureMessage(sourcesQuery.error)}
-                onRetry={() => void sourcesQuery.refetch()}
-                retryBusy={sourcesQuery.isFetching}
-                status="error"
-                title="Log sources unavailable"
-            />
-        );
-    }
+    useEffect(() => {
+        if (maintenanceQuery.data === undefined || maintenanceQuery.dataUpdatedAt <= 0) {
+            return;
+        }
+        const expiresInMs =
+            maintenanceQuery.dataUpdatedAt +
+            logMaintenanceAvailabilityMaximumAgeMs -
+            Date.now() +
+            1;
+        if (expiresInMs <= 0) return;
+        const timeout = globalThis.setTimeout(() => {
+            setMaintenanceAuthorityNowMs(Date.now());
+        }, expiresInMs);
+        return () => globalThis.clearTimeout(timeout);
+    }, [maintenanceQuery.data, maintenanceQuery.dataUpdatedAt]);
 
-    async function requestMaintenance(policyId: LogMaintenancePolicyId) {
+    async function requestMaintenance(policyId: LogMaintenancePolicyId, dryRun: boolean) {
         const result = await mutationBoundary.run((signal) =>
             client.mutation(
                 "logs.requestMaintenance",
                 {
+                    dryRun,
                     idempotencyKey: globalThis.crypto.randomUUID().replaceAll("-", ""),
                     policyId,
                 },
@@ -74,37 +120,77 @@ export function LogsBrowser() {
             )
         );
         if (mutationBoundary.completionIsCurrent()) {
-            await queryClient.invalidateQueries({
-                exact: true,
-                queryKey: logMaintenanceQueryKey,
+            const currentMaintenanceState =
+                queryClient.getQueryState<LogMaintenanceStatusOutput>(
+                    logMaintenanceQueryKey
+                );
+            setRequestedRunTracking({
+                maintenanceDataUpdatedAt: currentMaintenanceState?.dataUpdatedAt ?? 0,
+                maintenanceObservedAtMs: currentMaintenanceState?.data?.observedAtMs,
+                request: result,
             });
+            await refreshLogMaintenanceQueries(queryClient, result.jobRunId);
         }
         return result;
     }
 
+    async function refreshMaintenance(): Promise<void> {
+        await Promise.allSettled([
+            maintenanceQuery.refetch(),
+            ...(requestedRunRequest === undefined ? [] : [requestedRunQuery.refetch()]),
+        ]);
+    }
+
+    async function refreshAll(): Promise<void> {
+        const maintenanceRefresh = refreshMaintenance();
+        const refreshedSources = await sourcesQuery.refetch();
+        const refreshedSelection = refreshedSources.data?.sources.find(
+            ({ id }) => id === selectedSource?.id
+        );
+        if (refreshedSelection?.availability === "available") {
+            await snapshotQuery.refetch();
+        }
+        await maintenanceRefresh;
+    }
+
+    const globalMaintenanceActive =
+        maintenanceQuery.data?.policies.some(
+            ({ activeRun }) => activeRun !== undefined
+        ) ?? false;
+    const maintenanceAuthorityExpired =
+        maintenanceQuery.data !== undefined &&
+        (maintenanceQuery.dataUpdatedAt <= 0 ||
+            maintenanceAuthorityNowMs - maintenanceQuery.dataUpdatedAt >
+                logMaintenanceAvailabilityMaximumAgeMs);
+    const maintenanceAuthorityUnavailable =
+        maintenanceQuery.error !== null ||
+        maintenanceQuery.isPaused ||
+        maintenanceAuthorityExpired;
+    const maintenanceUpdatedAfterRequest =
+        requestedRunTracking !== undefined &&
+        (maintenanceQuery.dataUpdatedAt > requestedRunTracking.maintenanceDataUpdatedAt ||
+            (maintenanceQuery.data?.observedAtMs !== undefined &&
+                maintenanceQuery.data.observedAtMs >
+                    (requestedRunTracking.maintenanceObservedAtMs ?? 0)));
+    const requestedRunInactiveConfirmed =
+        maintenanceUpdatedAfterRequest &&
+        !maintenanceAuthorityUnavailable &&
+        !globalMaintenanceActive;
+    let maintenanceError: string | undefined;
+    if (maintenanceQuery.error !== null) {
+        maintenanceError = logFailureMessage(maintenanceQuery.error);
+    } else if (maintenanceQuery.isPaused || maintenanceAuthorityExpired) {
+        maintenanceError = unavailableMaintenanceAuthorityMessage;
+    }
     return (
         <LogsView
             maintenance={maintenanceQuery.data}
-            maintenanceError={
-                maintenanceQuery.error === null
-                    ? undefined
-                    : logFailureMessage(maintenanceQuery.error)
-            }
+            maintenanceError={maintenanceError}
             maintenanceLoading={maintenanceQuery.isPending}
+            maintenanceRefreshing={maintenanceQuery.isFetching}
             onClearSearch={() => setSearch(undefined)}
-            onRefresh={() => {
-                void (async () => {
-                    const maintenanceRefresh = maintenanceQuery.refetch();
-                    const refreshedSources = await sourcesQuery.refetch();
-                    const refreshedSelection = refreshedSources.data?.sources.find(
-                        ({ id }) => id === selectedSource?.id
-                    );
-                    if (refreshedSelection?.availability === "available") {
-                        await snapshotQuery.refetch();
-                    }
-                    await maintenanceRefresh;
-                })();
-            }}
+            onRefresh={() => void refreshAll()}
+            onRefreshMaintenance={() => void refreshMaintenance()}
             onRequestMaintenance={requestMaintenance}
             onSearch={(query) => {
                 if (selectedSource !== undefined && sourceAvailable) {
@@ -115,24 +201,46 @@ export function LogsBrowser() {
                 setSelectedSourceId(sourceId);
                 setSearch(undefined);
             }}
+            onRowCountChange={setRowCount}
             refreshing={
                 sourcesQuery.isRefetching ||
-                (sourceAvailable && snapshotQuery.isRefetching) ||
-                maintenanceQuery.isRefetching
+                (sourceAvailable && snapshotQuery.isRefetching)
             }
+            requestedRun={requestedRunQuery.data}
+            requestedRunError={
+                requestedRunQuery.error === null
+                    ? undefined
+                    : logFailureMessage(requestedRunQuery.error)
+            }
+            requestedRunLoading={
+                requestedRunRequest !== undefined && requestedRunQuery.isPending
+            }
+            requestedRunInactiveConfirmed={requestedRunInactiveConfirmed}
+            requestedRunRequest={requestedRunRequest}
+            rowCount={rowCount}
             searchQuery={
                 sourceAvailable && selection?.mode === "search"
                     ? selection.query
                     : undefined
             }
             selectedSourceId={selectedSource?.id}
-            snapshot={sourceAvailable ? snapshotQuery.data : undefined}
+            snapshot={
+                sourceAvailable && snapshotQuery.error === null
+                    ? snapshotQuery.data
+                    : undefined
+            }
             snapshotError={
                 !sourceAvailable || snapshotQuery.error === null
                     ? undefined
                     : logFailureMessage(snapshotQuery.error)
             }
             snapshotLoading={sourceAvailable && snapshotQuery.isPending}
+            sourcesError={
+                sourcesQuery.error === null
+                    ? undefined
+                    : logFailureMessage(sourcesQuery.error)
+            }
+            sourcesLoading={sourcesQuery.isPending && sourcesQuery.data === undefined}
             sources={sources}
         />
     );

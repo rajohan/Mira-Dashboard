@@ -1,9 +1,11 @@
-import { ArrowDown, RefreshCw, RotateCcw, Search, ShieldCheck, X } from "lucide-react";
+import { ArrowDown, Download, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable log must be keyboard-focusable. */
 
+import type { JobRunDetail } from "../../contracts/jobs.ts";
 import {
     logSearchMaximumCharacters,
+    type LogLine as LogLineContract,
     type LogMaintenancePolicyId,
     type LogMaintenanceStatusOutput,
     type LogSnapshotOutput,
@@ -23,7 +25,7 @@ import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
-import { Modal } from "../ui/Modal.tsx";
+import { PageState } from "../ui/PageState.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
@@ -36,26 +38,40 @@ import {
 } from "./logLevelFiltering.ts";
 import { LogLine } from "./LogLine.tsx";
 import { presentRedactedLogLine } from "./logLinePresentation.ts";
-import { logFailureMessage, logSourceGroupLabel } from "./logPresentation.ts";
+import { LogMaintenancePanel } from "./LogMaintenancePanel.tsx";
+import { logSourceGroupLabel } from "./logPresentation.ts";
+import { logSnapshotRowOptions } from "./logQueries.ts";
 
 export interface LogsViewProps {
     readonly maintenance?: LogMaintenanceStatusOutput;
     readonly maintenanceError?: string;
     readonly maintenanceLoading?: boolean;
+    readonly maintenanceRefreshing?: boolean;
     readonly onClearSearch: () => void;
     readonly onRefresh: () => void;
+    readonly onRefreshMaintenance: () => void;
     readonly onRequestMaintenance: (
-        policyId: LogMaintenancePolicyId
+        policyId: LogMaintenancePolicyId,
+        dryRun: boolean
     ) => Promise<RequestLogMaintenanceOutput>;
     readonly onSearch: (query: string) => void;
     readonly onSelectSource: (sourceId: string) => void;
+    readonly onRowCountChange: (rowCount: number) => void;
     readonly refreshing?: boolean;
+    readonly requestedRun?: JobRunDetail;
+    readonly requestedRunError?: string;
+    readonly requestedRunInactiveConfirmed?: boolean;
+    readonly requestedRunLoading?: boolean;
+    readonly requestedRunRequest?: RequestLogMaintenanceOutput;
+    readonly rowCount: number;
     readonly searchQuery?: string;
     readonly selectedSourceId?: string;
     readonly snapshot?: LogSnapshotOutput;
     readonly snapshotError?: string;
     readonly snapshotLoading?: boolean;
     readonly sources: readonly LogSource[];
+    readonly sourcesError?: string;
+    readonly sourcesLoading?: boolean;
 }
 
 function sourceDescription(source: LogSource): string {
@@ -70,15 +86,41 @@ function sourceDescription(source: LogSource): string {
         : `${group} · ${formatByteCount(source.sizeBytes)}`;
 }
 
+function downloadRedactedLogLines(
+    snapshot: LogSnapshotOutput,
+    lines: readonly LogLineContract[]
+): void {
+    const blob = new Blob([lines.map(({ line }) => line).join("\n")], {
+        type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.download = `mira-dashboard-${snapshot.sourceId}-${snapshot.revision.slice(0, 12)}.log`;
+    anchor.hidden = true;
+    anchor.href = url;
+    document.body.append(anchor);
+    try {
+        anchor.click();
+    } finally {
+        anchor.remove();
+        URL.revokeObjectURL(url);
+    }
+}
+
 function LogSnapshot({
     activeLevels,
+    rowCount,
     searchQuery,
     snapshot,
 }: Readonly<{
     readonly activeLevels: ReadonlySet<FilterableLogLevel>;
+    readonly rowCount: number;
     readonly searchQuery?: string;
     readonly snapshot: LogSnapshotOutput;
 }>) {
+    const [clearedLineIds, setClearedLineIds] = useState<ReadonlySet<string>>(
+        () => new Set()
+    );
     const presentedLines = snapshot.lines.map((entry) => ({
         entry,
         presentation: presentRedactedLogLine(entry, {
@@ -86,13 +128,16 @@ function LogSnapshot({
             sourceId: snapshot.sourceId,
         }),
     }));
-    const visibleLines = presentedLines.filter(({ presentation }) =>
+    const unclearedLines = presentedLines.filter(
+        ({ entry }) => !clearedLineIds.has(entry.id)
+    );
+    const visibleLines = unclearedLines.filter(({ presentation }) =>
         logLevelIsVisible(presentation.level, activeLevels)
     );
     const activeLevelKey = filterableLogLevels
         .filter((level) => activeLevels.has(level))
         .join(",");
-    const scopeKey = `${snapshot.sourceId}:${searchQuery ?? "latest"}:${activeLevelKey}`;
+    const scopeKey = `${snapshot.sourceId}:${searchQuery ?? "latest"}:${rowCount}:${activeLevelKey}`;
     const visibleLineCount = visibleLines.length;
     const totalLineCount = snapshot.lines.length;
     const lineCountLabel =
@@ -109,6 +154,15 @@ function LogSnapshot({
                 description="Change your search or refresh this source."
                 headingLevel={3}
                 title="No matching log lines"
+            />
+        );
+    } else if (unclearedLines.length === 0) {
+        linesContent = (
+            <EmptyState
+                className="border-primary-700/70 bg-primary-950/40 mt-4"
+                description="Existing rows stay hidden across refreshes. Newly appended rows will appear here."
+                headingLevel={3}
+                title="Current log buffer cleared"
             />
         );
     } else if (visibleLines.length === 0) {
@@ -189,11 +243,38 @@ function LogSnapshot({
     }
     return (
         <>
-            <div className="text-primary-400 mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                <span>{formatDashboardDateTime(snapshot.observedAtMs)}</span>
-                <span>{formatByteCount(snapshot.scannedBytes)} read</span>
-                <span>{lineCountLabel}</span>
-                {snapshot.hasEarlier && <span>Older lines not shown</span>}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-primary-400 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                    <span>{formatDashboardDateTime(snapshot.observedAtMs)}</span>
+                    <span>{formatByteCount(snapshot.scannedBytes)} read</span>
+                    <span>{lineCountLabel}</span>
+                    {snapshot.hasEarlier && <span>Older lines not shown</span>}
+                </div>
+                <Button
+                    disabled={visibleLines.length === 0}
+                    onClick={() =>
+                        downloadRedactedLogLines(
+                            snapshot,
+                            visibleLines.map(({ entry }) => entry)
+                        )
+                    }
+                    size="sm"
+                    variant="secondary"
+                >
+                    <Icon icon={Download} size="sm" tone="inherit" />
+                    Export
+                </Button>
+                <Button
+                    disabled={unclearedLines.length === 0}
+                    onClick={() => {
+                        setClearedLineIds(new Set(snapshot.lines.map(({ id }) => id)));
+                    }}
+                    size="sm"
+                    variant="secondary"
+                >
+                    <Icon icon={Trash2} size="sm" tone="inherit" />
+                    Clear buffer
+                </Button>
             </div>
             {linesContent}
         </>
@@ -209,51 +290,38 @@ export function LogsView({
     maintenance,
     maintenanceError,
     maintenanceLoading = false,
+    maintenanceRefreshing = false,
     onClearSearch,
     onRefresh,
+    onRefreshMaintenance,
     onRequestMaintenance,
+    onRowCountChange,
     onSearch,
     onSelectSource,
     refreshing = false,
+    requestedRun,
+    requestedRunError,
+    requestedRunInactiveConfirmed = false,
+    requestedRunLoading = false,
+    requestedRunRequest,
+    rowCount,
     searchQuery,
     selectedSourceId,
     snapshot,
     snapshotError,
     snapshotLoading = false,
     sources,
+    sourcesError,
+    sourcesLoading = false,
 }: LogsViewProps) {
-    const [actionError, setActionError] = useState<string>();
-    const [actionStatus, setActionStatus] = useState<string>();
-    const [confirmPolicyId, setConfirmPolicyId] = useState<LogMaintenancePolicyId>();
-    const [runningPolicyId, setRunningPolicyId] = useState<LogMaintenancePolicyId>();
     const [searchDraft, setSearchDraft] = useState(searchQuery ?? "");
     const [activeLevels, setActiveLevels] =
         useState<ReadonlySet<FilterableLogLevel>>(allLogLevels);
     const selectedSource = sources.find(({ id }) => id === selectedSourceId);
-    const confirmedPolicy = maintenance?.policies.find(
-        ({ id }) => id === confirmPolicyId
-    );
 
     function submitSearch() {
         const query = searchDraft.trim();
         if (query.length > 0) onSearch(query);
-    }
-
-    async function runMaintenance(policyId: LogMaintenancePolicyId) {
-        setActionError(undefined);
-        setActionStatus(undefined);
-        setRunningPolicyId(policyId);
-        try {
-            const result = await onRequestMaintenance(policyId);
-            setConfirmPolicyId(undefined);
-            setActionStatus(
-                `${confirmedPolicy?.label ?? "Log maintenance"} was added to the queue as job ${result.jobRunId}.`
-            );
-        } catch (error) {
-            setActionError(logFailureMessage(error));
-        } finally {
-            setRunningPolicyId(undefined);
-        }
     }
 
     let snapshotContent: ReactNode;
@@ -269,23 +337,75 @@ export function LogsView({
         snapshotContent = (
             <LogSnapshot
                 activeLevels={activeLevels}
+                key={`${snapshot.sourceId}:${searchQuery ?? "latest"}:${rowCount}`}
+                rowCount={rowCount}
                 searchQuery={searchQuery}
                 snapshot={snapshot}
             />
         );
     }
 
+    const maintenancePanel = (
+        <LogMaintenancePanel
+            maintenance={maintenance}
+            maintenanceError={maintenanceError}
+            maintenanceLoading={maintenanceLoading}
+            maintenanceRefreshing={maintenanceRefreshing}
+            onRefresh={onRefreshMaintenance}
+            onRequestMaintenance={onRequestMaintenance}
+            requestedRun={requestedRun}
+            requestedRunError={requestedRunError}
+            requestedRunInactiveConfirmed={requestedRunInactiveConfirmed}
+            requestedRunLoading={requestedRunLoading}
+            requestedRunRequest={requestedRunRequest}
+        />
+    );
     if (sources.length === 0) {
+        let sourceState: ReactNode;
+        if (sourcesLoading) {
+            sourceState = <LoadingState label="Loading log sources…" />;
+        } else if (sourcesError === undefined) {
+            sourceState = (
+                <EmptyState
+                    action={
+                        <Button
+                            busy={refreshing}
+                            busyLabel="Refreshing log sources…"
+                            onClick={onRefresh}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Refresh sources
+                        </Button>
+                    }
+                    description="Add a log source to the Dashboard configuration to view it here."
+                    title="No log sources"
+                />
+            );
+        } else {
+            sourceState = (
+                <PageState
+                    headingLevel={2}
+                    message={sourcesError}
+                    onRetry={onRefresh}
+                    retryBusy={refreshing}
+                    status="error"
+                    title="Log sources unavailable"
+                />
+            );
+        }
         return (
-            <EmptyState
-                description="Add a log source to the Dashboard configuration to view it here."
-                title="No log sources"
-            />
+            <div className="space-y-6">
+                {sourceState}
+                {maintenancePanel}
+            </div>
         );
     }
 
     return (
         <div className="space-y-6">
+            <Alert focusOnError={false} message={sourcesError} />
             <Card aria-labelledby="log-source-heading">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                     <div className="min-w-0 flex-1">
@@ -297,16 +417,37 @@ export function LogsView({
                             sensitive values are removed before lines reach this page.
                         </Text>
                     </div>
-                    <Button
-                        busy={refreshing}
-                        busyLabel="Refreshing logs…"
-                        onClick={onRefresh}
-                        size="sm"
-                        variant="secondary"
-                    >
-                        <Icon icon={RefreshCw} size="sm" tone="inherit" />
-                        Refresh
-                    </Button>
+                    <div className="flex w-full gap-2 sm:w-auto">
+                        <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
+                            <Select
+                                ariaLabel="Log rows"
+                                disabled={selectedSource?.availability !== "available"}
+                                onChange={(value) => {
+                                    const selectedRowCount = logSnapshotRowOptions.find(
+                                        (option) => String(option) === value
+                                    );
+                                    if (selectedRowCount !== undefined) {
+                                        onRowCountChange(selectedRowCount);
+                                    }
+                                }}
+                                options={logSnapshotRowOptions.map((option) => ({
+                                    label: `${option} lines`,
+                                    value: String(option),
+                                }))}
+                                value={String(rowCount)}
+                            />
+                        </div>
+                        <Button
+                            busy={refreshing}
+                            busyLabel="Refreshing logs…"
+                            onClick={onRefresh}
+                            size="sm"
+                            variant="secondary"
+                        >
+                            <Icon icon={RefreshCw} size="sm" tone="inherit" />
+                            Refresh
+                        </Button>
+                    </div>
                 </div>
                 <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(14rem,22rem)_minmax(18rem,1fr)]">
                     <FormField
@@ -430,112 +571,7 @@ export function LogsView({
                 {snapshotContent}
             </Card>
 
-            <Card aria-labelledby="log-maintenance-heading">
-                <div className="flex items-start gap-3">
-                    <Icon className="mt-0.5 shrink-0" icon={ShieldCheck} tone="accent" />
-                    <div>
-                        <Heading id="log-maintenance-heading" level={2} size="subsection">
-                            Log maintenance
-                        </Heading>
-                        <Text className="mt-1" tone="muted">
-                            Dashboard rotates application and container logs. System log
-                            cleanup uses the four configured Ubuntu cleanup jobs.
-                        </Text>
-                    </div>
-                </div>
-                <Alert className="mt-4" focusOnError={false} message={maintenanceError} />
-                <Alert
-                    className="mt-4"
-                    focusOnError={false}
-                    message={actionError}
-                    onDismiss={() => setActionError(undefined)}
-                />
-                <Alert
-                    className="mt-4"
-                    focusOnError={false}
-                    message={actionStatus}
-                    onDismiss={() => setActionStatus(undefined)}
-                    variant="success"
-                />
-                {maintenanceLoading && maintenance === undefined ? (
-                    <LoadingState label="Checking log maintenance options…" />
-                ) : (
-                    <ul className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {(maintenance?.policies ?? []).map((policy) => (
-                            <li
-                                className="border-primary-700 bg-primary-950/45 rounded-lg border p-4"
-                                key={policy.id}
-                            >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <p className="text-primary-100 font-medium">
-                                            {policy.label}
-                                        </p>
-                                        <div className="mt-2 flex gap-2">
-                                            <Badge>
-                                                {policy.scope === "docker"
-                                                    ? "Apps and containers"
-                                                    : "System"}
-                                            </Badge>
-                                            <Badge
-                                                variant={
-                                                    policy.state === "queueable"
-                                                        ? "success"
-                                                        : "danger"
-                                                }
-                                            >
-                                                {policy.state === "queueable"
-                                                    ? "Ready"
-                                                    : "Unavailable"}
-                                            </Badge>
-                                        </div>
-                                    </div>
-                                    <Button
-                                        aria-label={`Run ${policy.label}`}
-                                        disabled={policy.state !== "queueable"}
-                                        onClick={() => setConfirmPolicyId(policy.id)}
-                                        size="sm"
-                                        variant="secondary"
-                                    >
-                                        <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                                        Run
-                                    </Button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </Card>
-
-            <Modal
-                description="This adds the configured cleanup job to the queue. You must have verified your identity recently with multi-factor authentication."
-                dismissible={runningPolicyId === undefined}
-                onClose={() => setConfirmPolicyId(undefined)}
-                open={confirmedPolicy !== undefined}
-                size="sm"
-                title={`Run ${confirmedPolicy?.label ?? "log maintenance"}?`}
-            >
-                <div className="flex justify-end gap-2">
-                    <Button
-                        disabled={runningPolicyId !== undefined}
-                        onClick={() => setConfirmPolicyId(undefined)}
-                        variant="secondary"
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        busy={runningPolicyId !== undefined}
-                        busyLabel="Adding log maintenance to the queue…"
-                        onClick={() => {
-                            if (confirmedPolicy !== undefined) {
-                                void runMaintenance(confirmedPolicy.id);
-                            }
-                        }}
-                    >
-                        Add to queue
-                    </Button>
-                </div>
-            </Modal>
+            {maintenancePanel}
         </div>
     );
 }

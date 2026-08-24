@@ -277,7 +277,7 @@ describe("chat runtime projection", () => {
         }
     });
 
-    test("authoritatively removes an external run on the next empty runtime read", async () => {
+    test("retains one empty runtime read before authoritative removal", async () => {
         const sessionKey = "agent:main:main";
         const store = createChatRuntimeStore();
         let invocation = 0;
@@ -326,10 +326,21 @@ describe("chat runtime projection", () => {
                 exact: true,
                 queryKey: chatRuntimeQueryKey(sessionKey),
             });
+            await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+            expect(chatRuntimeMessages(store.state, sessionKey)).toHaveLength(1);
+            expect(
+                store.state.sessions[sessionKey]?.externalRuns["provider-run-1"]
+                    ?.omissionCount
+            ).toBe(1);
+
+            await queryClient.invalidateQueries({
+                exact: true,
+                queryKey: chatRuntimeQueryKey(sessionKey),
+            });
             await waitFor(() =>
                 expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([])
             );
-            expect(query).toHaveBeenCalledTimes(2);
+            expect(query).toHaveBeenCalledTimes(3);
         } finally {
             rendered.unmount();
             queryClient.clear();

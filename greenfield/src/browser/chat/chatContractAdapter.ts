@@ -6,6 +6,7 @@ import type {
 } from "../../contracts/chatModel.ts";
 import type {
     ChatExternalRunProjection,
+    ChatExternalRunSegmentProjection,
     ChatRuntimeEvent,
     ChatRuntimeSnapshotProjection,
 } from "./chatRuntimeStore.ts";
@@ -532,47 +533,100 @@ export function projectChatRuntimeSnapshot(
  * @returns Honest read-only assistant projection with explicit continuity markers.
  */
 export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunProjection {
-    const parts: ChatMessagePart[] = [];
+    const segments: ChatExternalRunSegmentProjection[] = [];
+    const createSegment = (
+        segmentId: string,
+        providerSequence: number,
+        parts: readonly ChatMessagePart[],
+        precedingUserText?: string
+    ): ChatExternalRunSegmentProjection => ({
+        message: {
+            attachments: [],
+            id: `external:${run.sessionKey}:${run.providerRunId}:segment:${segmentId}`,
+            parts,
+            providerRunId: run.providerRunId,
+            role: "assistant",
+            sequence: providerSequence,
+            sessionKey: run.sessionKey,
+            timestampMs: run.updatedAtMs,
+        },
+        ...(precedingUserText === undefined ? {} : { precedingUserText }),
+        providerSequence,
+        segmentId,
+    });
+    const replaceSegmentParts = (
+        index: number,
+        parts: readonly ChatMessagePart[]
+    ): void => {
+        const previous = segments[index];
+        if (previous === undefined) return;
+        segments[index] = {
+            ...previous,
+            message: { ...previous.message, parts },
+        };
+    };
+    const upsertSinglePart = (
+        segmentId: string,
+        providerSequence: number,
+        part: ChatMessagePart
+    ): void => {
+        const existingIndex = segments.findIndex(
+            (segment) => segment.segmentId === segmentId
+        );
+        if (existingIndex === -1) {
+            segments.push(createSegment(segmentId, providerSequence, [part]));
+            return;
+        }
+        replaceSegmentParts(existingIndex, [part]);
+    };
     if (run.parts !== undefined && run.parts.length > 0) {
         for (const part of run.parts) {
             switch (part.kind) {
                 case "assistant": {
-                    parts.push({
-                        kind: "text",
-                        ...(part.segmentId === undefined
-                            ? {}
-                            : {
-                                  sourceKey: `${run.providerRunId}:${part.segmentId}`,
-                              }),
-                        ...(part.streamId === undefined
-                            ? {}
-                            : {
-                                  sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
-                              }),
-                        text: part.text,
-                    });
+                    upsertSinglePart(
+                        `assistant:${part.segmentId ?? part.sequence}`,
+                        part.sequence,
+                        {
+                            kind: "text",
+                            ...(part.segmentId === undefined
+                                ? {}
+                                : {
+                                      sourceKey: `${run.providerRunId}:${part.segmentId}`,
+                                  }),
+                            ...(part.streamId === undefined
+                                ? {}
+                                : {
+                                      sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
+                                  }),
+                            text: part.text,
+                        }
+                    );
                     break;
                 }
                 case "thinking": {
-                    parts.push({
-                        kind: "thinking",
-                        ...(part.segmentId === undefined
-                            ? {}
-                            : {
-                                  sourceKey: `${run.providerRunId}:${part.segmentId}`,
-                              }),
-                        ...(part.streamId === undefined
-                            ? {}
-                            : {
-                                  sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
-                              }),
-                        status: "running",
-                        text: part.text,
-                    });
+                    upsertSinglePart(
+                        `thinking:${part.segmentId ?? part.sequence}`,
+                        part.sequence,
+                        {
+                            kind: "thinking",
+                            ...(part.segmentId === undefined
+                                ? {}
+                                : {
+                                      sourceKey: `${run.providerRunId}:${part.segmentId}`,
+                                  }),
+                            ...(part.streamId === undefined
+                                ? {}
+                                : {
+                                      sourceStreamKey: `${run.providerRunId}:${part.streamId}`,
+                                  }),
+                            status: "running",
+                            text: part.text,
+                        }
+                    );
                     break;
                 }
                 case "tool": {
-                    appendChatMessagePart(parts, {
+                    const projectedTool: ChatToolPart = {
                         callId: part.callId,
                         ...(part.callIdSource === undefined
                             ? {}
@@ -586,84 +640,188 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                             : { nameSource: part.nameSource }),
                         ...(part.output === undefined ? {} : { output: part.output }),
                         status: toolPartStatus(part.phase),
-                    });
+                    };
+                    const matchingSyntheticIndex = segments.findIndex((segment) =>
+                        segment.message.parts.some(
+                            (candidate) =>
+                                candidate.kind === "tool" &&
+                                chatToolResultMatchesCall(candidate, projectedTool)
+                        )
+                    );
+                    const directSegmentId = `tool:${part.callId}`;
+                    const directIndex = segments.findIndex(
+                        (segment) => segment.segmentId === directSegmentId
+                    );
+                    const existingIndex =
+                        directIndex === -1 ? matchingSyntheticIndex : directIndex;
+                    const segmentId =
+                        existingIndex === -1
+                            ? directSegmentId
+                            : (segments[existingIndex]?.segmentId ?? directSegmentId);
+                    const toolParts =
+                        existingIndex === -1
+                            ? []
+                            : [...(segments[existingIndex]?.message.parts ?? [])];
+                    appendChatMessagePart(toolParts, projectedTool);
+                    if (existingIndex === -1) {
+                        segments.push(createSegment(segmentId, part.sequence, toolParts));
+                    } else {
+                        replaceSegmentParts(existingIndex, toolParts);
+                    }
                     break;
                 }
                 case "item": {
+                    if (
+                        part.type === "compaction" &&
+                        (part.text === "Compacting context" ||
+                            part.text === "Context compacted")
+                    ) {
+                        upsertSinglePart(`compaction:${part.id}`, part.sequence, {
+                            activity:
+                                part.text === "Compacting context"
+                                    ? "running"
+                                    : "complete",
+                            kind: "control",
+                            text: part.text,
+                            tone: "muted",
+                        });
+                        const compactionIndex = segments.findIndex(
+                            (segment) => segment.segmentId === `compaction:${part.id}`
+                        );
+                        const compaction = segments[compactionIndex];
+                        if (compaction !== undefined && part.occurredAtMs !== undefined) {
+                            segments[compactionIndex] = {
+                                ...compaction,
+                                message: {
+                                    ...compaction.message,
+                                    timestampMs: part.occurredAtMs,
+                                },
+                            };
+                        }
+                    }
                     break;
                 }
                 case "user": {
+                    segments.push(
+                        createSegment(
+                            `user:${part.sequence}`,
+                            part.sequence,
+                            [],
+                            part.text
+                        )
+                    );
                     break;
                 }
             }
         }
     }
-    const assistantIndexes = parts.flatMap((part, index) =>
-        part.kind === "text" ? [index] : []
+    const assistantSegmentIndexes = segments.flatMap((segment, index) =>
+        segment.message.parts.some((part) => part.kind === "text") ? [index] : []
     );
-    const renderedAssistantText = assistantIndexes
+    const renderedAssistantText = assistantSegmentIndexes
         .map((index) => {
-            const part = parts[index];
-            return part?.kind === "text" ? part.text : "";
+            const segment = segments[index];
+            return segment?.message.parts
+                .filter((part) => part.kind === "text")
+                .map((part) => (part.kind === "text" ? part.text : ""))
+                .join("");
         })
         .join("");
     if (run.text !== "" && renderedAssistantText !== run.text) {
-        const lastAssistantIndex = assistantIndexes.at(-1);
+        const lastAssistantIndex = assistantSegmentIndexes.at(-1);
         if (
             lastAssistantIndex !== undefined &&
             run.text.startsWith(renderedAssistantText)
         ) {
-            const previous = parts[lastAssistantIndex];
-            if (previous?.kind === "text") {
-                parts[lastAssistantIndex] = {
-                    ...previous,
-                    text: previous.text + run.text.slice(renderedAssistantText.length),
-                };
+            const previous = segments[lastAssistantIndex];
+            if (previous !== undefined) {
+                const previousPartIndex = previous.message.parts.findLastIndex(
+                    (part) => part.kind === "text"
+                );
+                const previousPart = previous.message.parts[previousPartIndex];
+                if (previousPart?.kind === "text") {
+                    replaceSegmentParts(
+                        lastAssistantIndex,
+                        previous.message.parts.map((part, index) =>
+                            index === previousPartIndex
+                                ? {
+                                      ...previousPart,
+                                      text:
+                                          previousPart.text +
+                                          run.text.slice(renderedAssistantText.length),
+                                  }
+                                : part
+                        )
+                    );
+                }
             }
         } else if (lastAssistantIndex === undefined) {
-            parts.push({
-                kind: "text",
-                sourceKey: `${run.providerRunId}:aggregate:assistant`,
-                sourceStreamKey: `${run.providerRunId}:assistant`,
-                text: run.text,
-            });
-        } else {
-            const insertionIndex = parts
-                .slice(0, lastAssistantIndex)
-                .filter((part) => part.kind !== "text").length;
-            const retained: ChatMessagePart[] = parts.filter(
-                (part) => part.kind !== "text"
+            segments.push(
+                createSegment("aggregate:assistant", Number.MAX_SAFE_INTEGER - 4, [
+                    {
+                        kind: "text",
+                        sourceKey: `${run.providerRunId}:aggregate:assistant`,
+                        sourceStreamKey: `${run.providerRunId}:assistant`,
+                        text: run.text,
+                    },
+                ])
             );
-            retained.splice(insertionIndex, 0, {
-                kind: "text",
-                sourceKey: `${run.providerRunId}:aggregate:assistant`,
-                sourceStreamKey: `${run.providerRunId}:assistant`,
-                text: run.text,
-            });
-            parts.splice(0, parts.length, ...retained);
+        } else {
+            const insertionIndex = assistantSegmentIndexes[0] ?? segments.length;
+            const aggregateProviderSequence =
+                segments[insertionIndex]?.providerSequence ?? Number.MAX_SAFE_INTEGER - 4;
+            const retained = segments.filter(
+                (segment) => !segment.message.parts.some((part) => part.kind === "text")
+            );
+            retained.splice(
+                Math.min(insertionIndex, retained.length),
+                0,
+                createSegment("aggregate:assistant", aggregateProviderSequence, [
+                    {
+                        kind: "text",
+                        sourceKey: `${run.providerRunId}:aggregate:assistant`,
+                        sourceStreamKey: `${run.providerRunId}:assistant`,
+                        text: run.text,
+                    },
+                ])
+            );
+            segments.splice(0, segments.length, ...retained);
         }
     }
     if (run.projectionTruncated) {
-        parts.push({
-            kind: "control",
-            text: "Some OpenClaw activity details were not returned.",
-            tone: "warning",
-        });
+        segments.push(
+            createSegment("notice:truncated", Number.MAX_SAFE_INTEGER - 3, [
+                {
+                    kind: "control",
+                    text: "Some OpenClaw activity details were not returned.",
+                    tone: "warning",
+                },
+            ])
+        );
     }
     if (run.continuity === "interrupted") {
-        parts.push({
-            kind: "control",
-            text: "Activity updates were interrupted, so some details may be missing.",
-            tone: "warning",
-        });
+        segments.push(
+            createSegment("notice:interrupted", Number.MAX_SAFE_INTEGER - 2, [
+                {
+                    kind: "control",
+                    text: "Activity updates were interrupted, so some details may be missing.",
+                    tone: "warning",
+                },
+            ])
+        );
     }
     if (run.hasUnprojectedActivity) {
-        parts.push({
-            kind: "control",
-            text: "Some additional OpenClaw activity could not be shown.",
-            tone: "warning",
-        });
+        segments.push(
+            createSegment("notice:unprojected", Number.MAX_SAFE_INTEGER - 1, [
+                {
+                    kind: "control",
+                    text: "Some additional OpenClaw activity could not be shown.",
+                    tone: "warning",
+                },
+            ])
+        );
     }
+    const parts = segments.flatMap((segment) => segment.message.parts);
     return {
         ...(run.abortBoundary === undefined ? {} : { abortBoundary: run.abortBoundary }),
         continuity: run.continuity,
@@ -701,6 +859,7 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
               }),
         projectionTruncated: run.projectionTruncated,
         providerRunId: run.providerRunId,
+        segments,
         source: run.source,
         ...(run.streamResets === undefined
             ? {}

@@ -130,8 +130,17 @@ import {
     newestJobRunOrderIsStable,
 } from "../../src/contracts/jobs.ts";
 import {
+    logMaintenanceActiveRunIsConsistent,
+    logMaintenanceExecutionOutcomeIsConsistent,
+    logMaintenanceExecutionTimesAreConsistent,
+    logMaintenanceJobResultIsConsistent,
+    logMaintenanceLastRunIsConsistent,
+    logMaintenanceOutputIsConsistent,
+    logMaintenancePolicyStatusIsConsistent,
     logLinesHaveUniqueIds,
     logMaintenancePoliciesHaveUniqueIds,
+    logMaintenanceRequestIsConsistent,
+    logMaintenanceTerminalRunIsConsistent,
     logSourcesHaveUniqueIds,
 } from "../../src/contracts/logs.ts";
 import {
@@ -261,6 +270,42 @@ const runtimeCheckComments = new Map<unknown, string>([
     [
         logMaintenancePoliciesHaveUniqueIds,
         "Live Valibot validation additionally requires every fixed log-maintenance policy ID to be unique.",
+    ],
+    [
+        logMaintenanceExecutionTimesAreConsistent,
+        "Live Valibot validation additionally requires the maintenance finish timestamp not to precede its start timestamp.",
+    ],
+    [
+        logMaintenanceExecutionOutcomeIsConsistent,
+        "Live Valibot validation additionally requires a reported successful maintenance execution to contain no failed actions.",
+    ],
+    [
+        logMaintenanceActiveRunIsConsistent,
+        "Live Valibot validation additionally requires an active maintenance run to be queued or running.",
+    ],
+    [
+        logMaintenanceTerminalRunIsConsistent,
+        "Live Valibot validation additionally requires a last maintenance run to be terminal.",
+    ],
+    [
+        logMaintenanceLastRunIsConsistent,
+        "Live Valibot validation additionally permits a summary only for a successful non-dry-run maintenance result whose summary reports success.",
+    ],
+    [
+        logMaintenancePolicyStatusIsConsistent,
+        "Live Valibot validation additionally requires each maintenance status to agree with its fixed policy scope, maintenance action identity, and docker-only summary authority.",
+    ],
+    [
+        logMaintenanceRequestIsConsistent,
+        "Live Valibot validation additionally permits dry-run mode only for the fixed docker-managed policy.",
+    ],
+    [
+        logMaintenanceOutputIsConsistent,
+        "Live Valibot validation additionally permits a queued dry-run result only for the fixed docker-managed policy.",
+    ],
+    [
+        logMaintenanceJobResultIsConsistent,
+        "Live Valibot validation additionally requires a successful durable maintenance result to agree with its fixed policy, dry-run mode, successful summary, and completion time.",
     ],
     [
         terminalPathIsCanonical,

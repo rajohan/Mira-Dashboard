@@ -5,6 +5,16 @@ import { link, lstat, open, opendir, realpath, rename, unlink } from "node:fs/pr
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 
+import * as v from "valibot";
+
+import {
+    logRotationEpochProjectionFileName,
+    logRotationEpochProjectionMaximumBytes,
+    logRotationEpochProjectionSchema,
+    type LogRotationEpochProjection,
+    type LogRotationEpochProjectionEntry,
+} from "../../shared/logRotationEpochProjection.ts";
+import { compareStrings } from "../../shared/validation.ts";
 import {
     managedLogManifest,
     type ManagedArchiveTarget,
@@ -41,6 +51,7 @@ export interface ManagedLogTargetResult {
         | "invalid-source"
         | "missing"
         | "not-due"
+        | "recovery"
         | "retention"
         | "size";
     readonly targetId: string;
@@ -98,6 +109,12 @@ export interface ManagedLogRotationEngine {
         readonly signal?: AbortSignal;
     }) => Promise<ManagedLogRotationSummary>;
     readonly status: () => Promise<ManagedLogRotationStatus>;
+}
+
+/** Deterministic copytruncate boundaries exposed only to adversarial tests. */
+export interface ManagedLogRotationTestHooks {
+    readonly afterCopyTruncateMarkedRotating?: (sourceId: string) => Promise<void> | void;
+    readonly afterCopyTruncateSynced?: (sourceId: string) => Promise<void> | void;
 }
 
 function sanitizedFailure(): Error {
@@ -319,7 +336,9 @@ async function commitStage(
 async function copyTruncate(
     file: OpenedFile,
     target: ManagedLogFileTarget,
-    nowMs: number
+    nowMs: number,
+    publishEpochState: (state: LogRotationEpochProjectionEntry["state"]) => Promise<void>,
+    testHooks: ManagedLogRotationTestHooks
 ): Promise<void> {
     const source = await readExactFile(file);
     await verifyIdentity(file);
@@ -336,8 +355,13 @@ async function copyTruncate(
     await verifyIdentity(file);
     await commitStage(file.directory, stage, destinationName);
     await verifyIdentity(file);
+    await publishEpochState("rotating");
+    await testHooks.afterCopyTruncateMarkedRotating?.(target.id);
+    await verifyIdentity(file);
     await file.handle.truncate(0);
     await file.handle.sync();
+    await testHooks.afterCopyTruncateSynced?.(target.id);
+    await publishEpochState("committed");
 }
 
 async function rotateRename(
@@ -511,7 +535,12 @@ async function processFileTarget(
     target: ManagedLogFileTarget,
     lastRotatedAtMs: number | undefined,
     nowMs: number,
-    dryRun: boolean
+    dryRun: boolean,
+    recoveringCopyTruncate: boolean,
+    publishCopyTruncateEpochState: (
+        state: LogRotationEpochProjectionEntry["state"]
+    ) => Promise<void>,
+    testHooks: ManagedLogRotationTestHooks
 ): Promise<{
     readonly result: ManagedLogTargetResult;
     readonly rotated: boolean;
@@ -523,7 +552,14 @@ async function processFileTarget(
         target.maximumSourceBytes,
         true
     );
+    if (recoveringCopyTruncate && target.strategy !== "copytruncate") {
+        await closeOpenedFile(file);
+        throw sanitizedFailure();
+    }
     if (file === undefined) {
+        if (recoveringCopyTruncate && !dryRun) {
+            await publishCopyTruncateEpochState("committed");
+        }
         return {
             result: { action: "missing", reason: "missing", targetId: target.id },
             retentionDeleted: 0,
@@ -536,11 +572,24 @@ async function processFileTarget(
             target.cadenceMs !== undefined &&
             (lastRotatedAtMs === undefined ||
                 nowMs - lastRotatedAtMs >= target.cadenceMs);
-        const rotate = file.status.size > 0 && (sizeDue || cadenceDue);
+        const rotate =
+            file.status.size > 0 && (sizeDue || cadenceDue || recoveringCopyTruncate);
+        const completesEmptyRecovery = file.status.size === 0 && recoveringCopyTruncate;
         if (rotate && !dryRun) {
             await (target.strategy === "rename"
                 ? rotateRename(file, target, nowMs)
-                : copyTruncate(file, target, nowMs));
+                : copyTruncate(
+                      file,
+                      target,
+                      nowMs,
+                      publishCopyTruncateEpochState,
+                      testHooks
+                  ));
+        } else if (completesEmptyRecovery && !dryRun) {
+            await verifyIdentity(file);
+            await file.handle.sync();
+            await testHooks.afterCopyTruncateSynced?.(target.id);
+            await publishCopyTruncateEpochState("committed");
         }
         const deleted = await applyRetention(
             file.directory,
@@ -553,17 +602,19 @@ async function processFileTarget(
             dryRun
         );
         let reason: ManagedLogTargetResult["reason"] = "not-due";
-        if (file.status.size === 0) reason = "empty";
+        if (recoveringCopyTruncate) reason = "recovery";
+        else if (file.status.size === 0) reason = "empty";
         else if (sizeDue) reason = "size";
         else if (cadenceDue) reason = "cadence";
+        const completedRotation = rotate || completesEmptyRecovery;
         return {
             result: {
-                action: rotate ? "rotated" : "skipped",
+                action: completedRotation ? "rotated" : "skipped",
                 reason,
                 targetId: target.id,
             },
             retentionDeleted: deleted,
-            rotated: rotate,
+            rotated: completedRotation,
         };
     } finally {
         await closeOpenedFile(file);
@@ -704,6 +755,88 @@ async function writeState(
     }
 }
 
+function rotationEpochPath(manifest: ManagedLogManifest): string {
+    return path.join(
+        path.dirname(manifest.statePath),
+        logRotationEpochProjectionFileName
+    );
+}
+
+type RotationEpochState = Omit<LogRotationEpochProjectionEntry, "sourceId">;
+
+async function readRotationEpochs(
+    manifest: ManagedLogManifest
+): Promise<Map<string, RotationEpochState>> {
+    const trustedOwners = runtimeOwnerIds();
+    let projection: OpenedFile | undefined;
+    try {
+        projection = await openFileTarget(
+            rotationEpochPath(manifest),
+            trustedOwners,
+            logRotationEpochProjectionMaximumBytes
+        );
+        if (projection === undefined) return new Map();
+        if ((projection.status.mode & 0o777) !== privateFileMode) {
+            throw sanitizedFailure();
+        }
+        const projectionBytes = await readExactFile(projection);
+        await verifyIdentity(projection);
+        const parsed = v.parse(
+            logRotationEpochProjectionSchema,
+            JSON.parse(
+                new TextDecoder("utf-8", { fatal: true }).decode(projectionBytes)
+            ) as unknown
+        );
+        const allowedTargetIds = new Set(
+            manifest.fileTargets
+                .filter(({ strategy }) => strategy === "copytruncate")
+                .map(({ id }) => id)
+        );
+        if (parsed.entries.some(({ sourceId }) => !allowedTargetIds.has(sourceId))) {
+            throw sanitizedFailure();
+        }
+        return new Map(
+            parsed.entries.map(({ epoch, sourceId, state }) => [
+                sourceId,
+                { epoch, state },
+            ])
+        );
+    } catch {
+        throw sanitizedFailure();
+    } finally {
+        await closeOpenedFile(projection);
+    }
+}
+
+async function writeRotationEpochs(
+    manifest: ManagedLogManifest,
+    epochs: ReadonlyMap<string, RotationEpochState>
+): Promise<void> {
+    const projection: LogRotationEpochProjection = v.parse(
+        logRotationEpochProjectionSchema,
+        {
+            entries: [...epochs]
+                .map(([sourceId, { epoch, state }]) => ({ epoch, sourceId, state }))
+                .toSorted((left, right) => compareStrings(left.sourceId, right.sourceId)),
+            version: 1,
+        }
+    );
+    const bytes = Buffer.from(`${JSON.stringify(projection)}\n`, "utf8");
+    if (bytes.byteLength > logRotationEpochProjectionMaximumBytes) {
+        throw sanitizedFailure();
+    }
+    const directory = await openDirectory(
+        path.dirname(manifest.statePath),
+        runtimeOwnerIds()
+    );
+    try {
+        const stage = await createStage(directory, bytes, privateFileMode);
+        await commitStage(directory, stage, logRotationEpochProjectionFileName, true);
+    } finally {
+        await directory.handle.close().catch(() => {});
+    }
+}
+
 function processIsRunning(pid: number): boolean {
     try {
         process.kill(pid, 0);
@@ -804,17 +937,19 @@ async function releaseLock(lock: RotationLock): Promise<void> {
 
 /**
  * Creates the worker-only custom rotation engine for the reviewed application manifest.
- * @param options Fixed manifest and replaceable clock used by worker composition.
+ * @param options Fixed manifest, replaceable clock, and absent-in-production test hooks.
  * @returns Bounded status and execution operations with no dynamic path input.
  */
 export function createManagedLogRotationEngine(
     options: {
         readonly manifest?: ManagedLogManifest;
         readonly now?: () => number;
+        readonly testHooks?: ManagedLogRotationTestHooks;
     } = {}
 ): ManagedLogRotationEngine {
     const manifest = options.manifest ?? managedLogManifest;
     const now = options.now ?? Date.now;
+    const testHooks = options.testHooks ?? {};
     validateManagedLogManifest(manifest);
 
     const engine: ManagedLogRotationEngine = {
@@ -825,15 +960,68 @@ export function createManagedLogRotationEngine(
             const lock = dryRun ? undefined : await acquireLock(manifest, startedAtMs);
             const results: ManagedLogTargetResult[] = [];
             const files = { ...state.files };
+            let rotationEpochs = new Map<string, RotationEpochState>();
             try {
+                if (!dryRun) rotationEpochs = await readRotationEpochs(manifest);
                 for (const target of manifest.fileTargets) {
                     if (runOptions.signal?.aborted === true) throw sanitizedFailure();
                     try {
+                        const persistedRotationEpoch = rotationEpochs.get(target.id);
+                        const recoveringCopyTruncate =
+                            persistedRotationEpoch?.state === "rotating";
+                        let nextRotationEpoch = recoveringCopyTruncate
+                            ? persistedRotationEpoch.epoch
+                            : undefined;
+                        let publishedEpochState:
+                            | LogRotationEpochProjectionEntry["state"]
+                            | undefined = recoveringCopyTruncate ? "rotating" : undefined;
                         const outcome = await processFileTarget(
                             target,
                             files[target.id]?.lastRotatedAtMs,
                             startedAtMs,
-                            dryRun
+                            dryRun,
+                            recoveringCopyTruncate,
+                            async (epochState) => {
+                                if (epochState === "rotating") {
+                                    if (publishedEpochState === "rotating") return;
+                                    if (publishedEpochState !== undefined) {
+                                        throw sanitizedFailure();
+                                    }
+                                    const epoch = Bun.randomUUIDv7();
+                                    const nextEpochs = new Map<
+                                        string,
+                                        RotationEpochState
+                                    >([
+                                        ...rotationEpochs,
+                                        [target.id, { epoch, state: "rotating" }],
+                                    ]);
+                                    await writeRotationEpochs(manifest, nextEpochs);
+                                    rotationEpochs = nextEpochs;
+                                    nextRotationEpoch = epoch;
+                                    publishedEpochState = "rotating";
+                                    return;
+                                }
+                                if (
+                                    publishedEpochState !== "rotating" ||
+                                    nextRotationEpoch === undefined
+                                ) {
+                                    throw sanitizedFailure();
+                                }
+                                const nextEpochs = new Map<string, RotationEpochState>([
+                                    ...rotationEpochs,
+                                    [
+                                        target.id,
+                                        {
+                                            epoch: nextRotationEpoch,
+                                            state: epochState,
+                                        },
+                                    ],
+                                ]);
+                                await writeRotationEpochs(manifest, nextEpochs);
+                                rotationEpochs = nextEpochs;
+                                publishedEpochState = "committed";
+                            },
+                            testHooks
                         );
                         results.push(outcome.result);
                         for (

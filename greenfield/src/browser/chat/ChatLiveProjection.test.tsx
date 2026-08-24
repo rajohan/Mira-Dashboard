@@ -15,6 +15,68 @@ const display = {
 };
 
 describe("live OpenClaw chat projection", () => {
+    test("keeps compaction as one stable lifecycle row and refreshes retry age", () => {
+        const store = createChatRuntimeStore();
+        const projection = (
+            text: "Compacting context" | "Context compacted",
+            occurredAtMs: number
+        ) =>
+            projectChatExternalRun({
+                continuity: "complete",
+                hasUnprojectedActivity: false,
+                observationEpoch: occurredAtMs,
+                observedAtMs: occurredAtMs,
+                parts: [
+                    {
+                        id: "compaction:live-compaction",
+                        kind: "item",
+                        occurredAtMs,
+                        sequence: 1,
+                        text,
+                        type: "compaction",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId: "live-compaction",
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: occurredAtMs,
+            });
+
+        store.installExternalRuns(sessionKey, [projection("Compacting context", 1000)]);
+        store.installExternalRuns(sessionKey, [projection("Compacting context", 2000)]);
+        let messages = chatRuntimeMessages(store.state, sessionKey);
+        expect(messages).toHaveLength(1);
+        expect(messages[0]).toMatchObject({
+            parts: [
+                {
+                    activity: "running",
+                    kind: "control",
+                    text: "Compacting context",
+                },
+            ],
+            timestampMs: 2000,
+        });
+
+        store.installExternalRuns(sessionKey, [projection("Context compacted", 3000)]);
+        messages = chatRuntimeMessages(store.state, sessionKey);
+        expect(messages).toHaveLength(1);
+        expect(messages[0]).toMatchObject({
+            parts: [
+                {
+                    activity: "complete",
+                    kind: "control",
+                    text: "Context compacted",
+                },
+            ],
+            timestampMs: 3000,
+        });
+        expect(messages[0]?.id).toBe(
+            "external:agent:main:main:live-compaction:segment:compaction:compaction:live-compaction"
+        );
+    });
+
     test("renders exact provider order and complete session.tool bubbles without raw items", () => {
         const projection = projectChatExternalRun({
             continuity: "complete",
@@ -124,18 +186,16 @@ describe("live OpenClaw chat projection", () => {
         });
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [projection]);
-        const message = chatRuntimeMessages(store.state, sessionKey)[0]!;
+        const messages = chatRuntimeMessages(store.state, sessionKey);
 
-        expect(message.parts.map(({ kind }) => kind)).toEqual([
-            "thinking",
-            "thinking",
-            "tool",
-            "thinking",
-            "text",
-            "tool",
-            "text",
-        ]);
-        expect(message.parts.filter(({ kind }) => kind === "tool")).toEqual([
+        expect(
+            messages.flatMap((message) => message.parts.map(({ kind }) => kind))
+        ).toEqual(["thinking", "thinking", "tool", "thinking", "text", "tool", "text"]);
+        expect(
+            messages
+                .flatMap((message) => message.parts)
+                .filter(({ kind }) => kind === "tool")
+        ).toEqual([
             expect.objectContaining({
                 callId: "command-1",
                 input: '{"cmd":"pwd","workdir":"/workspace"}',
@@ -151,8 +211,17 @@ describe("live OpenClaw chat projection", () => {
         ]);
 
         const rendered = render(
-            <ChatMessageBubble display={display} message={message} />
+            <div>
+                {messages.map((message) => (
+                    <ChatMessageBubble
+                        display={display}
+                        key={message.id}
+                        message={message}
+                    />
+                ))}
+            </div>
         );
+        expect(screen.getAllByRole("article")).toHaveLength(7);
         const tools = screen.getAllByRole("region", { name: "Bash, completed" });
         expect(tools).toHaveLength(2);
         for (const tool of tools) {
@@ -160,9 +229,9 @@ describe("live OpenClaw chat projection", () => {
             expect(within(tool).getAllByText("Tool input")).toHaveLength(1);
             expect(within(tool).getAllByText("Tool output")).toHaveLength(1);
         }
-        expect(within(tools[0]!).getByText("pwd (workspace)")).toBeVisible();
+        expect(within(tools[0]!).getAllByText("pwd (workspace)")).toHaveLength(2);
         expect(within(tools[0]!).getByText("/workspace")).toBeVisible();
-        expect(within(tools[1]!).getByText("bun test (workspace)")).toBeVisible();
+        expect(within(tools[1]!).getAllByText("bun test (workspace)")).toHaveLength(2);
         expect(within(tools[1]!).getByText(/12 pass/iu)).toBeVisible();
         expect(screen.queryByText(/raw-(?:analysis|command|tool)-label/iu)).toBeNull();
         const visibleText = document.body.textContent ?? "";
@@ -184,7 +253,7 @@ describe("live OpenClaw chat projection", () => {
         const mixedWithoutTools = render(
             <ChatMessageBubble
                 display={{ ...display, showTools: false }}
-                message={message}
+                message={projection.message}
             />
         );
         expect(screen.getByRole("article")).toBeVisible();
@@ -223,5 +292,79 @@ describe("live OpenClaw chat projection", () => {
             />
         );
         expect(screen.queryByRole("article")).toBeNull();
+    });
+
+    test("renders an aggregate assistant replacement at the replaced provider position", () => {
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: 1000,
+            parts: [
+                {
+                    kind: "thinking",
+                    segmentId: "reasoning-before",
+                    sequence: 1,
+                    text: "Reasoning before.",
+                },
+                {
+                    kind: "assistant",
+                    segmentId: "assistant-replaced",
+                    sequence: 2,
+                    text: "Stale answer.",
+                },
+                {
+                    callId: "command-after",
+                    isError: false,
+                    kind: "tool",
+                    name: "lookup",
+                    phase: "succeeded",
+                    sequence: 3,
+                },
+                {
+                    kind: "thinking",
+                    segmentId: "reasoning-after",
+                    sequence: 4,
+                    text: "Reasoning after.",
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: "aggregate-order-run",
+            sessionKey,
+            source: "provider-runtime",
+            text: "Authoritative answer.",
+            updatedAtMs: 1000,
+        });
+        expect(
+            projection.segments?.find(
+                ({ segmentId }) => segmentId === "aggregate:assistant"
+            )?.providerSequence
+        ).toBe(2);
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [projection]);
+        const messages = chatRuntimeMessages(store.state, sessionKey);
+        render(
+            <div>
+                {messages.map((message) => (
+                    <ChatMessageBubble
+                        display={display}
+                        key={message.id}
+                        message={message}
+                    />
+                ))}
+            </div>
+        );
+
+        const visibleText = document.body.textContent ?? "";
+        const visibleOrder = [
+            "Reasoning before.",
+            "Authoritative answer.",
+            "Lookup",
+            "Reasoning after.",
+        ].map((text) => visibleText.indexOf(text));
+        expect(visibleOrder.every((index) => index >= 0)).toBeTrue();
+        expect(visibleOrder).toEqual(
+            [...visibleOrder].toSorted((left, right) => left - right)
+        );
     });
 });

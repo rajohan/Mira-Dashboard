@@ -505,7 +505,14 @@ export function ChatBrowser({
                 message.idempotencyKey === undefined ? [] : [message.idempotencyKey]
             ),
             runIds: canonicalMessages.flatMap((message) =>
-                message.runId === undefined ? [] : [message.runId]
+                message.role !== "assistant" || message.runId === undefined
+                    ? []
+                    : [message.runId]
+            ),
+            providerRunIds: canonicalMessages.flatMap((message) =>
+                message.role !== "assistant" || message.providerRunId === undefined
+                    ? []
+                    : [message.providerRunId]
             ),
             throughCursor: runtimeStore.cursorFor(selectedSessionKey),
         });

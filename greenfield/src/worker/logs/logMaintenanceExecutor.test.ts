@@ -7,11 +7,11 @@ import type { ManagedLogRotationEngine } from "./managedLogRotation.ts";
 function dependencies(options: { readonly managedOk?: boolean } = {}) {
     const calls: string[] = [];
     const managed: ManagedLogRotationEngine = {
-        run: () => {
-            calls.push("managed");
+        run: ({ dryRun = false } = {}) => {
+            calls.push(`managed:${dryRun}`);
             return Promise.resolve({
                 checkedTargets: 1,
-                dryRun: false,
+                dryRun,
                 finishedAtMs: 2,
                 ok: options.managedOk ?? true,
                 results: [],
@@ -42,14 +42,26 @@ describe("worker log maintenance executor", () => {
             "docker-managed",
             "host-rsyslog",
         ]);
-        await fixture.executor.run("docker-managed");
-        await fixture.executor.run("host-rsyslog");
-        expect(fixture.calls).toEqual(["managed", "host-rsyslog"]);
+        expect(await fixture.executor.run("docker-managed", true)).toMatchObject({
+            actionCounts: { skipped: 0 },
+            checkedTargets: 1,
+            dryRun: true,
+        });
+        await fixture.executor.run("host-rsyslog", false);
+        expect(fixture.calls).toEqual(["managed:true", "host-rsyslog"]);
     });
 
     test("fails with a constant error when any managed target fails", () => {
         expect(
-            dependencies({ managedOk: false }).executor.run("docker-managed")
+            dependencies({ managedOk: false }).executor.run("docker-managed", false)
         ).rejects.toThrow("Fixed log maintenance execution failed");
+    });
+
+    test("rejects a host dry-run without invoking the fixed system broker", () => {
+        const fixture = dependencies();
+        expect(fixture.executor.run("host-rsyslog", true)).rejects.toThrow(
+            "Fixed log maintenance execution failed"
+        );
+        expect(fixture.calls).toEqual([]);
     });
 });

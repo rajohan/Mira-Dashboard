@@ -956,6 +956,60 @@ describe("durable jobs repository", () => {
         }
     });
 
+    test("blocks a singleton due action while a manual run for that action is active", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        try {
+            await repository.reconcileSchedules({
+                at: new Date(1000),
+                schedules: [schedule()],
+                sideEffectsForSchedule: () => noSideEffects,
+            });
+            const manualRun = queuedRun(30, {
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+                triggerType: "system",
+            });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(manualRun),
+                    run: manualRun,
+                })
+            ).toMatchObject({ kind: "inserted" });
+
+            const scheduledRun = queuedRun(31, {
+                availableAt: new Date(100_000),
+                queuedAt: new Date(100_000),
+                requestedById: "job-scheduler",
+                requestedByKind: "system",
+                scheduledForAt: new Date(61_000),
+                triggerType: "schedule",
+                updatedAt: new Date(100_000),
+            });
+            expect(
+                await repository.enqueueNextDueSchedule({
+                    ...noSideEffects,
+                    at: new Date(100_000),
+                    nextRunAt: new Date(121_000),
+                    observedNextRunAt: new Date(61_000),
+                    rejectWhenActionActive: true,
+                    run: scheduledRun,
+                    scheduleId: "system.worker-smoke",
+                })
+            ).toMatchObject({ kind: "active", run: { id: manualRun.id } });
+            expect(
+                repository.findSchedule("system.worker-smoke")?.schedule.nextRunAt
+            ).toEqual(new Date(61_000));
+            expect(repository.findRun(scheduledRun.id)).toBeUndefined();
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("rejects a stale due execution snapshot before enqueueing", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
@@ -2794,6 +2848,171 @@ describe("durable jobs repository", () => {
             expect(
                 database.orm.select({ value: count() }).from(scheduledJobs).get()?.value
             ).toBe(0);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reads bounded active and terminal action-payload runs from one snapshot", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const realPayload = '{"policyId":"docker-managed"}';
+        const dryRunPayload = '{"dryRun":true,"policyId":"docker-managed"}';
+        async function enqueue(index: number, payloadJson: string) {
+            const run = queuedRun(index, {
+                actionKey: "maintenance.rotate-logs",
+                attemptLimit: 1,
+                displayName: "Managed log maintenance",
+                payloadJson,
+                requestedById: "system.logs-service",
+                requestedByKind: "system",
+                resourceClass: "host-heavy",
+                resourceKeysJson: '["host.logs"]',
+                retrySafe: false,
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+                triggerType: "system",
+            });
+            await repository.enqueueManualRun({
+                ...noSideEffects,
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+            return run;
+        }
+        try {
+            const firstReal = await enqueue(80, realPayload);
+            await repository.cancelRun({
+                actor: { id: "system.logs-service", kind: "system" },
+                at: new Date(2000),
+                id: firstReal.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "logs/maintenance-cancelled",
+                terminalMessage: "Log maintenance was cancelled.",
+            });
+            const latestTerminalReal = await enqueue(81, realPayload);
+            await repository.cancelRun({
+                actor: { id: "system.logs-service", kind: "system" },
+                at: new Date(3000),
+                id: latestTerminalReal.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "logs/maintenance-cancelled",
+                terminalMessage: "Log maintenance was cancelled.",
+            });
+            const dryRun = await enqueue(82, dryRunPayload);
+            await repository.cancelRun({
+                actor: { id: "system.logs-service", kind: "system" },
+                at: new Date(3500),
+                id: dryRun.id,
+                sideEffectsForRun: () => noSideEffects,
+                terminalCode: "logs/maintenance-cancelled",
+                terminalMessage: "Log maintenance was cancelled.",
+            });
+            await repository.registerWorker({
+                ...noSideEffects,
+                worker: worker(workerOneId),
+            });
+            const activeReal = await enqueue(83, realPayload);
+            expect(
+                await repository.claimNextRun({
+                    at: new Date(4000),
+                    leaseExpiresAt: new Date(10_000),
+                    leaseToken: uuid(830),
+                    minimumHeartbeatAt: new Date(1000),
+                    sideEffectsForClaim: () => noSideEffects,
+                    workerId: workerOneId,
+                })
+            ).toMatchObject({ kind: "claimed", run: { id: activeReal.id } });
+            const newerQueuedReal = await enqueue(84, realPayload);
+
+            const snapshots = repository.readActionPayloadRunSnapshots({
+                actionKey: "maintenance.rotate-logs",
+                payloadJsons: [realPayload, dryRunPayload],
+            });
+            expect(snapshots).toMatchObject([
+                {
+                    activeRun: { id: activeReal.id, state: "running" },
+                    lastRun: { id: latestTerminalReal.id, state: "cancelled" },
+                    payloadJson: realPayload,
+                },
+                {
+                    lastRun: { id: dryRun.id, state: "cancelled" },
+                    payloadJson: dryRunPayload,
+                },
+            ]);
+            const blockedRun = queuedRun(85, {
+                actionKey: "maintenance.rotate-logs",
+                attemptLimit: 1,
+                displayName: "Managed log maintenance",
+                payloadJson: realPayload,
+                requestedById: "system.logs-service",
+                requestedByKind: "system",
+                resourceClass: "host-heavy",
+                resourceKeysJson: '["host.logs"]',
+                retrySafe: false,
+                scheduledJobId: null,
+                scheduledJobVersion: null,
+                triggerType: "system",
+            });
+            expect(
+                await repository.enqueueManualRun({
+                    ...noSideEffects,
+                    queuedEvent: queuedEvent(blockedRun),
+                    rejectWhenActionActive: true,
+                    run: blockedRun,
+                })
+            ).toMatchObject({ kind: "active" });
+            expect(repository.findRun(blockedRun.id)).toBeUndefined();
+            expect(repository.findRun(newerQueuedReal.id)).toMatchObject({
+                state: "queued",
+            });
+            expect(
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "system.worker-smoke",
+                    payloadJsons: [realPayload],
+                })
+            ).toEqual([{ payloadJson: realPayload }]);
+
+            const invalidReads = [
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: [],
+                    }),
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: [realPayload, realPayload],
+                    }),
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: ["not-json"],
+                    }),
+                () =>
+                    repository.readActionPayloadRunSnapshots({
+                        actionKey: "maintenance.rotate-logs",
+                        payloadJsons: Array.from({ length: 33 }, (_, index) =>
+                            JSON.stringify({ index })
+                        ),
+                    }),
+            ];
+            for (const read of invalidReads) expect(read).toThrow();
+            expect(() =>
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "maintenance.rotate-logs",
+                    payloadJsons: [" ".repeat(65_537)],
+                })
+            ).toThrow("outside its budget");
+            expect(() =>
+                repository.readActionPayloadRunSnapshots({
+                    actionKey: "maintenance.rotate-logs",
+                    payloadJsons: [JSON.stringify({ value: "x".repeat(128) })],
+                })
+            ).toThrow("outside its status budget");
         } finally {
             database.sqlite.close(true);
         }

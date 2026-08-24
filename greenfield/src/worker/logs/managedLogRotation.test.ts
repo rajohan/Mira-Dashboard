@@ -16,6 +16,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 
+import { createLogRotationEpochProbe } from "../../server/platform/logs/logRotationEpochProbe.ts";
+import { createSafeLogReader } from "../../server/platform/logs/safeLogReader.ts";
+import { createLogSourceCatalog } from "../../server/platform/logs/sourceCatalog.ts";
+import { logRotationEpochProjectionFileName } from "../../shared/logRotationEpochProjection.ts";
 import type {
     ManagedArchiveTarget,
     ManagedLogFileTarget,
@@ -26,6 +30,25 @@ import { createManagedLogRotationEngine } from "./managedLogRotation.ts";
 
 const roots: string[] = [];
 const ownerId = typeof process.getuid === "function" ? process.getuid() : 0;
+const retainedEpoch = "019feb02-8b7e-72ab-8f76-19b2ce15c8ef";
+
+interface Deferred {
+    readonly promise: Promise<void>;
+    readonly resolve: () => void;
+}
+
+function deferred(): Deferred {
+    let resolvePromise: (() => void) | undefined;
+    const promise = new Promise<void>((resolve) => {
+        resolvePromise = resolve;
+    });
+    return {
+        promise,
+        resolve() {
+            resolvePromise?.();
+        },
+    };
+}
 
 interface Fixture {
     readonly archiveDirectory: string;
@@ -96,6 +119,62 @@ async function pathExists(filePath: string): Promise<boolean> {
     }
 }
 
+async function expectRejection(
+    operation: Promise<unknown>,
+    expectedMessage: string
+): Promise<void> {
+    try {
+        await operation;
+    } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(expectedMessage);
+        return;
+    }
+    throw new Error("Expected operation to reject");
+}
+
+async function readEpochProjection(stateDirectory: string): Promise<{
+    readonly entries: readonly {
+        readonly epoch: string;
+        readonly sourceId: string;
+        readonly state: "committed" | "rotating";
+    }[];
+    readonly version: number;
+}> {
+    return JSON.parse(
+        await readFile(
+            path.join(stateDirectory, logRotationEpochProjectionFileName),
+            "utf8"
+        )
+    ) as {
+        readonly entries: readonly {
+            readonly epoch: string;
+            readonly sourceId: string;
+            readonly state: "committed" | "rotating";
+        }[];
+        readonly version: number;
+    };
+}
+
+function createLogAccess(base: Fixture) {
+    const probe = createLogRotationEpochProbe({
+        logMaintenanceRoot: base.stateDirectory,
+    });
+    return {
+        probe,
+        reader: createSafeLogReader(
+            createLogSourceCatalog({
+                dashboardLogsRoot: base.logDirectory,
+                hostLogsRoot: base.archiveDirectory,
+                hostOwnerIds: [ownerId],
+                openClawLogsRoot: base.archiveDirectory,
+            }),
+            () => 100,
+            probe
+        ),
+    };
+}
+
 describe("managed log rotation engine", () => {
     test("copytruncates into a compressed archive and persists atomic bounded state", async () => {
         const base = await fixture();
@@ -132,6 +211,32 @@ describe("managed log rotation engine", () => {
         });
         const stateStatus = await lstat(manifest.statePath);
         expect(stateStatus.mode & 0o777).toBe(0o600);
+        const epochPath = path.join(
+            base.stateDirectory,
+            logRotationEpochProjectionFileName
+        );
+        const epochProjection = JSON.parse(await readFile(epochPath, "utf8")) as {
+            readonly entries: readonly {
+                readonly epoch: string;
+                readonly sourceId: string;
+                readonly state: "committed" | "rotating";
+            }[];
+            readonly version: number;
+        };
+        expect(epochProjection).toMatchObject({
+            entries: [
+                {
+                    sourceId: "dashboard.test",
+                    state: "committed",
+                },
+            ],
+            version: 1,
+        });
+        expect(epochProjection.entries[0]?.epoch).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+        );
+        const epochStatus = await lstat(epochPath);
+        expect(epochStatus.mode & 0o777).toBe(0o600);
         expect(await pathExists(manifest.lockPath)).toBe(false);
         expect(await engine.status()).toMatchObject({
             lastRun: { finishedAtMs: clock, ok: true, startedAtMs: clock },
@@ -140,6 +245,396 @@ describe("managed log rotation engine", () => {
             targetCount: 1,
         });
     });
+
+    test("fails closed during the pre-truncate phase and commits a new exact-prefix generation", async () => {
+        const base = await fixture();
+        const sourceId = "dashboard.web.stdout";
+        const source = path.join(base.logDirectory, "web-stdout.log");
+        const contents = "same line\n";
+        await writeFile(source, contents, { mode: 0o600 });
+        await writeFile(
+            path.join(base.stateDirectory, logRotationEpochProjectionFileName),
+            `${JSON.stringify({
+                entries: [
+                    {
+                        epoch: retainedEpoch,
+                        sourceId: "dashboard.worker.stdout",
+                        state: "committed",
+                    },
+                ],
+                version: 1,
+            })}\n`,
+            { mode: 0o600 }
+        );
+        const manifest = {
+            ...base.manifest,
+            fileTargets: [
+                fileTarget(source, {
+                    id: sourceId,
+                    maximumSizeBytes: 1,
+                }),
+                fileTarget(path.join(base.logDirectory, "worker-stdout.log"), {
+                    id: "dashboard.worker.stdout",
+                }),
+            ],
+        };
+        const { probe, reader } = createLogAccess(base);
+        const before = await reader.tail({ limit: 10, sourceId });
+        const beforeId = before.lines[0]?.id;
+        expect(beforeId).toBeDefined();
+
+        const markedRotating = deferred();
+        const continueTruncate = deferred();
+        let markedSourceId: string | undefined;
+        const run = createManagedLogRotationEngine({
+            manifest,
+            testHooks: {
+                async afterCopyTruncateMarkedRotating(observedSourceId) {
+                    markedSourceId = observedSourceId;
+                    markedRotating.resolve();
+                    await continueTruncate.promise;
+                },
+            },
+        }).run();
+        await markedRotating.promise;
+        try {
+            expect(markedSourceId).toBe(sourceId);
+            expect(await readFile(source, "utf8")).toBe(contents);
+            expect(await readEpochProjection(base.stateDirectory)).toMatchObject({
+                entries: [
+                    { sourceId, state: "rotating" },
+                    {
+                        epoch: retainedEpoch,
+                        sourceId: "dashboard.worker.stdout",
+                        state: "committed",
+                    },
+                ],
+                version: 1,
+            });
+            await expectRejection(
+                probe.epoch(sourceId),
+                "Log rotation epoch is unavailable"
+            );
+            expect(await probe.epoch("dashboard.worker.stdout")).toBe(retainedEpoch);
+            await expectRejection(
+                reader.tail({ limit: 10, sourceId }),
+                "Log source is unavailable"
+            );
+        } finally {
+            continueTruncate.resolve();
+        }
+
+        expect(await run).toMatchObject({ ok: true });
+        expect(await readFile(source, "utf8")).toBe("");
+        const committedProjection = await readEpochProjection(base.stateDirectory);
+        expect(committedProjection).toMatchObject({
+            entries: [
+                { sourceId, state: "committed" },
+                {
+                    epoch: retainedEpoch,
+                    sourceId: "dashboard.worker.stdout",
+                    state: "committed",
+                },
+            ],
+            version: 1,
+        });
+        await writeFile(source, contents);
+        const replacement = await reader.tail({ limit: 10, sourceId });
+        expect(replacement.lines[0]?.line).toBe("same line");
+        expect(replacement.lines[0]?.id).not.toBe(beforeId);
+    });
+
+    test("recovers old pre-truncate bytes on a new engine under the persisted epoch", async () => {
+        const base = await fixture();
+        const sourceId = "dashboard.web.stdout";
+        const source = path.join(base.logDirectory, "web-stdout.log");
+        const contents = "same line\nold bytes\n";
+        await writeFile(source, contents, { mode: 0o600 });
+        await writeFile(
+            path.join(base.stateDirectory, logRotationEpochProjectionFileName),
+            `${JSON.stringify({
+                entries: [
+                    {
+                        epoch: retainedEpoch,
+                        sourceId: "dashboard.worker.stdout",
+                        state: "committed",
+                    },
+                ],
+                version: 1,
+            })}\n`,
+            { mode: 0o600 }
+        );
+        const manifest = {
+            ...base.manifest,
+            fileTargets: [
+                fileTarget(source, { id: sourceId, maximumSizeBytes: 1 }),
+                fileTarget(path.join(base.logDirectory, "worker-stdout.log"), {
+                    id: "dashboard.worker.stdout",
+                }),
+            ],
+        };
+        const { probe, reader } = createLogAccess(base);
+        const before = await reader.tail({ limit: 10, sourceId });
+        const beforeId = before.lines[0]?.id;
+        expect(beforeId).toBeDefined();
+
+        const interrupted = await createManagedLogRotationEngine({
+            manifest,
+            testHooks: {
+                afterCopyTruncateMarkedRotating() {
+                    throw new Error("simulated shutdown");
+                },
+            },
+        }).run();
+        expect(interrupted).toMatchObject({ ok: false });
+        expect(interrupted.results).toContainEqual({
+            action: "error",
+            reason: "invalid-source",
+            targetId: sourceId,
+        });
+        expect(await readFile(source, "utf8")).toBe(contents);
+        const rotatingProjection = await readEpochProjection(base.stateDirectory);
+        expect(rotatingProjection).toMatchObject({
+            entries: [
+                {
+                    sourceId,
+                    state: "rotating",
+                },
+                {
+                    epoch: retainedEpoch,
+                    sourceId: "dashboard.worker.stdout",
+                    state: "committed",
+                },
+            ],
+            version: 1,
+        });
+        const pendingEpoch = rotatingProjection.entries.find(
+            (entry) => entry.sourceId === sourceId
+        )?.epoch;
+        expect(pendingEpoch).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+        );
+        await expectRejection(probe.epoch(sourceId), "Log rotation epoch is unavailable");
+        await expectRejection(
+            reader.tail({ limit: 10, sourceId }),
+            "Log source is unavailable"
+        );
+        expect(await probe.epoch("dashboard.worker.stdout")).toBe(retainedEpoch);
+
+        const recovered = await createManagedLogRotationEngine({ manifest }).run();
+        expect(recovered).toMatchObject({ ok: true });
+        expect(recovered.results).toContainEqual({
+            action: "rotated",
+            reason: "recovery",
+            targetId: sourceId,
+        });
+        expect(await readFile(source, "utf8")).toBe("");
+        const committedProjection = await readEpochProjection(base.stateDirectory);
+        expect(committedProjection).toMatchObject({
+            entries: [
+                {
+                    epoch: pendingEpoch,
+                    sourceId,
+                    state: "committed",
+                },
+                {
+                    epoch: retainedEpoch,
+                    sourceId: "dashboard.worker.stdout",
+                    state: "committed",
+                },
+            ],
+            version: 1,
+        });
+        expect(await probe.epoch(sourceId)).toBe(pendingEpoch);
+        expect(await probe.epoch("dashboard.worker.stdout")).toBe(retainedEpoch);
+        const archiveNames = await readdir(base.logDirectory);
+        const archivedContents = await Promise.all(
+            archiveNames
+                .filter((name) => name.endsWith(".gz"))
+                .map(async (name) =>
+                    gunzipSync(
+                        await readFile(path.join(base.logDirectory, name))
+                    ).toString()
+                )
+        );
+        expect(archivedContents).toContain(contents);
+        const recoveredEmptySnapshot = await reader.tail({ limit: 10, sourceId });
+        expect(recoveredEmptySnapshot.lines).toEqual([]);
+        await writeFile(source, contents);
+        const replacement = await reader.tail({ limit: 10, sourceId });
+        expect(replacement.lines[0]?.line).toBe("same line");
+        expect(replacement.lines[0]?.id).not.toBe(beforeId);
+        expect(await pathExists(manifest.lockPath)).toBe(false);
+    });
+
+    test("settles a pending epoch when the source disappears before recovery", async () => {
+        const base = await fixture();
+        const sourceId = "dashboard.web.stdout";
+        const source = path.join(base.logDirectory, "web-stdout.log");
+        await writeFile(source, "pending bytes\n", { mode: 0o600 });
+        const manifest = {
+            ...base.manifest,
+            fileTargets: [fileTarget(source, { id: sourceId, maximumSizeBytes: 1 })],
+        };
+        const { probe, reader } = createLogAccess(base);
+
+        const interrupted = await createManagedLogRotationEngine({
+            manifest,
+            testHooks: {
+                afterCopyTruncateMarkedRotating() {
+                    throw new Error("simulated shutdown");
+                },
+            },
+        }).run();
+        expect(interrupted).toMatchObject({ ok: false });
+        const rotatingProjection = await readEpochProjection(base.stateDirectory);
+        const pendingEpoch = rotatingProjection.entries[0]?.epoch;
+        expect(rotatingProjection).toMatchObject({
+            entries: [{ epoch: pendingEpoch, sourceId, state: "rotating" }],
+            version: 1,
+        });
+        await rm(source);
+
+        const recovered = await createManagedLogRotationEngine({ manifest }).run();
+        expect(recovered).toMatchObject({ ok: true });
+        expect(recovered.results).toContainEqual({
+            action: "missing",
+            reason: "missing",
+            targetId: sourceId,
+        });
+        expect(await readEpochProjection(base.stateDirectory)).toMatchObject({
+            entries: [{ epoch: pendingEpoch, sourceId, state: "committed" }],
+            version: 1,
+        });
+        expect(await probe.epoch(sourceId)).toBe(pendingEpoch);
+
+        await writeFile(source, "replacement\n", { mode: 0o600 });
+        const replacement = await reader.tail({ limit: 10, sourceId });
+        expect(replacement.lines[0]?.line).toBe("replacement");
+    });
+
+    test.each([
+        { name: "empty source", regrowth: "" },
+        { name: "small exact-prefix regrowth", regrowth: "same line\n" },
+    ])(
+        "recovers a post-sync $name on a new engine without committing prematurely",
+        async ({ regrowth }) => {
+            const base = await fixture();
+            const sourceId = "dashboard.web.stdout";
+            const source = path.join(base.logDirectory, "web-stdout.log");
+            const contents = "same line\nold tail that exceeds the threshold\n";
+            await writeFile(source, contents, { mode: 0o600 });
+            await writeFile(
+                path.join(base.stateDirectory, logRotationEpochProjectionFileName),
+                `${JSON.stringify({
+                    entries: [
+                        {
+                            epoch: retainedEpoch,
+                            sourceId: "dashboard.worker.stdout",
+                            state: "committed",
+                        },
+                    ],
+                    version: 1,
+                })}\n`,
+                { mode: 0o600 }
+            );
+            const manifest = {
+                ...base.manifest,
+                fileTargets: [
+                    fileTarget(source, {
+                        id: sourceId,
+                        maximumSizeBytes: 16,
+                    }),
+                    fileTarget(path.join(base.logDirectory, "worker-stdout.log"), {
+                        id: "dashboard.worker.stdout",
+                    }),
+                ],
+            };
+            const { probe, reader } = createLogAccess(base);
+            const before = await reader.tail({ limit: 10, sourceId });
+            const beforeId = before.lines[0]?.id;
+            expect(beforeId).toBeDefined();
+
+            const interrupted = await createManagedLogRotationEngine({
+                manifest,
+                testHooks: {
+                    afterCopyTruncateSynced() {
+                        throw new Error("simulated shutdown");
+                    },
+                },
+            }).run();
+            expect(interrupted).toMatchObject({ ok: false });
+            expect(await readFile(source, "utf8")).toBe("");
+            const rotatingProjection = await readEpochProjection(base.stateDirectory);
+            const pendingEpoch = rotatingProjection.entries.find(
+                (entry) => entry.sourceId === sourceId
+            )?.epoch;
+            expect(rotatingProjection).toMatchObject({
+                entries: [
+                    { epoch: pendingEpoch, sourceId, state: "rotating" },
+                    {
+                        epoch: retainedEpoch,
+                        sourceId: "dashboard.worker.stdout",
+                        state: "committed",
+                    },
+                ],
+                version: 1,
+            });
+            if (regrowth !== "") await writeFile(source, regrowth);
+            expect(Buffer.byteLength(regrowth)).toBeLessThan(16);
+            await expectRejection(
+                probe.epoch(sourceId),
+                "Log rotation epoch is unavailable"
+            );
+            await expectRejection(
+                reader.tail({ limit: 10, sourceId }),
+                "Log source is unavailable"
+            );
+            expect(await probe.epoch("dashboard.worker.stdout")).toBe(retainedEpoch);
+
+            const recovered = await createManagedLogRotationEngine({ manifest }).run();
+            expect(recovered).toMatchObject({ ok: true });
+            expect(recovered.results).toContainEqual({
+                action: "rotated",
+                reason: "recovery",
+                targetId: sourceId,
+            });
+            expect(await readFile(source, "utf8")).toBe("");
+            expect(await readEpochProjection(base.stateDirectory)).toMatchObject({
+                entries: [
+                    { epoch: pendingEpoch, sourceId, state: "committed" },
+                    {
+                        epoch: retainedEpoch,
+                        sourceId: "dashboard.worker.stdout",
+                        state: "committed",
+                    },
+                ],
+                version: 1,
+            });
+            expect(await probe.epoch(sourceId)).toBe(pendingEpoch);
+            expect(await probe.epoch("dashboard.worker.stdout")).toBe(retainedEpoch);
+            const recoveredEmptySnapshot = await reader.tail({ limit: 10, sourceId });
+            expect(recoveredEmptySnapshot.lines).toEqual([]);
+            if (regrowth !== "") {
+                const archiveNames = await readdir(base.logDirectory);
+                const archivedContents = await Promise.all(
+                    archiveNames
+                        .filter((name) => name.endsWith(".gz"))
+                        .map(async (name) =>
+                            gunzipSync(
+                                await readFile(path.join(base.logDirectory, name))
+                            ).toString()
+                        )
+                );
+                expect(archivedContents).toContain(regrowth);
+            }
+            await writeFile(source, "same line\n");
+            const replacement = await reader.tail({ limit: 10, sourceId });
+            expect(replacement.lines[0]?.line).toBe("same line");
+            expect(replacement.lines[0]?.id).not.toBe(beforeId);
+            expect(await pathExists(manifest.lockPath)).toBe(false);
+        }
+    );
 
     test("dry-run reports size and retention work without mutating bytes or state", async () => {
         const base = await fixture();
@@ -154,6 +649,46 @@ describe("managed log rotation engine", () => {
         expect(await readFile(source, "utf8")).toBe("oversize\n");
         expect(await readdir(base.logDirectory)).toEqual(["application.log"]);
         expect(await pathExists(manifest.statePath)).toBe(false);
+        expect(await pathExists(manifest.lockPath)).toBe(false);
+    });
+
+    test("fails closed and releases the lock for a corrupt or non-allowlisted epoch projection", async () => {
+        const base = await fixture();
+        const source = path.join(base.logDirectory, "application.log");
+        await writeFile(source, "oversize\n", { mode: 0o600 });
+        const manifest = { ...base.manifest, fileTargets: [fileTarget(source)] };
+        const epochPath = path.join(
+            base.stateDirectory,
+            logRotationEpochProjectionFileName
+        );
+        await writeFile(epochPath, "not-json\n", { mode: 0o600 });
+
+        await expectRejection(
+            createManagedLogRotationEngine({ manifest }).run(),
+            "Managed log maintenance failed"
+        );
+        expect(await readFile(source, "utf8")).toBe("oversize\n");
+        expect(await pathExists(manifest.lockPath)).toBe(false);
+
+        await writeFile(
+            epochPath,
+            `${JSON.stringify({
+                entries: [
+                    {
+                        epoch: "019feb02-8b7d-7062-94c6-2708cc994799",
+                        sourceId: "dashboard.not-allowlisted",
+                        state: "committed",
+                    },
+                ],
+                version: 1,
+            })}\n`,
+            { mode: 0o600 }
+        );
+        await expectRejection(
+            createManagedLogRotationEngine({ manifest }).run(),
+            "Managed log maintenance failed"
+        );
+        expect(await readFile(source, "utf8")).toBe("oversize\n");
         expect(await pathExists(manifest.lockPath)).toBe(false);
     });
 
@@ -304,6 +839,26 @@ describe("managed log rotation engine", () => {
                 fileTargets: [fileTarget("relative.log")],
                 lockPath: "/tmp/state/lock",
                 statePath: "/tmp/state/status",
+            })
+        ).toThrow("Managed log manifest is invalid");
+        expect(() =>
+            validateManagedLogManifest({
+                archiveTargets: [],
+                fileTargets: Array.from({ length: 65 }, (_, index) =>
+                    fileTarget(`/tmp/log-${index}.log`, {
+                        id: `dashboard.test-${index}`,
+                    })
+                ),
+                lockPath: "/tmp/state/lock",
+                statePath: "/tmp/state/status",
+            })
+        ).toThrow("Managed log manifest is invalid");
+        expect(() =>
+            validateManagedLogManifest({
+                archiveTargets: [],
+                fileTargets: [],
+                lockPath: "/tmp/state/lock",
+                statePath: `/tmp/state/${logRotationEpochProjectionFileName}`,
             })
         ).toThrow("Managed log manifest is invalid");
     });

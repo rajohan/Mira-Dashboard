@@ -106,6 +106,14 @@ export interface ChatProviderAbortAcknowledgement {
 
 export type ChatProviderEvent =
     | Readonly<{
+          kind: "compaction";
+          phase: "active" | "complete" | "inactive";
+          providerRunId: string;
+          providerSequence: number;
+          receivedAtMs: number;
+          sessionKey: string;
+      }>
+    | Readonly<{
           kind: "delta";
           mode: "append" | "merge" | "replace";
           providerRunId: string;

@@ -151,8 +151,10 @@ const meta = {
         maintenance,
         onClearSearch: fn(),
         onRefresh: fn(),
+        onRefreshMaintenance: fn(),
         onRequestMaintenance: fn(() =>
             Promise.resolve({
+                dryRun: false,
                 jobRunId: "log-maintenance-run",
                 policyId: "docker-managed" as const,
                 queued: true as const,
@@ -160,6 +162,8 @@ const meta = {
         ),
         onSearch: fn(),
         onSelectSource: fn(),
+        onRowCountChange: fn(),
+        rowCount: 200,
         selectedSourceId: sources[0]!.id,
         snapshot,
         sources,

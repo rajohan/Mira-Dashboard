@@ -12,7 +12,12 @@ import {
     nonnegativeSafeIntegerSchema,
     positiveSafeIntegerSchema,
 } from "../shared/validation.ts";
-import { jobIdempotencyKeySchema, jobRunIdSchema } from "./jobModel.ts";
+import {
+    jobIdempotencyKeySchema,
+    jobRunIdSchema,
+    jobRunSummarySchema,
+    type JobRunSummary,
+} from "./jobModel.ts";
 import type { ProcedureContract } from "./registry.ts";
 import { emptyInputSchema } from "./system.ts";
 
@@ -155,12 +160,143 @@ export const logMaintenancePolicyIdSchema = v.picklist(
     "Log maintenance policy is invalid"
 );
 
-export const logMaintenancePolicyStatusSchema = v.strictObject({
+const logMaintenanceExecutionSummaryObjectSchema = v.strictObject({
+    actionCounts: v.strictObject({
+        compressed: nonnegativeSafeIntegerSchema(
+            "Compressed log action count is invalid"
+        ),
+        deleted: nonnegativeSafeIntegerSchema("Deleted log action count is invalid"),
+        error: nonnegativeSafeIntegerSchema("Failed log action count is invalid"),
+        missing: nonnegativeSafeIntegerSchema("Missing log action count is invalid"),
+        rotated: nonnegativeSafeIntegerSchema("Rotated log action count is invalid"),
+        skipped: nonnegativeSafeIntegerSchema("Skipped log action count is invalid"),
+    }),
+    checkedTargets: nonnegativeSafeIntegerSchema("Checked log target count is invalid"),
+    dryRun: v.boolean("Log maintenance mode is invalid"),
+    finishedAtMs: timestampMillisecondsSchema("Log maintenance finish time is invalid"),
+    ok: v.boolean("Log maintenance outcome is invalid"),
+    startedAtMs: timestampMillisecondsSchema("Log maintenance start time is invalid"),
+});
+
+type LogMaintenanceExecutionSummaryValue = v.InferOutput<
+    typeof logMaintenanceExecutionSummaryObjectSchema
+>;
+
+/** @returns Whether one maintenance summary preserves execution time order. */
+export function logMaintenanceExecutionTimesAreConsistent(
+    summary: LogMaintenanceExecutionSummaryValue
+): boolean {
+    return summary.finishedAtMs >= summary.startedAtMs;
+}
+
+/** @returns Whether one reported successful execution has no failed actions. */
+export function logMaintenanceExecutionOutcomeIsConsistent(
+    summary: LogMaintenanceExecutionSummaryValue
+): boolean {
+    return !summary.ok || summary.actionCounts.error === 0;
+}
+
+export const logMaintenanceExecutionSummarySchema = v.pipe(
+    logMaintenanceExecutionSummaryObjectSchema,
+    v.check(
+        logMaintenanceExecutionTimesAreConsistent,
+        "Log maintenance timestamps are inconsistent"
+    ),
+    v.check(
+        logMaintenanceExecutionOutcomeIsConsistent,
+        "Successful log maintenance cannot report failed actions"
+    )
+);
+
+/** @returns Whether one projected run is still queued or running. */
+export function logMaintenanceActiveRunIsConsistent(run: JobRunSummary): boolean {
+    return run.state === "queued" || run.state === "running";
+}
+
+export const logMaintenanceActiveRunSchema = v.pipe(
+    jobRunSummarySchema,
+    v.check(
+        logMaintenanceActiveRunIsConsistent,
+        "Active maintenance run must be queued or running"
+    )
+);
+
+/** @returns Whether one projected last run is terminal. */
+export function logMaintenanceTerminalRunIsConsistent(run: JobRunSummary): boolean {
+    return (
+        run.state === "cancelled" ||
+        run.state === "failed" ||
+        run.state === "succeeded" ||
+        run.state === "timed-out"
+    );
+}
+
+const logMaintenanceLastRunObjectSchema = v.strictObject({
+    run: v.pipe(
+        jobRunSummarySchema,
+        v.check(
+            logMaintenanceTerminalRunIsConsistent,
+            "Last maintenance run must be terminal"
+        )
+    ),
+    summary: v.optional(logMaintenanceExecutionSummarySchema),
+});
+
+type LogMaintenanceLastRunValue = v.InferOutput<typeof logMaintenanceLastRunObjectSchema>;
+
+/** @returns Whether a terminal real run carries only a successful real-run summary. */
+export function logMaintenanceLastRunIsConsistent(
+    value: LogMaintenanceLastRunValue
+): boolean {
+    return (
+        value.summary === undefined ||
+        (value.run.state === "succeeded" && !value.summary.dryRun && value.summary.ok)
+    );
+}
+
+export const logMaintenanceLastRunSchema = v.pipe(
+    logMaintenanceLastRunObjectSchema,
+    v.check(
+        logMaintenanceLastRunIsConsistent,
+        "Only a successful real maintenance run can include a result summary"
+    )
+);
+
+const logMaintenancePolicyStatusObjectSchema = v.strictObject({
+    activeRun: v.optional(logMaintenanceActiveRunSchema),
     id: logMaintenancePolicyIdSchema,
     label: boundedControlSafeTextSchema(128, "Log maintenance policy label is invalid"),
+    lastRun: v.optional(logMaintenanceLastRunSchema),
     scope: v.picklist(["docker", "host"], "Log maintenance scope is invalid"),
     state: v.picklist(["queueable", "unavailable"], "Log maintenance state is invalid"),
 });
+
+type LogMaintenancePolicyStatusValue = v.InferOutput<
+    typeof logMaintenancePolicyStatusObjectSchema
+>;
+
+/** @returns Whether one status agrees with its fixed policy, scope, and job identity. */
+export function logMaintenancePolicyStatusIsConsistent(
+    status: LogMaintenancePolicyStatusValue
+): boolean {
+    const managed = status.id === "docker-managed";
+    return (
+        status.scope === (managed ? "docker" : "host") &&
+        (status.activeRun === undefined ||
+            status.activeRun.actionKey === "maintenance.rotate-logs") &&
+        (status.lastRun === undefined ||
+            (status.lastRun.run.actionKey === "maintenance.rotate-logs" &&
+                (status.lastRun.summary === undefined || managed)))
+    );
+}
+
+export const logMaintenancePolicyStatusSchema = v.pipe(
+    logMaintenancePolicyStatusObjectSchema,
+    v.check(
+        logMaintenancePolicyStatusIsConsistent,
+        "Log maintenance policy status is inconsistent"
+    )
+);
 
 /**
  * Applies runtime-only fixed-policy identity uniqueness validation.
@@ -188,16 +324,89 @@ export const logMaintenanceStatusOutputSchema = v.strictObject({
     ),
 });
 
-export const requestLogMaintenanceInputSchema = v.strictObject({
+const requestLogMaintenanceInputObjectSchema = v.strictObject({
+    dryRun: v.optional(v.boolean("Log maintenance mode is invalid"), false),
     idempotencyKey: jobIdempotencyKeySchema,
     policyId: logMaintenancePolicyIdSchema,
 });
 
-export const requestLogMaintenanceOutputSchema = v.strictObject({
+type RequestLogMaintenanceInputValue = v.InferOutput<
+    typeof requestLogMaintenanceInputObjectSchema
+>;
+
+/** @returns Whether dry-run mode targets the only policy that supports it. */
+export function logMaintenanceRequestIsConsistent(
+    input: RequestLogMaintenanceInputValue
+): boolean {
+    return !input.dryRun || input.policyId === "docker-managed";
+}
+
+export const requestLogMaintenanceInputSchema = v.pipe(
+    requestLogMaintenanceInputObjectSchema,
+    v.check(
+        logMaintenanceRequestIsConsistent,
+        "Dry-run is available only for managed application and container logs"
+    )
+);
+
+const requestLogMaintenanceOutputObjectSchema = v.strictObject({
+    dryRun: v.boolean("Log maintenance mode is invalid"),
     jobRunId: jobRunIdSchema,
     policyId: logMaintenancePolicyIdSchema,
     queued: v.literal(true),
 });
+
+type RequestLogMaintenanceOutputValue = v.InferOutput<
+    typeof requestLogMaintenanceOutputObjectSchema
+>;
+
+/** @returns Whether a queued result preserves the fixed dry-run policy boundary. */
+export function logMaintenanceOutputIsConsistent(
+    output: RequestLogMaintenanceOutputValue
+): boolean {
+    return !output.dryRun || output.policyId === "docker-managed";
+}
+
+export const requestLogMaintenanceOutputSchema = v.pipe(
+    requestLogMaintenanceOutputObjectSchema,
+    v.check(
+        logMaintenanceOutputIsConsistent,
+        "Dry-run is available only for managed application and container logs"
+    )
+);
+
+const logMaintenanceJobResultObjectSchema = v.strictObject({
+    completedAtMs: timestampMillisecondsSchema(
+        "Log maintenance completion timestamp is invalid"
+    ),
+    dryRun: v.boolean("Log maintenance mode is invalid"),
+    policyId: logMaintenancePolicyIdSchema,
+    status: v.literal("completed"),
+    summary: v.optional(logMaintenanceExecutionSummarySchema),
+});
+
+type LogMaintenanceJobResultValue = v.InferOutput<
+    typeof logMaintenanceJobResultObjectSchema
+>;
+
+/** @returns Whether one successful durable result agrees with policy, mode, and time. */
+export function logMaintenanceJobResultIsConsistent(
+    result: LogMaintenanceJobResultValue
+): boolean {
+    if (result.dryRun && result.policyId !== "docker-managed") return false;
+    if (result.summary === undefined) return result.policyId !== "docker-managed";
+    return (
+        result.policyId === "docker-managed" &&
+        result.summary.dryRun === result.dryRun &&
+        result.summary.ok &&
+        result.completedAtMs >= result.summary.finishedAtMs
+    );
+}
+
+export const logMaintenanceJobResultSchema = v.pipe(
+    logMaintenanceJobResultObjectSchema,
+    v.check(logMaintenanceJobResultIsConsistent, "Log maintenance result is inconsistent")
+);
 
 export type LogSource = v.InferOutput<typeof logSourceSchema>;
 export type ListLogSourcesOutput = v.InferOutput<typeof listLogSourcesOutputSchema>;
@@ -209,6 +418,19 @@ export type LogMaintenancePolicyId = v.InferOutput<typeof logMaintenancePolicyId
 export type LogMaintenancePolicyStatus = v.InferOutput<
     typeof logMaintenancePolicyStatusSchema
 >;
+export type LogMaintenanceExecutionSummary = v.InferOutput<
+    typeof logMaintenanceExecutionSummarySchema
+>;
+export type LogMaintenanceJobResult = v.InferOutput<typeof logMaintenanceJobResultSchema>;
+export type LogMaintenanceActiveRun = NonNullable<
+    LogMaintenancePolicyStatus["activeRun"]
+>;
+export type LogMaintenanceLastRun = NonNullable<LogMaintenancePolicyStatus["lastRun"]>;
+export type LogMaintenanceRunStatus = Readonly<{
+    readonly activeRun?: LogMaintenanceActiveRun;
+    readonly lastRun?: LogMaintenanceLastRun;
+    readonly policyId: LogMaintenancePolicyId;
+}>;
 export type LogMaintenanceStatusOutput = v.InferOutput<
     typeof logMaintenanceStatusOutputSchema
 >;
@@ -293,7 +515,8 @@ export const logProcedureContracts = [
         name: "logs.maintenanceStatus",
         output: logMaintenanceStatusOutputSchema,
         outputSchemaId: "logs.maintenanceStatus.output",
-        summary: "Reports which reviewed fixed log-maintenance policies can be queued.",
+        summary:
+            "Reports reviewed policy queueability plus active and latest terminal maintenance runs.",
         transport: logQueryTransport,
     },
     {

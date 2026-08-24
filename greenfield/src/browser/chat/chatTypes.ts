@@ -91,6 +91,7 @@ export interface ChatToolPart {
 
 /** Ordered provider status/control information retained beside run content. */
 export interface ChatControlPart {
+    readonly activity?: "complete" | "running";
     readonly kind: "control";
     readonly text: string;
     readonly tone: "danger" | "muted" | "warning";
@@ -117,6 +118,8 @@ export interface ChatDisplayMessage {
     readonly idempotencyKey?: string;
     readonly hydration?: "error" | "loading" | "required";
     readonly parts: readonly ChatMessagePart[];
+    /** Provider user echo used only to place the matching canonical/local user row. */
+    readonly precedingUserTextAnchor?: string;
     readonly providerRunId?: string;
     readonly role: "assistant" | "control" | "user";
     readonly runId?: string;

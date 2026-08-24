@@ -30,7 +30,7 @@ const noSideEffects: JobMutationSideEffects = Object.freeze({
 });
 const terminalRunStates = new Set(["cancelled", "failed", "succeeded", "timed-out"]);
 const findJobWorkerAction = createJobWorkerActionResolver({
-    run: () => Promise.resolve(),
+    run: () => Promise.resolve(undefined),
 });
 
 async function waitForTerminal(

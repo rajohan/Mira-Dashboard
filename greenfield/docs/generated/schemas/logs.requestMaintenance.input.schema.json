@@ -2,6 +2,10 @@
   "$id": "urn:mira-dashboard:logs.requestMaintenance.input",
   "type": "object",
   "properties": {
+    "dryRun": {
+      "type": "boolean",
+      "default": false
+    },
     "idempotencyKey": {
       "type": "string",
       "minLength": 32,
@@ -24,5 +28,6 @@
     "policyId"
   ],
   "additionalProperties": false,
+  "$comment": "Live Valibot validation additionally permits dry-run mode only for the fixed docker-managed policy.",
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

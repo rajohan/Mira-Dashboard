@@ -58,6 +58,7 @@ export type StructuredLogFields =
           readonly targetFingerprint: string;
       }
     | {
+          readonly dryRun: boolean;
           readonly kind: "logs-maintenance-audit-settlement";
           readonly policyId: LogMaintenancePolicyId;
           readonly settlement: "failed" | "queued";
@@ -293,12 +294,14 @@ function safeEventFields(
         case "logs-maintenance-audit-settlement": {
             if (
                 eventName !== "logs.maintenance.audit_settlement_failed" ||
+                typeof fields.dryRun !== "boolean" ||
                 !structuredLogMaintenancePolicyIds.has(fields.policyId) ||
                 (fields.settlement !== "failed" && fields.settlement !== "queued")
             ) {
                 return undefined;
             }
             return {
+                dryRun: fields.dryRun,
                 policyId: fields.policyId,
                 settlement: fields.settlement,
             };

@@ -649,6 +649,10 @@ describe("chat runtime store", () => {
         ).toEqual([]);
 
         store.installExternalRuns(sessionKey, []);
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-1"]?.omissionCount
+        ).toBe(1);
+        store.installExternalRuns(sessionKey, []);
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
         expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
     });
@@ -1434,5 +1438,195 @@ describe("chat runtime store", () => {
             "with-timestamp",
             "without-timestamp",
         ]);
+    });
+
+    test("keeps same-run activity around a steer and folds the later tool result", () => {
+        const store = createChatRuntimeStore();
+        const providerRunId = "provider-steer";
+        const initial = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            parts: [
+                {
+                    kind: "thinking",
+                    segmentId: "reasoning-before",
+                    sequence: 1,
+                    streamId: "agent:reasoning",
+                    text: "Before steer",
+                },
+                {
+                    callId: "call-before",
+                    input: '{"cmd":"bun test"}',
+                    isError: false,
+                    kind: "tool",
+                    name: "bash",
+                    phase: "started",
+                    sequence: 2,
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId,
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: occurredAtMs,
+        });
+        store.installExternalRuns(sessionKey, [initial]);
+        store.enqueue({
+            attachments: [],
+            clientRunId: "client-steer",
+            createdAtMs: occurredAtMs + 1,
+            delivery: "accepted",
+            idempotencyKey: "steer-idempotency",
+            sessionKey,
+            text: "Continue",
+        });
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                hasUnprojectedActivity: false,
+                observationEpoch: 2,
+                observedAtMs: occurredAtMs,
+                parts: [
+                    {
+                        kind: "thinking",
+                        segmentId: "reasoning-before",
+                        sequence: 1,
+                        streamId: "agent:reasoning",
+                        text: "Before steer",
+                    },
+                    {
+                        callId: "call-before",
+                        input: '{"cmd":"bun test"}',
+                        isError: false,
+                        kind: "tool",
+                        name: "bash",
+                        phase: "started",
+                        sequence: 2,
+                    },
+                    { kind: "user", sequence: 3, text: "Continue" },
+                    {
+                        callId: "call-before",
+                        isError: false,
+                        kind: "tool",
+                        name: "bash",
+                        output: "passed",
+                        phase: "succeeded",
+                        sequence: 4,
+                    },
+                    {
+                        kind: "thinking",
+                        segmentId: "reasoning-after",
+                        sequence: 5,
+                        streamId: "agent:reasoning",
+                        text: "After steer",
+                    },
+                ],
+                projectionTruncated: false,
+                providerRunId,
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: occurredAtMs + 2,
+            }),
+        ]);
+
+        const messages = chatRuntimeMessages(store.state, sessionKey);
+        expect(messages.map((message) => message.role)).toEqual([
+            "assistant",
+            "assistant",
+            "user",
+            "assistant",
+        ]);
+        expect(messages.flatMap((message) => message.parts)).toEqual([
+            expect.objectContaining({ kind: "thinking", text: "Before steer" }),
+            expect.objectContaining({
+                input: '{"cmd":"bun test"}',
+                kind: "tool",
+                output: "passed",
+                status: "completed",
+            }),
+            { kind: "text", text: "Continue" },
+            expect.objectContaining({ kind: "thinking", text: "After steer" }),
+        ]);
+    });
+
+    test("retires an omitted external run only after one authoritative grace poll", () => {
+        const store = createChatRuntimeStore();
+        const projection = projectChatExternalRun({
+            continuity: "complete",
+            hasUnprojectedActivity: false,
+            observationEpoch: 1,
+            observedAtMs: occurredAtMs,
+            parts: [
+                {
+                    kind: "thinking",
+                    sequence: 1,
+                    text: "Still active",
+                },
+            ],
+            projectionTruncated: false,
+            providerRunId: "provider-terminal-lag",
+            sessionKey,
+            source: "provider-runtime",
+            text: "",
+            updatedAtMs: occurredAtMs,
+        });
+        store.installExternalRuns(sessionKey, [projection]);
+
+        store.installExternalRuns(sessionKey, []);
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-terminal-lag"]
+                ?.omissionCount
+        ).toBe(1);
+        expect(chatRuntimeMessages(store.state, sessionKey)).not.toHaveLength(0);
+
+        store.installExternalRuns(sessionKey, []);
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-terminal-lag"]
+        ).toBeUndefined();
+        expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
+    });
+
+    test("does not retire external activity from a canonical user echo", () => {
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            projectChatExternalRun({
+                continuity: "complete",
+                hasUnprojectedActivity: false,
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
+                parts: [{ kind: "thinking", sequence: 1, text: "Retain me" }],
+                projectionTruncated: false,
+                providerRunId: "provider-user-echo",
+                sessionKey,
+                source: "provider-runtime",
+                text: "",
+                updatedAtMs: occurredAtMs,
+            }),
+        ]);
+        store.reconcileHistory(sessionKey, {
+            clientRunIds: [],
+            idempotencyKeys: ["user-echo"],
+            providerRunIds: [],
+            runIds: [],
+            throughCursor: 0,
+        });
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-user-echo"]
+        ).toBeDefined();
+
+        store.reconcileHistory(sessionKey, {
+            clientRunIds: [],
+            idempotencyKeys: [],
+            providerRunIds: ["provider-user-echo"],
+            runIds: [],
+            throughCursor: 0,
+        });
+        expect(
+            store.state.sessions[sessionKey]?.externalRuns["provider-user-echo"]
+        ).toBeUndefined();
     });
 });

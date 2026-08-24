@@ -3,6 +3,7 @@ import {
     type ListLogSourcesOutput,
     type LogMaintenancePolicyId,
     type LogMaintenancePolicyStatus,
+    type LogMaintenanceRunStatus,
     type LogMaintenanceStatusOutput,
     type LogSnapshotOutput,
     type RequestLogMaintenanceInput,
@@ -15,6 +16,7 @@ import { SafeLogReaderError } from "../../platform/logs/safeLogReader.ts";
 import type { LogSourceCatalog } from "../../platform/logs/sourceCatalog.ts";
 import type {
     LogMaintenanceAuditContext,
+    LogMaintenanceAuditEvent,
     LogMaintenanceAuditWriter,
 } from "./operationAudit.ts";
 
@@ -42,6 +44,10 @@ export class LogsServiceError extends Error {
 }
 
 export interface LogMaintenanceQueuePort {
+    /** Returns active and latest terminal non-dry-run observations for fixed policies. */
+    readonly runStatuses: (
+        signal?: AbortSignal
+    ) => Promise<readonly LogMaintenanceRunStatus[]>;
     /** Returns exact policies accepted by this release's durable queue. */
     readonly queueablePolicies: (
         signal?: AbortSignal
@@ -59,6 +65,7 @@ export interface LogsServiceDependencies {
     readonly maintenanceQueue: LogMaintenanceQueuePort;
     readonly now?: () => number;
     readonly onAuditSettlementFailure?: (fields: {
+        readonly dryRun: boolean;
         readonly policyId: LogMaintenancePolicyId;
         readonly settlement: "failed" | "queued";
     }) => void;
@@ -120,6 +127,7 @@ export function createLogsService({
         try {
             await auditWriter.record({
                 ...context,
+                dryRun: input.dryRun,
                 policyId: input.policyId,
                 settlement: "attempted",
             });
@@ -131,18 +139,33 @@ export function createLogsService({
     async function settle(
         input: RequestLogMaintenanceInput,
         context: LogMaintenanceAuditContext,
-        settlement: "failed" | "queued",
-        jobRunId?: string
+        settlement:
+            | { readonly kind: "failed" }
+            | { readonly jobRunId: string; readonly kind: "queued" }
     ): Promise<void> {
         try {
-            await auditWriter.record({
-                ...context,
-                ...(jobRunId === undefined ? {} : { jobRunId }),
-                policyId: input.policyId,
-                settlement,
-            });
+            const event: LogMaintenanceAuditEvent =
+                settlement.kind === "queued"
+                    ? {
+                          ...context,
+                          dryRun: input.dryRun,
+                          jobRunId: settlement.jobRunId,
+                          policyId: input.policyId,
+                          settlement: "queued",
+                      }
+                    : {
+                          ...context,
+                          dryRun: input.dryRun,
+                          policyId: input.policyId,
+                          settlement: "failed",
+                      };
+            await auditWriter.record(event);
         } catch {
-            onAuditSettlementFailure({ policyId: input.policyId, settlement });
+            onAuditSettlementFailure({
+                dryRun: input.dryRun,
+                policyId: input.policyId,
+                settlement: settlement.kind,
+            });
         }
     }
 
@@ -156,16 +179,30 @@ export function createLogsService({
         },
         async maintenanceStatus(signal?: AbortSignal) {
             try {
-                const queueable = new Set(
-                    await maintenanceQueue.queueablePolicies(signal)
+                const [queueablePolicies, runStatuses] = await Promise.all([
+                    maintenanceQueue.queueablePolicies(signal),
+                    maintenanceQueue.runStatuses(signal),
+                ]);
+                const queueable = new Set(queueablePolicies);
+                const runStatusByPolicy = new Map(
+                    runStatuses.map((status) => [status.policyId, status])
                 );
                 return {
                     observedAtMs: now(),
-                    policies: logMaintenancePolicyIds.map((id) => ({
-                        id,
-                        ...policyMetadata[id],
-                        state: queueable.has(id) ? "queueable" : "unavailable",
-                    })),
+                    policies: logMaintenancePolicyIds.map((id) => {
+                        const runStatus = runStatusByPolicy.get(id);
+                        return {
+                            ...(runStatus?.activeRun === undefined
+                                ? {}
+                                : { activeRun: runStatus.activeRun }),
+                            id,
+                            ...policyMetadata[id],
+                            ...(runStatus?.lastRun === undefined
+                                ? {}
+                                : { lastRun: runStatus.lastRun }),
+                            state: queueable.has(id) ? "queueable" : "unavailable",
+                        };
+                    }),
                 };
             } catch (error) {
                 throw serviceFailure(error);
@@ -181,11 +218,15 @@ export function createLogsService({
             try {
                 result = await maintenanceQueue.enqueue(input, signal);
             } catch (error) {
-                await settle(input, auditContext, "failed");
+                await settle(input, auditContext, { kind: "failed" });
                 throw serviceFailure(error);
             }
-            await settle(input, auditContext, "queued", result.jobRunId);
+            await settle(input, auditContext, {
+                jobRunId: result.jobRunId,
+                kind: "queued",
+            });
             return {
+                dryRun: input.dryRun,
                 jobRunId: result.jobRunId,
                 policyId: input.policyId,
                 queued: true,

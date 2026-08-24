@@ -19,6 +19,7 @@ import {
     type JobCacheAttemptWriteResult,
     JobActionRetryableError,
     jobActionDefinitions,
+    logMaintenanceJobActionKey,
     parseJobActionOutputMessage,
     parseJobActionProgress,
 } from "./actionRegistry.ts";
@@ -932,6 +933,8 @@ export function createJobWorkerCoordinator(
                         at: effectiveAt,
                         nextRunAt: new Date(nextRunAtMs),
                         observedNextRunAt: schedule.nextRunAt,
+                        rejectWhenActionActive:
+                            schedule.actionKey === logMaintenanceJobActionKey,
                         run,
                         scheduleId: schedule.id,
                     });
