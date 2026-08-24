@@ -202,7 +202,7 @@ export async function loadRuntimeRelease(
             throw invalidRuntimeRelease();
         }
         const manifest = parseReleaseManifest(manifestValue);
-        const runtime = readRuntimeIdentity(observedRuntime);
+        const runtime = readRuntimeIdentity(observedRuntime, manifest.runtime.version);
         if (
             path.basename(releaseRoot) !== manifest.source.commitSha ||
             manifest.runtime.version !== runtime.version ||

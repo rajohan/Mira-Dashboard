@@ -11,7 +11,7 @@ import {
     serverRequestBodyMaximumBytes,
 } from "../../../app/server.ts";
 import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
-import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
+import { createBunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
 import { createSystemMetricsRuntimeService } from "../../domains/system/systemMetricsService.ts";
 import {
     createReadinessController,
@@ -28,6 +28,7 @@ import {
     waitForTestLogQuiescence,
 } from "../support/requestContext.ts";
 
+const bunRuntimePolicy = createBunRuntimePolicy("1.4.0");
 const servers: ApplicationServer[] = [];
 const requestIdPattern =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -730,7 +731,7 @@ describe("system foundation", () => {
         }
     });
 
-    test("accepts new canary revisions on Bun 1.4", () => {
+    test("accepts the selected runtime with a new exact source revision", () => {
         expect(
             runtimeIdentityModule.readRuntimeIdentity({
                 revision: "0".repeat(40),
@@ -745,10 +746,13 @@ describe("system foundation", () => {
 
     test("rejects a runtime outside the Bun 1.4 baseline", () => {
         expect(() =>
-            runtimeIdentityModule.readRuntimeIdentity({
-                revision: "0000000000000000000000000000000000000000",
-                version: "1.3.0",
-            })
+            runtimeIdentityModule.readRuntimeIdentity(
+                {
+                    revision: "0000000000000000000000000000000000000000",
+                    version: "1.3.0",
+                },
+                bunRuntimePolicy.version
+            )
         ).toThrow(`Serving Bun runtime must be ${bunRuntimePolicy.version}`);
     });
 

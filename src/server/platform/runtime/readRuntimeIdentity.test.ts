@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { bunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
+import { createBunRuntimePolicy } from "../../../shared/bunRuntimePolicy.ts";
 import { readRuntimeIdentity } from "./readRuntimeIdentity.ts";
+
+const bunRuntimePolicy = createBunRuntimePolicy("1.4.0");
 
 describe("runtime identity validation", () => {
     test("returns a validated Bun runtime identity", () => {
@@ -18,7 +20,10 @@ describe("runtime identity validation", () => {
 
     test("preserves the runtime-version error before revision validation", () => {
         expect(() =>
-            readRuntimeIdentity({ revision: "invalid", version: "1.3.0" })
+            readRuntimeIdentity(
+                { revision: "invalid", version: "1.3.0" },
+                bunRuntimePolicy.version
+            )
         ).toThrow(`Serving Bun runtime must be ${bunRuntimePolicy.version}`);
     });
 

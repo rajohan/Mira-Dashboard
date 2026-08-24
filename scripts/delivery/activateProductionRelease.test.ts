@@ -28,6 +28,12 @@ describe("production release activation CLI", () => {
         expect(
             parseActivateProductionReleaseArguments(validArguments.toReversed())
         ).toEqual(parseActivateProductionReleaseArguments(validArguments));
+        expect(
+            parseActivateProductionReleaseArguments([
+                ...validArguments,
+                "--activation-mode=greenfield",
+            ]).activationMode
+        ).toBe("greenfield");
     });
 
     test("rejects unknown, duplicate, external-readiness, and relative inputs", () => {

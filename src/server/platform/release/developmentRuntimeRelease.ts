@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -18,11 +19,13 @@ const placeholderSha256 = "0".repeat(64);
  * runtime-release loader; production startup therefore retains its immutable-file checks.
  * @param repositoryRoot Canonical self-contained repository root.
  * @param sourceCommitSha Exact Git commit from which the development checkout was created.
+ * @param expectedRuntimeVersion Optional explicit test boundary; production reads `.bun-version`.
  * @returns A typed source/runtime identity compatible with existing process composition seams.
  */
 export function createDevelopmentRuntimeRelease(
     repositoryRoot: string,
-    sourceCommitSha: string
+    sourceCommitSha: string,
+    expectedRuntimeVersion?: string
 ): RuntimeRelease {
     if (
         !path.isAbsolute(repositoryRoot) ||
@@ -32,7 +35,10 @@ export function createDevelopmentRuntimeRelease(
     ) {
         throw new TypeError("Development source identity is invalid");
     }
-    const runtime = readRuntimeIdentity();
+    const selectedRuntimeVersion =
+        expectedRuntimeVersion ??
+        readFileSync(path.join(repositoryRoot, ".bun-version"), "utf8").trim();
+    const runtime = readRuntimeIdentity(undefined, selectedRuntimeVersion);
     const manifest = parseReleaseManifest({
         artifacts: [
             {

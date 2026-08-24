@@ -45,7 +45,11 @@ describe("development process entrypoints", () => {
     test("composes the web runtime from isolated source-backed state", () => {
         const projectRoot = "/srv/mira-dashboard";
         const sourceCommit = "d".repeat(40);
-        const source = createDevelopmentRuntimeRelease(projectRoot, sourceCommit);
+        const source = createDevelopmentRuntimeRelease(
+            projectRoot,
+            sourceCommit,
+            Bun.version
+        );
         const layout = deriveDashboardProjectLayout(projectRoot);
         const logger = createTestStructuredLogger();
         const configuration = Object.freeze({

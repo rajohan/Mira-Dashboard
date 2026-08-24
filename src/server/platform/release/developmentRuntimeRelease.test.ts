@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { createDevelopmentRuntimeRelease } from "./developmentRuntimeRelease.ts";
@@ -23,5 +25,19 @@ describe("development runtime release identity", () => {
         expect(() =>
             createDevelopmentRuntimeRelease("/srv/dashboard", "not-a-sha")
         ).toThrow("Development source identity is invalid");
+    });
+
+    test("rejects a runtime outside the repository-selected version", async () => {
+        const repositoryRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-development-runtime-version-")
+        );
+        try {
+            await writeFile(path.join(repositoryRoot, ".bun-version"), "9.9.9\n");
+            expect(() =>
+                createDevelopmentRuntimeRelease(repositoryRoot, "1".repeat(40))
+            ).toThrow("Serving Bun runtime must be 9.9.9");
+        } finally {
+            await rm(repositoryRoot, { force: true, recursive: true });
+        }
     });
 });

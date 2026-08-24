@@ -11,15 +11,15 @@ Use the Bun revision selected by `.bun-version`. A fresh checkout can install th
 graph, validate generated artifacts, prepare isolated state, and start the loopback Dashboard with:
 
 ```bash
-bun run bootstrap
+bun run bootstrap development
 ```
 
-Use `bun run bootstrap --no-start` to prepare without starting, or add `--with-browser` to install
+Use `bun run bootstrap development --no-start` to prepare without starting, or add `--with-browser` to install
 the repository-owned Playwright Chromium runtime needed by Storybook tests. Bootstrap is
 idempotent and deliberately unprivileged: it never installs system units, mutates production,
 reads a secret manager, or changes credentials.
 
-On a configured owner host, `bun run bootstrap --doppler` performs the same preparation and starts
+On a configured owner host, `bun run bootstrap development --doppler` performs the same preparation and starts
 through the fixed Doppler allowlist. It cannot be combined with `--no-start`.
 
 Before starting the stack, provide its Gateway credential through either `OPENCLAW_GATEWAY_TOKEN` or the

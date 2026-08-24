@@ -1,5 +1,11 @@
 # Mira Dashboard
 
+[![coverage](https://img.shields.io/codecov/c/github/rajohan/Mira-Dashboard?branch=main&label=coverage&logo=codecov)](https://codecov.io/gh/rajohan/Mira-Dashboard)
+[![checks](https://img.shields.io/github/actions/workflow/status/rajohan/Mira-Dashboard/dashboard-checks.yml?branch=main&label=checks&logo=github)](https://github.com/rajohan/Mira-Dashboard/actions/workflows/dashboard-checks.yml)
+[![codeql](https://img.shields.io/github/actions/workflow/status/rajohan/Mira-Dashboard/codeql.yml?branch=main&label=codeql&logo=github)](https://github.com/rajohan/Mira-Dashboard/actions/workflows/codeql.yml)
+[![Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
+[![License](https://img.shields.io/github/license/rajohan/Mira-Dashboard)](LICENSE)
+
 This is the self-contained Dashboard repository root. Application source lives in `src/`,
 repository tooling in `scripts/`, migrations in `migrations/`, and project configuration at the
 root. The retired implementation has been removed; no compatibility source tree remains.
@@ -17,9 +23,10 @@ bun run test
 bun run test coverage
 ```
 
-For a fresh checkout, `bun run bootstrap` combines frozen install, generated checks, isolated state
-preparation, and local start. The [command reference](docs/development/commands.md) documents every
-public entrypoint and subcommand.
+For a fresh development checkout, `bun run bootstrap development` combines frozen install,
+generated checks, isolated state preparation, and local start. Bare `bun run bootstrap` owns the
+complete first installation on a clean production host. The
+[command reference](docs/development/commands.md) documents every public entrypoint and subcommand.
 
 `bun run build release` additionally requires a clean Git tree. It produces a commit-addressed
 immutable release containing browser/process artifacts, migrations, generated documentation,

@@ -100,7 +100,9 @@ describe("repository command entrypoints", () => {
                 return Promise.resolve(0);
             },
         };
-        expect(await runBootstrap(["--no-start"], "/source", dependencies)).toBe(0);
+        expect(
+            await runBootstrap(["development", "--no-start"], "/source", dependencies)
+        ).toBe(0);
         expect(calls.map((call) => call.slice(1))).toEqual([
             ["install", "--frozen-lockfile"],
             ["scripts/installGitHooks.ts"],
@@ -109,10 +111,12 @@ describe("repository command entrypoints", () => {
             ["scripts/developmentStack.ts", "--prepare-state"],
         ]);
         calls.length = 0;
-        expect(await runBootstrap([], "/source", dependencies)).toBe(0);
+        expect(await runBootstrap(["development"], "/source", dependencies)).toBe(0);
         expect(calls.at(-1)?.slice(1)).toEqual(["scripts/developmentStack.ts"]);
         calls.length = 0;
-        expect(await runBootstrap(["--doppler"], "/source", dependencies)).toBe(0);
+        expect(
+            await runBootstrap(["development", "--doppler"], "/source", dependencies)
+        ).toBe(0);
         expect(calls.at(-1)?.slice(1)).toEqual([
             "scripts/developmentCommand.ts",
             "doppler",
@@ -121,12 +125,29 @@ describe("repository command entrypoints", () => {
 
     test("fails before installation on a mismatched runtime", () => {
         expect(
-            runBootstrap(["--no-start"], "/source", {
+            runBootstrap(["development", "--no-start"], "/source", {
                 readRuntimeVersion: () => Promise.resolve("1.4.0"),
                 runtimeVersion: "1.3.9",
                 run: () => Promise.resolve(0),
             })
         ).rejects.toThrow("requires Bun 1.4.0");
+    });
+
+    test("uses the complete production bootstrap by default", async () => {
+        const calls: Array<readonly string[]> = [];
+        const dependencies = {
+            readRuntimeVersion: () => Promise.resolve("1.4.0"),
+            runtimeVersion: "1.4.0",
+            run: (arguments_: readonly string[]) => {
+                calls.push(arguments_);
+                return Promise.resolve(0);
+            },
+        };
+        expect(await runBootstrap([], "/source", dependencies)).toBe(0);
+        expect(calls.map((call) => call.slice(1))).toEqual([
+            ["install", "--frozen-lockfile"],
+            ["scripts/productionBootstrap.ts"],
+        ]);
     });
 
     test("installs portable Git hooks from the repository root", async () => {

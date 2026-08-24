@@ -282,8 +282,10 @@ export function validateSseMemoryEvidence(
     );
     assertProcessMemory(candidate.process);
 
-    if (candidate.runtime.version !== "1.4.0") {
-        throw new Error(`Expected Bun 1.4.0; observed ${candidate.runtime.version}`);
+    if (candidate.runtime.version !== Bun.version) {
+        throw new Error(
+            `Expected Bun ${Bun.version}; observed ${candidate.runtime.version}`
+        );
     }
     if (!v.safeParse(bunRevisionSchema, candidate.runtime.revision).success) {
         throw new Error("Bun revision is not a full commit SHA");

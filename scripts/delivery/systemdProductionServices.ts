@@ -48,6 +48,7 @@ export type { SystemctlProcessResult } from "./systemctlProcess.ts";
 
 /** Explicit systemd and readiness boundaries for one project-local deployment. */
 export interface SystemdProductionServiceOptions {
+    readonly allowEmptyOperatorSmoke?: boolean;
     readonly execute?: SystemctlExecutor;
     readonly fetch?: (request: Request) => Promise<Response>;
     readonly verifyUnits?: typeof verifyPublishedProductionSystemdUnitsInstalledAtRoot;
@@ -188,7 +189,9 @@ export function createSystemdProductionServiceController(
             runtime: InstalledProductionRuntime,
             transitionId: string
         ): Promise<void> {
-            await smoke(paths, release, runtime, readinessUrl, transitionId);
+            await smoke(paths, release, runtime, readinessUrl, transitionId, {
+                allowEmptyOperator: options.allowEmptyOperatorSmoke,
+            });
             await requireUnitsActive(execute, executable);
         },
     });

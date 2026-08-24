@@ -9,7 +9,7 @@ import type {
     RawHttpBodyContract,
 } from "../../src/contracts/registry.ts";
 import { dashboardRouteDocumentation } from "../../src/shared/browserRouteRegistry.ts";
-import { bunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
+import { createBunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
 import { applicationConfigurationRegistry } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { convertContractSchema, type SchemaTypeMode } from "./jsonSchema.ts";
 import {
@@ -34,6 +34,7 @@ export interface DocumentationPackageManifest {
     dependencies: Readonly<Record<string, string>>;
     devDependencies: Readonly<Record<string, string>>;
     resolvedVersions: Readonly<Record<string, string>>;
+    runtimeVersion: string;
 }
 
 function registerSchema(
@@ -291,7 +292,7 @@ export function buildDocumentationArtifacts(
         dependencies: packageManifest.dependencies,
         developmentDependencies: packageManifest.devDependencies,
         resolvedVersions: packageManifest.resolvedVersions,
-        runtime: bunRuntimePolicy,
+        runtime: createBunRuntimePolicy(packageManifest.runtimeVersion),
     };
     const schemas = collectSchemas();
     const artifacts = new Map<string, string>([

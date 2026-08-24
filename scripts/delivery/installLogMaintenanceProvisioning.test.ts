@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
     chmod,
+    chown,
     cp,
     lstat,
     mkdir,
@@ -28,6 +29,12 @@ import {
 const releaseId = "a".repeat(40);
 const sourceProjectRoot = path.resolve(import.meta.dir, "../..");
 const temporaryRoots: string[] = [];
+const currentUserId = typeof process.getuid === "function" ? process.getuid() : -1;
+const currentGroupId = typeof process.getgid === "function" ? process.getgid() : -1;
+const supplementaryGroupId =
+    typeof process.getgroups === "function"
+        ? process.getgroups().find((groupId) => groupId !== currentGroupId)
+        : undefined;
 
 afterEach(async () => {
     for (const temporaryRoot of temporaryRoots.splice(0)) {
@@ -123,6 +130,22 @@ function argumentsFor(releaseRoot: string): readonly string[] {
 }
 
 describe("root log-maintenance provisioning installer", () => {
+    test("accepts a root-owned non-writable policy directory with a service group", async () => {
+        if (supplementaryGroupId === undefined) return;
+        const releaseRoot = await releaseFixture();
+        const destinationRoot = await destinationFixture();
+        const rulesDirectory = path.join(destinationRoot, "etc/polkit-1/rules.d");
+        await chown(rulesDirectory, currentUserId, supplementaryGroupId);
+        await chmod(rulesDirectory, 0o750);
+
+        expect(
+            await runInstallLogMaintenanceProvisioningCli(argumentsFor(releaseRoot), {
+                destinationRoot,
+                requireRoot: () => {},
+            })
+        ).toEqual({ releaseId, status: "INSTALLED" });
+    });
+
     test("installs exact manifest bytes atomically without activating host policy", async () => {
         const releaseRoot = await releaseFixture();
         const destinationRoot = await destinationFixture();

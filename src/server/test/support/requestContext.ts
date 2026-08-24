@@ -595,6 +595,7 @@ export interface TestServerSecurityServices {
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly cacheService: CacheService["Service"];
     readonly databaseObservabilityService: DatabaseObservabilityService;
+    readonly expectedRuntimeVersion: string;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
@@ -633,6 +634,7 @@ export function createTestServerSecurityServices(
         databaseObservabilityService:
             overrides.databaseObservabilityService ??
             createTestDatabaseObservabilityService(),
+        expectedRuntimeVersion: overrides.expectedRuntimeVersion ?? Bun.version,
         gatewayConnectionService:
             overrides.gatewayConnectionService ?? createTestGatewayConnectionService(),
         gatewaySessionsService:

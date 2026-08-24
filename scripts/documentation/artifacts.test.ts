@@ -22,6 +22,7 @@ const packageManifest = {
         eventsource: "4.1.1",
         valibot: "1.4.2",
     },
+    runtimeVersion: "1.4.0",
 };
 
 describe("generated contract documentation", () => {

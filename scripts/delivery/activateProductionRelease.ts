@@ -34,7 +34,7 @@ import { createSystemdProductionServiceController } from "./systemdProductionSer
 
 const activationCliFailureMessage = "Production release activation failed";
 const activationCliUsage =
-    "Usage: bun run delivery activate --project-root=/absolute/project --release-root=/absolute/release --readiness-url=http://127.0.0.1:PORT/api/health/ready [--runtime-source=/absolute/bun]";
+    "Usage: bun run delivery activate --project-root=/absolute/project --release-root=/absolute/release --readiness-url=http://127.0.0.1:PORT/api/health/ready [--runtime-source=/absolute/bun] [--activation-mode=greenfield]";
 const absolutePathSchema = v.pipe(
     v.string(),
     v.maxLength(4096),
@@ -68,6 +68,7 @@ const readinessUrlSchema = v.pipe(
     }, activationCliUsage)
 );
 const activateProductionReleaseArgumentsSchema = v.strictObject({
+    activationMode: v.optional(v.literal("greenfield")),
     projectRoot: absolutePathSchema,
     readinessUrl: readinessUrlSchema,
     releaseRoot: absolutePathSchema,
@@ -79,6 +80,7 @@ const activationCliResultSchema = v.strictObject({
     transitionId: v.pipe(v.string(), v.uuid()),
 });
 const activationArgumentNames = new Set([
+    "activation-mode",
     "project-root",
     "readiness-url",
     "release-root",
@@ -136,7 +138,7 @@ function readNamedArguments(arguments_: readonly string[]): Record<string, strin
 export function parseActivateProductionReleaseArguments(
     arguments_: readonly string[]
 ): ActivateProductionReleaseArguments {
-    if (arguments_.length < 3 || arguments_.length > 4) {
+    if (arguments_.length < 3 || arguments_.length > 5) {
         throw new TypeError(activationCliUsage);
     }
     const named = readNamedArguments(arguments_);
@@ -144,6 +146,7 @@ export function parseActivateProductionReleaseArguments(
         throw new TypeError(activationCliUsage);
     }
     const candidate: unknown = {
+        activationMode: named["activation-mode"],
         projectRoot: named["project-root"],
         readinessUrl: named["readiness-url"],
         releaseRoot: named["release-root"],
@@ -223,6 +226,7 @@ async function activateProductionRelease(
     return withDeploymentLease(state.stateDirectory, async (lease) => {
         const paths = await prepareProductionDeliveryDirectories(state);
         const services = createSystemdProductionServiceController(lease, paths, {
+            allowEmptyOperatorSmoke: options.activationMode === "greenfield",
             readinessUrl: options.readinessUrl,
         });
         return deliverProductionReleaseUnderLease(

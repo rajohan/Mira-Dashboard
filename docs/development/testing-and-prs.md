@@ -1,5 +1,19 @@
 # Testing and Pull Requests
 
+## Release titles
+
+Every PR title must use Conventional Commits because release-please uses the squash title on
+`main` to calculate the next semantic version and changelog:
+
+- `fix(scope): ...` produces a patch release;
+- `feat(scope): ...` produces a minor release;
+- `feat(scope)!: ...`, `fix(scope)!: ...`, or a `BREAKING CHANGE` footer produces a major release;
+- `chore`, `docs`, `test`, and `ci` entries remain in history without pretending to be product
+  features or fixes.
+
+Verify the final rendered PR title before merge. Production archives remain commit-addressed and
+are attached permanently to the semantic GitHub release for that exact commit.
+
 ## Standard gates
 
 Run these commands from the repository root:

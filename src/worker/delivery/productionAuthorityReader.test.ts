@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/p
 import os from "node:os";
 import path from "node:path";
 
-import { bunRuntimePolicy } from "../../shared/bunRuntimePolicy.ts";
+import { createBunRuntimePolicy } from "../../shared/bunRuntimePolicy.ts";
 import { serializeProductionActivationRecord } from "../../shared/productionActivationRecord.ts";
 import {
     releaseBuildCommands,
@@ -16,6 +16,7 @@ import {
     DeliveryProductionAuthorityReaderError,
 } from "./productionAuthorityReader.ts";
 
+const bunRuntimePolicy = createBunRuntimePolicy("1.4.0");
 const currentReleaseId = "a".repeat(40);
 const currentRuntime = "b".repeat(40);
 const previousReleaseId = "c".repeat(40);
