@@ -5,6 +5,9 @@ import { Redacted } from "effect";
 
 import { createAgentRepository } from "../server/domains/agents/repository.ts";
 import { createAgentService } from "../server/domains/agents/service.ts";
+import { createMonitoringCatalogService } from "../server/domains/monitoring/catalogService.ts";
+import { createMonitoringRepository } from "../server/domains/monitoring/repository.ts";
+import { createMonitoringService } from "../server/domains/monitoring/service.ts";
 import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
@@ -83,6 +86,8 @@ export interface DashboardServerOptions extends Omit<
     | "hostname"
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
+    | "monitoringCatalogService"
+    | "monitoringService"
     | "securityAuditLifecycle"
     | "taskService"
 > {
@@ -246,17 +251,42 @@ export async function createDashboardServer(
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
         const domainNow = options.now;
+        const wakeEventPump = async (): Promise<void> => {
+            try {
+                await options.applicationRuntime.services.realtimeEvents.wake();
+            } catch (error) {
+                options.applicationRuntime.logger.warn({
+                    component: "realtime-event-pump",
+                    event: "realtime.wake.failed",
+                    failure: error,
+                    outcome: "server-error",
+                });
+                throw error;
+            }
+        };
         const agentService = createAgentService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: createAgentRepository(database, databaseRuntime),
-            wakeEventPump: () =>
-                options.applicationRuntime.services.realtimeEvents.wake(),
+            wakeEventPump,
         });
         const taskService = createTaskService({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: createTaskRepository(database, databaseRuntime),
-            wakeEventPump: () =>
-                options.applicationRuntime.services.realtimeEvents.wake(),
+            wakeEventPump,
+        });
+        const monitoringRepository = createMonitoringRepository(
+            database,
+            databaseRuntime
+        );
+        const monitoringService = createMonitoringService({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            repository: monitoringRepository,
+            wakeEventPump,
+        });
+        const monitoringCatalogService = createMonitoringCatalogService({
+            ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
+            repository: monitoringRepository,
+            wakeEventPump,
         });
         const serverOptions: ServerOptions = {
             agentService,
@@ -271,6 +301,8 @@ export async function createDashboardServer(
             hostname: "127.0.0.1",
             mfaAccountLifecycle,
             mfaLoginLifecycle,
+            monitoringCatalogService,
+            monitoringService,
             port: options.port,
             readiness: options.readiness,
             securityAuditLifecycle,

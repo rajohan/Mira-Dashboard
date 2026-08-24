@@ -1,8 +1,10 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "17f69d2d-da53-412b-ba2b-4f803e96050c",
-  "prevIds": [],
+  "id": "fccb7937-15cf-4628-a561-1093e2ee23ed",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
   "ddl": [
     {
       "name": "agent_task_runs",
@@ -1340,11 +1342,31 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "report_id",
+      "entityType": "columns",
+      "table": "notifications"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "severity",
+      "entityType": "columns",
+      "table": "notifications"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source",
       "entityType": "columns",
       "table": "notifications"
     },
@@ -1505,6 +1527,26 @@
       "default": null,
       "generated": null,
       "name": "source_job_id",
+      "entityType": "columns",
+      "table": "reports"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'ok'",
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "reports"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "summary",
       "entityType": "columns",
       "table": "reports"
     },
@@ -2520,6 +2562,21 @@
     },
     {
       "columns": [
+        "report_id"
+      ],
+      "tableTo": "reports",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_notifications_report_id_reports_id_fk",
+      "entityType": "fks",
+      "table": "notifications"
+    },
+    {
+      "columns": [
         "task_id"
       ],
       "tableTo": "tasks",
@@ -3414,6 +3471,24 @@
     {
       "columns": [
         {
+          "value": "last_seen_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "incidents_last_seen_id_idx",
+      "entityType": "indexes",
+      "table": "incidents"
+    },
+    {
+      "columns": [
+        {
           "value": "monitor_key",
           "isExpression": false
         },
@@ -3472,6 +3547,38 @@
     {
       "columns": [
         {
+          "value": "report_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "notifications_report_id_idx",
+      "entityType": "indexes",
+      "table": "notifications"
+    },
+    {
+      "columns": [
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "notifications_occurred_id_idx",
+      "entityType": "indexes",
+      "table": "notifications"
+    },
+    {
+      "columns": [
+        {
           "value": "expires_at",
           "isExpression": false
         },
@@ -3504,6 +3611,24 @@
       "name": "realtime_events_topic_id_idx",
       "entityType": "indexes",
       "table": "realtime_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "occurred_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "reports_occurred_id_idx",
+      "entityType": "indexes",
+      "table": "reports"
     },
     {
       "columns": [
@@ -4210,7 +4335,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'notifications:read', 'reports:read', 'tasks:read', 'tasks:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -4398,6 +4523,12 @@
     {
       "value": "CASE WHEN json_valid(\"metadata_json\") THEN json_type(\"metadata_json\") = 'object' ELSE 0 END",
       "name": "reports_metadata_json_check",
+      "entityType": "checks",
+      "table": "reports"
+    },
+    {
+      "value": "\"status\" IN ('error', 'ok', 'warning')",
+      "name": "reports_status_check",
       "entityType": "checks",
       "table": "reports"
     },

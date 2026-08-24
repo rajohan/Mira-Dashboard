@@ -13,7 +13,7 @@ import {
     listAgentTaskHistoryResultSchema,
     updateAgentMetadataInputSchema,
 } from "../../../contracts/agents.ts";
-import { capabilityProcedure } from "../../trpc/trpc.ts";
+import { capabilityProcedure, principalKindProcedure } from "../../trpc/trpc.ts";
 import { AgentNotFoundError } from "./errors.ts";
 
 async function runAgentEffect<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
@@ -32,15 +32,11 @@ async function runAgentEffect<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
 }
 
 const readProcedure = capabilityProcedure("agents:read");
-const writeProcedure = capabilityProcedure("agents:write").use(({ ctx, next }) => {
-    if (ctx.principal.kind !== "automation") {
-        throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "An automation principal is required",
-        });
-    }
-    return next({ ctx });
-});
+const writeProcedure = principalKindProcedure(
+    "agents:write",
+    "automation",
+    "An automation principal is required"
+);
 
 /** Capability-scoped Dashboard agent status and task-history routes. */
 export const agentRoutes = {

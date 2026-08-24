@@ -2,7 +2,8 @@ import * as v from "valibot";
 
 import { timestampMillisecondsSchema } from "../shared/dateTime.ts";
 import { agentIdSchema } from "./agentModel.ts";
-import type { RealtimeTopicDefinition } from "./realtime.ts";
+import { realtimeEventRetentionLabel, type RealtimeTopicDefinition } from "./realtime.ts";
+import type { RealtimeEventContract } from "./registry.ts";
 
 /** Durable topic carrying compact agent current-task invalidations. */
 export const agentRealtimeTopic = "agents.status";
@@ -28,6 +29,16 @@ export const agentRealtimeTopicDefinition = {
     payload: agentChangePayloadSchema,
     topic: agentRealtimeTopic,
 } as const satisfies RealtimeTopicDefinition;
+
+/** Standalone agent invalidation topic tied to its authoritative snapshot query. */
+export const agentRealtimeEventContract = {
+    payload: agentChangePayloadSchema,
+    payloadSchemaId: "agents.status.realtime.payload",
+    retention: realtimeEventRetentionLabel,
+    snapshotProcedure: "agents.listStatuses",
+    summary: "Invalidates one agent status row after a durable metadata change.",
+    topic: agentRealtimeTopic,
+} as const satisfies RealtimeEventContract;
 
 /** Client-visible validated agent status change event. */
 export const agentRealtimeChangeSchema = v.strictObject({

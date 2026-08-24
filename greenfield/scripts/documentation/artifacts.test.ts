@@ -95,9 +95,61 @@ describe("generated contract documentation", () => {
         expect(rawHttpDocumentation).toContain(
             "| HEAD | `/api/health/ready` | Public | 200, 503 | No body |"
         );
-        expect(first.get("realtime-events.md")).toContain(
-            "No standalone realtime topic references are published"
-        );
+        const realtimeDocumentation = first.get("realtime-events.md");
+        for (const [topic, snapshot, idSchema] of [
+            [
+                "agents.status",
+                "agents.listStatuses",
+                {
+                    maxLength: 64,
+                    minLength: 1,
+                    pattern: "^[a-z0-9][a-z0-9._-]*$",
+                    type: "string",
+                },
+            ],
+            [
+                "monitoring.incidents",
+                "incidents.list",
+                { maxLength: 200, pattern: "\\S", type: "string" },
+            ],
+            [
+                "monitoring.notifications",
+                "notifications.list",
+                { maxLength: 200, pattern: "\\S", type: "string" },
+            ],
+            [
+                "monitoring.reports",
+                "reports.list",
+                { maxLength: 200, pattern: "\\S", type: "string" },
+            ],
+            [
+                "tasks.records",
+                "tasks.list",
+                {
+                    format: "uuid",
+                    maxLength: 36,
+                    minLength: 36,
+                    pattern:
+                        "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                    type: "string",
+                },
+            ],
+        ] as const) {
+            expect(realtimeDocumentation).toContain(
+                `| \`${topic}\` | [payload](./schemas/${topic}.realtime.payload.schema.json) | \`${snapshot}\` | 7 days |`
+            );
+            const payloadSchema = JSON.parse(
+                first.get(`schemas/${topic}.realtime.payload.schema.json`) ?? "null"
+            ) as unknown;
+            expect(payloadSchema).toMatchObject({
+                $id: `urn:mira-dashboard:${topic}.realtime.payload`,
+                additionalProperties: false,
+                properties: { id: idSchema },
+                required: ["id"],
+                type: "object",
+            });
+        }
+        expect(realtimeDocumentation?.match(/^\| `/gmu)).toHaveLength(5);
     });
 
     test("emits JSON Schema from the same Valibot transport schemas", () => {

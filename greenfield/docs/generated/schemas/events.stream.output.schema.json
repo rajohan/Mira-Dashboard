@@ -131,6 +131,8 @@
                     "operation": {
                       "enum": [
                         "created",
+                        "deleted",
+                        "snapshot-required",
                         "updated"
                       ],
                       "type": "string"
@@ -180,7 +182,11 @@
                       "maximum": 8640000000000000
                     },
                     "operation": {
-                      "const": "created"
+                      "enum": [
+                        "created",
+                        "deleted"
+                      ],
+                      "type": "string"
                     },
                     "payload": {
                       "type": "object",

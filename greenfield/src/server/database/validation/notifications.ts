@@ -10,6 +10,7 @@ import * as v from "valibot";
 import {
     monitoringKindSchema,
     monitoringProblemTitleSchema,
+    monitoringReportSourceSchema,
     monitoringReportTitleSchema,
 } from "../../../contracts/monitoring.ts";
 import { notifications } from "../schema/notifications.ts";
@@ -44,6 +45,8 @@ const notificationRefinements = {
     message: () => monitoringProblemTitleSchema,
     occurredAt: nonnegativeDateSchema,
     readAt: nonnegativeDateSchema,
+    reportId: uuidV7TextSchema,
+    source: () => monitoringReportSourceSchema,
     title: () => monitoringReportTitleSchema,
 };
 

@@ -6,6 +6,8 @@ import {
     monitoringReportBodyMarkdownSchema,
     monitoringReportSourceJobIdSchema,
     monitoringReportSourceSchema,
+    monitoringReportStatusSchema,
+    monitoringReportSummarySchema,
     monitoringReportTitleSchema,
 } from "../../../contracts/monitoring.ts";
 import { reports } from "../schema/reports.ts";
@@ -23,6 +25,8 @@ const reportRefinements = {
     occurredAt: nonnegativeDateSchema,
     source: () => monitoringReportSourceSchema,
     sourceJobId: () => monitoringReportSourceJobIdSchema,
+    status: () => monitoringReportStatusSchema,
+    summary: () => monitoringReportSummarySchema,
     title: () => monitoringReportTitleSchema,
 };
 

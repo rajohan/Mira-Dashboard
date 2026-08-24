@@ -94,8 +94,11 @@ export const securityRecordIdSchema = lowercaseUuidV7Schema(
 export const applicationCapabilities = [
     "agents:read",
     "agents:write",
+    "monitoring:write",
     "notifications:read",
+    "notifications:write",
     "reports:read",
+    "reports:write",
     "tasks:read",
     "tasks:write",
 ] as const;

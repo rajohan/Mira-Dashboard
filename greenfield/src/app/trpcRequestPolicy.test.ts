@@ -30,6 +30,7 @@ import {
     authenticationHandlerIdleTimeoutSeconds,
     authenticationRequestBodyMaximumBytes,
     isTrpcRequestPath,
+    monitoringRequestBodyMaximumBytes,
     readTrpcRequestPolicy,
     serverRequestBodyMaximumBytes,
     taskContentRequestBodyMaximumBytes,
@@ -108,9 +109,50 @@ describe("tRPC request policy", () => {
             rejectsBatch: false,
             requestBodyMaximumBytes: taskProgressRequestBodyMaximumBytes,
         });
+        expect(policy("/trpc/monitoring.submitCompleteSnapshot")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: monitoringRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/reports.upsert")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: monitoringRequestBodyMaximumBytes,
+        });
+        expect(policy("/trpc/reports.delete")).toEqual({
+            rejectsBatch: false,
+            requestBodyMaximumBytes: trpcRequestBodyMaximumBytes,
+        });
+        expect(serverRequestBodyMaximumBytes).toBe(
+            Math.max(
+                taskContentRequestBodyMaximumBytes,
+                monitoringRequestBodyMaximumBytes
+            )
+        );
+        for (const procedureLimit of [
+            authenticationRequestBodyMaximumBytes,
+            monitoringRequestBodyMaximumBytes,
+            taskContentRequestBodyMaximumBytes,
+            taskProgressRequestBodyMaximumBytes,
+            trpcRequestBodyMaximumBytes,
+            webAuthnRequestBodyMaximumBytes,
+        ]) {
+            expect(procedureLimit).toBeLessThanOrEqual(serverRequestBodyMaximumBytes);
+        }
     });
 
     test("combines mixed batches using the strictest applicable policies", () => {
+        expect(
+            policy("/trpc/monitoring.submitCompleteSnapshot,tasks.updateProgress?batch=1")
+        ).toEqual({
+            rejectsBatch: true,
+            requestBodyMaximumBytes: monitoringRequestBodyMaximumBytes,
+        });
+        expect(
+            policy("/trpc/monitoring.submitCompleteSnapshot,auth.status?batch=1")
+        ).toEqual({
+            handlerIdleTimeoutSeconds: authenticationHandlerIdleTimeoutSeconds,
+            rejectsBatch: true,
+            requestBodyMaximumBytes: authenticationRequestBodyMaximumBytes,
+        });
         expect(policy("/trpc/auth.status,auth.login?batch=1")).toEqual({
             handlerIdleTimeoutSeconds: authenticationHandlerIdleTimeoutSeconds,
             rejectsBatch: true,

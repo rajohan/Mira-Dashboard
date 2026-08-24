@@ -52,6 +52,7 @@ export interface ProcedureTransportContract {
     requestBody:
         | "authentication"
         | "default"
+        | "monitoring"
         | "task-content"
         | "task-progress"
         | "webauthn";

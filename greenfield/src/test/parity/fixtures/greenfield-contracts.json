@@ -176,6 +176,58 @@
         },
         {
             "kind": "query",
+            "name": "incidents.get"
+        },
+        {
+            "kind": "query",
+            "name": "incidents.list"
+        },
+        {
+            "kind": "mutation",
+            "name": "monitoring.submitCompleteSnapshot"
+        },
+        {
+            "kind": "mutation",
+            "name": "notifications.clearRead"
+        },
+        {
+            "kind": "mutation",
+            "name": "notifications.delete"
+        },
+        {
+            "kind": "query",
+            "name": "notifications.list"
+        },
+        {
+            "kind": "mutation",
+            "name": "notifications.markAllRead"
+        },
+        {
+            "kind": "mutation",
+            "name": "notifications.markRead"
+        },
+        {
+            "kind": "mutation",
+            "name": "notifications.upsert"
+        },
+        {
+            "kind": "mutation",
+            "name": "reports.delete"
+        },
+        {
+            "kind": "query",
+            "name": "reports.get"
+        },
+        {
+            "kind": "query",
+            "name": "reports.list"
+        },
+        {
+            "kind": "mutation",
+            "name": "reports.upsert"
+        },
+        {
+            "kind": "query",
             "name": "securityAudit.listEvents"
         },
         {

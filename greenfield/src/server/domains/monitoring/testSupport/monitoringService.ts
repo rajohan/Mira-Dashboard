@@ -89,7 +89,7 @@ export function serviceFor(
     database: TestDatabase,
     overrides: {
         generateId?: () => string;
-        wakeEventPump?: () => void;
+        wakeEventPump?: () => Promise<void> | void;
     } = {}
 ) {
     return createMonitoringService({

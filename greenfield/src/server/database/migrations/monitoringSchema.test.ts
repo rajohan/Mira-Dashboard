@@ -6,6 +6,14 @@ interface QueryPlanRow {
     detail: string;
 }
 
+function expectUsesIndexWithoutTemporarySort(
+    plan: readonly QueryPlanRow[],
+    indexName: string
+): void {
+    expect(plan.some((row) => row.detail.includes(indexName))).toBeTrue();
+    expect(plan.some((row) => row.detail.includes("USE TEMP B-TREE"))).toBeFalse();
+}
+
 const filesystemFingerprint = "a".repeat(64);
 const memoryFingerprint = "b".repeat(64);
 const cpuFingerprint = "c".repeat(64);
@@ -335,7 +343,7 @@ describe("monitoring schema", () => {
         }
     });
 
-    test("uses the declared partial indexes for monitoring reads", async () => {
+    test("uses the declared indexes for filtered and keyset monitoring reads", async () => {
         const database = await openFreshMigratedDatabase();
 
         try {
@@ -371,6 +379,63 @@ describe("monitoring schema", () => {
                     LIMIT 1
                 `)
                 .all("ops-check");
+            const incidentPagePlan = database.sqlite
+                .query<QueryPlanRow, []>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM incidents
+                    ORDER BY last_seen_at DESC, id DESC
+                    LIMIT 101
+                `)
+                .all();
+            const incidentCursorPlan = database.sqlite
+                .query<QueryPlanRow, [number, number, string]>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM incidents
+                    WHERE last_seen_at < ? OR (last_seen_at = ? AND id < ?)
+                    ORDER BY last_seen_at DESC, id DESC
+                    LIMIT 101
+                `)
+                .all(1000, 1000, "incident-2");
+            const notificationPagePlan = database.sqlite
+                .query<QueryPlanRow, []>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM notifications
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT 101
+                `)
+                .all();
+            const notificationCursorPlan = database.sqlite
+                .query<QueryPlanRow, [number, number, string]>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM notifications
+                    WHERE occurred_at < ? OR (occurred_at = ? AND id < ?)
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT 101
+                `)
+                .all(1000, 1000, "notification-2");
+            const reportPagePlan = database.sqlite
+                .query<QueryPlanRow, []>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM reports
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT 201
+                `)
+                .all();
+            const reportCursorPlan = database.sqlite
+                .query<QueryPlanRow, [number, number, string]>(`
+                    EXPLAIN QUERY PLAN
+                    SELECT id
+                    FROM reports
+                    WHERE occurred_at < ? OR (occurred_at = ? AND id < ?)
+                    ORDER BY occurred_at DESC, id DESC
+                    LIMIT 201
+                `)
+                .all(1000, 1000, "report-2");
 
             expect(
                 incidentPlan.some((row) =>
@@ -387,6 +452,18 @@ describe("monitoring schema", () => {
                     row.detail.includes("monitor_runs_monitor_completed_id_idx")
                 )
             ).toBeTrue();
+            for (const plan of [incidentPagePlan, incidentCursorPlan]) {
+                expectUsesIndexWithoutTemporarySort(plan, "incidents_last_seen_id_idx");
+            }
+            for (const plan of [notificationPagePlan, notificationCursorPlan]) {
+                expectUsesIndexWithoutTemporarySort(
+                    plan,
+                    "notifications_occurred_id_idx"
+                );
+            }
+            for (const plan of [reportPagePlan, reportCursorPlan]) {
+                expectUsesIndexWithoutTemporarySort(plan, "reports_occurred_id_idx");
+            }
         } finally {
             database.sqlite.close(true);
         }

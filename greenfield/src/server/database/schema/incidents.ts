@@ -65,5 +65,6 @@ export const incidents = sqliteTable(
         index("incidents_active_monitor_seen_idx")
             .on(table.monitorKey, table.lastSeenAt)
             .where(sql`${table.state} = 'active'`),
+        index("incidents_last_seen_id_idx").on(table.lastSeenAt, table.id),
     ]
 );

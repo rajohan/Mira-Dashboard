@@ -49,7 +49,9 @@ export const validNotificationValues = Object.freeze({
     kind: "incident-opened",
     message: "Root filesystem usage exceeded the warning threshold.",
     occurredAt: observedAt,
+    reportId,
     severity: "warning" as const,
+    source: "ops-check",
     title: "Root filesystem pressure",
 });
 

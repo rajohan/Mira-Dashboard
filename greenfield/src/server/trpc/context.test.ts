@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { createTestAgentService } from "../domains/agents/testSupport/service.ts";
+import {
+    createTestMonitoringCatalogService,
+    createTestMonitoringService,
+} from "../domains/monitoring/testSupport/services.ts";
 import { createTestTaskService } from "../domains/tasks/testSupport/service.ts";
 import { readAuthenticationHttpCredentials } from "../rawHttp/authenticationCredentials.ts";
 import { generateOpaqueToken } from "../shared/opaqueToken.ts";
@@ -29,6 +33,8 @@ describe("tRPC request context", () => {
         const authenticationLifecycle = createTestAuthenticationLifecycleService();
         const automationSecurityLifecycle =
             createTestAutomationSecurityLifecycleService();
+        const monitoringCatalogService = createTestMonitoringCatalogService();
+        const monitoringService = createTestMonitoringService();
         const responseHeaders = new Headers();
 
         const context = await createRequestContext({
@@ -59,6 +65,8 @@ describe("tRPC request context", () => {
             },
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+            monitoringCatalogService,
+            monitoringService,
             pendingLoginCredential: credentials.pendingLogin,
             request,
             requestId: "request-context-1",
@@ -84,6 +92,8 @@ describe("tRPC request context", () => {
         expect(context.services).toBe(applicationRuntime.services);
         expect(context.authenticationLifecycle).toBe(authenticationLifecycle);
         expect(context.automationSecurityLifecycle).toBe(automationSecurityLifecycle);
+        expect(context.monitoringCatalogService).toBe(monitoringCatalogService);
+        expect(context.monitoringService).toBe(monitoringService);
         expect(context.authenticationClientSourceId).toBe("client-source-1");
         expect(context.pendingLoginCredential).toEqual({
             kind: "present",
@@ -117,6 +127,8 @@ describe("tRPC request context", () => {
             authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
             mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+            monitoringCatalogService: createTestMonitoringCatalogService(),
+            monitoringService: createTestMonitoringService(),
             pendingLoginCredential: credentials.pendingLogin,
             request,
             requestId: "request-context-2",
@@ -156,6 +168,8 @@ describe("tRPC request context", () => {
                 }),
                 mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
                 mfaLoginLifecycle: createTestMfaLoginLifecycleService(),
+                monitoringCatalogService: createTestMonitoringCatalogService(),
+                monitoringService: createTestMonitoringService(),
                 pendingLoginCredential: credentials.pendingLogin,
                 request,
                 requestId: "request-context-3",

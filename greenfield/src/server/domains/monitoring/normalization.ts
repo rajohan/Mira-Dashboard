@@ -6,6 +6,7 @@ import {
     type JsonObject,
 } from "../../../contracts/monitoring.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
+import { serializeCanonicalMonitoringJson } from "./serialization.ts";
 
 const TaggedErrorClass = Schema.TaggedError;
 const fingerprintVersion = "monitoring-incident-fingerprint:v1";
@@ -66,6 +67,7 @@ export interface NormalizedMonitoringSnapshot {
         metadata: JsonObject;
         source: string;
         sourceJobId: string;
+        summary?: string;
         title: string;
     };
     runId: string;
@@ -83,27 +85,6 @@ export class MonitoringSnapshotValidationError extends TaggedErrorClass<Monitori
 )("MonitoringSnapshotValidationError", {
     message: Schema.String,
 }) {}
-
-function canonicalJson(value: unknown): string {
-    if (value === null || typeof value !== "object") {
-        const serialized = JSON.stringify(value);
-        if (serialized === undefined) {
-            throw new MonitoringSnapshotValidationError({
-                message: "Monitoring snapshots must contain only JSON values",
-            });
-        }
-        return serialized;
-    }
-    if (Array.isArray(value)) {
-        return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
-    }
-
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-        .toSorted()
-        .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-        .join(",")}}`;
-}
 
 function parseNormalizedIdentifier(
     schema: v.GenericSchema<string, string>,
@@ -130,7 +111,7 @@ export function deriveIncidentFingerprint(input: {
     kind: string;
 }): string {
     return sha256Hex(
-        `${fingerprintVersion}\0${canonicalJson([
+        `${fingerprintVersion}\0${serializeCanonicalMonitoringJson([
             input.kind,
             input.entityKey,
             input.condition,
@@ -205,6 +186,9 @@ export function normalizeMonitoringSnapshot(
             metadata: parsed.report.metadata,
             source: v.parse(trimmedTextSchema, parsed.report.source),
             sourceJobId: v.parse(trimmedTextSchema, parsed.report.sourceJobId),
+            ...(parsed.report.summary === undefined
+                ? {}
+                : { summary: parsed.report.summary }),
             title: v.parse(trimmedTextSchema, parsed.report.title),
         },
         runId: parsed.runId,
@@ -213,6 +197,6 @@ export function normalizeMonitoringSnapshot(
 
     return {
         snapshot,
-        submissionSha256: sha256Hex(canonicalJson(snapshot)),
+        submissionSha256: sha256Hex(serializeCanonicalMonitoringJson(snapshot)),
     };
 }
