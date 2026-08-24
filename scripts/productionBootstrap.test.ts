@@ -138,6 +138,9 @@ describe("production bootstrap admission", () => {
                 dependencies
             )
         ).toBe("/tmp/artifact");
+        expect(commands.some((command) => command.includes(" fetch --force "))).toBe(
+            true
+        );
         expect(commands.at(-1)).toContain("release download v0.2.0");
     });
 

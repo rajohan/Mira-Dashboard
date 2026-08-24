@@ -18,6 +18,7 @@ const dopplerConfigurationNames = applicationConfigurationRegistry
     .filter(
         (entry) =>
             entry.required ||
+            entry.environmentName === "PORT" ||
             entry.environmentName === "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD"
     )
     .map((entry) => entry.environmentName)
@@ -224,6 +225,14 @@ export async function downloadProductionBootstrapRelease(
         githubReleaseSchema,
         JSON.parse(releaseText) as unknown
     );
+    await requireSuccess(dependencies, [
+        "/usr/bin/git",
+        "fetch",
+        "--force",
+        "--no-tags",
+        "origin",
+        `refs/tags/${unverifiedRelease.tagName}:refs/tags/${unverifiedRelease.tagName}`,
+    ]);
     const tagCommit = await requireSuccess(dependencies, [
         "/usr/bin/git",
         "rev-list",
@@ -570,7 +579,6 @@ export async function verifyProductionBootstrapPrerequisites(
             `MIRA_DASHBOARD_PROJECT_ROOT=${projectHome}`,
             "MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw",
             "MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace",
-            "PORT=3100",
             "/usr/local/bin/doppler",
             "run",
             "--config=prd",
@@ -579,7 +587,7 @@ export async function verifyProductionBootstrapPrerequisites(
             "--no-read-env",
             `--only-secrets=${dopplerConfigurationNames}`,
             "--no-exit-on-missing-only-secrets",
-            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT,PORT",
+            "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT",
             "--",
             process.execPath,
             path.join(repositoryRoot, "src/app/productionBootstrapConfigurationCheck.ts"),

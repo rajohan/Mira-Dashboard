@@ -10,6 +10,8 @@ export function assertProductionBootstrapConfiguration(
     if (
         web.nodeEnvironment !== "production" ||
         worker.nodeEnvironment !== "production" ||
+        web.port !== 3100 ||
+        worker.port !== 3100 ||
         worker.databaseObservabilityPassword === undefined
     ) {
         throw new Error("Production Doppler configuration is incomplete");

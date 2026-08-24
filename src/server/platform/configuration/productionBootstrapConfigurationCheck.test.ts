@@ -42,4 +42,12 @@ describe("production bootstrap configuration check", () => {
             "Production Doppler configuration is incomplete"
         );
     });
+
+    test("requires the fixed activation port", () => {
+        const environment = validEnvironment();
+        environment.PORT = "3200";
+        expect(() => assertProductionBootstrapConfiguration(environment)).toThrow(
+            "Production Doppler configuration is incomplete"
+        );
+    });
 });

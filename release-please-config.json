@@ -3,6 +3,12 @@
     "packages": {
         ".": {
             "changelog-path": "CHANGELOG.md",
+            "extra-files": [
+                {
+                    "path": "src/shared/dashboardVersion.ts",
+                    "type": "generic"
+                }
+            ],
             "include-component-in-tag": false,
             "package-name": "mira-dashboard",
             "release-type": "node"
