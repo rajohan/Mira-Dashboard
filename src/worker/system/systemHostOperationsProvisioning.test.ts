@@ -130,7 +130,9 @@ describe("fixed host operations provisioning", () => {
         expect(cleanup).toContain("TimeoutStartSec=30min");
         expect(cleanup).toContain("StandardOutput=null");
         expect(cleanup).toContain("StandardError=null");
-        expect(webRuntime).toContain("X-mount.idmap=u:");
+        expect(webRuntime).toContain(
+            'mapping="X-mount.idmap=u:${owner_uid}:${web_uid}:1 g:${owner_gid}:${web_gid}:1"'
+        );
         expect(webRuntime).toContain("--reuid=mira-dashboard-web");
         expect(webRuntime).toContain("--clear-groups");
         expect(webRuntime).toContain("--bounding-set=-all");

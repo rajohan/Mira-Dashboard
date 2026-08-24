@@ -76,28 +76,41 @@ const staleEnrollmentSummary = {
     recentAuth: { mfa: { recent: false }, password: { recent: false } },
 } as const satisfies AccountSecuritySummary;
 
-function stalePasswordEnrollmentFixtures(): DashboardStoryFixtures {
-    let failNextSessionRefresh = false;
-    return accountSecurityFixtures(staleEnrollmentSummary, {
-        mutations: {
-            "accountSecurity.reauthenticatePassword": dashboardStoryResolver(() => {
-                failNextSessionRefresh = true;
-                return {
-                    session: currentSession,
-                    verifiedAtMs: nowMs,
-                };
-            }),
+function stalePasswordEnrollmentScenario(): {
+    readonly allowSessionRefresh: () => void;
+    readonly fixtures: DashboardStoryFixtures;
+    readonly reset: () => void;
+} {
+    let reauthenticationCompleted = false;
+    let sessionRefreshAllowed = false;
+    return {
+        allowSessionRefresh: () => {
+            sessionRefreshAllowed = true;
         },
-        queries: {
-            "auth.status": dashboardStoryResolver(() => {
-                if (failNextSessionRefresh) {
-                    failNextSessionRefresh = false;
-                    throw new TypeError("Safe session refresh failure");
-                }
-                return authenticatedDashboardStoryStatus;
-            }),
+        fixtures: accountSecurityFixtures(staleEnrollmentSummary, {
+            mutations: {
+                "accountSecurity.reauthenticatePassword": dashboardStoryResolver(() => {
+                    reauthenticationCompleted = true;
+                    return {
+                        session: currentSession,
+                        verifiedAtMs: nowMs,
+                    };
+                }),
+            },
+            queries: {
+                "auth.status": dashboardStoryResolver(() => {
+                    if (reauthenticationCompleted && !sessionRefreshAllowed) {
+                        throw new TypeError("Safe session refresh failure");
+                    }
+                    return authenticatedDashboardStoryStatus;
+                }),
+            },
+        }),
+        reset: () => {
+            reauthenticationCompleted = false;
+            sessionRefreshAllowed = false;
         },
-    });
+    };
 }
 const allMfaStaleSummary = {
     ...readySummary,
@@ -182,6 +195,8 @@ function accountSecurityFixtures(
         },
     };
 }
+
+const stalePasswordEnrollment = stalePasswordEnrollmentScenario();
 
 const pendingSummary = dashboardStoryResolver(
     () =>
@@ -336,26 +351,38 @@ export const InitialError: Story = {
 
 export const StalePasswordEnrollment: Story = {
     args: {
-        fixtures: stalePasswordEnrollmentFixtures(),
+        fixtures: stalePasswordEnrollment.fixtures,
         route: "/account-security",
+    },
+    beforeEach: () => {
+        stalePasswordEnrollment.reset();
+        return stalePasswordEnrollment.reset;
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         const page = within(canvasElement.ownerDocument.body);
         await userEvent.click(
-            await canvas.findByRole("button", { name: "Add authenticator app" })
+            await canvas.findByRole(
+                "button",
+                { name: "Add authenticator app" },
+                asyncStoryTimeout
+            )
         );
-        const verification = await page.findByRole("dialog", {
-            name: "Verify current password",
-        });
+        const verification = await page.findByRole(
+            "dialog",
+            { name: "Verify current password" },
+            asyncStoryTimeout
+        );
         const password = within(verification).getByLabelText("Current password");
         await fireEvent.change(password, { target: { value: "current password" } });
         await userEvent.click(
             within(verification).getByRole("button", { name: "Verify password" })
         );
-        const enrollment = await page.findByRole("dialog", {
-            name: "Add authenticator app",
-        });
+        const enrollment = await page.findByRole(
+            "dialog",
+            { name: "Add authenticator app" },
+            asyncStoryTimeout
+        );
         await expect(within(enrollment).getByLabelText("Name")).toBeVisible();
         await fireEvent.click(within(enrollment).getByRole("button", { name: "Cancel" }));
         const retry = await page.findByRole(
@@ -371,6 +398,7 @@ export const StalePasswordEnrollment: Story = {
         await expect(within(reconciliation).getByRole("alert")).toHaveTextContent(
             "The request could not be completed. Try again."
         );
+        stalePasswordEnrollment.allowSessionRefresh();
         await fireEvent.click(retry);
         await waitFor(async () => {
             await expect(

@@ -507,7 +507,9 @@ describe("production root-systemd service control", () => {
         }
         expect(webRuntime).toContain("--clear-groups");
         expect(webRuntime).toContain("--bounding-set=-all");
-        expect(webRuntime).toContain("X-mount.idmap=u:");
+        expect(webRuntime).toContain(
+            'mapping="X-mount.idmap=u:${owner_uid}:${web_uid}:1 g:${owner_gid}:${web_gid}:1"'
+        );
         expect(worker).not.toContain("InaccessiblePaths=");
         expect(web).toContain("PrivateTmp=true");
         expect(web).toContain("BindReadOnlyPaths=-/tmp/openclaw");
