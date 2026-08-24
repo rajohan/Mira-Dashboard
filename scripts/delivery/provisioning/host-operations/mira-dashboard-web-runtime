@@ -33,11 +33,20 @@ operator_doppler_config=/home/ubuntu/.doppler/.doppler.yaml
 if [ "${1-}" = projected-web-runtime ]; then
     /usr/bin/umount -- "$operator_doppler"
     [ ! -e "$operator_doppler_config" ]
-    [ ! -e /run/docker.sock ]
-    [ ! -e /var/run/docker.sock ]
-    [ ! -e /opt/docker ]
-    [ ! -e /run/systemd/private ]
-    [ ! -e /run/dbus/system_bus_socket ]
+
+    # InaccessiblePaths replaces existing paths with systemd's mode-000
+    # inaccessible bind mounts; root can still stat those placeholders. Verify
+    # the mount source instead of incorrectly requiring the paths to disappear.
+    assert_inaccessible_mount() {
+        path=$1
+        kind=$2
+        [ "$(/usr/bin/findmnt -n -o SOURCE -T "$path")" = "tmpfs[/systemd/inaccessible/$kind]" ]
+    }
+    assert_inaccessible_mount /run/docker.sock sock
+    assert_inaccessible_mount /var/run/docker.sock sock
+    assert_inaccessible_mount /opt/docker dir
+    assert_inaccessible_mount /run/systemd/private sock
+    assert_inaccessible_mount /run/dbus/system_bus_socket sock
 
     exec /usr/bin/setpriv \
         --reuid=mira-dashboard-web \
