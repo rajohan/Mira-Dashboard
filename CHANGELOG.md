@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.2...v0.2.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* **bootstrap:** map web runtime identities correctly ([2459dc9](https://github.com/rajohan/Mira-Dashboard/commit/2459dc981aae8203abe3433c42dc2d8738d0f43f))
+
 ## [0.2.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.1...v0.2.2) (2026-08-24)
 
 
