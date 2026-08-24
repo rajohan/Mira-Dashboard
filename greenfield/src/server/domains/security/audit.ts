@@ -5,22 +5,9 @@ import {
     securityRecordIdSchema,
     type ApplicationCapability,
 } from "../../../contracts/security.ts";
+import { securityAuditReasonValues } from "../../../contracts/securityAudit.ts";
 import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
 
-const securityAuditReasonValues = [
-    "gateway_unavailable",
-    "identity_changed",
-    "invalid_credentials",
-    "invalid_current_password",
-    "invalid_gateway",
-    "recovery_invalid",
-    "recovery_pending_invalid",
-    "totp_invalid",
-    "totp_pending_invalid",
-    "webauthn_configuration_mismatch",
-    "webauthn_invalid",
-    "webauthn_pending_invalid",
-] as const;
 type SecurityAuditReason = (typeof securityAuditReasonValues)[number];
 const securityAuditReasons: ReadonlySet<string> = new Set(securityAuditReasonValues);
 

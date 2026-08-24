@@ -155,8 +155,8 @@ Phase 2 is closed only for the server-side scope stated above. The evidence cons
 
 1. focused unit, repository, lifecycle, adapter, and system tests at the exact paths in the misuse
    table;
-2. `bun run typecheck`, `bun run test:server`, and the security-relevant integration suites;
-3. `bun run test:tooling`, `bun run docs:check`, and `bun run db:check`; and
+2. `bun run typecheck`, `bun run test:bun`, and `bun run test:browser`;
+3. `bun run test:coverage`, `bun run docs:check`, and `bun run db:check`; and
 4. the explicit remaining-phase status in
    `docs/architecture/greenfield-rewrite/progress.md`.
 

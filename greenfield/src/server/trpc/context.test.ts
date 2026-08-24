@@ -8,6 +8,7 @@ import {
     createTestAutomationSecurityLifecycleService,
     createTestMfaAccountLifecycleService,
     createTestMfaLoginLifecycleService,
+    createTestSecurityAuditLifecycleService,
 } from "../test/support/requestContext.ts";
 import { createRequestContext } from "./context.ts";
 
@@ -59,6 +60,7 @@ describe("tRPC request context", () => {
             request,
             requestId: "request-context-1",
             responseHeaders,
+            securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
         });
 
         expect(observedCredential).toEqual({ kind: "anonymous" });
@@ -114,6 +116,7 @@ describe("tRPC request context", () => {
             request,
             requestId: "request-context-2",
             responseHeaders: new Headers(),
+            securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
         });
 
         expect(context.userAgent).toBeUndefined();
@@ -150,6 +153,7 @@ describe("tRPC request context", () => {
                 request,
                 requestId: "request-context-3",
                 responseHeaders: new Headers(),
+                securityAuditLifecycle: createTestSecurityAuditLifecycleService(),
             });
         } catch (error) {
             failure = error;

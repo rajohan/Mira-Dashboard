@@ -36,6 +36,8 @@ function decimalRangePattern(maximum: number): RegExp {
 const CANONICAL_NONNEGATIVE_SAFE_INTEGER_PATTERN = decimalRangePattern(
     Number.MAX_SAFE_INTEGER
 );
+type StringRequirement = (value: string) => boolean;
+const boundedNonBlankTextMaximumLengths = new WeakMap<StringRequirement, number>();
 
 /**
  * Builds a bounded string schema that rejects blank values.
@@ -60,7 +62,16 @@ export function boundedNonBlankStringSchema(
  * @returns Valibot action for a NUL-free string.
  */
 export function noNulStringAction(message = "Expected a string without NUL characters.") {
-    return v.check((value: string) => !value.includes("\0"), message);
+    return v.check(hasNoNulCharacter, message);
+}
+
+/**
+ * Tests the named persistence-safe NUL exclusion shared with JSON Schema generation.
+ * @param value String value to inspect.
+ * @returns Whether the string contains no embedded NUL character.
+ */
+export function hasNoNulCharacter(value: string): boolean {
+    return !value.includes("\0");
 }
 
 function unicodeCodePointLength(value: string): number {
@@ -79,15 +90,30 @@ export function boundedNonBlankTextSchema(
     maximumLength: number,
     message = "Expected bounded non-blank text."
 ) {
+    const hasValidCodePointLength = (value: string): boolean => {
+        const length = unicodeCodePointLength(value);
+        return length > 0 && length <= maximumLength;
+    };
+    boundedNonBlankTextMaximumLengths.set(hasValidCodePointLength, maximumLength);
     return v.pipe(
         v.string(message),
-        v.check((value) => {
-            const length = unicodeCodePointLength(value);
-            return length > 0 && length <= maximumLength;
-        }, message),
+        v.check(hasValidCodePointLength, message),
         v.regex(/\S/u, message),
         noNulStringAction(message)
     );
+}
+
+/**
+ * Reads the Unicode code-point budget carried by a bounded-text requirement.
+ * @param requirement Valibot check requirement to inspect.
+ * @returns The registered maximum code-point length, when this module created it.
+ */
+export function getBoundedNonBlankTextMaximumLength(
+    requirement: unknown
+): number | undefined {
+    return typeof requirement === "function"
+        ? boundedNonBlankTextMaximumLengths.get(requirement as StringRequirement)
+        : undefined;
 }
 
 /**

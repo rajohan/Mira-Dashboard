@@ -116,7 +116,7 @@ describe("reviewed pre-cutover parity inventory", () => {
         ).toThrow("is not registered");
     });
 
-    test("keeps unresolved Phase 2 behavior explicit", async () => {
+    test("keeps the Phase 2 server endpoint inventory closed", async () => {
         const reviewed = await loadReviewedParityInventory();
 
         expect(
@@ -128,10 +128,6 @@ describe("reviewed pre-cutover parity inventory", () => {
                         target.delivery === "planned"
                 )
                 .map(({ id }) => id)
-        ).toEqual([
-            "GET /api/audit-events",
-            "POST /api/account/security/sessions/revoke-all",
-            "POST /api/account/security/sessions/revoke-others",
-        ]);
+        ).toEqual([]);
     });
 });

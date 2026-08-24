@@ -309,6 +309,16 @@ describe("account-security contracts", () => {
             "accountSecurity.rotateRecoveryCodes",
             "accountSecurity.disableMfa",
         ]);
+        for (const name of [
+            "accountSecurity.stepUpWebAuthn",
+            "accountSecurity.confirmWebAuthnEnrollment",
+        ] as const) {
+            expect(
+                accountSecurityProcedureContracts.find(
+                    (contract) => contract.name === name
+                )?.transport.requestBody
+            ).toBe("webauthn");
+        }
 
         const enrollment = accountSecurityProcedureContracts.find(
             ({ name }) => name === "accountSecurity.beginTotpEnrollment"

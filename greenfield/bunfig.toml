@@ -2,12 +2,12 @@
 peer = false
 
 [test]
-coverageReporter = ["text", "lcov"]
-coverageDir = "coverage"
+preload = ["./src/test/setup.ts"]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
     "scripts/**",
     "src/**/*.d.ts",
+    "src/**/test/**",
     "src/**/testSupport/**",
     "src/server/test/**",
     "src/test/**",

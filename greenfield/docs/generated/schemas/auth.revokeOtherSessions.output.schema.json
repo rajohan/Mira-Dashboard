@@ -1,0 +1,16 @@
+{
+  "$id": "urn:mira-dashboard:auth.revokeOtherSessions.output",
+  "type": "object",
+  "properties": {
+    "revokedSessions": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "revokedSessions"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

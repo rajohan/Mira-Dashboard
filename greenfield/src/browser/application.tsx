@@ -1,59 +1,68 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
+import { ErrorBoundary } from "react-error-boundary";
 
-import type { DashboardRouter } from "./router.tsx";
+import { createDashboardQueryClient } from "./api/queryClient.ts";
+import { createDashboardTrpcClient, type DashboardTrpcClient } from "./api/trpcClient.ts";
+import { DashboardTrpcProvider } from "./api/trpcContext.tsx";
+import { AuthenticatedSessionActivity } from "./auth/AuthenticatedSessionActivity.tsx";
+import { createDashboardRouter, type DashboardRouter } from "./router.tsx";
+import {
+    createDashboardWebAuthnClient,
+    type DashboardWebAuthnClient,
+} from "./security/webauthn/webauthnClient.ts";
+import { DashboardWebAuthnProvider } from "./security/webauthn/webauthnContext.tsx";
+import { AppErrorFallback } from "./ui/AppErrorFallback.tsx";
 
-function DashboardErrorFallback({ resetErrorBoundary }: FallbackProps) {
-    return (
-        <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-slate-100">
-            <section
-                aria-labelledby="application-error-heading"
-                className="w-full max-w-lg rounded-xl border border-red-900/60 bg-slate-900 p-6"
-                role="alert"
-            >
-                <p className="text-sm font-medium text-red-300">Application error</p>
-                <h1
-                    className="mt-2 text-2xl font-semibold text-white"
-                    id="application-error-heading"
-                >
-                    Dashboard unavailable
-                </h1>
-                <p className="mt-3 text-sm leading-6 text-slate-300">
-                    The browser application could not finish rendering. No private error
-                    details were displayed.
-                </p>
-                <button
-                    className="mt-5 rounded-md bg-blue-500 px-4 py-2 text-sm font-semibold text-white outline-none hover:bg-blue-400 focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
-                    onClick={resetErrorBoundary}
-                    type="button"
-                >
-                    Try again
-                </button>
-            </section>
-        </main>
-    );
-}
+const queryClient = createDashboardQueryClient();
+const router = createDashboardRouter();
+const trpcClient = createDashboardTrpcClient();
+const webAuthnClient = createDashboardWebAuthnClient();
 
-/** Browser application dependencies constructed once by `main.tsx`. */
+/** Browser dependencies accepted by the testable provider boundary. */
 export interface DashboardBrowserApplicationProps {
     readonly queryClient: QueryClient;
     readonly router: DashboardRouter;
+    readonly trpcClient: DashboardTrpcClient;
+    readonly webAuthnClient: DashboardWebAuthnClient;
 }
 
 /**
  * Renders the root error, query, and routing boundaries.
- * @returns The composed browser application.
+ * @param props Browser dependencies owned by the composition root.
+ * @returns The composed browser provider graph.
  */
 export function DashboardBrowserApplication({
     queryClient,
     router,
+    trpcClient,
+    webAuthnClient,
 }: DashboardBrowserApplicationProps) {
     return (
-        <ErrorBoundary FallbackComponent={DashboardErrorFallback}>
+        <ErrorBoundary FallbackComponent={AppErrorFallback}>
             <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
+                <DashboardTrpcProvider client={trpcClient}>
+                    <AuthenticatedSessionActivity />
+                    <DashboardWebAuthnProvider client={webAuthnClient}>
+                        <RouterProvider router={router} />
+                    </DashboardWebAuthnProvider>
+                </DashboardTrpcProvider>
             </QueryClientProvider>
         </ErrorBoundary>
+    );
+}
+
+/**
+ * Owns browser services for the complete document lifetime.
+ * @returns The Dashboard application composed with its production dependencies.
+ */
+export default function DashboardBrowserApplicationRoot() {
+    return (
+        <DashboardBrowserApplication
+            queryClient={queryClient}
+            router={router}
+            trpcClient={trpcClient}
+            webAuthnClient={webAuthnClient}
+        />
     );
 }

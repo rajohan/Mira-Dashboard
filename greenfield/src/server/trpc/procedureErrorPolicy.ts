@@ -137,6 +137,8 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
     "auth.loginTotp": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.loginWebAuthn": ["SERVICE_UNAVAILABLE", "TOO_MANY_REQUESTS", "UNAUTHORIZED"],
     "auth.logout": ["SERVICE_UNAVAILABLE"],
+    "auth.revokeAllSessions": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
+    "auth.revokeOtherSessions": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "auth.revokeSession": ["FORBIDDEN", "SERVICE_UNAVAILABLE", "UNAUTHORIZED"],
     "auth.sessions": ["FORBIDDEN", "UNAUTHORIZED"],
     "auth.status": [],
@@ -194,6 +196,7 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
+    "securityAudit.listEvents": ["FORBIDDEN", "UNAUTHORIZED"],
     "system.runtimeIdentity": [],
 } as const satisfies ProcedureExpectedErrorPolicy);
 

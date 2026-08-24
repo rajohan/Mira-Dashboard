@@ -7,6 +7,7 @@ import {
 import type { AutomationSecurityLifecycleService } from "../domains/security/automation/lifecycle.ts";
 import type { MfaAccountLifecycleService } from "../domains/security/mfa/accountLifecycle.ts";
 import type { MfaLoginLifecycleService } from "../domains/security/mfa/loginLifecycle.ts";
+import type { SecurityAuditLifecycleService } from "../domains/security/securityAuditLifecycle.ts";
 import type {
     ApplicationRuntime,
     ApplicationRuntimeServices,
@@ -33,6 +34,7 @@ export interface RequestContextOptions {
     readonly request: Request;
     readonly requestId: string;
     readonly responseHeaders: Headers;
+    readonly securityAuditLifecycle: SecurityAuditLifecycleService;
 }
 
 /** Dependencies supplied to every application tRPC procedure. */
@@ -47,6 +49,7 @@ export interface RequestContext {
     readonly pendingLoginCredential: PendingLoginCredential;
     readonly requestId: string;
     readonly responseHeaders: Headers;
+    readonly securityAuditLifecycle: SecurityAuditLifecycleService;
     readonly services: ApplicationRuntimeServices;
     readonly userAgent?: string;
 }
@@ -74,6 +77,7 @@ export async function createRequestContext(
         pendingLoginCredential: options.pendingLoginCredential,
         requestId: options.requestId,
         responseHeaders: options.responseHeaders,
+        securityAuditLifecycle: options.securityAuditLifecycle,
         services: options.applicationRuntime.services,
         ...(userAgent !== null && { userAgent }),
     });

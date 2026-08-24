@@ -26,10 +26,10 @@ export interface FrontendBuildScenarioEvidence {
 
 const frontendBuildFixtureEntrypoint = path.resolve(
     import.meta.dir,
-    "../../../browser/testSupport/frontendBuildFixture/index.html"
+    "../../../browser/test/fixtures/frontendBuild/index.html"
 );
 const frontendBuildFixtureAppInput =
-    "src/browser/testSupport/frontendBuildFixture/src/main.tsx";
+    "src/browser/test/fixtures/frontendBuild/src/main.tsx";
 
 export const frontendBuildPluginOrder = [
     reactCompilerPlugin.name,

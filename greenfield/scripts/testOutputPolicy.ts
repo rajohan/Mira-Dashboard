@@ -17,6 +17,10 @@ const testOutputRules: readonly TestOutputRule[] = Object.freeze([
         pattern: /current testing environment is not configured to support act/i,
     },
     {
+        description: "Headless UI Web Animations test shim is missing",
+        pattern: /Headless UI has polyfilled `Element\.prototype\.getAnimations`/i,
+    },
+    {
         description: "Bun main thread panicked",
         pattern: /panic\(main thread\):/i,
     },

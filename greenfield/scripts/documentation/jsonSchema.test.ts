@@ -21,11 +21,15 @@ import {
     listAutomationPrincipalsResultSchema,
 } from "../../src/contracts/automationSecurity.ts";
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
+import { listSecurityAuditEventsResultSchema } from "../../src/contracts/securityAudit.ts";
 import {
     webAuthnAuthenticationResponseSchema,
     webAuthnTransportListSchema,
 } from "../../src/contracts/webauthn.ts";
-import { hasUniqueArrayItems } from "../../src/shared/validation.ts";
+import {
+    boundedNonBlankTextSchema,
+    hasUniqueArrayItems,
+} from "../../src/shared/validation.ts";
 import { convertContractSchema } from "./jsonSchema.ts";
 
 const parseHexadecimalCodePoint = (value: string): number => Number.parseInt(value, 16);
@@ -179,6 +183,35 @@ describe("contract JSON Schema conversion", () => {
             pattern: "^(?=[\\s\\S]*\\S)[^\\u0000]*$",
             type: "string",
         });
+    });
+
+    test("documents persistence-safe bounded text without losing constraints", () => {
+        expect(
+            convertContractSchema(
+                boundedNonBlankTextSchema(4),
+                "test.boundedText",
+                "input"
+            )
+        ).toMatchObject({
+            allOf: [{ pattern: "^[^\\u0000]*$" }],
+            maxLength: 4,
+            minLength: 1,
+            pattern: "\\S",
+            type: "string",
+        });
+    });
+
+    test("documents security audit ordering and cursor refinements", () => {
+        const document = JSON.stringify(
+            convertContractSchema(
+                listSecurityAuditEventsResultSchema,
+                "test.securityAuditPage",
+                "output"
+            )
+        );
+
+        expect(document).toContain("strict newest-first audit-event ordering");
+        expect(document).toContain("audit continuation cursor");
     });
 
     test("documents the exact TOTP factor-label predicate", () => {

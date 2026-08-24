@@ -5,10 +5,12 @@ import {
     sessionActivityWriteIntervalMs,
     type AuthenticationLifecycleContext,
 } from "./authenticationLifecycleContext.ts";
+import type { AuthenticationLifecycleUnitOfWork } from "./authenticationLifecycleRepository.ts";
 import type { AuthenticationLifecycleService } from "./authenticationLifecycleTypes.ts";
 import {
     authSession,
     authUser,
+    type AuthenticatedBrowserIdentity,
     browserSessionIsActive as sessionIsActive,
     sessionActor,
 } from "./authenticationSession.ts";
@@ -23,6 +25,38 @@ type SessionsContext = Pick<
     | "sessionIdleDurationMs"
 >;
 
+type SessionMutationAccess = "authorized" | "session-changed" | "step-up-required";
+
+function sessionMutationAccess(
+    context: SessionsContext,
+    unit: AuthenticationLifecycleUnitOfWork,
+    identity: AuthenticatedBrowserIdentity,
+    checkedAt: Date
+): SessionMutationAccess {
+    const user = unit.findUserById(identity.userId);
+    const actorSession = unit.findSession(identity.userId, identity.sessionId);
+    if (
+        user === undefined ||
+        user.disabledAt !== null ||
+        actorSession === undefined ||
+        actorSession.authenticationVersion !== user.authenticationVersion ||
+        !sessionIsActive(actorSession, checkedAt, context.sessionIdleDurationMs)
+    ) {
+        return "session-changed";
+    }
+    const recentAuthentication = evaluateRecentAuthentication({
+        checkedAt,
+        mfaEnabledAt: user.mfaEnabledAt,
+        mfaVerifiedAt: actorSession.mfaVerifiedAt,
+        passwordVerifiedAt: actorSession.passwordVerifiedAt,
+        windowMs: context.recentAuthenticationWindowMs,
+    });
+    if (user.mfaEnabledAt === null) {
+        return recentAuthentication.password.recent ? "authorized" : "step-up-required";
+    }
+    return recentAuthentication.mfa.recent ? "authorized" : "step-up-required";
+}
+
 /**
  * Creates session reads, activity, logout, and revocation operations.
  * @returns Session operations backed by the shared lifecycle context.
@@ -31,7 +65,13 @@ export function createAuthenticationSessionOperations(
     context: SessionsContext
 ): Pick<
     AuthenticationLifecycleService,
-    "listSessions" | "logout" | "revokeSession" | "status" | "touchSession"
+    | "listSessions"
+    | "logout"
+    | "revokeAllSessions"
+    | "revokeOtherSessions"
+    | "revokeSession"
+    | "status"
+    | "touchSession"
 > {
     return {
         listSessions(identity) {
@@ -102,36 +142,9 @@ export function createAuthenticationSessionOperations(
         async revokeSession(identity, sessionId, metadata) {
             return await context.repository.withImmediateTransaction((unit) => {
                 const occurredAt = context.now();
-                const user = unit.findUserById(identity.userId);
-                const actorSession = unit.findSession(
-                    identity.userId,
-                    identity.sessionId
-                );
-                if (
-                    user === undefined ||
-                    user.disabledAt !== null ||
-                    actorSession === undefined ||
-                    actorSession.authenticationVersion !== user.authenticationVersion ||
-                    !sessionIsActive(
-                        actorSession,
-                        occurredAt,
-                        context.sessionIdleDurationMs
-                    )
-                ) {
-                    return;
-                }
-                const recentAuthentication = evaluateRecentAuthentication({
-                    checkedAt: occurredAt,
-                    mfaEnabledAt: user.mfaEnabledAt,
-                    mfaVerifiedAt: actorSession.mfaVerifiedAt,
-                    passwordVerifiedAt: actorSession.passwordVerifiedAt,
-                    windowMs: context.recentAuthenticationWindowMs,
-                });
-                if (
-                    user.mfaEnabledAt === null
-                        ? !recentAuthentication.password.recent
-                        : !recentAuthentication.mfa.recent
-                ) {
+                const access = sessionMutationAccess(context, unit, identity, occurredAt);
+                if (access === "session-changed") return;
+                if (access === "step-up-required") {
                     return { status: "step-up-required" as const };
                 }
                 const revoked = unit.deleteSession(identity.userId, sessionId);
@@ -148,6 +161,60 @@ export function createAuthenticationSessionOperations(
                     });
                 }
                 return { revoked };
+            });
+        },
+
+        async revokeAllSessions(identity, metadata) {
+            return await context.repository.withImmediateTransaction((unit) => {
+                const occurredAt = context.now();
+                const access = sessionMutationAccess(context, unit, identity, occurredAt);
+                if (access === "session-changed") return;
+                if (access === "step-up-required") {
+                    return { status: "step-up-required" as const };
+                }
+                unit.deletePendingLoginsForUser(identity.userId);
+                const revokedSessions = unit.deleteAllSessions(identity.userId);
+                if (revokedSessions > 0) {
+                    context.audit(unit, {
+                        action: "auth.session.revoke-all",
+                        actor: sessionActor(identity),
+                        metadata: { revokedSessions },
+                        occurredAt,
+                        outcome: "succeeded",
+                        requestId: metadata.requestId,
+                        targetId: identity.userId,
+                        targetType: "auth_sessions",
+                    });
+                }
+                return { revokedSessions };
+            });
+        },
+
+        async revokeOtherSessions(identity, metadata) {
+            return await context.repository.withImmediateTransaction((unit) => {
+                const occurredAt = context.now();
+                const access = sessionMutationAccess(context, unit, identity, occurredAt);
+                if (access === "session-changed") return;
+                if (access === "step-up-required") {
+                    return { status: "step-up-required" as const };
+                }
+                const revokedSessions = unit.deleteOtherSessions(
+                    identity.userId,
+                    identity.sessionId
+                );
+                if (revokedSessions > 0) {
+                    context.audit(unit, {
+                        action: "auth.session.revoke-others",
+                        actor: sessionActor(identity),
+                        metadata: { revokedSessions },
+                        occurredAt,
+                        outcome: "succeeded",
+                        requestId: metadata.requestId,
+                        targetId: identity.userId,
+                        targetType: "auth_sessions",
+                    });
+                }
+                return { revokedSessions };
             });
         },
 

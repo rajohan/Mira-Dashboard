@@ -27,6 +27,8 @@ import { createWebAuthnAdapter } from "../server/domains/security/mfa/webauthn/a
 import type { WebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import { createRequestAuthenticator } from "../server/domains/security/requestAuthentication.ts";
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
+import { createSecurityAuditLifecycleService } from "../server/domains/security/securityAuditLifecycle.ts";
+import { createSecurityAuditLifecycleRepository } from "../server/domains/security/securityAuditLifecycleRepository.ts";
 import {
     type WebConfiguration,
     parseWebConfiguration,
@@ -76,6 +78,7 @@ export interface DashboardServerOptions extends Omit<
     | "hostname"
     | "mfaAccountLifecycle"
     | "mfaLoginLifecycle"
+    | "securityAuditLifecycle"
 > {
     readonly applicationRuntime: DashboardApplicationRuntime;
     readonly authenticationLeaseDurationMs?: number;
@@ -231,6 +234,11 @@ export async function createDashboardServer(
             repository: createAutomationLifecycleRepository(database, databaseRuntime),
             sessionIdleDurationMs: options.sessionIdleDurationMs,
         });
+        const securityAuditLifecycle = createSecurityAuditLifecycleService({
+            ...(options.now !== undefined && { now: options.now }),
+            repository: createSecurityAuditLifecycleRepository(database),
+            sessionIdleDurationMs: options.sessionIdleDurationMs,
+        });
         const serverOptions: ServerOptions = {
             applicationRuntime: options.applicationRuntime,
             authenticateCredential: (credential) =>
@@ -245,6 +253,7 @@ export async function createDashboardServer(
             mfaLoginLifecycle,
             port: options.port,
             readiness: options.readiness,
+            securityAuditLifecycle,
             trustedProxyAddresses: options.trustedProxyAddresses,
         };
         serverOwnsRuntimeCleanup = true;

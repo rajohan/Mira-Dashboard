@@ -16,6 +16,7 @@ import { userRecoveryCodeInsertSchema } from "../../../database/validation/userR
 import { userTotpFactorInsertSchema } from "../../../database/validation/userTotpFactors.ts";
 import { userWebAuthnCredentialInsertSchema } from "../../../database/validation/userWebAuthnCredentials.ts";
 import { opaqueTokenValidatorVersion } from "../../../shared/opaqueToken.ts";
+import { DrizzlePendingLoginStore } from "../pendingLoginStore.ts";
 import {
     DrizzleSecurityAuditStore,
     type SecurityAuditWriter,
@@ -69,12 +70,14 @@ export class DrizzleMfaLifecycleUnitOfWork
     implements MfaLifecycleUnitOfWork
 {
     readonly #auditEvents: DrizzleSecurityAuditStore;
+    readonly #pendingLogins: DrizzlePendingLoginStore;
     readonly #transaction: SecurityTransaction;
 
     constructor(transaction: SecurityTransaction) {
         super(transaction);
         this.#transaction = transaction;
         this.#auditEvents = new DrizzleSecurityAuditStore(transaction);
+        this.#pendingLogins = new DrizzlePendingLoginStore(transaction);
     }
 
     advanceTotpLastUsedStep(
@@ -322,10 +325,7 @@ export class DrizzleMfaLifecycleUnitOfWork
     }
 
     deletePendingLoginsForUser(userId: string): number {
-        return this.#transaction
-            .delete(authPendingLogins)
-            .where(eq(authPendingLogins.userId, userId))
-            .run().changes;
+        return this.#pendingLogins.deleteAllForUser(userId);
     }
 
     deletePendingTotpFactorsForUser(userId: string): number {
