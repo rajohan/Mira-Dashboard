@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.0...v0.2.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **bootstrap:** complete clean-host configuration ([97e882f](https://github.com/rajohan/Mira-Dashboard/commit/97e882ffe3bacfceec76cac6e64b8e5f9c78863c))
+
 ## [0.2.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.1.0...v0.2.0) (2026-08-24)
 
 
