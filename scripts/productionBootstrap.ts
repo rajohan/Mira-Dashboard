@@ -25,6 +25,7 @@ const dopplerConfigurationNames = applicationConfigurationRegistry
     )
     .map((entry) => entry.environmentName)
     .join(",");
+const minimumUnprivilegedGroupId = 100;
 
 interface CommandResult {
     readonly exitCode: number;
@@ -63,6 +64,37 @@ interface ProductionBootstrapPathStatus {
     readonly uid: number;
     isDirectory(): boolean;
     isFile(): boolean;
+}
+
+function parseMaintenanceGroup(
+    stdout: string,
+    expectedMembers: string
+): Readonly<{ groupId: number; line: string }> | undefined {
+    const line = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+    const match = /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)$/u.exec(
+        line
+    );
+    if (!match || match[2] !== expectedMembers) return undefined;
+    const groupId = Number(match[1]);
+    return Number.isSafeInteger(groupId) && groupId >= minimumUnprivilegedGroupId
+        ? Object.freeze({ groupId, line })
+        : undefined;
+}
+
+async function maintenanceGroupIsUnique(
+    dependencies: ProductionBootstrapDependencies,
+    group: Readonly<{ groupId: number; line: string }>
+): Promise<boolean> {
+    const inventory = await dependencies.run(["/usr/bin/getent", "group"]);
+    if (inventory.exitCode !== 0) return false;
+    const aliases = inventory.stdout
+        .split("\n")
+        .filter(Boolean)
+        .filter((line) => {
+            const fields = line.split(":");
+            return fields.length === 4 && Number(fields[2]) === group.groupId;
+        });
+    return aliases.length === 1 && aliases[0] === group.line;
 }
 
 export interface ProductionBootstrapPrerequisiteFilesystem {
@@ -341,6 +373,7 @@ export async function admitProductionBootstrapRelease(
  * @param manifestSha256 Independently verified release-manifest digest.
  * @param archiveSha256 Digest verified before and after the root-owned archive handoff.
  * @param runtimeSha256 Digest of the root-owned runtime source and staged interpreter.
+ * @param userId Canonical non-root production service identity.
  * @param dependencies Fixed process boundary.
  */
 export async function stageProductionBootstrapRootAuthority(
@@ -349,6 +382,7 @@ export async function stageProductionBootstrapRootAuthority(
     manifestSha256: string,
     archiveSha256: string,
     runtimeSha256: string,
+    userId: number,
     dependencies: ProductionBootstrapDependencies
 ): Promise<void> {
     const sudo = "/usr/bin/sudo";
@@ -436,7 +470,7 @@ export async function stageProductionBootstrapRootAuthority(
         `--release-root=${stagedRelease}`,
         `--release-id=${releaseId}`,
     ]);
-    const group = await dependencies.run([
+    let group = await dependencies.run([
         "/usr/bin/getent",
         "group",
         "mira-dashboard-log-maintenance",
@@ -448,6 +482,19 @@ export async function stageProductionBootstrapRootAuthority(
             "--system",
             "mira-dashboard-log-maintenance",
         ]);
+        group = await dependencies.run([
+            "/usr/bin/getent",
+            "group",
+            "mira-dashboard-log-maintenance",
+        ]);
+    }
+    let admittedGroup =
+        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
+    if (
+        !admittedGroup ||
+        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+    ) {
+        throw new Error(failureMessage);
     }
     await requireSuccess(dependencies, [
         sudo,
@@ -456,6 +503,31 @@ export async function stageProductionBootstrapRootAuthority(
         "--groups",
         "mira-dashboard-log-maintenance",
         "ubuntu",
+    ]);
+    group = await dependencies.run([
+        "/usr/bin/getent",
+        "group",
+        "mira-dashboard-log-maintenance",
+    ]);
+    admittedGroup =
+        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "ubuntu") : undefined;
+    if (
+        !admittedGroup ||
+        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+    ) {
+        throw new Error(failureMessage);
+    }
+    await requireSuccess(dependencies, [
+        sudo,
+        stagedRuntime,
+        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
+        `--user-id=${userId}`,
+    ]);
+    await requireSuccess(dependencies, [
+        sudo,
+        "/usr/bin/systemd-tmpfiles",
+        "--create",
+        "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
     ]);
     await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
     await requireSuccess(dependencies, [
@@ -654,14 +726,6 @@ export async function bootstrapProduction(
             dependencies,
             repositoryRoot
         );
-        await stageProductionBootstrapRootAuthority(
-            artifactRoot,
-            releaseId,
-            admitted.manifestSha256,
-            admitted.archiveSha256,
-            prerequisites.runtimeSha256,
-            dependencies
-        );
         await requireSuccess(dependencies, [
             process.execPath,
             "run",
@@ -669,6 +733,15 @@ export async function bootstrapProduction(
             "prepare-state",
             `--project-root=${projectHome}`,
         ]);
+        await stageProductionBootstrapRootAuthority(
+            artifactRoot,
+            releaseId,
+            admitted.manifestSha256,
+            admitted.archiveSha256,
+            prerequisites.runtimeSha256,
+            userId,
+            dependencies
+        );
         await requireSuccess(dependencies, [
             process.execPath,
             "run",

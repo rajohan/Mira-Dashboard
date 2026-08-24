@@ -113,7 +113,7 @@ async function destinationFixture(
     );
     temporaryRoots.push(destinationRoot);
     await chmod(destinationRoot, 0o700);
-    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system"];
+    const directories = ["etc/polkit-1/rules.d", "etc/systemd/system", "usr/lib"];
     if (options.includeLibexec === false) directories.push("usr/local");
     else directories.push("usr/local/libexec");
     for (const directory of directories) {
@@ -181,10 +181,11 @@ describe("root log-maintenance provisioning installer", () => {
         }
     });
 
-    test("creates and validates the reviewed libexec target on a fresh host", async () => {
+    test("creates and validates reviewed fresh-host target directories", async () => {
         const releaseRoot = await releaseFixture();
         const destinationRoot = await destinationFixture({ includeLibexec: false });
         const libexec = path.join(destinationRoot, "usr/local/libexec");
+        const tmpfiles = path.join(destinationRoot, "usr/lib/tmpfiles.d");
 
         expect(
             await runInstallLogMaintenanceProvisioningCli(argumentsFor(releaseRoot), {
@@ -194,9 +195,11 @@ describe("root log-maintenance provisioning installer", () => {
         ).toEqual({ releaseId, status: "INSTALLED" });
 
         const status = await lstat(libexec);
+        const tmpfilesStatus = await lstat(tmpfiles);
         expect(status.isDirectory()).toBeTrue();
         expect(status.isSymbolicLink()).toBeFalse();
         expect(status.mode & 0o7777).toBe(0o755);
+        expect(tmpfilesStatus.mode & 0o7777).toBe(0o755);
         expect(
             await readFile(path.join(libexec, "mira-dashboard-log-maintenance"))
         ).toEqual(

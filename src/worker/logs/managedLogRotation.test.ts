@@ -24,11 +24,12 @@ import type {
     ManagedLogFileTarget,
     ManagedLogManifest,
 } from "./managedLogManifest.ts";
-import { validateManagedLogManifest } from "./managedLogManifest.ts";
+import { managedLogManifest, validateManagedLogManifest } from "./managedLogManifest.ts";
 import { createManagedLogRotationEngine } from "./managedLogRotation.ts";
 
 const roots: string[] = [];
 const ownerId = typeof process.getuid === "function" ? process.getuid() : 0;
+const groupId = typeof process.getgid === "function" ? process.getgid() : 0;
 const retainedEpoch = "019feb02-8b7e-72ab-8f76-19b2ce15c8ef";
 
 interface Deferred {
@@ -242,6 +243,54 @@ describe("managed log rotation engine", () => {
             observedAtMs: clock,
             policyId: "docker-managed",
             targetCount: 1,
+        });
+    });
+
+    test("admits group-writable logs owned by one runtime group", async () => {
+        const base = await fixture();
+        const source = path.join(base.logDirectory, "container.log");
+        await writeFile(source, "container payload\n", { mode: 0o660 });
+        await chmod(source, 0o660);
+        const engine = createManagedLogRotationEngine({
+            manifest: {
+                ...base.manifest,
+                fileTargets: [fileTarget(source, { trustedWritableGroupId: groupId })],
+            },
+        });
+
+        const summary = await engine.run();
+
+        expect(summary).toMatchObject({ checkedTargets: 1, ok: true });
+        expect(summary.results).toContainEqual({
+            action: "rotated",
+            reason: "size",
+            targetId: "dashboard.test",
+        });
+    });
+
+    test("rejects group-writable logs outside the reviewed maintenance group", async () => {
+        const base = await fixture();
+        const source = path.join(base.logDirectory, "container.log");
+        await writeFile(source, "container payload\n", { mode: 0o660 });
+        await chmod(source, 0o660);
+        const engine = createManagedLogRotationEngine({
+            manifest: {
+                ...base.manifest,
+                fileTargets: [
+                    fileTarget(source, {
+                        trustedWritableGroupId: groupId + 1,
+                    }),
+                ],
+            },
+        });
+
+        const summary = await engine.run();
+
+        expect(summary.ok).toBe(false);
+        expect(summary.results).toContainEqual({
+            action: "error",
+            reason: "invalid-source",
+            targetId: "dashboard.test",
         });
     });
 
@@ -862,5 +911,14 @@ describe("managed log rotation engine", () => {
                 statePath: `/tmp/state/${logRotationEpochProjectionFileName}`,
             })
         ).toThrow("Managed log manifest is invalid");
+    });
+
+    test("trusts the declarative Submaker directory and runtime owners", () => {
+        const submaker = managedLogManifest.fileTargets.find(
+            ({ id }) => id === "docker.submaker"
+        );
+        expect(submaker?.trustedOwnerIds).toContain(1000);
+        expect(submaker?.trustedOwnerIds).toContain(1001);
+        expect(submaker?.trustedOwnerIds).toContain(ownerId);
     });
 });

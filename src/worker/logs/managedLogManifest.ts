@@ -1,3 +1,4 @@
+import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -18,6 +19,7 @@ export interface ManagedLogFileTarget {
     readonly retentionCount: number;
     readonly strategy: ManagedLogRotationStrategy;
     readonly trustedOwnerIds: readonly number[];
+    readonly trustedWritableGroupId?: number;
 }
 
 export interface ManagedArchiveTarget {
@@ -45,6 +47,53 @@ const runtimeOwnerId = typeof process.getuid === "function" ? process.getuid() :
 const rootAndRuntimeOwnerIds = Object.freeze(
     runtimeOwnerId === 0 ? [0] : [0, runtimeOwnerId]
 );
+const maintenanceGroupName = "mira-dashboard-log-maintenance";
+
+function resolveMaintenanceGroupId(): number | undefined {
+    let descriptor: number | undefined;
+    try {
+        descriptor = openSync(
+            "/etc/group",
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+        const status = fstatSync(descriptor);
+        if (
+            !status.isFile() ||
+            status.nlink !== 1 ||
+            status.uid !== 0 ||
+            (status.mode & 0o022) !== 0 ||
+            status.size === 0 ||
+            status.size > 1024 * 1024
+        ) {
+            return undefined;
+        }
+        const matches = readFileSync(descriptor, "utf8")
+            .split("\n")
+            .filter((line) => line.startsWith(`${maintenanceGroupName}:`));
+        if (matches.length !== 1) return undefined;
+        const fields = matches[0]?.split(":");
+        const groupId = fields?.[2];
+        if (fields?.length !== 4 || !/^(?:0|[1-9]\d{0,9})$/u.test(groupId ?? "")) {
+            return undefined;
+        }
+        const parsed = Number(groupId);
+        return Number.isSafeInteger(parsed) ? parsed : undefined;
+    } catch {
+        return undefined;
+    } finally {
+        if (descriptor !== undefined) closeSync(descriptor);
+    }
+}
+
+const maintenanceGroupId = resolveMaintenanceGroupId();
+
+function trustedContainerOwnerIds(...containerOwnerIds: number[]): readonly number[] {
+    return Object.freeze(
+        [...new Set([...rootAndRuntimeOwnerIds, ...containerOwnerIds])].toSorted(
+            (left, right) => left - right
+        )
+    );
+}
 
 function validateManifestPath(value: string): void {
     if (
@@ -77,6 +126,19 @@ function managedFile(
         strategy: "copytruncate",
         trustedOwnerIds: rootAndRuntimeOwnerIds,
         ...options,
+    });
+}
+
+function managedContainerFile(
+    id: string,
+    filePath: string,
+    trustedOwnerIds: readonly number[]
+): ManagedLogFileTarget {
+    return managedFile(id, filePath, {
+        trustedOwnerIds,
+        ...(maintenanceGroupId === undefined
+            ? {}
+            : { trustedWritableGroupId: maintenanceGroupId }),
     });
 }
 
@@ -117,19 +179,31 @@ export const managedLogManifest: ManagedLogManifest = Object.freeze({
             "dashboard.worker.stderr",
             path.join(dashboardLogsRoot, "worker-stderr.log")
         ),
-        managedFile(
+        managedContainerFile(
             "docker.prowlarr.debug",
-            "/opt/docker/data/prowlarr/logs/prowlarr.debug.txt"
+            "/opt/docker/data/prowlarr/logs/prowlarr.debug.txt",
+            trustedContainerOwnerIds(1001)
         ),
-        managedFile(
+        managedContainerFile(
             "docker.prowlarr.trace",
-            "/opt/docker/data/prowlarr/logs/prowlarr.trace.txt"
+            "/opt/docker/data/prowlarr/logs/prowlarr.trace.txt",
+            trustedContainerOwnerIds(1001)
         ),
-        managedFile("docker.prowlarr", "/opt/docker/data/prowlarr/logs/prowlarr.txt"),
-        managedFile("docker.submaker", "/opt/docker/data/submaker/logs/app.log", {
-            trustedOwnerIds: Object.freeze([0, 1000]),
-        }),
-        managedFile("docker.traefik", "/opt/docker/data/traefik/access.log"),
+        managedContainerFile(
+            "docker.prowlarr",
+            "/opt/docker/data/prowlarr/logs/prowlarr.txt",
+            trustedContainerOwnerIds(1001)
+        ),
+        managedContainerFile(
+            "docker.submaker",
+            "/opt/docker/data/submaker/logs/app.log",
+            trustedContainerOwnerIds(1000, 1001)
+        ),
+        managedContainerFile(
+            "docker.traefik",
+            "/opt/docker/data/traefik/access.log",
+            trustedContainerOwnerIds(1001)
+        ),
     ]),
     lockPath:
         "/home/ubuntu/projects/mira-dashboard/production/state/log-maintenance/managed.lock",
@@ -172,6 +246,9 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
         }
         if ("filePath" in target) {
             if (
+                (target.trustedWritableGroupId !== undefined &&
+                    (!Number.isSafeInteger(target.trustedWritableGroupId) ||
+                        target.trustedWritableGroupId < 0)) ||
                 target.maximumSizeBytes < 1 ||
                 target.maximumSizeBytes > target.maximumSourceBytes ||
                 !Number.isSafeInteger(target.maximumSizeBytes) ||
