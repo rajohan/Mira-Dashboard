@@ -1,5 +1,5 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { useDashboardRealtimeHub } from "./realtimeContextValue.ts";
 import type { DashboardRealtimeTopic } from "./realtimeHub.ts";
@@ -23,6 +23,11 @@ export function useRealtimeQueryInvalidation({
 }: RealtimeQueryInvalidationOptions): void {
     const hub = useDashboardRealtimeHub();
     const queryClient = useQueryClient();
+    const refreshQueriesReference = useRef(refreshQueries);
+
+    useEffect(() => {
+        refreshQueriesReference.current = refreshQueries;
+    }, [refreshQueries]);
 
     useEffect(() => {
         let disposed = false;
@@ -35,7 +40,7 @@ export function useRealtimeQueryInvalidation({
             if (disposed) return;
             refreshInFlight = true;
             try {
-                await refreshQueries(queryClient);
+                await refreshQueriesReference.current(queryClient);
             } catch {
                 // Realtime refresh is best-effort; cached data remains available.
             } finally {
@@ -76,12 +81,5 @@ export function useRealtimeQueryInvalidation({
             if (refreshTimer !== undefined) clearTimeout(refreshTimer);
             if (fallbackTimer !== undefined) clearInterval(fallbackTimer);
         };
-    }, [
-        fallbackRefreshIntervalMs,
-        hub,
-        queryClient,
-        refreshDelayMs,
-        refreshQueries,
-        topic,
-    ]);
+    }, [fallbackRefreshIntervalMs, hub, queryClient, refreshDelayMs, topic]);
 }

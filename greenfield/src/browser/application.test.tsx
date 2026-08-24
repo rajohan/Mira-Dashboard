@@ -19,7 +19,7 @@ const unexpectedWebAuthnClient: DashboardWebAuthnClient = Object.freeze({
 });
 
 describe("Dashboard browser application", () => {
-    test("renders the overview and owns throttled authenticated activity", async () => {
+    test("renders the overview cache foundation and owns authenticated activity", async () => {
         const timestampMs = Date.now();
         const queryClient = createDashboardQueryClient();
         const router = createDashboardRouter(
@@ -27,6 +27,7 @@ describe("Dashboard browser application", () => {
         );
         let touchCalls = 0;
         let notificationCalls = 0;
+        let cacheStatusCalls = 0;
         const trpcClient = createDashboardTrpcClient({
             mutation(path, input) {
                 expect(path).toBe("auth.touch");
@@ -35,6 +36,16 @@ describe("Dashboard browser application", () => {
                 return Promise.resolve({ lastSeenAtMs: timestampMs });
             },
             query(path, input) {
+                if (path === "cache.getStatus") {
+                    expect(input).toEqual({});
+                    cacheStatusCalls += 1;
+                    return Promise.resolve({
+                        entries: [],
+                        generatedAtMs: timestampMs,
+                        totalCount: 0,
+                        truncated: false,
+                    });
+                }
                 if (path === "notifications.list") {
                     expect(input).toEqual({ limit: 100 });
                     notificationCalls += 1;
@@ -89,11 +100,14 @@ describe("Dashboard browser application", () => {
             expect(
                 screen.getByRole("link", { name: "Skip to content" }).getAttribute("href")
             ).toBe("#dashboard-content");
+            expect(screen.getByRole("heading", { level: 2, name: "Cache" })).toBeTruthy();
             expect(
-                screen.getByRole("status", { name: "Application status" }).textContent
-            ).toContain("Application shell ready");
+                screen.getByRole("heading", { level: 3, name: "No cache attempts yet" })
+            ).toBeTruthy();
+            expect(screen.queryByText("Select a cache entry")).toBeNull();
             await waitFor(() => expect(touchCalls).toBe(1));
             await waitFor(() => expect(notificationCalls).toBe(1));
+            await waitFor(() => expect(cacheStatusCalls).toBe(1));
             expect(queryClient.getQueryData(authStatusQueryKey)).toMatchObject({
                 session: { lastSeenAtMs: timestampMs },
                 state: "authenticated",
