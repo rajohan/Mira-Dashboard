@@ -18829,7 +18829,6 @@
                                     "approve-review",
                                     "create-stack",
                                     "merge",
-                                    "merge-and-deploy",
                                     "preview-start",
                                     "reject",
                                     "update-branch"
@@ -18886,7 +18885,7 @@
                               "additionalProperties": false,
                               "$comment": "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind."
                             },
-                            "maxItems": 7,
+                            "maxItems": 6,
                             "$comment": "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID."
                           },
                           "additions": {
@@ -19214,7 +19213,6 @@
                                     "approve-review",
                                     "create-stack",
                                     "merge",
-                                    "merge-and-deploy",
                                     "preview-start",
                                     "reject",
                                     "update-branch"
@@ -19271,7 +19269,7 @@
                               "additionalProperties": false,
                               "$comment": "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind."
                             },
-                            "maxItems": 7,
+                            "maxItems": 6,
                             "$comment": "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID."
                           },
                           "additions": {
@@ -20739,6 +20737,24 @@
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
                   },
+                  "candidate": {
+                    "type": "object",
+                    "properties": {
+                      "releaseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{40}$"
+                      },
+                      "tagName": {
+                        "type": "string",
+                        "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+                      }
+                    },
+                    "required": [
+                      "releaseId",
+                      "tagName"
+                    ],
+                    "additionalProperties": false
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -20985,6 +21001,24 @@
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
                   },
+                  "candidate": {
+                    "type": "object",
+                    "properties": {
+                      "releaseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{40}$"
+                      },
+                      "tagName": {
+                        "type": "string",
+                        "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+                      }
+                    },
+                    "required": [
+                      "releaseId",
+                      "tagName"
+                    ],
+                    "additionalProperties": false
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -21230,159 +21264,77 @@
       },
       "delivery.approvePullRequest.input": {
         "$id": "urn:mira-dashboard:delivery.approvePullRequest.input",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "checkoutRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "confirmation": {
-                "const": "merge-delivery-pull-request"
-              },
-              "expectedHeads": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "headSha": {
-                      "type": "string",
-                      "pattern": "^[0-9a-f]{40}$"
-                    },
-                    "number": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "headSha",
-                    "number"
-                  ],
-                  "additionalProperties": false
-                },
-                "minItems": 1,
-                "maxItems": 100,
-                "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
-              },
-              "mergeStack": {
-                "type": "boolean"
-              },
-              "operation": {
-                "const": "merge-pull-request"
-              },
-              "idempotencyKey": {
-                "type": "string",
-                "minLength": 32,
-                "maxLength": 128,
-                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
-              },
-              "sourceRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "number": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 9007199254740991
-              },
-              "deploy": {
-                "const": false
-              }
-            },
-            "required": [
-              "checkoutRevision",
-              "confirmation",
-              "expectedHeads",
-              "mergeStack",
-              "operation",
-              "idempotencyKey",
-              "sourceRevision",
-              "number",
-              "deploy"
-            ],
-            "additionalProperties": false
+        "type": "object",
+        "properties": {
+          "checkoutRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           },
-          {
-            "type": "object",
-            "properties": {
-              "checkoutRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "confirmation": {
-                "const": "merge-and-deploy-delivery-pull-request"
-              },
-              "expectedHeads": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "headSha": {
-                      "type": "string",
-                      "pattern": "^[0-9a-f]{40}$"
-                    },
-                    "number": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "headSha",
-                    "number"
-                  ],
-                  "additionalProperties": false
+          "confirmation": {
+            "const": "merge-delivery-pull-request"
+          },
+          "expectedHeads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "headSha": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
                 },
-                "minItems": 1,
-                "maxItems": 100,
-                "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
+                "number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
               },
-              "mergeStack": {
-                "type": "boolean"
-              },
-              "operation": {
-                "const": "merge-pull-request"
-              },
-              "idempotencyKey": {
-                "type": "string",
-                "minLength": 32,
-                "maxLength": 128,
-                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
-              },
-              "sourceRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "number": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 9007199254740991
-              },
-              "activationRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "deploy": {
-                "const": true
-              }
+              "required": [
+                "headSha",
+                "number"
+              ],
+              "additionalProperties": false
             },
-            "required": [
-              "checkoutRevision",
-              "confirmation",
-              "expectedHeads",
-              "mergeStack",
-              "operation",
-              "idempotencyKey",
-              "sourceRevision",
-              "number",
-              "activationRevision",
-              "deploy"
-            ],
-            "additionalProperties": false
+            "minItems": 1,
+            "maxItems": 100,
+            "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
+          },
+          "mergeStack": {
+            "type": "boolean"
+          },
+          "operation": {
+            "const": "merge-pull-request"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128,
+            "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+          },
+          "sourceRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "deploy": {
+            "const": false
           }
+        },
+        "required": [
+          "checkoutRevision",
+          "confirmation",
+          "expectedHeads",
+          "mergeStack",
+          "operation",
+          "idempotencyKey",
+          "sourceRevision",
+          "number",
+          "deploy"
         ],
+        "additionalProperties": false,
         "$comment": "Live Valibot validation additionally requires the selected pull request and exact head to be the final member of its submitted scope.",
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },

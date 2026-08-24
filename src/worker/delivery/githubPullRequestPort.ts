@@ -10,6 +10,7 @@ import {
     deliveryGitHubPullRequestMaximum,
     deliveryGitHubPullRequestNumberSchema,
     deliveryGitHubPullRequestSchema,
+    deliveryGitHubPublishedReleaseSchema,
     deliveryGitHubStackSchema,
     type DeliveryGitHubExpectedHead,
     type DeliveryGitHubMergeMutationOutcome,
@@ -17,6 +18,7 @@ import {
     type DeliveryGitHubPullRequest,
     type DeliveryGitHubPullRequestMutationPort,
     type DeliveryGitHubPullRequestReadPort,
+    type DeliveryGitHubPublishedRelease,
     type DeliveryGitHubStack,
 } from "../../contracts/deliveryGithub.ts";
 import { utf8ByteLength } from "../../shared/encoding.ts";
@@ -153,6 +155,19 @@ const rawStackSchema = v.object({
 const rawMainRefSchema = v.object({
     object: v.object({ sha: v.string(), type: v.literal("commit") }),
     ref: v.optional(v.string()),
+});
+const rawLatestReleaseSchema = v.object({
+    assets: v.array(
+        v.object({
+            digest: v.string(),
+            name: v.string(),
+            size: v.number(),
+        })
+    ),
+    draft: v.boolean(),
+    prerelease: v.boolean(),
+    tag_name: v.string(),
+    target_commitish: v.string(),
 });
 const rawMergeSchema = v.object({
     merged: v.boolean(),
@@ -538,6 +553,30 @@ export function createDeliveryGitHubPullRequestPort(
         }
     }
 
+    async function readLatestPublishedRelease(
+        signal?: AbortSignal
+    ): Promise<DeliveryGitHubPublishedRelease> {
+        try {
+            const raw = v.parse(
+                rawLatestReleaseSchema,
+                await options.transport.requestJson({ kind: "latest-release" }, signal)
+            );
+            if (raw.draft || raw.prerelease) fail("conflict");
+            return v.parse(deliveryGitHubPublishedReleaseSchema, {
+                assets: raw.assets.map(({ digest, name, size }) => ({
+                    digest,
+                    name,
+                    size,
+                })),
+                releaseId: raw.target_commitish,
+                tagName: raw.tag_name,
+            });
+        } catch (error) {
+            if (error instanceof DeliveryGitHubError) throw error;
+            fail("unavailable");
+        }
+    }
+
     async function findNativeStack(
         number: number,
         signal?: AbortSignal
@@ -727,6 +766,7 @@ export function createDeliveryGitHubPullRequestPort(
         listOpenPullRequests,
         mergeNativeStack,
         mergePullRequest,
+        readLatestPublishedRelease,
         readMainRef,
         rejectPullRequest,
         supportsNativeStacks,

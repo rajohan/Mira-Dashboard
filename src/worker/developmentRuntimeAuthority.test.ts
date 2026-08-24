@@ -99,14 +99,12 @@ describe("source-development runtime authority", () => {
             throw new TypeError("Development pull request groups are missing");
         }
         for (const member of nativeGroup.members) {
-            for (const actionId of ["merge", "merge-and-deploy"] as const) {
-                expect(
-                    member.actions.find(({ action }) => action === actionId)
-                ).toMatchObject({
+            expect(member.actions.find(({ action }) => action === "merge")).toMatchObject(
+                {
                     available: false,
                     reason: "head-guard-unavailable",
-                });
-            }
+                }
+            );
         }
         for (const member of [...nativeGroup.members, ...ordinaryGroup.members]) {
             expect(
@@ -123,7 +121,6 @@ describe("source-development runtime authority", () => {
         for (const actionId of [
             "approve-review",
             "merge",
-            "merge-and-deploy",
             "preview-start",
             "update-branch",
         ] as const) {

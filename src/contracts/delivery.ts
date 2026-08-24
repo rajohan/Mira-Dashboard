@@ -168,7 +168,6 @@ export const deliveryPullRequestActionIds = [
     "approve-review",
     "create-stack",
     "merge",
-    "merge-and-deploy",
     "preview-start",
     "reject",
     "update-branch",
@@ -203,11 +202,7 @@ export function actionCapabilityIsConsistent(
 ): boolean {
     let expectedScope: DeliveryPullRequestActionScope = "self";
     if (capability.action === "create-stack") expectedScope = "group";
-    if (
-        capability.action === "merge" ||
-        capability.action === "merge-and-deploy" ||
-        capability.action === "preview-start"
-    ) {
+    if (capability.action === "merge" || capability.action === "preview-start") {
         expectedScope = "prefix";
     }
     return (
@@ -452,6 +447,20 @@ export const deliveryReleaseSchema = v.strictObject({
 });
 export type DeliveryRelease = v.InferOutput<typeof deliveryReleaseSchema>;
 
+export const deliveryReleaseCandidateSchema = v.strictObject({
+    releaseId: deliveryCommitShaSchema,
+    tagName: v.pipe(
+        v.string("Delivery release tag is invalid"),
+        v.regex(
+            /^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u,
+            "Delivery release tag is invalid"
+        )
+    ),
+});
+export type DeliveryReleaseCandidate = v.InferOutput<
+    typeof deliveryReleaseCandidateSchema
+>;
+
 export const deliveryRollbackTargetSchema = v.strictObject({
     databaseSnapshotTransitionId: lowercaseUuidV7Schema(
         "Delivery rollback snapshot identity is invalid"
@@ -463,6 +472,7 @@ export type DeliveryRollbackTarget = v.InferOutput<typeof deliveryRollbackTarget
 
 const deliveryReleasesObjectSchema = v.strictObject({
     activationRevision: deliveryResourceRevisionSchema,
+    candidate: v.optional(deliveryReleaseCandidateSchema),
     current: v.optional(deliveryReleaseSchema),
     previous: v.optional(deliveryReleaseSchema),
     rollback: v.variant("available", [
@@ -493,7 +503,13 @@ export function deliveryReleasesAreConsistent(releases: DeliveryReleases): boole
         releases.current === undefined ||
         releases.previous === undefined ||
         releases.current.releaseId !== releases.previous.releaseId;
-    if (!distinctSlots) return false;
+    if (
+        !distinctSlots ||
+        (releases.candidate !== undefined &&
+            releases.current?.releaseId === releases.candidate.releaseId)
+    ) {
+        return false;
+    }
     if (!releases.rollback.available) return true;
     return (
         releases.previous !== undefined &&
@@ -856,15 +872,7 @@ const mergeBase = {
     ...deliveryOperationBase,
     number: pullRequestNumberSchema,
 } as const;
-const mergeInputSchema = v.variant("deploy", [
-    v.strictObject({ ...mergeBase, deploy: v.literal(false) }),
-    v.strictObject({
-        ...mergeBase,
-        activationRevision: deliveryResourceRevisionSchema,
-        confirmation: v.literal("merge-and-deploy-delivery-pull-request"),
-        deploy: v.literal(true),
-    }),
-]);
+const mergeInputSchema = v.strictObject({ ...mergeBase, deploy: v.literal(false) });
 
 export function selectedPullRequestEndsScope<
     T extends {

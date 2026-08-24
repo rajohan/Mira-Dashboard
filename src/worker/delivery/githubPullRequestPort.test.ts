@@ -119,6 +119,94 @@ function graphQlResponse(
 }
 
 describe("Delivery GitHub pull-request port", () => {
+    test("admits only the permanent asset pair for the latest stable release", () => {
+        const port = createDeliveryGitHubPullRequestPort({
+            transport: transport("mira-2026", (operation) => {
+                if (operation.kind !== "latest-release") throw new Error("unexpected");
+                return {
+                    assets: [
+                        {
+                            digest: `sha256:${"b".repeat(64)}`,
+                            name: "receipt.json",
+                            size: 512,
+                        },
+                        {
+                            digest: `sha256:${"c".repeat(64)}`,
+                            name: "release.tar",
+                            size: 4096,
+                        },
+                    ],
+                    draft: false,
+                    prerelease: false,
+                    tag_name: "v1.2.3",
+                    target_commitish: head,
+                };
+            }),
+        });
+
+        expect(port.readLatestPublishedRelease?.()).resolves.toEqual({
+            assets: [
+                {
+                    digest: `sha256:${"b".repeat(64)}`,
+                    name: "receipt.json",
+                    size: 512,
+                },
+                {
+                    digest: `sha256:${"c".repeat(64)}`,
+                    name: "release.tar",
+                    size: 4096,
+                },
+            ],
+            releaseId: head,
+            tagName: "v1.2.3",
+        });
+    });
+
+    test.each([
+        {
+            assets: [
+                {
+                    digest: `sha256:${"b".repeat(64)}`,
+                    name: "receipt.json",
+                    size: 512,
+                },
+            ],
+            draft: false,
+            prerelease: false,
+            tag_name: "v1.2.3",
+            target_commitish: head,
+        },
+        {
+            assets: [
+                {
+                    digest: `sha256:${"b".repeat(64)}`,
+                    name: "receipt.json",
+                    size: 512,
+                },
+                {
+                    digest: `sha256:${"c".repeat(64)}`,
+                    name: "release.tar",
+                    size: 4096,
+                },
+            ],
+            draft: false,
+            prerelease: true,
+            tag_name: "v1.2.3-rc.1",
+            target_commitish: head,
+        },
+    ])("rejects an incomplete or prerelease publication", (release) => {
+        const port = createDeliveryGitHubPullRequestPort({
+            transport: transport("mira-2026", (operation) => {
+                if (operation.kind !== "latest-release") throw new Error("unexpected");
+                return release;
+            }),
+        });
+
+        expect(port.readLatestPublishedRelease?.()).rejects.toBeInstanceOf(
+            DeliveryGitHubError
+        );
+    });
+
     test("lists a bounded normalized PR projection through Mira", async () => {
         const operations: string[] = [];
         const port = createDeliveryGitHubPullRequestPort({

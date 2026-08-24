@@ -157,10 +157,7 @@ function payloadMatchesInput(
                 payload.deploy === input.deploy &&
                 payload.mergeStack === input.mergeStack &&
                 payload.checkoutRevision === input.checkoutRevision &&
-                headsMatch(payload.expectedHeads, input.expectedHeads) &&
-                (input.deploy === false ||
-                    (payload.deploy === true &&
-                        payload.activationRevision === input.activationRevision))
+                headsMatch(payload.expectedHeads, input.expectedHeads)
             );
         }
         case "reject-pull-request":

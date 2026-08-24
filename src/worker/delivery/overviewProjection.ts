@@ -419,14 +419,6 @@ function updateBlockReason(
     return nonOrdinaryReason(group);
 }
 
-function deploymentBlockReason(
-    mergeReason: DeliveryActionCapabilityReason | undefined,
-    production: DeliveryProductionAuthoritySnapshot
-): DeliveryActionCapabilityReason | undefined {
-    if (mergeReason !== undefined) return mergeReason;
-    return production.releases.current === undefined ? "source-unavailable" : undefined;
-}
-
 function actions(input: {
     readonly checkout: DeliveryCheckout;
     readonly group: GroupDraft;
@@ -486,13 +478,6 @@ function actions(input: {
         mergeReason === undefined
             ? available("merge", "mira", "prefix")
             : unavailable("merge", "mira", mergeReason, "prefix")
-    );
-
-    const deployReason = deploymentBlockReason(mergeReason, input.production);
-    result.push(
-        deployReason === undefined
-            ? available("merge-and-deploy", "mira", "prefix")
-            : unavailable("merge-and-deploy", "mira", deployReason, "prefix")
     );
 
     const previewReason = previewBlockReason({

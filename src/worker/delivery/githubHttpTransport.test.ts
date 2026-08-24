@@ -67,6 +67,29 @@ describe("Delivery GitHub HTTPS transport", () => {
         ).toBeTrue();
     });
 
+    test("reads the latest release from the fixed repository authority", () => {
+        const calls: string[] = [];
+        const transport = createDeliveryGitHubHttpTransport({
+            expectedLogin: "mira-2026",
+            fetch: (input) => {
+                calls.push(input);
+                return Promise.resolve(
+                    calls.length === 1
+                        ? Response.json({ id: 42, login: "mira-2026", type: "User" })
+                        : Response.json({ tag_name: "v1.2.3" })
+                );
+            },
+            token: token(),
+        });
+
+        expect(transport.requestJson({ kind: "latest-release" })).resolves.toEqual({
+            tag_name: "v1.2.3",
+        });
+        expect(calls.at(-1)).toBe(
+            "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/latest"
+        );
+    });
+
     test("rejects identity mismatch without calling the requested endpoint", async () => {
         const calls: string[] = [];
         const transport = createDeliveryGitHubHttpTransport({

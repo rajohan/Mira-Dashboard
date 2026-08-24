@@ -297,7 +297,7 @@ function capabilityHeads(
 
 function publicActionFor(input: DeliveryRequestOperationInput) {
     if (input.operation === "merge-pull-request") {
-        return input.deploy ? "merge-and-deploy" : "merge";
+        return "merge";
     }
     if (input.operation === "create-pull-request-stack") return "create-stack";
     if (input.operation === "start-preview") return "preview-start";
@@ -333,26 +333,15 @@ function payloadFor(input: DeliveryRequestOperationInput): DeliveryOperationJobP
             };
         }
         case "merge-pull-request": {
-            return input.deploy
-                ? {
-                      activationRevision: input.activationRevision,
-                      checkoutRevision: input.checkoutRevision,
-                      deploy: true,
-                      expectedHeads: input.expectedHeads,
-                      mergeStack: input.mergeStack,
-                      number: input.number,
-                      operation: input.operation,
-                      sourceRevision: input.sourceRevision,
-                  }
-                : {
-                      checkoutRevision: input.checkoutRevision,
-                      deploy: false,
-                      expectedHeads: input.expectedHeads,
-                      mergeStack: input.mergeStack,
-                      number: input.number,
-                      operation: input.operation,
-                      sourceRevision: input.sourceRevision,
-                  };
+            return {
+                checkoutRevision: input.checkoutRevision,
+                deploy: false,
+                expectedHeads: input.expectedHeads,
+                mergeStack: input.mergeStack,
+                number: input.number,
+                operation: input.operation,
+                sourceRevision: input.sourceRevision,
+            };
         }
         case "reject-pull-request":
         case "update-branch": {
@@ -544,15 +533,6 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 !checkout.checkout.safeForDeploy
             ) {
                 throw new DeliveryServiceError("conflict");
-            }
-            if (input.deploy) {
-                const releases = freshSnapshot("releases");
-                if (
-                    releases.actionActive ||
-                    input.activationRevision !== releases.releases.activationRevision
-                ) {
-                    throw new DeliveryServiceError("conflict");
-                }
             }
         }
         return payloadFor(input);

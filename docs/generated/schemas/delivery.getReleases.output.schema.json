@@ -32,6 +32,24 @@
               "type": "string",
               "pattern": "^[0-9a-f]{64}$"
             },
+            "candidate": {
+              "type": "object",
+              "properties": {
+                "releaseId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "tagName": {
+                  "type": "string",
+                  "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+                }
+              },
+              "required": [
+                "releaseId",
+                "tagName"
+              ],
+              "additionalProperties": false
+            },
             "current": {
               "type": "object",
               "properties": {
@@ -277,6 +295,24 @@
             "activationRevision": {
               "type": "string",
               "pattern": "^[0-9a-f]{64}$"
+            },
+            "candidate": {
+              "type": "object",
+              "properties": {
+                "releaseId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                "tagName": {
+                  "type": "string",
+                  "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+                }
+              },
+              "required": [
+                "releaseId",
+                "tagName"
+              ],
+              "additionalProperties": false
             },
             "current": {
               "type": "object",

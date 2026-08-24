@@ -199,20 +199,6 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                           reason: "A fresh, safe production checkout is required.",
                       };
             }
-            case "merge-and-deploy": {
-                if (releasesFresh && releases.actionActive) {
-                    return {
-                        enabled: false,
-                        reason: "Another Delivery action is active.",
-                    };
-                }
-                return checkoutFresh && checkout.checkout.safeForDeploy && releasesFresh
-                    ? { enabled: true }
-                    : {
-                          enabled: false,
-                          reason: "Fresh checkout and activation revisions are required for merge and deploy.",
-                      };
-            }
             case "preview-start": {
                 if (previewFresh && preview.actionActive) {
                     return {
@@ -257,7 +243,8 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
         releasesFresh &&
         !releases.actionActive &&
         checkout.checkout.safeForDeploy &&
-        releases.releases.current !== undefined;
+        releases.releases.candidate !== undefined &&
+        releases.releases.candidate.releaseId === checkout.checkout.remoteHeadSha;
     let deployReason: string | undefined;
     if (!checkoutFresh || !releasesFresh) {
         deployReason = "Fresh checkout and activation revisions are required.";
@@ -265,8 +252,13 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
         deployReason = "Another Delivery action is active.";
     } else if (!checkout.checkout.safeForDeploy) {
         deployReason = "The production checkout must be ready, clean, and on main.";
-    } else if (releases.releases.current === undefined) {
-        deployReason = "An active managed release is required before deployment.";
+    } else if (releases.releases.candidate === undefined) {
+        deployReason =
+            "A published Release Please release is required before deployment.";
+    } else if (
+        releases.releases.candidate.releaseId !== checkout.checkout.remoteHeadSha
+    ) {
+        deployReason = "The published release must match the exact main head.";
     }
 
     function requestDeploy(): void {

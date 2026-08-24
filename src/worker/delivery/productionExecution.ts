@@ -360,6 +360,13 @@ export function createDeliveryProductionExecutionPort(
             signal?: AbortSignal
         ): Promise<DeliveryJobOperationResult> {
             validateRunIdentity(payload, identity);
+            if (
+                payload.operation === "deploy" &&
+                (current.releases.candidate === undefined ||
+                    current.releases.candidate.releaseId !== payload.expectedMainHeadSha)
+            ) {
+                throw failure();
+            }
             const existing = await options.control.inspect(identity.runId, signal);
             if (existing.state === "terminal") {
                 return consumeTerminalResult(

@@ -59,6 +59,23 @@ function github(
         findNativeStack: () => Promise.resolve(undefined),
         getPullRequest: () => Promise.reject(new Error("unused")),
         listOpenPullRequests: list,
+        readLatestPublishedRelease: () =>
+            Promise.resolve({
+                assets: [
+                    {
+                        digest: `sha256:${"b".repeat(64)}`,
+                        name: "receipt.json",
+                        size: 512,
+                    },
+                    {
+                        digest: `sha256:${"c".repeat(64)}`,
+                        name: "release.tar",
+                        size: 4096,
+                    },
+                ],
+                releaseId: mainHead,
+                tagName: "v1.2.3",
+            }),
         readMainRef: () => Promise.resolve(mainHead),
         supportsNativeStacks: () => Promise.resolve(true),
     };
@@ -140,6 +157,10 @@ describe("Delivery overview collector", () => {
             sourceRevision,
         });
         expect(deploy.checkout.remoteHeadSha).toBe(mainHead);
+        expect(deploy.releases.candidate).toEqual({
+            releaseId: mainHead,
+            tagName: "v1.2.3",
+        });
 
         const rollback = await collector.collectForOperation(
             {

@@ -141,6 +141,26 @@ export const deliveryGitHubStackSchema = v.strictObject({
     ),
 });
 
+const deliveryGitHubReleaseAssetSchema = v.strictObject({
+    digest: v.pipe(v.string(), v.regex(/^sha256:[a-f\d]{64}$/u)),
+    name: v.picklist(["receipt.json", "release.tar"]),
+    size: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+});
+export const deliveryGitHubPublishedReleaseSchema = v.pipe(
+    v.strictObject({
+        assets: v.pipe(v.array(deliveryGitHubReleaseAssetSchema), v.length(2)),
+        releaseId: deliveryGitHubCommitShaSchema,
+        tagName: v.pipe(v.string(), v.regex(/^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u)),
+    }),
+    v.check(
+        ({ assets }) =>
+            new Set(assets.map(({ name }) => name)).size === 2 &&
+            assets.some(({ name }) => name === "receipt.json") &&
+            assets.some(({ name }) => name === "release.tar"),
+        "Delivery GitHub release assets are invalid"
+    )
+);
+
 export const deliveryGitHubAsyncMergeSchema = v.strictObject({
     details: v.strictObject({
         expectedHeadSha: v.optional(deliveryGitHubCommitShaSchema),
@@ -163,6 +183,9 @@ export type DeliveryGitHubExpectedHead = v.InferOutput<
     typeof deliveryGitHubExpectedHeadSchema
 >;
 export type DeliveryGitHubStack = v.InferOutput<typeof deliveryGitHubStackSchema>;
+export type DeliveryGitHubPublishedRelease = v.InferOutput<
+    typeof deliveryGitHubPublishedReleaseSchema
+>;
 export type DeliveryGitHubAsyncMerge = v.InferOutput<
     typeof deliveryGitHubAsyncMergeSchema
 >;
@@ -199,6 +222,9 @@ export interface DeliveryGitHubPullRequestReadPort {
     readonly listOpenPullRequests: (
         signal?: AbortSignal
     ) => Promise<readonly DeliveryGitHubPullRequest[]>;
+    readonly readLatestPublishedRelease?: (
+        signal?: AbortSignal
+    ) => Promise<DeliveryGitHubPublishedRelease>;
     readonly readMainRef: (signal?: AbortSignal) => Promise<string>;
     readonly supportsNativeStacks: (signal?: AbortSignal) => Promise<boolean>;
 }

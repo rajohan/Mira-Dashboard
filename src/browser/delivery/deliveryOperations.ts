@@ -109,11 +109,8 @@ export function pullRequestOperationPrompt(input: {
                 title: "Create native pull request stack?",
             };
         }
-        case "merge":
-        case "merge-and-deploy": {
+        case "merge": {
             if (input.checkout === undefined) return undefined;
-            const deploy = action.action === "merge-and-deploy";
-            if (deploy && input.releases === undefined) return undefined;
             // A partially merged native stack can legitimately have one open layer
             // left. Stack authority comes from the server-owned group kind, never
             // from the remaining prefix cardinality.
@@ -122,36 +119,21 @@ export function pullRequestOperationPrompt(input: {
                 ? `Mira (mira-2026) will squash-merge the exact stack prefix bottom-to-top: ${scopeDescription(expectedHeads)}. Branch cleanup happens only after every included layer is confirmed merged.`
                 : `Mira (mira-2026) will squash-merge #${pullRequest.number} at exact head ${pullRequest.headSha} and request safe remote-branch cleanup.`;
             return {
-                confirmLabel: deploy ? "Queue merge and deploy" : "Queue merge",
-                danger: deploy,
-                description: deploy
-                    ? `${description} After confirmed merge, main is synced to the exact remote head, an immutable release is built and verified, and failure restores the prior paired release.`
-                    : `${description} Production is not deployed.`,
-                input: deploy
-                    ? {
-                          activationRevision: input.releases!.activationRevision,
-                          checkoutRevision: input.checkout.revision,
-                          confirmation: "merge-and-deploy-delivery-pull-request",
-                          deploy: true,
-                          expectedHeads,
-                          idempotencyKey,
-                          mergeStack,
-                          number: pullRequest.number,
-                          operation: "merge-pull-request",
-                          sourceRevision,
-                      }
-                    : {
-                          checkoutRevision: input.checkout.revision,
-                          confirmation: "merge-delivery-pull-request",
-                          deploy: false,
-                          expectedHeads,
-                          idempotencyKey,
-                          mergeStack,
-                          number: pullRequest.number,
-                          operation: "merge-pull-request",
-                          sourceRevision,
-                      },
-                title: deploy ? "Merge and deploy?" : "Merge pull request?",
+                confirmLabel: "Queue merge",
+                danger: false,
+                description: `${description} Production is not deployed; deployment is available only after Release Please publishes the exact main release.`,
+                input: {
+                    checkoutRevision: input.checkout.revision,
+                    confirmation: "merge-delivery-pull-request",
+                    deploy: false,
+                    expectedHeads,
+                    idempotencyKey,
+                    mergeStack,
+                    number: pullRequest.number,
+                    operation: "merge-pull-request",
+                    sourceRevision,
+                },
+                title: "Merge pull request?",
             };
         }
         case "preview-start": {
@@ -239,10 +221,16 @@ export function deployMainPrompt(
     checkoutSourceRevision: string,
     releases: DeliveryReleases
 ): DeliveryOperationPrompt {
+    if (
+        releases.candidate === undefined ||
+        releases.candidate.releaseId !== checkout.remoteHeadSha
+    ) {
+        throw new TypeError("Published Delivery release candidate is unavailable");
+    }
     return {
         confirmLabel: "Queue deploy",
         danger: true,
-        description: `Mira (mira-2026) will deploy exact main head ${checkout.remoteHeadSha}. The immutable release is atomically activated and verified. A failed cutover restores the prior paired release and database snapshot.`,
+        description: `Mira (mira-2026) will deploy ${releases.candidate.tagName} at exact main head ${checkout.remoteHeadSha} from its verified permanent GitHub release assets. Privileged host authority is provisioned before atomic activation and verification. A failed cutover restores the prior paired release and database snapshot.`,
         input: {
             activationRevision: releases.activationRevision,
             checkoutRevision: checkout.revision,
@@ -252,7 +240,7 @@ export function deployMainPrompt(
             operation: "deploy",
             sourceRevision: checkoutSourceRevision,
         },
-        title: "Deploy latest main?",
+        title: `Deploy ${releases.candidate.tagName}?`,
     };
 }
 
@@ -302,12 +290,7 @@ export function deliveryOperationIsCurrent(
                 current.pullRequestsFresh === true &&
                 current.checkoutFresh === true &&
                 input.sourceRevision === current.pullRequestSourceRevision &&
-                input.checkoutRevision === current.checkout?.revision &&
-                (!input.deploy ||
-                    (current.releasesFresh === true &&
-                        current.releasesActionActive === false &&
-                        input.activationRevision ===
-                            current.releases?.activationRevision))
+                input.checkoutRevision === current.checkout?.revision
             );
         }
         case "start-preview": {

@@ -866,15 +866,21 @@ manifest-inventoried Tailscale provisioning artifact, which delegates the fixed 
 `NoNewPrivileges=true` and invokes only the fixed `/usr/bin/tailscale` binary directly; it never
 uses `sudo`. Production cutover reads Tailscale preferences and requires the exact operator before
 confirming the journal or stopping services. Missing or drifted delegation therefore fails closed
-before deployment effects, and bootstrap is never applied implicitly by deployment.
+before deployment effects. Later deployment reuses the bootstrap release-admission and
+manifest-bound root-provisioning boundary before activation; it does not rerun greenfield state
+initialization.
 
 Post-cutover Greenfield deployment flow:
 
-1. Build and test one artifact using the same resolved Bun runtime throughout the build.
+1. Release Please publishes the tested commit as a stable semantic GitHub release with permanent,
+   digest-bound `release.tar` and `receipt.json` assets. Ordinary pull requests only merge and can
+   never deploy directly.
 2. Verify every source artifact hash and the exact runtime identity without copying into the
    production artifact roots yet.
-3. Prepare and verify `<project-root>/production/state` plus its protected ancestor chain before
-   changing the active release pointer.
+3. Reapply the candidate manifest's root-owned systemd, polkit, log-maintenance, and related host
+   authority, then run `daemon-reload`. Prepare and verify
+   `<project-root>/production/state` plus its protected ancestor chain before changing the active
+   release pointer.
 4. Acquire the deployment lease, recover any durable activation journal, and run verified
    release/runtime retention before copying. Admit the missing source-tree and Bun runtime using
    destination allocation blocks, conservative directory metadata, free-inode capacity, a fixed

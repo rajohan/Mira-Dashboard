@@ -57,6 +57,11 @@ export interface ProductionBootstrapOptions {
     readonly userId?: number;
 }
 
+export interface PreparedPublishedProductionRelease {
+    readonly releaseId: string;
+    readonly releaseRoot: string;
+}
+
 interface ProductionBootstrapPathStatus {
     readonly gid: number;
     readonly mode: number;
@@ -538,7 +543,7 @@ export async function stageProductionBootstrapRootAuthority(
     ]);
 }
 
-const productionBootstrapDependencies = Object.freeze({ run: defaultRun });
+export const productionBootstrapDependencies = Object.freeze({ run: defaultRun });
 const productionBootstrapPrerequisiteFilesystem = Object.freeze({
     canonical: realpath,
     read: (target: string) => readFile(target),
@@ -680,30 +685,22 @@ export async function verifyProductionBootstrapPrerequisites(
 }
 
 /**
- * Performs the complete first production installation on one clean host.
- * @param dependencies Fixed process boundary used by focused orchestration tests.
+ * Downloads, admits, and root-provisions one exact published production release.
+ * @param releaseId Exact clean main commit published by Release Please.
+ * @param repositoryRoot Canonical production checkout.
+ * @param dependencies Fixed process boundary.
+ * @param userId Effective managed-user identity.
+ * @param createTemporaryRoot Optional private temporary-root factory.
+ * @returns Exact admitted release root.
  */
-export async function bootstrapProduction(
+export async function preparePublishedProductionRelease(
+    releaseId: string,
+    repositoryRoot: string,
     dependencies: ProductionBootstrapDependencies = productionBootstrapDependencies,
-    options: ProductionBootstrapOptions = {}
-): Promise<void> {
-    const repositoryRoot = options.repositoryRoot ?? projectRoot;
-    const userId =
-        options.userId ?? (typeof process.getuid === "function" ? process.getuid() : 0);
-    const releaseId = await resolveProductionBootstrapSourceIdentity(
-        dependencies,
-        repositoryRoot,
-        options.expectedCheckout ?? `${projectHome}/production/checkout`,
-        userId
-    );
-    const selectedVersionFile = await readFile(
-        path.join(repositoryRoot, ".bun-version"),
-        "utf8"
-    );
-    const selectedVersion = selectedVersionFile.trim();
-    if (Bun.version !== selectedVersion) {
-        throw new Error(`Production bootstrap requires Bun ${selectedVersion}`);
-    }
+    userId = typeof process.getuid === "function" ? process.getuid() : 0,
+    createTemporaryRoot: () => Promise<string> = () =>
+        mkdtemp(path.join(os.tmpdir(), "mira-dashboard-release-"))
+): Promise<PreparedPublishedProductionRelease> {
     const prerequisites = dependencies.inspectPrerequisites
         ? await dependencies.inspectPrerequisites()
         : await verifyProductionBootstrapPrerequisites(
@@ -711,9 +708,7 @@ export async function bootstrapProduction(
               repositoryRoot,
               userId
           );
-    const temporaryRoot = options.createTemporaryRoot
-        ? await options.createTemporaryRoot()
-        : await mkdtemp(path.join(os.tmpdir(), "mira-dashboard-bootstrap-"));
+    const temporaryRoot = await createTemporaryRoot();
     try {
         const artifactRoot = await downloadProductionBootstrapRelease(
             releaseId,
@@ -742,20 +737,107 @@ export async function bootstrapProduction(
             userId,
             dependencies
         );
-        await requireSuccess(dependencies, [
-            process.execPath,
-            "run",
-            "delivery",
-            "activate",
-            `--project-root=${projectHome}`,
-            `--release-root=${admitted.releaseRoot}`,
-            `--runtime-source=${process.execPath}`,
-            "--readiness-url=http://127.0.0.1:3100/api/health/ready",
-            "--activation-mode=greenfield",
-        ]);
+        return Object.freeze({ releaseId, releaseRoot: admitted.releaseRoot });
     } finally {
         await rm(temporaryRoot, { force: true, recursive: true });
     }
+}
+
+/**
+ * Performs the complete first production installation on one clean host.
+ * @param dependencies Fixed process boundary used by focused orchestration tests.
+ */
+export async function bootstrapProduction(
+    dependencies: ProductionBootstrapDependencies = productionBootstrapDependencies,
+    options: ProductionBootstrapOptions = {}
+): Promise<void> {
+    const repositoryRoot = options.repositoryRoot ?? projectRoot;
+    const userId =
+        options.userId ?? (typeof process.getuid === "function" ? process.getuid() : 0);
+    const releaseId = await resolveProductionBootstrapSourceIdentity(
+        dependencies,
+        repositoryRoot,
+        options.expectedCheckout ?? `${projectHome}/production/checkout`,
+        userId
+    );
+    const selectedVersionFile = await readFile(
+        path.join(repositoryRoot, ".bun-version"),
+        "utf8"
+    );
+    const selectedVersion = selectedVersionFile.trim();
+    if (Bun.version !== selectedVersion) {
+        throw new Error(`Production bootstrap requires Bun ${selectedVersion}`);
+    }
+    const admitted = await preparePublishedProductionRelease(
+        releaseId,
+        repositoryRoot,
+        dependencies,
+        userId,
+        options.createTemporaryRoot
+    );
+    await requireSuccess(dependencies, [
+        process.execPath,
+        "run",
+        "delivery",
+        "activate",
+        `--project-root=${projectHome}`,
+        `--release-root=${admitted.releaseRoot}`,
+        `--runtime-source=${process.execPath}`,
+        "--readiness-url=http://127.0.0.1:3100/api/health/ready",
+        "--activation-mode=greenfield",
+    ]);
+}
+
+/**
+ * Deploys the exact published Release Please release from a clean production checkout.
+ * @param dependencies Fixed process boundary used by focused orchestration tests.
+ * @param options Canonical checkout and identity overrides.
+ */
+export async function deployProduction(
+    dependencies: ProductionBootstrapDependencies = productionBootstrapDependencies,
+    options: ProductionBootstrapOptions = {}
+): Promise<void> {
+    const repositoryRoot = options.repositoryRoot ?? projectRoot;
+    const userId =
+        options.userId ?? (typeof process.getuid === "function" ? process.getuid() : 0);
+    const releaseId = await resolveProductionBootstrapSourceIdentity(
+        dependencies,
+        repositoryRoot,
+        options.expectedCheckout ?? `${projectHome}/production/checkout`,
+        userId
+    );
+    const selectedVersionFile = await readFile(
+        path.join(repositoryRoot, ".bun-version"),
+        "utf8"
+    );
+    const selectedVersion = selectedVersionFile.trim();
+    if (Bun.version !== selectedVersion) {
+        throw new Error(`Production deploy requires Bun ${selectedVersion}`);
+    }
+    const admitted = await preparePublishedProductionRelease(
+        releaseId,
+        repositoryRoot,
+        dependencies,
+        userId,
+        options.createTemporaryRoot
+    );
+    await requireSuccess(dependencies, [
+        process.execPath,
+        "run",
+        "delivery",
+        "prepare-state",
+        `--project-root=${projectHome}`,
+    ]);
+    await requireSuccess(dependencies, [
+        process.execPath,
+        "run",
+        "delivery",
+        "activate",
+        `--project-root=${projectHome}`,
+        `--release-root=${admitted.releaseRoot}`,
+        `--runtime-source=${process.execPath}`,
+        "--readiness-url=http://127.0.0.1:3100/api/health/ready",
+    ]);
 }
 
 if (import.meta.main) {

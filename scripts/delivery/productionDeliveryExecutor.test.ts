@@ -717,6 +717,50 @@ describe("production Delivery executor", () => {
         });
     });
 
+    test("admits published assets and root provisioning instead of building by default", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const current = artifact(currentReleaseId, currentRuntimeRevision);
+            const target = artifact(targetReleaseId, targetRuntimeRevision);
+            const calls: string[] = [];
+            await prepareProductionDeliveryTargetUnderLease(
+                lease,
+                paths,
+                options.projectRoot,
+                record,
+                current,
+                {
+                    capacityAdmission: () => Promise.resolve(),
+                    installRuntime: () => Promise.resolve(target.runtime),
+                    preparePublishedRelease: (releaseId, checkoutRoot) => {
+                        expect(releaseId).toBe(targetReleaseId);
+                        expect(checkoutRoot).toEndWith("/production/checkout");
+                        calls.push("published-assets-and-root-provisioning");
+                        return Promise.resolve({
+                            releaseId,
+                            releaseRoot: `${checkoutRoot}/dist/releases/${releaseId}`,
+                        });
+                    },
+                    publishRelease: () => Promise.resolve(target.release),
+                    resolveSourceIdentity: () =>
+                        Promise.resolve({
+                            commitSha: targetReleaseId,
+                            commitTitle: "Target release",
+                            state: "clean",
+                        }),
+                    verifyLocalRelease: () => Promise.resolve(target.release.manifest),
+                }
+            );
+            expect(calls).toEqual(["published-assets-and-root-provisioning"]);
+        });
+    });
+
     test("requires the exact Tailscale operator before confirming a cutover", async () => {
         const { options, paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {

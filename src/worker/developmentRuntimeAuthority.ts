@@ -547,13 +547,6 @@ function deliveryPullRequestsPayload(now: number) {
             reason: "head-guard-unavailable",
             scope: "prefix",
         },
-        {
-            action: "merge-and-deploy",
-            actor: "mira",
-            available: false,
-            reason: "head-guard-unavailable",
-            scope: "prefix",
-        },
         { action: "preview-start", actor: "mira", available: true, scope: "prefix" },
         {
             action: "reject",
@@ -573,12 +566,6 @@ function deliveryPullRequestsPayload(now: number) {
     const ordinaryActions = [
         { action: "approve-review", actor: "raymond", available: true, scope: "self" },
         { action: "merge", actor: "mira", available: true, scope: "prefix" },
-        {
-            action: "merge-and-deploy",
-            actor: "mira",
-            available: true,
-            scope: "prefix",
-        },
         { action: "preview-start", actor: "mira", available: true, scope: "prefix" },
         {
             action: "reject",

@@ -22,6 +22,10 @@ import {
 import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
 import { lowercaseUuidV7Schema } from "../../src/shared/validation.ts";
 import { resolveBuildSourceIdentity } from "../buildSourceIdentity.ts";
+import {
+    preparePublishedProductionRelease,
+    productionBootstrapDependencies,
+} from "../productionBootstrap.ts";
 import { buildDashboardRelease } from "./buildRelease.ts";
 import { withDeploymentLease, type DashboardDeploymentLease } from "./deploymentLease.ts";
 import { loadProductionActivationState } from "./productionActivationState.ts";
@@ -150,6 +154,7 @@ export interface ProductionDeliveryExecutorDependencies {
     readonly installRuntime?: typeof installProductionRuntime;
     readonly nowMs?: () => number;
     readonly publishRelease?: typeof publishProductionRelease;
+    readonly preparePublishedRelease?: typeof preparePublishedProductionRelease;
     readonly resolveSourceIdentity?: typeof resolveBuildSourceIdentity;
     readonly verifyRunBeforeSnapshot?: (
         paths: PreparedProductionDeliveryPaths,
@@ -474,6 +479,16 @@ export async function prepareProductionDeliveryTargetUnderLease(
         throw failure();
     }
 
+    const usesTestBuildSeams =
+        dependencies.preparePublishedRelease === undefined &&
+        (dependencies.buildRelease !== undefined ||
+            dependencies.verifyLocalRelease !== undefined);
+    const admittedPublishedRelease = usesTestBuildSeams
+        ? undefined
+        : await (
+              dependencies.preparePublishedRelease ?? preparePublishedProductionRelease
+          )(target.releaseId, checkoutRoot, productionBootstrapDependencies);
+
     const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
     if ((await pathState(publishedRoot)) === "present") {
         return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
@@ -481,7 +496,16 @@ export async function prepareProductionDeliveryTargetUnderLease(
 
     const localReleaseRoot = path.join(checkoutRoot, "dist/releases", target.releaseId);
     let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
-    if ((await pathState(localReleaseRoot)) === "present") {
+    if (admittedPublishedRelease !== undefined) {
+        const manifest = await (dependencies.verifyLocalRelease ?? verifyReleaseIdentity)(
+            admittedPublishedRelease.releaseRoot,
+            current.runtime.identity
+        );
+        sourceRelease = Object.freeze({
+            manifest,
+            releaseRoot: admittedPublishedRelease.releaseRoot,
+        });
+    } else if ((await pathState(localReleaseRoot)) === "present") {
         const manifest = await (dependencies.verifyLocalRelease ?? verifyReleaseIdentity)(
             localReleaseRoot,
             current.runtime.identity

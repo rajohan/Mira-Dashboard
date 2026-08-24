@@ -56,6 +56,7 @@ export type DeliveryGitHubHttpOperation =
           variables: Readonly<Record<string, boolean | number | string | null>>;
       }>
     | Readonly<{ kind: "main-ref" }>
+    | Readonly<{ kind: "latest-release" }>
     | Readonly<{ branch: string; kind: "branch-ref" }>
     | Readonly<{ kind: "native-stack-find"; pullRequestNumber: number }>
     | Readonly<{ kind: "native-stack-create"; pullRequestNumbers: readonly number[] }>
@@ -191,6 +192,10 @@ function prepareRequest(operation: DeliveryGitHubHttpOperation): PreparedRequest
         }
         case "main-ref": {
             path = repositoryPath("/git/ref/heads/main");
+            break;
+        }
+        case "latest-release": {
+            path = repositoryPath("/releases/latest");
             break;
         }
         case "branch-ref": {

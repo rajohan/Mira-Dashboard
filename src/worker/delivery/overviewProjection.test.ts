@@ -263,12 +263,10 @@ describe("Delivery overview projection", () => {
             available: false,
             reason: "head-guard-unavailable",
         });
-        for (const id of ["merge", "merge-and-deploy"] as const) {
-            expect(action(nativeTop.number, id)).toMatchObject({
-                available: false,
-                reason: "head-guard-unavailable",
-            });
-        }
+        expect(action(nativeTop.number, "merge")).toMatchObject({
+            available: false,
+            reason: "head-guard-unavailable",
+        });
         expect(action(nativeTop.number, "preview-start")).toMatchObject({
             available: true,
         });

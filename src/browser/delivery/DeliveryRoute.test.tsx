@@ -35,6 +35,7 @@ const userEvent = userEventModule.default;
 const observedAtMs = 1_800_000_000_000;
 const headSha = "a".repeat(40);
 const previousSha = "b".repeat(40);
+const candidateSha = "c".repeat(40);
 const sourceRevision = "c".repeat(64);
 const reviewerRevision = "d".repeat(64);
 const previewRevision = "e".repeat(64);
@@ -129,7 +130,7 @@ const checkoutResult = {
         condition: "ready",
         expectedBranch: "main",
         headSha,
-        remoteHeadSha: headSha,
+        remoteHeadSha: candidateSha,
         revision: checkoutRevision,
         safeForDeploy: true,
         upstream: "origin/main",
@@ -145,6 +146,7 @@ const releasesResult = {
     observedAtMs,
     releases: {
         activationRevision,
+        candidate: { releaseId: candidateSha, tagName: "v1.2.3" },
         current: {
             builtAtMs: observedAtMs - 1000,
             commitTitle: "Current release",
@@ -370,9 +372,7 @@ describe("DeliveryRoute", () => {
             expect(
                 await screen.findByRole("button", { name: "Stop dev" })
             ).toBeDisabled();
-            expect(
-                screen.getByRole("button", { name: "Deploy latest main" })
-            ).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Deploy v1.2.3" })).toBeDisabled();
             expect(
                 screen.getByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
             ).toBeDisabled();
@@ -380,7 +380,7 @@ describe("DeliveryRoute", () => {
                 name: "Production release slots",
             });
             const deployButton = within(productionPanel).getByRole("button", {
-                name: "Deploy latest main",
+                name: "Deploy v1.2.3",
             });
             const deployAlert = within(productionPanel)
                 .getByText("Another Delivery action is active.")

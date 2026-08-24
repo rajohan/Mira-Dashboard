@@ -8,6 +8,7 @@ import {
     admitProductionBootstrapRelease,
     assertProductionReleaseArchiveListing,
     bootstrapProduction,
+    deployProduction,
     downloadProductionBootstrapRelease,
     parseProductionBootstrapRelease,
     resolveProductionBootstrapSourceIdentity,
@@ -638,18 +639,23 @@ describe("production bootstrap admission", () => {
             path.join(tmpdir(), "mira-production-bootstrap-composition-")
         );
         temporaryDirectories.push(targetRepositoryRoot);
-        const artifactRoot = path.join(targetRepositoryRoot, "download");
-        await Promise.all([
-            cp(
+        await cp(
+            path.join(sourceProjectRoot, ".bun-version"),
+            path.join(targetRepositoryRoot, ".bun-version")
+        );
+        let artifactSequence = 0;
+        const createTemporaryRoot = async () => {
+            const artifactRoot = path.join(
+                targetRepositoryRoot,
+                `download-${String((artifactSequence += 1))}`
+            );
+            await cp(
                 path.join(sourceRepositoryRoot, "dist/production-release-artifact"),
                 artifactRoot,
                 { recursive: true }
-            ),
-            cp(
-                path.join(sourceProjectRoot, ".bun-version"),
-                path.join(targetRepositoryRoot, ".bun-version")
-            ),
-        ]);
+            );
+            return artifactRoot;
+        };
         const commands: string[] = [];
         let prerequisitesInspected = false;
         let groupLookupCount = 0;
@@ -720,7 +726,7 @@ describe("production bootstrap admission", () => {
         };
 
         await bootstrapProduction(dependencies, {
-            createTemporaryRoot: () => Promise.resolve(artifactRoot),
+            createTemporaryRoot,
             expectedCheckout: targetRepositoryRoot,
             repositoryRoot: targetRepositoryRoot,
             userId: 1000,
@@ -739,5 +745,21 @@ describe("production bootstrap admission", () => {
         );
         expect(commands.at(-1)).toContain("delivery activate");
         expect(commands.at(-1)).toContain("--activation-mode=greenfield");
+
+        commands.length = 0;
+        await deployProduction(dependencies, {
+            createTemporaryRoot,
+            expectedCheckout: targetRepositoryRoot,
+            repositoryRoot: targetRepositoryRoot,
+            userId: 1000,
+        });
+        expect(commands.some((command) => command.includes("release download"))).toBe(
+            true
+        );
+        expect(
+            commands.some((command) => command.includes("systemctl daemon-reload"))
+        ).toBe(true);
+        expect(commands.at(-1)).toContain("delivery activate");
+        expect(commands.at(-1)).not.toContain("--activation-mode=greenfield");
     });
 });

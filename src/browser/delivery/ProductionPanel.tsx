@@ -205,7 +205,7 @@ export function ProductionReleasesPanel({
                         {checkout?.headSha.slice(0, 8) ?? "Checking…"}
                     </code>
                     <Text className="mt-1" size="sm" tone="muted">
-                        Control checkout. Deploy syncs latest main first.
+                        Deploy installs the published release for exact main.
                     </Text>
                     {checkoutError === undefined ? null : (
                         <Alert
@@ -268,7 +268,9 @@ export function ProductionReleasesPanel({
                         title={deployReason}
                     >
                         <Icon icon={Rocket} size="sm" />
-                        Deploy latest main
+                        {releases.candidate === undefined
+                            ? "Deploy published release"
+                            : `Deploy ${releases.candidate.tagName}`}
                     </Button>
                     <Button
                         aria-describedby={rollbackDescriptionId}

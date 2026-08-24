@@ -62,7 +62,6 @@ const actionLabels: Readonly<
     "approve-review": "Approve PR",
     "create-stack": "Create stack",
     merge: "Merge only",
-    "merge-and-deploy": "Merge + Deploy",
     reject: "Reject",
     "update-branch": "Update branch",
 };
@@ -73,10 +72,9 @@ const actionOrder: Readonly<
     "preview-start": 0,
     "approve-review": 1,
     "update-branch": 2,
-    "merge-and-deploy": 3,
-    merge: 4,
-    reject: 5,
-    "create-stack": 6,
+    merge: 3,
+    reject: 4,
+    "create-stack": 5,
 };
 
 const groupOrder: Readonly<Record<DeliveryPullRequestGroup["kind"], number>> = {
@@ -127,9 +125,6 @@ function actionLabel(
     if (action.action === "merge" && group.kind === "native-stack") {
         return `Merge stack through #${pullRequest.number}`;
     }
-    if (action.action === "merge-and-deploy" && group.kind === "native-stack") {
-        return `Merge through #${pullRequest.number} + Deploy`;
-    }
     if (action.action !== "preview-start") return actionLabels[action.action];
     return pullRequestOwnsActivePreview(pullRequest, preview)
         ? "Rebuild preview"
@@ -161,7 +156,6 @@ function actionVariant(
     action: DeliveryPullRequestActionCapability["action"]
 ): "danger" | "primary" | "secondary" {
     if (action === "reject") return "danger";
-    if (action === "merge-and-deploy") return "primary";
     return "secondary";
 }
 

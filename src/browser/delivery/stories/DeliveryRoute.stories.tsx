@@ -31,6 +31,7 @@ import {
 const observedAtMs = 1_800_000_000_000;
 const headSha = "a".repeat(40);
 const previousSha = "b".repeat(40);
+const candidateSha = "c".repeat(40);
 const sourceRevision = "c".repeat(64);
 const reviewerRevision = "d".repeat(64);
 const previewRevision = "e".repeat(64);
@@ -50,13 +51,6 @@ const nativeStackActions: DeliveryPullRequest["actions"] = [
     },
     {
         action: "merge",
-        actor: "mira",
-        available: false,
-        reason: "head-guard-unavailable",
-        scope: "prefix",
-    },
-    {
-        action: "merge-and-deploy",
         actor: "mira",
         available: false,
         reason: "head-guard-unavailable",
@@ -93,12 +87,6 @@ const ordinaryActions: DeliveryPullRequest["actions"] = [
     },
     {
         action: "merge",
-        actor: "mira",
-        available: true,
-        scope: "prefix",
-    },
-    {
-        action: "merge-and-deploy",
         actor: "mira",
         available: true,
         scope: "prefix",
@@ -251,7 +239,7 @@ const checkoutResult = {
         condition: "ready",
         expectedBranch: "main",
         headSha,
-        remoteHeadSha: headSha,
+        remoteHeadSha: candidateSha,
         revision: checkoutRevision,
         safeForDeploy: true,
         upstream: "origin/main",
@@ -267,6 +255,7 @@ const releasesResult = {
     observedAtMs,
     releases: {
         activationRevision,
+        candidate: { releaseId: candidateSha, tagName: "v1.2.3" },
         current: {
             builtAtMs: observedAtMs - 1000,
             commitTitle: "Current release",
@@ -437,20 +426,18 @@ export const PullRequests: Story = {
     },
     play: async ({ canvasElement }) => {
         const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
-        for (const action of [
-            /^Merge(?: stack through #\d+| only)$/u,
-            /^Merge(?: through #\d+)? \+ Deploy$/u,
-        ]) {
-            const buttons = pullRequestRegion.getAllByRole("button", { name: action });
-            await expect(buttons).toHaveLength(3);
-            await expect(buttons[0]).toBeEnabled();
-            for (const button of buttons.slice(1)) {
-                await expect(button).toBeDisabled();
-                await expect(button).toHaveAccessibleDescription(
-                    headGuardUnavailableReason
-                );
-            }
+        const buttons = pullRequestRegion.getAllByRole("button", {
+            name: /^Merge(?: stack through #\d+| only)$/u,
+        });
+        await expect(buttons).toHaveLength(3);
+        await expect(buttons[0]).toBeEnabled();
+        for (const button of buttons.slice(1)) {
+            await expect(button).toBeDisabled();
+            await expect(button).toHaveAccessibleDescription(headGuardUnavailableReason);
         }
+        await expect(
+            pullRequestRegion.queryByRole("button", { name: /Merge.*Deploy/u })
+        ).not.toBeInTheDocument();
 
         const rejectButtons = pullRequestRegion.getAllByRole("button", {
             name: "Reject",

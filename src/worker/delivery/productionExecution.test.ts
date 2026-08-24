@@ -114,6 +114,7 @@ function currentAuthority() {
             actionActive: false,
             releases: {
                 activationRevision,
+                candidate: { releaseId: mergedMainHead, tagName: "v1.2.3" },
                 current: {
                     builtAtMs: nowMs - 1000,
                     commitTitle: "Current",

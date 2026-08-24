@@ -7,6 +7,7 @@ import { parseDeliveryCommandArguments } from "./deliveryCommand.ts";
 import { parseDevelopmentCommandArguments } from "./developmentCommand.ts";
 import { parseGenerateCommandArguments } from "./generateCommand.ts";
 import { installGitHooks } from "./installGitHooks.ts";
+import { runProductionDeploy } from "./productionDeploy.ts";
 import {
     productionPreflightCommands,
     runProductionPreflight,
@@ -187,6 +188,29 @@ describe("repository command entrypoints", () => {
         );
     });
 
+    test("reports production deploy success and failure without hiding the exit code", async () => {
+        const output: string[] = [];
+        const errors: string[] = [];
+        expect(
+            await runProductionDeploy({
+                deploy: () => Promise.resolve(),
+                writeError: (message) => errors.push(message),
+                writeOutput: (message) => output.push(message),
+            })
+        ).toBe(0);
+        expect(output).toEqual(["Production deploy complete.\n"]);
+        expect(errors).toEqual([]);
+
+        expect(
+            await runProductionDeploy({
+                deploy: () => Promise.reject(new Error("deploy failed")),
+                writeError: (message) => errors.push(message),
+                writeOutput: (message) => output.push(message),
+            })
+        ).toBe(1);
+        expect(errors).toEqual(["deploy failed\n"]);
+    });
+
     test("keeps the public package surface bounded", async () => {
         const packageJson: unknown = JSON.parse(
             await Bun.file(new URL("../package.json", import.meta.url)).text()
@@ -207,6 +231,7 @@ describe("repository command entrypoints", () => {
             "build",
             "generate",
             "delivery",
+            "deploy",
             "preflight",
             "storybook",
             "test",
