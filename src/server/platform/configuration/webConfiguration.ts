@@ -82,7 +82,7 @@ export const webConfigurationEnvironmentSchema = v.object({
     NODE_ENV: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
-    PORT: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_PORT: optionalEnvironmentValueSchema,
     RESEND_API_KEY: optionalEnvironmentValueSchema,
 });
 

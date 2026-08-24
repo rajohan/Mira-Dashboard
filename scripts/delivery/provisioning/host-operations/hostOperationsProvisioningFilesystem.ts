@@ -605,8 +605,8 @@ async function openDestinationDirectories(
 /**
  * Installs all seven manifest-bound files through held destination descriptors.
  * Source verification and a non-mutating preflight of every existing destination
- * directory and target file complete before the one reviewed support directory may
- * be created. Every file is replaced atomically; no service or policy daemon is activated.
+ * directory and target file complete before the reviewed support directories may be
+ * created. Every file is replaced atomically; no service or policy daemon is activated.
  * @param destinationRoot `/` in production or one explicit test-only filesystem root.
  * @param files Exact ordered source bytes and manifest hashes.
  * @param testHooks Deterministic mutation boundaries for adversarial tests.

@@ -42,7 +42,7 @@ function validEnvironment(): Record<string, unknown> {
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
-        PORT: "3100",
+        MIRA_DASHBOARD_PORT: "3100",
         RESEND_API_KEY: "resend-api-key-test-value",
     };
 }
@@ -80,7 +80,7 @@ describe("web application configuration", () => {
         const environment = validEnvironment();
         delete environment.MIRA_DASHBOARD_LOG_LEVEL;
         delete environment.OPENCLAW_GATEWAY_URL;
-        delete environment.PORT;
+        delete environment.MIRA_DASHBOARD_PORT;
         const before = { ...environment };
         Object.freeze(environment);
 
@@ -193,7 +193,7 @@ describe("web application configuration", () => {
         });
         const hostileEnvironment = new Proxy(validEnvironment(), {
             getOwnPropertyDescriptor(target, property) {
-                if (property === "PORT") throw new Error(sentinel);
+                if (property === "MIRA_DASHBOARD_PORT") throw new Error(sentinel);
                 return Reflect.getOwnPropertyDescriptor(target, property);
             },
         });
@@ -205,7 +205,7 @@ describe("web application configuration", () => {
 
         for (const [environment, field, reason] of [
             [accessorEnvironment, "NODE_ENV", "invalid"],
-            [hostileEnvironment, "PORT", "invalid"],
+            [hostileEnvironment, "MIRA_DASHBOARD_PORT", "invalid"],
             [inheritedEnvironment, "MIRA_DASHBOARD_PUBLIC_ORIGIN", "missing"],
         ] as const) {
             let caught: unknown;
@@ -271,10 +271,10 @@ describe("web application configuration", () => {
             ["ELEVENLABS_API_KEY", " secret", "ELEVENLABS_API_KEY", "invalid"],
             ["ELEVENLABS_API_KEY", "secret\nvalue", "ELEVENLABS_API_KEY", "invalid"],
             ["NODE_ENV", "staging", "NODE_ENV", "invalid"],
-            ["PORT", "0", "PORT", "invalid"],
-            ["PORT", "01", "PORT", "invalid"],
-            ["PORT", "65536", "PORT", "invalid"],
-            ["PORT", 3100, "PORT", "invalid"],
+            ["MIRA_DASHBOARD_PORT", "0", "MIRA_DASHBOARD_PORT", "invalid"],
+            ["MIRA_DASHBOARD_PORT", "01", "MIRA_DASHBOARD_PORT", "invalid"],
+            ["MIRA_DASHBOARD_PORT", "65536", "MIRA_DASHBOARD_PORT", "invalid"],
+            ["MIRA_DASHBOARD_PORT", 3100, "MIRA_DASHBOARD_PORT", "invalid"],
             [
                 "MIRA_DASHBOARD_PROJECT_ROOT",
                 "relative/path",

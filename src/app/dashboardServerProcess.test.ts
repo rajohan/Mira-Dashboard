@@ -81,7 +81,7 @@ const processOptions = Object.freeze({
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "gateway-token-test-value",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
-        PORT: "3100",
+        MIRA_DASHBOARD_PORT: "3100",
         RESEND_API_KEY: "resend-dashboard-process-test-value",
     },
     releaseRoot: release.releaseRoot,

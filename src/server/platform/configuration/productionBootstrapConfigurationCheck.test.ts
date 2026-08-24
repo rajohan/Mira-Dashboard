@@ -22,7 +22,7 @@ function validEnvironment(): Record<string, unknown> {
         NODE_ENV: "production",
         OPENCLAW_GATEWAY_TOKEN: "gateway-token",
         OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
-        PORT: "3100",
+        MIRA_DASHBOARD_PORT: "3100",
         RESEND_API_KEY: "resend-key",
     };
 }
@@ -45,7 +45,7 @@ describe("production bootstrap configuration check", () => {
 
     test("requires the fixed activation port", () => {
         const environment = validEnvironment();
-        environment.PORT = "3200";
+        environment.MIRA_DASHBOARD_PORT = "3200";
         expect(() => assertProductionBootstrapConfiguration(environment)).toThrow(
             "Production Doppler configuration is incomplete"
         );

@@ -99,6 +99,7 @@ export type HostOperationsProvisioningArtifactPolicy =
 
 /** Exact host directory the installer may create when absent on a fresh host. */
 export const hostOperationsProvisioningCreatedDirectories = Object.freeze([
+    Object.freeze({ destinationPath: "/etc/sysusers.d", mode: 0o755 }),
     Object.freeze({ destinationPath: "/usr/local/libexec", mode: 0o755 }),
 ] as const);
 

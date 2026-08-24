@@ -114,7 +114,7 @@ export async function developmentProcessEnvironments(
         MIRA_DASHBOARD_WEBAUTHN_RP_ID: config.rpId,
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard Development",
         OPENCLAW_GATEWAY_TOKEN: token,
-        PORT: String(config.backendPort),
+        MIRA_DASHBOARD_PORT: String(config.backendPort),
     };
     const worker: Record<string, string> = {
         ...shared,
@@ -175,7 +175,7 @@ export function managedPreviewProcessEnvironments(
             MIRA_DASHBOARD_WEBAUTHN_ORIGINS: config.publicOrigin,
             MIRA_DASHBOARD_WEBAUTHN_RP_ID: config.rpId,
             MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard PR Preview",
-            PORT: String(config.backendPort),
+            MIRA_DASHBOARD_PORT: String(config.backendPort),
         },
         worker: {
             ...shared,

@@ -72,7 +72,7 @@ export const workerConfigurationEnvironmentSchema = v.object({
     OPENROUTER_API_KEY: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_TOKEN: optionalEnvironmentValueSchema,
     OPENCLAW_GATEWAY_URL: optionalEnvironmentValueSchema,
-    PORT: optionalEnvironmentValueSchema,
+    MIRA_DASHBOARD_PORT: optionalEnvironmentValueSchema,
     SYNTHETIC_API_KEY: optionalEnvironmentValueSchema,
     ELEVENLABS_API_KEY: optionalEnvironmentValueSchema,
 });

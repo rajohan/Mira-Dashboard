@@ -169,7 +169,7 @@ function webEnvironment(projectRoot: string, port: number): Record<string, strin
         MIRA_DASHBOARD_WEBAUTHN_RP_NAME: "Mira Dashboard",
         NODE_ENV: "production",
         ...gatewayTestEnvironment,
-        PORT: String(port),
+        MIRA_DASHBOARD_PORT: String(port),
         RESEND_API_KEY: "resend-production-lifecycle-test-value",
     };
 }
