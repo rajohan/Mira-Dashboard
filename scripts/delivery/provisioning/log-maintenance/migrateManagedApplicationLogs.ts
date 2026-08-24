@@ -140,44 +140,30 @@ export async function migrateManagedApplicationLogs(
             await file.handle.chmod(0o600);
         }
         await options.afterMigration?.();
-        let verifiedDirectory: FileHandle | undefined;
-        try {
-            verifiedDirectory = await open(directoryPath, directoryFlags);
-            const [verifiedDirectoryStatus, verifiedCanonical] = await Promise.all([
-                verifiedDirectory.stat({ bigint: true }),
-                realpath(`/proc/self/fd/${verifiedDirectory.fd}`),
-            ]);
+        const [verifiedDirectoryStatus, verifiedCanonical] = await Promise.all([
+            directory.stat({ bigint: true }),
+            realpath(`/proc/self/fd/${directory.fd}`),
+        ]);
+        if (
+            verifiedCanonical !== directoryPath ||
+            verifiedDirectoryStatus.dev !== directoryStatus.dev ||
+            verifiedDirectoryStatus.ino !== directoryStatus.ino ||
+            !trustedDirectory(verifiedDirectoryStatus, userId)
+        ) {
+            throw failure();
+        }
+        for (const file of files) {
+            const verifiedStatus = await file.handle.stat({ bigint: true });
             if (
-                verifiedCanonical !== directoryPath ||
-                verifiedDirectoryStatus.dev !== directoryStatus.dev ||
-                verifiedDirectoryStatus.ino !== directoryStatus.ino ||
-                !trustedDirectory(verifiedDirectoryStatus, userId)
+                !migratedLogFile(
+                    verifiedStatus,
+                    verifiedDirectoryStatus,
+                    file.status,
+                    userId
+                )
             ) {
                 throw failure();
             }
-            for (const file of files) {
-                const verifiedFile = await open(
-                    path.join(`/proc/self/fd/${verifiedDirectory.fd}`, file.fileName),
-                    constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK
-                );
-                try {
-                    const verifiedStatus = await verifiedFile.stat({ bigint: true });
-                    if (
-                        !migratedLogFile(
-                            verifiedStatus,
-                            verifiedDirectoryStatus,
-                            file.status,
-                            userId
-                        )
-                    ) {
-                        throw failure();
-                    }
-                } finally {
-                    await close(verifiedFile);
-                }
-            }
-        } finally {
-            await close(verifiedDirectory);
         }
     } catch {
         throw failure();
