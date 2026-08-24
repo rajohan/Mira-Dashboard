@@ -21,6 +21,9 @@ import { createChatRepository } from "../server/domains/chat/repository.ts";
 import { createChatService, type ChatService } from "../server/domains/chat/service.ts";
 import { chatSessionSubscriptionIdleMilliseconds } from "../server/domains/chat/subscriptionManager.ts";
 import { createChatTranscriptLifecycleCoordinator } from "../server/domains/chat/transcriptLifecycle.ts";
+import { createDatabaseObservabilityService } from "../server/domains/database/service.ts";
+import { createDatabaseObservabilitySnapshotRepository } from "../server/domains/database/snapshotRepository.ts";
+import { createSqliteLifecycleReader } from "../server/domains/database/sqliteLifecycle.ts";
 import { createWorkspaceFileJobScheduler } from "../server/domains/files/jobScheduler.ts";
 import type { WorkspaceFileRootConfiguration } from "../server/domains/files/ports.ts";
 import {
@@ -221,6 +224,7 @@ export interface DashboardServerOptions extends Omit<
     | "cacheService"
     | "chatRawHttpHandler"
     | "chatService"
+    | "databaseObservabilityService"
     | "workspaceFileRawHttpHandler"
     | "workspaceFilesService"
     | "disposeBeforeRuntime"
@@ -252,6 +256,8 @@ export interface DashboardServerOptions extends Omit<
     readonly dashboardLogMaintenanceRoot?: string;
     /** Optional only for isolated composition tests; production always supplies it. */
     readonly dashboardLogsRoot?: string;
+    /** Private production state root used only by the fixed SQLite lifecycle reader. */
+    readonly databaseStateDirectory?: string;
     /** Optional server-only speech credential; absence keeps both voice controls hidden. */
     readonly elevenLabsApiKey?: Redacted.Redacted<string>;
     /** Direct-loopback endpoint shared by bootstrap verification and persistent Gateway traffic. */
@@ -662,6 +668,28 @@ export async function createDashboardServer(
         await options.applicationRuntime.initialize();
         const databaseRuntime = options.applicationRuntime.database;
         const database = await databaseRuntime.orm();
+        const cacheRepository = createCacheRepository(database, databaseRuntime);
+        const jobRepository = createJobRepository(database, databaseRuntime);
+        const observabilityNow = options.now;
+        const databaseObservabilityService = createDatabaseObservabilityService({
+            ...(observabilityNow === undefined
+                ? {}
+                : { nowMs: () => observabilityNow().getTime() }),
+            readDiagnostics: databaseRuntime.diagnostics,
+            ...(options.databaseStateDirectory === undefined
+                ? {}
+                : {
+                      lifecycleReader: createSqliteLifecycleReader({
+                          ...(observabilityNow === undefined
+                              ? {}
+                              : { nowMs: () => observabilityNow().getTime() }),
+                          repository: jobRepository,
+                          stateDirectory: options.databaseStateDirectory,
+                      }),
+                  }),
+            snapshotRepository:
+                createDatabaseObservabilitySnapshotRepository(cacheRepository),
+        });
         const repository = createRequestAuthenticationRepository(database);
         const authenticator = createRequestAuthenticator({
             authenticationLeaseDurationMs: options.authenticationLeaseDurationMs,
@@ -752,7 +780,6 @@ export async function createDashboardServer(
             repository: taskRepository,
             wakeEventPump,
         });
-        const jobRepository = createJobRepository(database, databaseRuntime);
         await reconcileJobSchedules({
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             repository: jobRepository,
@@ -1347,7 +1374,7 @@ export async function createDashboardServer(
         });
         openClawCronHeartbeatReader = openClawCronService;
         const cacheService = createCacheService({
-            cacheRepository: createCacheRepository(database, databaseRuntime),
+            cacheRepository,
             jobRepository,
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             readGatewayConnection: gatewayConnectionService.get,
@@ -1406,6 +1433,7 @@ export async function createDashboardServer(
             cacheService,
             ...(chatRawHttpHandler === undefined ? {} : { chatRawHttpHandler }),
             ...(chatService === undefined ? {} : { chatService }),
+            databaseObservabilityService,
             ...(workspaceFileRawHttpHandler === undefined
                 ? {}
                 : { workspaceFileRawHttpHandler }),
@@ -1631,6 +1659,7 @@ export async function runDashboardWebProcess(
             browserOrigin: configuration.publicOrigin,
             dashboardLogMaintenanceRoot: layout.production.state.logMaintenance,
             dashboardLogsRoot: layout.production.state.logs,
+            databaseStateDirectory: layout.production.state.root,
             ...(configuration.elevenLabsApiKey === undefined
                 ? {}
                 : { elevenLabsApiKey: configuration.elevenLabsApiKey }),

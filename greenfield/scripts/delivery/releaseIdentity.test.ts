@@ -124,6 +124,13 @@ async function releaseFixture(): Promise<{
             path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
             path.join(releaseRoot, "scripts/delivery/provisioning/log-maintenance")
         ),
+        copyDirectory(
+            path.join(
+                sourceProjectRoot,
+                "scripts/delivery/provisioning/database-observability"
+            ),
+            path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
+        ),
     ]);
     return { releaseRoot, repositoryRoot };
 }
@@ -175,6 +182,36 @@ describe("release identity", () => {
                 .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
                 .map(({ path: artifactPath }) => artifactPath)
         ).toEqual([
+            "scripts/delivery/provisioning/database-observability/README.md",
+            "scripts/delivery/provisioning/database-observability/activate-observer.sql",
+            "scripts/delivery/provisioning/database-observability/apply-cluster.sql",
+            "scripts/delivery/provisioning/database-observability/apply-control-database-capability.sql",
+            "scripts/delivery/provisioning/database-observability/apply-control-database.sql",
+            "scripts/delivery/provisioning/database-observability/apply-database-access-reconciler.sql",
+            "scripts/delivery/provisioning/database-observability/apply-database-capabilities.sql",
+            "scripts/delivery/provisioning/database-observability/apply-reconciliation-approval.sql",
+            "scripts/delivery/provisioning/database-observability/apply-torrent-view.sql",
+            "scripts/delivery/provisioning/database-observability/disable-observer.sql",
+            "scripts/delivery/provisioning/database-observability/enable-approved-collection.sql",
+            "scripts/delivery/provisioning/database-observability/manifest.json",
+            "scripts/delivery/provisioning/database-observability/prepare-approved-collection.sql",
+            "scripts/delivery/provisioning/database-observability/reconcile-database-access.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-cluster.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-control-database-capability.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-control-database.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-database-access-reconciler.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-database-capabilities.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-reconciliation-approval.sql",
+            "scripts/delivery/provisioning/database-observability/rollback-torrent-view.sql",
+            "scripts/delivery/provisioning/database-observability/runProvisioning.ts",
+            "scripts/delivery/provisioning/database-observability/verify-cluster.sql",
+            "scripts/delivery/provisioning/database-observability/verify-control-database-capability.sql",
+            "scripts/delivery/provisioning/database-observability/verify-control-database.sql",
+            "scripts/delivery/provisioning/database-observability/verify-database-access-reconciler.sql",
+            "scripts/delivery/provisioning/database-observability/verify-database-capabilities.sql",
+            "scripts/delivery/provisioning/database-observability/verify-database.sql",
+            "scripts/delivery/provisioning/database-observability/verify-reconciliation-approval.sql",
+            "scripts/delivery/provisioning/database-observability/verify-torrent-view.sql",
             "scripts/delivery/provisioning/host-operations/60-mira-dashboard-host-operations.rules",
             "scripts/delivery/provisioning/host-operations/README.md",
             "scripts/delivery/provisioning/host-operations/hostOperationsProvisioningFilesystem.ts",

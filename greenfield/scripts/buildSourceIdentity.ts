@@ -12,12 +12,13 @@ export type BuildSourceIdentity =
 const maximumGitOutputBytes = 1024 * 1024;
 const commitShaSchema = fullCommitShaSchema();
 
-function gitOutput(
+async function gitOutput(
     repositoryRoot: string,
     arguments_: readonly string[]
-): string | undefined {
+): Promise<string | undefined> {
+    let child: Bun.Subprocess<"ignore", "pipe", "ignore">;
     try {
-        const result = Bun.spawnSync(
+        child = Bun.spawn(
             ["git", "--no-optional-locks", "-C", repositoryRoot, ...arguments_],
             {
                 maxBuffer: maximumGitOutputBytes,
@@ -26,9 +27,20 @@ function gitOutput(
                 stdout: "pipe",
             }
         );
-        if (result.exitCode !== 0) return undefined;
-        return result.stdout.toString().trim();
     } catch {
+        return undefined;
+    }
+
+    try {
+        const [exitCode, stdout] = await Promise.all([
+            child.exited,
+            new Response(child.stdout).text(),
+        ]);
+        if (exitCode !== 0) return undefined;
+        return stdout.trim();
+    } catch {
+        child.kill();
+        await child.exited.catch(() => null);
         return undefined;
     }
 }
@@ -39,16 +51,22 @@ function gitOutput(
  * @param repositoryRoot Absolute repository root to inspect.
  * @returns Clean, dirty, or unknown source identity.
  */
-export function resolveBuildSourceIdentity(repositoryRoot: string): BuildSourceIdentity {
+export async function resolveBuildSourceIdentity(
+    repositoryRoot: string
+): Promise<BuildSourceIdentity> {
     if (!path.isAbsolute(repositoryRoot) || repositoryRoot.includes("\0")) {
         return Object.freeze({ state: "unknown" });
     }
 
-    const commitOutput = gitOutput(repositoryRoot, ["rev-parse", "--verify", "HEAD"]);
+    const commitOutput = await gitOutput(repositoryRoot, [
+        "rev-parse",
+        "--verify",
+        "HEAD",
+    ]);
     const commit = v.safeParse(commitShaSchema, commitOutput, { abortEarly: true });
     if (!commit.success) return Object.freeze({ state: "unknown" });
 
-    const status = gitOutput(repositoryRoot, [
+    const status = await gitOutput(repositoryRoot, [
         "status",
         "--porcelain=v1",
         "--untracked-files=all",

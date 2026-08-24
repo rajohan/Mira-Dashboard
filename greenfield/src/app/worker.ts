@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 
+import type { DatabaseObservabilityCollector } from "../contracts/databaseObservabilityCollector.ts";
 import type { FixedHostOperationsExecutionPort } from "../server/domains/jobs/actionExecutors.ts";
 import {
     createDashboardWorkerRuntime,
@@ -40,9 +41,14 @@ import {
     createProcessTerminationController,
     type ProcessTerminationController,
 } from "../server/platform/runtime/processSignals.ts";
+import type { DatabaseObservabilityReconciliationPort } from "../shared/databaseObservabilityReconciliation.ts";
 import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
+import { createBunSqlDatabaseObservabilityCollector } from "../worker/database/bunSqlDatabaseObservabilityCollector.ts";
+import { createDockerDatabaseObservabilityConnectionResolver } from "../worker/database/dockerDatabaseObservabilityEndpointResolver.ts";
+import { createFixedDatabaseObservabilityReconciler } from "../worker/database/fixedDatabaseObservabilityReconciler.ts";
+import { createFixedSqliteLifecycleMaintenance } from "../worker/database/fixedSqliteLifecycleMaintenance.ts";
 import {
     createDescriptorWorkspaceFileStructuralWriter,
     type WorkerWorkspaceFileRootConfiguration,
@@ -92,6 +98,8 @@ export interface DashboardWorkerProcessDependencies {
     readonly createGatewayTransport: (
         options: PersistentGatewayTransportOptions
     ) => PersistentGatewayTaskNotificationTransport;
+    readonly createDatabaseObservabilityConnectionResolver: typeof createDockerDatabaseObservabilityConnectionResolver;
+    readonly createDatabaseObservabilityReconciler: typeof createFixedDatabaseObservabilityReconciler;
     readonly createLogDestination: (
         logsDirectory: string,
         processRole: "worker"
@@ -117,6 +125,10 @@ export interface DashboardWorkerProcessDependencies {
         openClawRoot: WorkerWorkspaceFileRootConfiguration,
         logMaintenance: LogMaintenanceExecutor,
         moltbook: MoltbookDashboardCollector,
+        databaseObservability: DatabaseObservabilityCollector,
+        databaseObservabilityReconciler:
+            | DatabaseObservabilityReconciliationPort
+            | undefined,
         hostOperations: FixedHostOperationsExecutionPort | undefined,
         bootIdentity: LinuxBootIdentity
     ) => DashboardWorkerRuntime;
@@ -187,6 +199,9 @@ export function createWorkerLogMaintenanceExecutor(
 }
 
 const defaultDependencies = Object.freeze({
+    createDatabaseObservabilityConnectionResolver:
+        createDockerDatabaseObservabilityConnectionResolver,
+    createDatabaseObservabilityReconciler: createFixedDatabaseObservabilityReconciler,
     createGatewayTransport: createPersistentGatewayTaskNotificationTransport,
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
@@ -205,6 +220,8 @@ const defaultDependencies = Object.freeze({
         openClawRoot,
         logMaintenance,
         moltbook,
+        databaseObservability,
+        databaseObservabilityReconciler,
         hostOperations,
         bootIdentity
     ) => {
@@ -220,6 +237,10 @@ const defaultDependencies = Object.freeze({
                 startupMode: "validate-only",
                 stateDirectory: layout.production.state.root,
             },
+            databaseObservability,
+            ...(databaseObservabilityReconciler === undefined
+                ? {}
+                : { databaseObservabilityReconciler }),
             logMaintenance,
             moltbook,
             ...(openClawGateway === undefined ? {} : { openClawGateway }),
@@ -229,6 +250,12 @@ const defaultDependencies = Object.freeze({
             pid: process.pid,
             releaseId: release.manifest.source.commitSha,
             sideEffects: createSystemJobWorkerSideEffects(),
+            sqliteMaintenance: createFixedSqliteLifecycleMaintenance({
+                migrationsDirectory: path.join(release.releaseRoot, "migrations"),
+                releaseId: release.manifest.source.commitSha,
+                releaseRoot: release.releaseRoot,
+                stateDirectory: layout.production.state.root,
+            }),
             taskNotificationLoop: taskNotificationWorkerLoop,
             workerInstanceId: Bun.randomUUIDv7(),
             workspaceFiles: writer,
@@ -342,6 +369,29 @@ export async function runDashboardWorkerProcess(
             agentName: configuration.moltbookAgentName,
             apiKey: configuration.moltbookApiKey,
         });
+        const databaseObservabilityConnectionResolver =
+            configuration.databaseObservabilityPassword === undefined
+                ? undefined
+                : dependencies.createDatabaseObservabilityConnectionResolver({
+                      credentials: {
+                          password: configuration.databaseObservabilityPassword,
+                      },
+                  });
+        const databaseObservability = createBunSqlDatabaseObservabilityCollector({
+            connectionResolver: databaseObservabilityConnectionResolver,
+        });
+        const databaseObservabilityReconciler =
+            databaseObservabilityConnectionResolver === undefined
+                ? undefined
+                : dependencies.createDatabaseObservabilityReconciler({
+                      bunExecutable: path.join(
+                          layout.production.runtimes,
+                          "bun",
+                          release.manifest.runtime.revision,
+                          "bun"
+                      ),
+                      releaseRoot: release.releaseRoot,
+                  });
         runtime = dependencies.createRuntime(
             layout,
             release,
@@ -353,6 +403,8 @@ export async function runDashboardWorkerProcess(
             openClawRoot,
             logMaintenance,
             moltbook,
+            databaseObservability,
+            databaseObservabilityReconciler,
             hostOperations,
             bootIdentity
         );

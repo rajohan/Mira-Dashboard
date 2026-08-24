@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { resolveBuildSourceIdentity } from "./buildSourceIdentity.ts";
 
+const maximumGitFixtureOutputBytes = 1024 * 1024;
 const temporaryRepositories: string[] = [];
 
 afterEach(async () => {
@@ -15,41 +16,47 @@ afterEach(async () => {
     );
 });
 
-function runGit(repositoryRoot: string, ...arguments_: string[]): string {
-    const result = Bun.spawnSync(
+async function runGit(repositoryRoot: string, ...arguments_: string[]): Promise<string> {
+    const child = Bun.spawn(
         ["git", "--no-optional-locks", "-C", repositoryRoot, ...arguments_],
         {
+            maxBuffer: maximumGitFixtureOutputBytes,
             stderr: "pipe",
             stdin: "ignore",
             stdout: "pipe",
         }
     );
-    if (result.exitCode !== 0) {
-        throw new Error(result.stderr.toString() || "Git fixture command failed");
+    const [exitCode, stderr, stdout] = await Promise.all([
+        child.exited,
+        new Response(child.stderr).text(),
+        new Response(child.stdout).text(),
+    ]);
+    if (exitCode !== 0) {
+        throw new Error(stderr || "Git fixture command failed");
     }
-    return result.stdout.toString().trim();
+    return stdout.trim();
 }
 
 async function createRepository(): Promise<{ commitSha: string; root: string }> {
     const root = await mkdtemp(path.join(tmpdir(), "mira-source-identity-"));
     temporaryRepositories.push(root);
-    runGit(root, "init", "--quiet");
-    runGit(root, "config", "user.name", "Mira Test");
-    runGit(root, "config", "user.email", "mira-test@example.invalid");
+    await runGit(root, "init", "--quiet");
+    await runGit(root, "config", "user.name", "Mira Test");
+    await runGit(root, "config", "user.email", "mira-test@example.invalid");
     await writeFile(path.join(root, "tracked.txt"), "initial\n", {
         encoding: "utf8",
         mode: 0o600,
     });
-    runGit(root, "add", "tracked.txt");
-    runGit(root, "commit", "--quiet", "--message", "initial");
-    return { commitSha: runGit(root, "rev-parse", "HEAD"), root };
+    await runGit(root, "add", "tracked.txt");
+    await runGit(root, "commit", "--quiet", "--message", "initial");
+    return { commitSha: await runGit(root, "rev-parse", "HEAD"), root };
 }
 
 describe("build source identity", () => {
     test("returns the full commit for a clean repository", async () => {
         const { commitSha, root } = await createRepository();
 
-        const identity = resolveBuildSourceIdentity(root);
+        const identity = await resolveBuildSourceIdentity(root);
 
         expect(identity).toEqual({ commitSha, state: "clean" });
         expect(Object.isFrozen(identity)).toBe(true);
@@ -61,19 +68,19 @@ describe("build source identity", () => {
         const untrackedPath = path.join(root, "untracked.txt");
 
         await writeFile(trackedPath, "changed\n", { encoding: "utf8", mode: 0o600 });
-        expect(resolveBuildSourceIdentity(root)).toEqual({
+        expect(await resolveBuildSourceIdentity(root)).toEqual({
             commitSha,
             state: "dirty",
         });
 
-        runGit(root, "add", "tracked.txt");
-        expect(resolveBuildSourceIdentity(root)).toEqual({
+        await runGit(root, "add", "tracked.txt");
+        expect(await resolveBuildSourceIdentity(root)).toEqual({
             commitSha,
             state: "dirty",
         });
 
         await writeFile(untrackedPath, "new\n", { encoding: "utf8", mode: 0o600 });
-        expect(resolveBuildSourceIdentity(root)).toEqual({
+        expect(await resolveBuildSourceIdentity(root)).toEqual({
             commitSha,
             state: "dirty",
         });
@@ -84,8 +91,8 @@ describe("build source identity", () => {
         const root = await mkdtemp(path.join(tmpdir(), "mira-source-identity-"));
         temporaryRepositories.push(root);
 
-        expect(resolveBuildSourceIdentity(root)).toEqual({ state: "unknown" });
-        expect(resolveBuildSourceIdentity("relative/path")).toEqual({
+        expect(await resolveBuildSourceIdentity(root)).toEqual({ state: "unknown" });
+        expect(await resolveBuildSourceIdentity("relative/path")).toEqual({
             state: "unknown",
         });
     });

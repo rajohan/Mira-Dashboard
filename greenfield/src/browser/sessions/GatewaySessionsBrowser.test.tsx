@@ -218,7 +218,7 @@ describe("Gateway sessions browser", () => {
             ]);
             expect(await screen.findByText("Session reset.")).toBeTruthy();
             expect(screen.queryByRole("dialog", { name: "Reset session?" })).toBeNull();
-            expect(document.activeElement).toBe(trigger);
+            await waitFor(() => expect(document.activeElement === trigger).toBeTrue());
             expect(mutation).toHaveBeenCalledTimes(1);
             expect(rendered.queryClient.getQueryData(gatewaySessionQueryKey)).toEqual(
                 snapshot

@@ -56,6 +56,7 @@ describe("reviewed pre-cutover parity inventory", () => {
         ).toEqual([
             "/agents",
             "/chat",
+            "/database",
             "/files",
             "/jobs",
             "/login",
@@ -321,6 +322,53 @@ describe("reviewed pre-cutover parity inventory", () => {
         expect(endpoints[3]?.purpose).toContain("older than 168 hours");
         expect(endpoints[3]?.purpose).toContain("never deletes volumes");
         expect(endpoints[3]?.purpose).toContain("distinct-worker production topology");
+    });
+
+    test("closes read-only database observability without importing backup authority", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const databaseEndpoint = reviewed.legacyEndpoints.endpoints.find(
+            ({ id }) => id === "GET /api/database/overview"
+        );
+        const databaseRoute = reviewed.frontend.routes.find(
+            ({ path }) => path === "/database"
+        );
+        const backupEndpoints = reviewed.legacyEndpoints.endpoints.filter(({ id }) =>
+            [
+                "GET /api/backups/kopia",
+                "GET /api/backups/walg",
+                "POST /api/backups/kopia/clear-needs-attention",
+                "POST /api/backups/kopia/run",
+                "POST /api/backups/walg/clear-needs-attention",
+                "POST /api/backups/walg/run",
+            ].includes(id)
+        );
+
+        expect(databaseEndpoint?.target).toEqual({
+            delivery: "implemented",
+            kind: "procedure",
+            names: ["database.overview"],
+            phase: "phase-5",
+        });
+        expect(databaseEndpoint?.purpose).toContain("bounded, read-only");
+        expect(databaseEndpoint?.purpose).toContain("Kopia/WAL-G status and control");
+        expect(databaseEndpoint?.purpose).toContain("database restore mutations");
+        expect(databaseRoute).toMatchObject({
+            access: "session",
+            featureOwner: "database",
+            searchNormalizer: "normalizeDatabaseSearch",
+            target: {
+                delivery: "implemented",
+                path: "/database",
+                phase: "phase-5",
+            },
+        });
+        expect(dashboardRoutePaths).toContain("/database");
+        expect(
+            backupEndpoints.every(
+                ({ target }) =>
+                    target.kind === "procedure" && target.delivery === "planned"
+            )
+        ).toBeTrue();
     });
 
     test("records the bounded OpenClaw settings and operations slice", async () => {

@@ -113,4 +113,58 @@ describe("Dashboard database maintenance process", () => {
 
         expect(result).toEqual({ state: "absent", transitionId });
     });
+
+    test("routes only the fixed online SQLite maintenance argument shape", async () => {
+        const transitionId = Bun.randomUUIDv7();
+        const command = parseDatabaseMaintenanceArguments([
+            "--operation=sqlite-maintenance",
+            `--transition=${transitionId}`,
+            `--release=${releaseId}`,
+            "--state=/srv/mira/production/state",
+            "--migrations=/srv/mira/releases/release/migrations",
+        ]);
+        expect(command).toEqual({
+            migrationsDirectory: "/srv/mira/releases/release/migrations",
+            operation: "sqlite-maintenance",
+            releaseId,
+            stateDirectory: "/srv/mira/production/state",
+            transitionId,
+        });
+        const expected = {
+            backupBytes: 4096,
+            backupCreatedAtMs: Date.now(),
+            checkpoint: { busyFrames: 0, checkpointedFrames: 2, logFrames: 2 },
+            completedAtMs: Date.now(),
+            retainedBackupBytes: 4096,
+            retainedBackupCount: 1,
+            status: "completed" as const,
+        };
+        const result = await runDashboardDatabaseMaintenance(command, {
+            createRuntime() {
+                throw new Error("Unexpected runtime construction");
+            },
+            createSnapshot: unexpectedSnapshot,
+            createSqliteMaintenance(observed) {
+                expect(observed).toEqual({
+                    migrationsDirectory: "/srv/mira/releases/release/migrations",
+                    releaseId,
+                    stateDirectory: "/srv/mira/production/state",
+                    transitionId,
+                });
+                return Promise.resolve(expected);
+            },
+        });
+        expect(result).toEqual(expected);
+
+        expect(() =>
+            parseDatabaseMaintenanceArguments([
+                "--operation=sqlite-maintenance",
+                `--transition=${transitionId}`,
+                `--release=${releaseId}`,
+                "--state=/srv/mira/production/state",
+                "--migrations=/srv/mira/releases/release/migrations",
+                "--path=/tmp/unreviewed",
+            ])
+        ).toThrow("Usage:");
+    });
 });

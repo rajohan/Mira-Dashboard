@@ -6,6 +6,7 @@ export type ConfigurationBrowserExposure = "none" | "presence-only" | "value";
 
 /** Shared parser/documentation limits for immutable application configuration. */
 export const applicationConfigurationLimits = Object.freeze({
+    databaseObservabilityPasswordMaximumLength: 4096,
     elevenLabsApiKeyMaximumLength: 4096,
     gatewayTokenMaximumLength: 4096,
     gatewayUrlMaximumLength: 2048,
@@ -31,6 +32,7 @@ export const applicationConfigurationLimits = Object.freeze({
 
 /** Stable field names used by typed server configuration. */
 export type ApplicationConfigurationField =
+    | "databaseObservabilityPassword"
     | "elevenLabsApiKey"
     | "gatewayToken"
     | "gatewayUrl"
@@ -61,6 +63,7 @@ export const applicationConfigurationEnvironmentNames = [
     "MIRA_DASHBOARD_PUBLIC_ORIGIN",
     "MIRA_DASHBOARD_TRUSTED_PROXY_IPS",
     "ELEVENLABS_API_KEY",
+    "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
     "MOLTBOOK_API_KEY",
     "MOLTBOOK_AGENT_NAME",
     "OPENCLAW_GATEWAY_TOKEN",
@@ -258,6 +261,23 @@ export const applicationConfigurationRegistry: readonly ApplicationConfiguration
             roles: Object.freeze(["web"]),
             secret: true,
             validationConstraints: `When present, a trimmed nonblank control-safe secret at most ${applicationConfigurationLimits.elevenLabsApiKeyMaximumLength} code units; never persisted, logged, or browser-exposed.`,
+            valueType: "opaque-secret",
+        }),
+        metadata({
+            allowedValues: null,
+            browserExposure: "none",
+            defaultValue: null,
+            description:
+                "Optional worker-only password for the dedicated database-observability principal.",
+            environmentName: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
+            field: "databaseObservabilityPassword",
+            operationalEffect:
+                "Authenticates the hourly bounded database snapshot after the worker discovers the loopback PgBouncer endpoint from Docker and connects through the fixed code-owned mira_dashboard_observability control capability.",
+            required: false,
+            restartRequired: true,
+            roles: Object.freeze(["worker"]),
+            secret: true,
+            validationConstraints: `When present, a trimmed nonblank opaque credential at most ${applicationConfigurationLimits.databaseObservabilityPasswordMaximumLength} code units; no database, container, service, project, image, host, or port value is accepted, and the credential is never persisted, logged, or browser-exposed.`,
             valueType: "opaque-secret",
         }),
         metadata({

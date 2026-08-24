@@ -94,6 +94,14 @@ import {
     normalizeChatSpeechSynthesisText,
 } from "../../src/contracts/chatSpeech.ts";
 import {
+    databaseObservabilityCachePayloadIsConsistent,
+    databaseObservabilityNameFitsPostgresqlByteLimit,
+    databaseOverviewIsConsistent,
+    sqlitePageSizeIsPowerOfTwo,
+    sqliteStorageObservationIsConsistent,
+    sqliteMigrationStateIsConsistent,
+} from "../../src/contracts/database.ts";
+import {
     workspaceFileContentTicketIsConsistent,
     workspaceFileNameIsSafe,
 } from "../../src/contracts/files.ts";
@@ -280,6 +288,30 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        databaseObservabilityNameFitsPostgresqlByteLimit,
+        "Live Valibot validation additionally limits PostgreSQL identifiers to 63 UTF-8 bytes.",
+    ],
+    [
+        databaseObservabilityCachePayloadIsConsistent,
+        "Live Valibot validation additionally enforces the PostgreSQL 128 KiB UTF-8 payload budget; deterministic unique database, table-health, and statement rows; exact aggregate sizes and connection bounds; and maintenance thresholds consistent with the visible observations.",
+    ],
+    [
+        databaseOverviewIsConsistent,
+        "Live Valibot validation additionally requires SQLite observation and stale timestamps to remain causally ordered within the response check time, and enforces the PostgreSQL 128 KiB UTF-8 payload budget, canonical unique rows, contiguous statement ranks, exact aggregate sizes and connection bounds, and coherent maintenance assessment.",
+    ],
+    [
+        sqliteMigrationStateIsConsistent,
+        "Live Valibot validation additionally requires applied migrations not to exceed the bundled graph and current status to agree with the counts.",
+    ],
+    [
+        sqlitePageSizeIsPowerOfTwo,
+        "Live Valibot validation additionally requires the SQLite page size to be a power of two.",
+    ],
+    [
+        sqliteStorageObservationIsConsistent,
+        "Live Valibot validation additionally requires SQLite file totals, reusable pages and bytes, percentages, permission security, and VACUUM review status to agree exactly.",
+    ],
     [
         serviceActionStatusesAreCanonical,
         "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered.",
@@ -1047,6 +1079,9 @@ export function convertContractSchema(
             overrideAction({ jsonSchema, valibotAction }) {
                 const requirement = readActionRequirement(valibotAction);
                 const operation = readActionOperation(valibotAction);
+                // JSON numbers are finite by definition: NaN and infinities are
+                // not valid JSON values. Valibot still enforces this at runtime.
+                if (valibotAction.type === "finite") return jsonSchema;
                 // JSON Schema carries a pattern but no flags. The transport uses
                 // Unicode mode only for ASCII-bounded expressions, for which
                 // dropping the flag does not change accepted values.

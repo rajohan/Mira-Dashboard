@@ -75,9 +75,85 @@ describe("coverage threshold", () => {
         }
     });
 
-    test("keeps Bun coverage from counting stories and story support", async () => {
+    test("includes exact executable root configurations without treating them as directories", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await Promise.all([
+                writeFile(
+                    path.join(projectRoot, "drizzle.config.ts"),
+                    "export default { dialect: 'sqlite' };"
+                ),
+                writeFile(
+                    path.join(projectRoot, "tailwind.config.ts"),
+                    "export default { plugins: [] };"
+                ),
+            ]);
+
+            expect(
+                await discoverExecutableCoverageSources(projectRoot, [
+                    "scripts",
+                    "src",
+                    "drizzle.config.ts",
+                    "tailwind.config.ts",
+                ])
+            ).toEqual(["drizzle.config.ts", "tailwind.config.ts"]);
+            expect(
+                summarizeLineCoverage(
+                    [
+                        record("drizzle.config.ts", 2, 1),
+                        record("drizzle.config.ts/injected.ts", 100, 100),
+                        record("tailwind.config.ts", 2, 1),
+                        record("tailwind.config.ts/injected.ts", 100, 100),
+                    ].join("\n"),
+                    ["drizzle.config.ts", "tailwind.config.ts"]
+                )
+            ).toEqual({ foundLines: 4, hitLines: 2, percent: 50 });
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("excludes script test support without hiding similarly named production files", async () => {
+        const projectRoot = await temporaryProject();
+        try {
+            await mkdir(path.join(projectRoot, "scripts", "nested", "testSupport"), {
+                recursive: true,
+            });
+            await Promise.all([
+                writeFile(
+                    path.join(projectRoot, "scripts", "productionTestSupport.ts"),
+                    "export const production = true;"
+                ),
+                writeFile(
+                    path.join(projectRoot, "scripts", "testSupport.ts"),
+                    "export const fixture = true;"
+                ),
+                writeFile(
+                    path.join(
+                        projectRoot,
+                        "scripts",
+                        "nested",
+                        "testSupport",
+                        "fixture.ts"
+                    ),
+                    "export const nestedFixture = true;"
+                ),
+            ]);
+
+            expect(
+                await discoverExecutableCoverageSources(projectRoot, ["scripts"])
+            ).toEqual(["scripts/productionTestSupport.ts"]);
+        } finally {
+            await rm(projectRoot, { force: true, recursive: true });
+        }
+    });
+
+    test("keeps Bun coverage from counting test support, stories and story support", async () => {
         const bunfig = await Bun.file(new URL("../bunfig.toml", import.meta.url)).text();
 
+        expect(bunfig).toContain('"scripts/**/testSupport/**"');
+        expect(bunfig).toContain('"scripts/**/testSupport.ts"');
+        expect(bunfig).toContain('"scripts/**/testSupport.tsx"');
         expect(bunfig).toContain('"src/**/*.stories.tsx"');
         expect(bunfig).toContain('"src/**/storySupport/**"');
     });

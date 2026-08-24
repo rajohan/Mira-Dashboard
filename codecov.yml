@@ -13,7 +13,10 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - greenfield/scripts/
                     - greenfield/src/
+                    - greenfield/drizzle.config.ts
+                    - greenfield/tailwind.config.ts
             backend:
                 target: 85%
                 threshold: 0%
@@ -42,7 +45,10 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - greenfield/scripts/
                     - greenfield/src/
+                    - greenfield/drizzle.config.ts
+                    - greenfield/tailwind.config.ts
             backend:
                 target: 85%
                 threshold: 0%
@@ -70,7 +76,10 @@ comment:
 flags:
     dashboard:
         paths:
+            - greenfield/scripts/
             - greenfield/src/
+            - greenfield/drizzle.config.ts
+            - greenfield/tailwind.config.ts
     frontend:
         paths:
             - frontend/src/

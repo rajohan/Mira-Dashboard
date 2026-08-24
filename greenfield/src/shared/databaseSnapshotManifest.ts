@@ -27,6 +27,7 @@ export const databaseSnapshotManifestSchema = v.strictObject({
         bytes: positiveSafeIntegerSchema(invalidSnapshotManifest),
         sha256: lowercaseSha256Schema(invalidSnapshotManifest),
     }),
+    restoreVerifiedAtMs: v.optional(positiveSafeIntegerSchema(invalidSnapshotManifest)),
     migrations: v.pipe(
         v.array(migrationIdentitySchema),
         v.minLength(1, invalidSnapshotManifest),

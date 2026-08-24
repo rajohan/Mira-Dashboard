@@ -1,67 +1,28 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
 import { Outlet, useLocation } from "@tanstack/react-router";
-import {
-    BookOpen,
-    Bot,
-    CalendarClock,
-    FolderOpen,
-    Home,
-    ListTodo,
-    Logs,
-    Menu,
-    MessageCircle,
-    MessagesSquare,
-    Newspaper,
-    Settings as SettingsIcon,
-    SquareTerminal,
-    X,
-    type LucideIcon,
-} from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "../lib/classNames.ts";
-import type {
-    DashboardAuthenticatedPath,
-    DashboardNavigationPath,
-} from "../lib/dashboardRoutes.ts";
+import type { DashboardAuthenticatedPath } from "../lib/dashboardRoutes.ts";
 import { MonitoringRouteLayout } from "../monitoring/MonitoringRouteLayout.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { NavigationLink } from "../ui/NavigationLink.tsx";
 import { DashboardHeaderControls } from "./DashboardHeaderControls.tsx";
+import { dashboardNavigationItems } from "./dashboardNavigation.ts";
 import {
     dashboardContentContainerClassName,
     dashboardMainClassName,
 } from "./dashboardShellLayout.ts";
 
-interface NavigationItem {
-    readonly icon: LucideIcon;
-    readonly label: string;
-    readonly to: DashboardNavigationPath;
-}
-
-const navigationItems: readonly NavigationItem[] = Object.freeze([
-    { icon: Home, label: "Dashboard", to: "/" },
-    { icon: Bot, label: "Agents", to: "/agents" },
-    { icon: MessagesSquare, label: "Sessions", to: "/sessions" },
-    { icon: MessageCircle, label: "Chat", to: "/chat" },
-    { icon: FolderOpen, label: "Files", to: "/files" },
-    { icon: ListTodo, label: "Tasks", to: "/tasks" },
-    { icon: CalendarClock, label: "Jobs", to: "/jobs" },
-    { icon: Logs, label: "Logs", to: "/logs" },
-    { icon: BookOpen, label: "Moltbook", to: "/moltbook" },
-    { icon: SquareTerminal, label: "Terminal", to: "/terminal" },
-    { icon: Newspaper, label: "Reports", to: "/reports" },
-    { icon: SettingsIcon, label: "Settings", to: "/settings" },
-]);
-const routeTitles: readonly Pick<NavigationItem, "label" | "to">[] = Object.freeze([
-    ...navigationItems,
-]);
-const authenticatedRouteTitles: readonly {
+interface AuthenticatedRouteTitle {
     readonly label: string;
     readonly to: DashboardAuthenticatedPath;
-}[] = Object.freeze([
-    ...routeTitles,
+}
+
+const authenticatedRouteTitles: readonly AuthenticatedRouteTitle[] = Object.freeze([
+    ...dashboardNavigationItems,
     { label: "Account security", to: "/account-security" },
     { label: "Incidents", to: "/incidents" },
 ]);
@@ -75,7 +36,7 @@ interface NavigationProps {
 function Navigation({ currentPath, onNavigate }: NavigationProps) {
     return (
         <nav aria-label="Main navigation" className="flex-1 p-2">
-            {navigationItems.map((item) => {
+            {dashboardNavigationItems.map((item) => {
                 const active =
                     currentPath === item.to ||
                     (item.to === "/reports" && currentPath === "/incidents");

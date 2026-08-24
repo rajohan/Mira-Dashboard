@@ -303,6 +303,135 @@ Minimum operational signals include:
 The Dashboard displays the last known good operational data with a freshness marker when a
 refresh fails. It never converts a dependency outage into an empty healthy-looking screen.
 
+The implemented Database page applies this operational model without adding a privileged request
+path. One worker refresh produces the bounded PostgreSQL/PgBouncer snapshot and persists it through
+the existing claim-fenced cache protocol; refresh work is not repeated per browser request.
+Dashboard SQLite lifecycle facts come from the already-retained process database runtime and are
+joined with that cached external projection by `database.overview`. Collection is sequential or
+low-concurrency, abortable, deadline-bound, and constrained by a database-specific 128 KiB payload
+limit beneath the generic 256 KiB cache ceiling, plus contract row limits. Missing or failed external data remains explicitly unavailable
+or last-known-good. The `/database` route is lazy and session-gated, retains validated data during
+background failure, and offers no mutation controls. Backup/restore and Kopia/WAL-G operations are
+not enabled by this observability composition. The read-only SQLite inventory composes scheduled
+and activation/cutover snapshots only. The activation snapshot is the reviewed greenfield
+consolidation of legacy pre-deploy and pre-migration recovery purposes, not an import of those old
+artifact kinds. A scheduled snapshot is not published until a separate temporary copy passes
+SQLite integrity and migration checks; crash-left staging/verification directories are reconciled
+under the exclusive maintenance job. Fourteen scheduled snapshots are retained. The deployment
+lease enforces cutover retention on every committed/recovered/same-candidate success: at most five
+snapshots, at most two days for unreferenced snapshots, and unconditional preservation of current,
+previous, and active-journal identities. Both namespaces use parent-descriptor atomic `.retire-*`
+rename plus fsync before bounded resumable descriptor-anchored reaping under the trusted same-UID
+deployment lease, so a crash never requires mutating or recursively deleting a published immutable
+snapshot in place.
+Before either snapshot path writes, capacity uses `page_count * page_size` under the validated
+SQLite connection. Scheduled maintenance budgets the simultaneously resident VACUUM snapshot and
+restore-verification copy; activation budgets possible checkpoint expansion plus its VACUUM
+snapshot before issuing the truncate checkpoint. Both retain the fixed free-space reserve and a
+post-snapshot restore-copy recheck.
+
+Database-observability provisioning is a separate fail-closed delivery step. It creates one
+dedicated monitoring login with zero role memberships and grants PgBouncer `stats_users` without
+admin authority. An isolated `NOLOGIN` capability owner holds exactly direct
+`pg_read_all_stats` membership plus direct per-database `SELECT` on
+`pg_catalog.pg_statistic`. The observer receives only direct database `CONNECT`, private-schema
+`USAGE`, and `EXECUTE` on the exact no-input, bounded `connection_metrics()`, identity-free
+`statement_metrics()`, `table_health()`, and `maintenance_metrics()` functions. `PUBLIC` and the
+observer have no raw `pg_stat_statements` source-view or extension-routine access. Database names
+are not release inventory: each
+refresh derives the bounded, sorted set from `pg_catalog.pg_database`, and generic per-database
+policy checks admit detail reads. The existing hourly
+`cache.refresh.database-observability` job composes a separate privileged collection-lease port
+only when the provider is configured. Administrative psql authority never enters Dashboard
+configuration or the collector. Between attempts the observer is `NOLOGIN`, has expired
+`VALID UNTIL`, and has zero PostgreSQL sessions. The fixed attempt closes leftovers; invokes
+`open-approved-collection` to verify approval and identity, perform the full bounded idempotent
+ACL-and-capability reconcile, retain `NOLOGIN`, and prepare a one-use token bound to the exact
+catalog digest; `enable-approved-collection` then rechecks approval, identity, policy, and digest
+before atomically consuming the token and setting `LOGIN` plus a short `VALID UNTIL`;
+collects once; and invokes a shielded
+mandatory close that restores and proves the exact closed state. The port returns a fresh payload
+only after close proof, so the generic cache executor commits afterward. Any open, collection, or
+close failure instead preserves last-known-good and settles as a retryable redacted failure without
+a fresh commit.
+
+Explicit activation alone creates or refreshes the approval marker bound to the PostgreSQL
+`system_identifier` and the exact current and previous immutable-release policy digests; the policy
+version alone is not authorization, and lease operations cannot mutate the approval. Every open
+checks that binding and performs and verifies the full bounded, idempotent reconcile before the
+separate one-use enable; no persisted
+fingerprint, verification-age state, or reduced path is used. Reconciliation removes `PUBLIC`
+database privileges, grants direct observer `CONNECT` only to non-template connectable databases,
+applies and verifies every sanitized capability, and rejects catalog, policy-digest, or endpoint
+races. No additional action,
+schedule, loop, sidecar, systemd unit, function-executor login, credential, or exclusive admission
+is introduced. Adding, removing, or renaming a database therefore requires no Dashboard source,
+manifest, or configuration edit. A new database is reconciled by the next approved open before
+that attempt collects it; the pass removes unsafe database authority, grants the exact observer
+ACL, and installs the verified interfaces.
+After the manual first-install prerequisites, explicit `activate-current-catalog --approved` must
+be the first runner operation because `verify-current-catalog --approved` requires an existing
+matching approval. Activation finishes closed; verification then proves the approved state. On a
+later release, verification may precede activation only when the retained current or previous
+policy digest already approves that release. Otherwise activation must run first.
+PostgreSQL close proof cannot prove that PgBouncer has no already-authenticated waiting client; a
+waiting client that interferes causes a failed attempt, while `NOLOGIN`, expiry, and termination
+prevent it from obtaining a new backend after close. The observer password is the sole Dashboard
+credential input. On every snapshot
+attempt the worker runs bounded `docker ps -a` followed by one batched, fixed-template
+`docker inspect`, then requires exactly one running, healthy container with
+the explicit `mira.dashboard.database-observability=pgbouncer-v1` capability label and exactly one
+loopback-published TCP binding. That single capability owns the fixed
+`mira_dashboard_observability` PgBouncer control alias. Approved provisioning creates the
+dedicated same-named physical database from `template0`, and PgBouncer's existing wildcard route
+preserves the client database name without an explicit mapping or environment interpolation. No
+database-name label or Dashboard setting exists. Container, Compose project/service, image, and
+host-port values are observations, never configured authority; application-database renames and
+port changes therefore reconcile without an application or secret edit. Credential absence,
+discovery absence or ambiguity, privilege drift, catalog overflow, or an unexpected row shape
+causes an explicit unavailable/last-known-good state and never widens authority or falls back to
+an application credential. App-specific relations and cards, including the legacy Comet and
+Bitmagnet torrent counts, cannot define the generic inventory. The sole named exception is an
+optional, count-only `mira_dashboard_observability.torrent_count` probe in those two databases.
+Its reviewed fixed identifiers are isolated capability metadata: a missing database or view makes
+only that card unavailable and never hides or fails unrelated dynamically discovered databases.
+The inspect template admits only ID, state/health, the one database capability label, standard
+Compose project/service identity, and structured published ports; it never ingests container
+environment, mounts, or the remaining labels into the Dashboard process.
+
+The approval-gated provisioning runner has a separate Docker execution boundary. It pins the
+local Engine socket and root Compose file/project directory, resolves the one healthy PostgreSQL
+dependency of that capability, and runs container-local psql over the fixed Unix socket. A fixed
+launcher carries only the existing non-secret administrative username into `env -i`; it discards
+host/container endpoint variables and passwords. Every bounded stdin execution verifies the
+probed superuser role OID and PostgreSQL system identifier before SQL runs. Provisioning artifacts
+are allowlisted, descriptor-pinned, bounded immutable-release children with contained `\ir`
+expansion. The operator command uses the exact production Bun/current-release pointers, not host
+psql, ambient `PG*`, or PATH-selected Bun.
+
+Production credential cutover remains a release gate for this provider. The existing
+`DATABASE_USERNAME`/`DATABASE_PASSWORD` Doppler pair is administrative/application-stack input;
+it must not become a Dashboard runtime fallback or grant the worker PostgreSQL/PgBouncer admin
+authority. Doppler must instead supply the distinct observer password named by the application
+configuration registry, while host and port remain discovery-owned and the control alias, physical
+control database, and role name remain code/capability-owned as described above. The observer credential is
+applied by a reviewed activation
+path that withholds it from argv, output, logs, manifests, and generated documentation.
+
+The currently deployed `/opt/docker/apps/pgbouncer/userlist.txt` is a Git-tracked SCRAM auth file.
+Its verifier is not a cleartext password, and the repository is private, but it remains
+credential material: repository access and Git history widen its lifetime and permit offline
+guessing of a weak password. Before Phase 5 closure or production cutover, the Docker source of
+truth must stop tracking that file, provision an equivalent PgBouncer auth input from Doppler at
+runtime with no group/world-readable copy, and rotate the affected credential after the new path
+has passed a rollback-capable PgBouncer authentication smoke test. Historical Git rewriting is a
+separate destructive decision and is not implied; rotation makes the retained historical verifier
+obsolete. Validation uses `/opt/docker/bin/docker-compose-doppler` in a mode that emits no resolved
+Compose document or secret values. The app-owned PgBouncer Compose file must carry the exact single
+database-observability capability label and fixed control alias, and the worker must compose the
+separate privileged collection-lease port into the existing hourly cache action, before this
+provider is enabled.
+
 ## Resource Safety
 
 At this audit, the production web service used about 247 MiB with a recorded peak of 379 MiB;
@@ -406,6 +535,45 @@ does not absorb its compose files, application data, or deployment lifecycle int
 repository or state tree. Dashboard is the control plane: browser requests select reviewed
 operations, durable jobs and audit records preserve intent/outcome, and worker-only adapters touch
 the Docker project within explicit policy and resource bounds.
+
+The Docker slice must discover its topology at runtime rather than ship a service catalog. A
+worker-owned, read-only adapter enumerates Docker Engine containers and collects batched inspect
+data; standard Compose project/service labels are observed metadata, not required names. The
+configured Compose roots constrain where later mutation policy may resolve files, but they do not
+decide which running containers are visible. Bounded reconciliation must add, remove, and rename
+containers, services, projects, images, networks, and volumes without manual Dashboard handling.
+Ambiguous or disappearing items fail closed individually, while a source-wide Engine failure keeps
+the last known good inventory with an explicit freshness state.
+
+Update discovery reuses the Compose policy already deployed under `/opt/docker`:
+`mira.updater.enabled`, `mira.updater.autoUpdate`, `mira.updater.track`,
+`mira.updater.tagPattern`, and `mira.updater.tagPatternIsRegex`. Both list and map label syntax are
+normalized, tag regexes are safety-checked, and Compose project/service identity is joined against
+Engine labels rather than container names. Greenfield tightens the legacy default: inventory is
+automatic, but an update mutation requires an explicit valid `mira.updater.enabled=true`; absent,
+ambiguous, or invalid labels remain visible and non-mutable. Necessary label-schema changes are
+versioned and applied to the Compose source of truth as part of the Docker slice, not maintained as
+a parallel Dashboard service catalog.
+
+`/opt/docker/compose.yaml` is the canonical whole-stack project entrypoint. The worker resolves its
+bounded recursive include graph with canonical regular-file containment beneath `/opt/docker`, so
+root-level start/stop and service-level update operations use the same project definition. The only
+admitted Compose executor is `/opt/docker/bin/docker-compose-doppler`, invoked from `/opt/docker`
+with a fixed executable and worker-constructed argv. Browser input cannot select an executable,
+working directory, Compose path, environment file, or free-form flag. Root `/opt/docker/.env` and
+app-local `.env` files are opaque inputs consumed by Compose/Doppler; Dashboard may verify metadata
+needed for a fail-closed preflight but never returns, logs, diffs, rewrites, or persists their
+contents. Resolved Compose output that could contain injected secret values is likewise forbidden
+from contracts and logs.
+
+Each managed container's update labels and editable `services.<service>.image` source live in its
+included app Compose file. Discovery joins Engine project/config/service labels to the canonical
+root include graph and records the exact defining file/field under the Docker trust root. An update
+re-resolves that ownership under the worker lease, verifies the expected old scalar, atomically
+edits only that image field while preserving unrelated YAML, and validates the complete root
+project before calling the Doppler wrapper for the resolved service. If includes, labels, image
+ownership, or source text changed concurrently, the attempt does not guess: it aborts, restores the
+pre-edit file when necessary, refreshes discovery, and requires a new intent.
 
 The future repository root ships new `systemd/` web and worker units as part of the immutable
 release. The legacy units were deliberately not copied: they change into a `backend` working
@@ -525,9 +693,10 @@ Recommended layout:
       systemd/
       release-manifest.json
     releases/current -> <release-id>
-    releases/previous -> <release-id>
     runtimes/bun/<exact-revision>/bun
+    runtimes/bun/current -> <exact-revision>
     state/
+      activation.json  # authoritative current/previous release-runtime pairs
       mira-dashboard.db
       backups/
       job-output/
@@ -550,12 +719,21 @@ and required process roles. It contains no secrets.
 Deployment flow:
 
 1. Build and test one artifact using the same resolved Bun runtime throughout the build.
-2. Transfer or materialize it into a new immutable release directory and verify every hash.
+2. Verify every source artifact hash and the exact runtime identity without copying into the
+   production artifact roots yet.
 3. Prepare and verify `<project-root>/production/state` plus its protected ancestor chain before
    changing the active release pointer.
-4. Acquire the deployment lease, install/reload the verified stop-owner units, drain active jobs,
-   enter maintenance mode, durably journal the exact stop intent, and only then quiesce all
-   database writers. Recovery treats this pre-snapshot phase as database-unmodified and
+4. Acquire the deployment lease, recover any durable activation journal, and run verified
+   release/runtime retention before copying. Admit the missing source-tree and Bun runtime using
+   destination allocation blocks, conservative directory metadata, free-inode capacity, a fixed
+   64 MiB byte reserve, and 64 free reserve inodes. Each copied file and the directory tree are
+   fsynced bottom-up before the immutable stage is renamed, and that rename's parent is fsynced
+   before publication or runtime installation returns. Install/publication failure repeats the
+   same journal-aware retention pass immediately; a crash between those operations is reconciled
+   before the next attempt, so distinct failed candidates cannot accumulate indefinitely or consume
+   space needed by the authoritative pair. Install/reload the verified stop-owner units, drain
+   active jobs, enter maintenance mode, durably journal the exact stop intent, and only then quiesce
+   all database writers. Recovery treats this pre-snapshot phase as database-unmodified and
    idempotently restores the previous service owner before clearing the journal.
 5. Snapshot and verify the current database while writers remain stopped.
 6. Apply migrations to a copy, run schema/preflight checks, then atomically promote the
@@ -565,7 +743,24 @@ Deployment flow:
    deadlines. A rollback reinstalls the previous release's units before restarting its paired
    release/database state.
 8. Run authenticated smoke checks, including tRPC, SSE, Gateway, docs, and one safe queued job.
-9. Atomically record current/previous and prune only releases whose manifests verify.
+9. Atomically record current/previous and run release/runtime retention only after the complete
+   managed inventories verify. Retention preserves the authoritative current and rollback pairs
+   plus the candidate while a transition is being prepared, so successful activation converges to
+   at most two immutable releases and at most two Bun revisions. Every other commit-addressed
+   release must pass its manifest/tree verification, and every other runtime must pass its exact
+   revision probe, before either root is mutated. Selected directories are atomically renamed to
+   `.retire-*`, the parent is synced, and bounded descriptor-rooted, same-owner/same-mount,
+   no-symlink reaping resumes after interruption. Files move through private tombstones and are
+   checked against held descriptors and observed inodes immediately before pathname-based unlink.
+   Linux provides no inode-conditional unlink. These checks fail closed for accidental or stale
+   path/rename drift; every authorized mutation by the trusted application UID is instead
+   serialized by the exact deployment lease. A malicious concurrent process with that same UID is
+   outside the current application-owned threat boundary because it can already rewrite manifests,
+   pointers, and roots. Defending against it requires the planned root-owned immutable handoff and
+   different-principal garbage collection. Bounded crash-left `.stage-*` trees and `.current-*`
+   pointer stages are reconciled by the same pass. An
+   unknown entry, pointer/reference mismatch, invalid artifact, path replacement, or oversized
+   inventory fails activation closed without deleting the authoritative pairs.
 
 Because the new application carries no schema compatibility code, rollback is a **release and
 database pair**. If activation crosses a non-backward-compatible migration, rollback restores

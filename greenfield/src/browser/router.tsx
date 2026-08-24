@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 
 import { parseChatRouteSearch } from "./chat/chatRouteSearch.ts";
+import { normalizeDatabaseSearch } from "./database/databaseRouteSearch.ts";
 import { parseJobsRouteSearch } from "./jobs/jobRouteSearch.ts";
 import { DashboardShell } from "./layout/DashboardShell.tsx";
 import {
@@ -46,6 +47,11 @@ const filesRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/files",
 }).lazy(() => import("./routes/files.lazy.tsx").then((module) => module.Route));
+const databaseRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/database",
+    validateSearch: normalizeDatabaseSearch,
+}).lazy(() => import("./routes/database.lazy.tsx").then((module) => module.Route));
 const logsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/logs",
@@ -88,6 +94,7 @@ const routeTree = rootRoute.addChildren([
     accountSecurityRoute,
     agentsRoute,
     chatRoute,
+    databaseRoute,
     filesRoute,
     incidentsRoute,
     jobsRoute,

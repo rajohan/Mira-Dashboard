@@ -80,6 +80,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/chat.ts");
             return module.chatProcedureContracts;
         }
+        case "database": {
+            const module = await import("../../contracts/database.ts");
+            return module.databaseProcedureContracts;
+        }
         case "files": {
             const module = await import("../../contracts/files.ts");
             return module.workspaceFileProcedureContracts;

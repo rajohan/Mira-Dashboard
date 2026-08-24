@@ -7,6 +7,7 @@ import { healthLivenessPath, healthReadinessPath } from "../contracts/system.ts"
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
+import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
 import type { WorkspaceFileRawHttpHandler } from "../server/domains/files/rawHttp.ts";
 import type { WorkspaceFilesService } from "../server/domains/files/service.ts";
 import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
@@ -198,6 +199,7 @@ export interface ServerOptions {
     /** Raw attachment/media routes mounted before browser asset fallback. */
     readonly chatRawHttpHandler?: ChatRawHttpHandler;
     readonly chatService?: ChatService;
+    readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly workspaceFilesService?: WorkspaceFilesService;
     /** Ticket-bound Files GET/HEAD/PUT routes mounted before browser asset fallback. */
     readonly workspaceFileRawHttpHandler?: WorkspaceFileRawHttpHandler;
@@ -267,6 +269,7 @@ export async function createServer(options: ServerOptions): Promise<ApplicationS
             browserOrigin,
             cacheService: options.cacheService,
             chatService: options.chatService,
+            databaseObservabilityService: options.databaseObservabilityService,
             workspaceFilesService: options.workspaceFilesService,
             gatewayConnectionService: options.gatewayConnectionService,
             gatewaySessionsService: options.gatewaySessionsService,

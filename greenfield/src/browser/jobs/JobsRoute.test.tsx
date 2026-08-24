@@ -582,21 +582,22 @@ async function renderJobsRoute(
     const collections = createDashboardBrowserCollections(queryClient, trpcClient);
     collectionRegistries.push(collections);
     const router = createDashboardRouter(createMemoryHistory({ initialEntries: [path] }));
-    mountedViews.push(
-        render(
-            <DashboardBrowserApplication
-                collections={collections}
-                queryClient={queryClient}
-                realtimeClient={realtimeClient}
-                router={router}
-                trpcClient={trpcClient}
-                webAuthnClient={unexpectedWebAuthnClient}
-            />
-        )
-    );
-    if (transport.authStatus.state === "authenticated") {
-        await screen.findByRole("heading", { level: 3, name: "OpenClaw cleanup" });
-    }
+    await act(async () => {
+        await router.load();
+        mountedViews.push(
+            render(
+                <DashboardBrowserApplication
+                    collections={collections}
+                    queryClient={queryClient}
+                    realtimeClient={realtimeClient}
+                    router={router}
+                    trpcClient={trpcClient}
+                    webAuthnClient={unexpectedWebAuthnClient}
+                />
+            )
+        );
+        await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    });
     return { queryClient, router };
 }
 

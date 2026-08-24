@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    describe,
+    expect,
+    setDefaultTimeout,
+    test,
+} from "bun:test";
 import {
     chmod,
     cp,
@@ -17,10 +25,17 @@ import type { BuildSourceIdentity } from "../buildSourceIdentity.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { buildDashboardRelease, type ReleaseBuildCommand } from "./buildRelease.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
+import {
+    assertProductionArtifactCapacity,
+    productionArtifactCapacityReserveBytes,
+} from "./productionArtifactCapacity.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import { publishProductionRelease } from "./productionReleasePublication.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
-import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
+import {
+    type ReleaseRuntimeIdentity,
+    verifyReleaseArtifactIdentity,
+} from "./releaseIdentity.ts";
 
 const sourceProjectRoot = path.resolve(import.meta.dir, "../..");
 const temporaryDirectories: string[] = [];
@@ -34,7 +49,18 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     version: "1.4.0",
 });
 const releaseFixtureDirectories: string[] = [];
+const documentationFixture = "# Production release publication fixture\n";
 let sharedSourceReleaseRoot: string | undefined;
+
+setDefaultTimeout(15_000);
+
+function filesystemCapacity(availableBytes: bigint) {
+    return Object.freeze({
+        availableBytes,
+        availableInodes: 1_000_000n,
+        blockSize: 4096n,
+    });
+}
 
 async function restoreOwnerWrite(directory: string): Promise<void> {
     const status = await stat(directory).catch(() => null);
@@ -81,11 +107,11 @@ async function repositoryFixture(): Promise<string> {
         path.join(tmpdir(), "mira-production-release-source-")
     );
     releaseFixtureDirectories.push(repositoryRoot);
+    await mkdir(path.join(repositoryRoot, "docs/generated"), { recursive: true });
     await Promise.all([
-        cp(
-            path.join(sourceProjectRoot, "docs/generated"),
-            path.join(repositoryRoot, "docs/generated"),
-            { recursive: true }
+        writeFile(
+            path.join(repositoryRoot, "docs/generated/README.md"),
+            documentationFixture
         ),
         cp(
             path.join(sourceProjectRoot, "migrations"),
@@ -98,13 +124,8 @@ async function repositoryFixture(): Promise<string> {
             { recursive: true }
         ),
         cp(
-            path.join(sourceProjectRoot, "scripts/delivery/provisioning/host-operations"),
-            path.join(repositoryRoot, "scripts/delivery/provisioning/host-operations"),
-            { recursive: true }
-        ),
-        cp(
-            path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
-            path.join(repositoryRoot, "scripts/delivery/provisioning/log-maintenance"),
+            path.join(sourceProjectRoot, "scripts/delivery/provisioning"),
+            path.join(repositoryRoot, "scripts/delivery/provisioning"),
             { recursive: true }
         ),
         cp(
@@ -156,7 +177,7 @@ async function localReleaseFixture(): Promise<string> {
     const repositoryRoot = await repositoryFixture();
     const observedCommands: ReleaseBuildCommand[] = [];
     const release = await buildDashboardRelease(repositoryRoot, {
-        resolveSourceIdentity: () => cleanSource,
+        resolveSourceIdentity: () => Promise.resolve(cleanSource),
         runCommand: async (command, root) => {
             observedCommands.push(command);
             await materializeCommandOutput(command, root);
@@ -238,6 +259,103 @@ describe("production release publication", () => {
         });
 
         expect(result.failure.message).toBe("Production release publication failed");
+        expect(await readdir(result.paths.releasesDirectory)).toEqual([]);
+    });
+
+    test("rejects source growth after outer capacity admission before writing a stage", async () => {
+        const sourceReleaseRoot = await localReleaseFixture();
+        const projectRoot = await productionProjectFixture();
+        const runtimeRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-publication-runtime-source-")
+        );
+        temporaryDirectories.push(runtimeRoot);
+        const runtimeSource = path.join(runtimeRoot, "bun");
+        await writeFile(runtimeSource, "runtime", { mode: 0o500 });
+        await chmod(runtimeSource, 0o500);
+        const sourceManifest = await verifyReleaseArtifactIdentity(sourceReleaseRoot);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        const result = await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            await assertProductionArtifactCapacity(
+                lease,
+                paths,
+                sourceReleaseRoot,
+                sourceManifest,
+                runtimeSource,
+                {
+                    availableCapacity: () =>
+                        Promise.resolve(
+                            filesystemCapacity(
+                                productionArtifactCapacityReserveBytes +
+                                    1024n * 1024n * 1024n
+                            )
+                        ),
+                }
+            );
+            let inlineCapacityChecks = 0;
+            const failure = await rejectionError(
+                publishProductionRelease(
+                    lease,
+                    paths,
+                    sourceReleaseRoot,
+                    runtimeIdentity,
+                    {
+                        availableCapacity: () => {
+                            inlineCapacityChecks += 1;
+                            return Promise.resolve(
+                                filesystemCapacity(
+                                    productionArtifactCapacityReserveBytes + 1n
+                                )
+                            );
+                        },
+                        beforeCopy: async () => {
+                            const sourceFile = path.join(
+                                sourceReleaseRoot,
+                                "server/web.js"
+                            );
+                            await chmod(sourceFile, 0o600);
+                            await writeFile(sourceFile, "grown-after-admission");
+                            await chmod(sourceFile, 0o400);
+                        },
+                    }
+                )
+            );
+            return { failure, inlineCapacityChecks, paths };
+        });
+
+        expect(result.failure.message).toBe("Production release publication failed");
+        expect(result.inlineCapacityChecks).toBe(0);
+        expect(await readdir(result.paths.releasesDirectory)).toEqual([]);
+    });
+
+    test("rechecks current free space immediately before copying a stable release", async () => {
+        const sourceReleaseRoot = sourceReleaseFixture();
+        const projectRoot = await productionProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        const result = await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            let inlineCapacityChecks = 0;
+            const failure = await rejectionError(
+                publishProductionRelease(
+                    lease,
+                    paths,
+                    sourceReleaseRoot,
+                    runtimeIdentity,
+                    {
+                        availableCapacity: () => {
+                            inlineCapacityChecks += 1;
+                            return Promise.resolve(
+                                filesystemCapacity(productionArtifactCapacityReserveBytes)
+                            );
+                        },
+                    }
+                )
+            );
+            return { failure, inlineCapacityChecks, paths };
+        });
+
+        expect(result.failure.message).toBe("Production release publication failed");
+        expect(result.inlineCapacityChecks).toBe(1);
         expect(await readdir(result.paths.releasesDirectory)).toEqual([]);
     });
 

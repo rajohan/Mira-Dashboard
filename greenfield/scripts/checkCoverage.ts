@@ -15,6 +15,10 @@ export interface LineCoverageSummary {
 }
 
 const maximumLcovBytes = 64 * 1024 * 1024;
+const exactCoverageSourceFiles: ReadonlySet<string> = new Set([
+    "drizzle.config.ts",
+    "tailwind.config.ts",
+]);
 const typeScriptModuleExtensions: ReadonlySet<string> = new Set([".cts", ".mts", ".ts"]);
 
 function normalizeCoveragePath(value: string): string {
@@ -22,7 +26,11 @@ function normalizeCoveragePath(value: string): string {
 }
 
 function belongsToRoot(sourcePath: string, sourceRoot: string): boolean {
-    return sourcePath === sourceRoot || sourcePath.startsWith(`${sourceRoot}/`);
+    return (
+        sourcePath === sourceRoot ||
+        (!exactCoverageSourceFiles.has(sourceRoot) &&
+            sourcePath.startsWith(`${sourceRoot}/`))
+    );
 }
 
 function isStorybookSource(sourcePath: string): boolean {

@@ -18,6 +18,7 @@ import {
 } from "../buildSourceIdentity.ts";
 import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import { resolveDirectPackageVersions } from "../packageIdentity.ts";
+import { databaseObservabilityProvisioningReleaseArtifactPaths } from "./databaseObservabilityProvisioningPolicy.ts";
 import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
 import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
@@ -57,6 +58,7 @@ const exactSystemdPaths = Object.freeze(
 );
 const exactScriptPaths = Object.freeze(
     [
+        ...databaseObservabilityProvisioningReleaseArtifactPaths,
         ...hostOperationsProvisioningReleaseArtifactPaths,
         ...logMaintenanceProvisioningReleaseArtifactPaths,
     ].toSorted()
@@ -318,7 +320,8 @@ export async function createReleaseIdentity(
 ): Promise<ReleaseManifest> {
     validateRoots(options.repositoryRoot, options.releaseRoot);
     const source =
-        options.sourceIdentity ?? resolveBuildSourceIdentity(options.repositoryRoot);
+        options.sourceIdentity ??
+        (await resolveBuildSourceIdentity(options.repositoryRoot));
     if (source.state !== "clean") throw invalidReleaseIdentity();
     const runtime = options.runtimeIdentity ?? currentRuntimeIdentity();
     assertRuntimeIdentity(runtime);

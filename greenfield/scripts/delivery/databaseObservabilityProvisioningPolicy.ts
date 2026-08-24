@@ -1,0 +1,40 @@
+/** Exact approval-gated database-observability artifacts shipped in a release. */
+export const databaseObservabilityProvisioningReleaseArtifactPaths = Object.freeze(
+    [
+        "README.md",
+        "activate-observer.sql",
+        "apply-cluster.sql",
+        "apply-control-database-capability.sql",
+        "apply-control-database.sql",
+        "apply-database-access-reconciler.sql",
+        "apply-database-capabilities.sql",
+        "apply-reconciliation-approval.sql",
+        "apply-torrent-view.sql",
+        "disable-observer.sql",
+        "enable-approved-collection.sql",
+        "manifest.json",
+        "prepare-approved-collection.sql",
+        "reconcile-database-access.sql",
+        "rollback-cluster.sql",
+        "rollback-control-database-capability.sql",
+        "rollback-control-database.sql",
+        "rollback-database-access-reconciler.sql",
+        "rollback-database-capabilities.sql",
+        "rollback-reconciliation-approval.sql",
+        "rollback-torrent-view.sql",
+        "runProvisioning.ts",
+        "verify-cluster.sql",
+        "verify-control-database-capability.sql",
+        "verify-control-database.sql",
+        "verify-database-access-reconciler.sql",
+        "verify-database-capabilities.sql",
+        "verify-reconciliation-approval.sql",
+        "verify-database.sql",
+        "verify-torrent-view.sql",
+    ]
+        .map(
+            (fileName) =>
+                `scripts/delivery/provisioning/database-observability/${fileName}`
+        )
+        .toSorted()
+);

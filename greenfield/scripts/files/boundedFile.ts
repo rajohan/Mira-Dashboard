@@ -2,6 +2,10 @@ import { constants, type BigIntStats } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 
+// Linux UAPI O_CLOEXEC. The pinned Node types omit this runtime constant,
+// while the descriptor-rooted reader below already depends on Linux /proc.
+const linuxCloseOnExecFlag = 1 << 19;
+
 export interface BoundedFileReadTestHooks {
     /** Holds the read after its initial descriptor stat for deterministic mutation tests. */
     readonly afterInitialStat?: () => Promise<void> | void;
@@ -23,6 +27,9 @@ function invalidFileState(message: string): Error {
 
 function matchesSnapshot(before: BigIntStats, after: BigIntStats): boolean {
     return (
+        after.isFile() &&
+        !after.isSymbolicLink() &&
+        after.nlink === 1n &&
         after.dev === before.dev &&
         after.ino === before.ino &&
         after.size === before.size &&
@@ -77,7 +84,10 @@ export async function readBoundedRegularFile(
         const canonicalRoot = await realpath(requestedRoot);
         file = await open(
             requestedPath,
-            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+            constants.O_RDONLY |
+                constants.O_NOFOLLOW |
+                constants.O_NONBLOCK |
+                linuxCloseOnExecFlag
         );
         const descriptorPath = await realpath(`/proc/self/fd/${file.fd}`);
         if (!isContainedPath(canonicalRoot, descriptorPath)) {
@@ -85,7 +95,12 @@ export async function readBoundedRegularFile(
         }
 
         const before = await file.stat({ bigint: true });
-        if (!before.isFile() || before.size <= 0n || before.size > BigInt(maximumBytes)) {
+        if (
+            !before.isFile() ||
+            before.nlink !== 1n ||
+            before.size <= 0n ||
+            before.size > BigInt(maximumBytes)
+        ) {
             throw invalidFileState(invalidMessage);
         }
         await testHooks.afterInitialStat?.();
@@ -110,6 +125,7 @@ export async function readBoundedRegularFile(
             bytesRead !== expectedBytes ||
             !matchesSnapshot(before, after) ||
             !pathState.isFile() ||
+            pathState.nlink !== 1n ||
             !matchesSnapshot(before, pathState)
         ) {
             throw invalidFileState(invalidMessage);

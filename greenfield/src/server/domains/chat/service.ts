@@ -509,6 +509,30 @@ function externalStreamResetsAfterEvent(
     );
 }
 
+/**
+ * Reindexes a bounded external projection before contract validation.
+ * Part-count overflow loses detail; sequence-only rollover preserves every part.
+ * @param parts Ordered external projection parts before contract validation.
+ * @returns Bounded parts plus whether projection detail was discarded.
+ */
+export function normalizeExternalProjectionParts(
+    parts: readonly ChatRuntimeProjectionPart[]
+): Readonly<{
+    parts: readonly ChatRuntimeProjectionPart[];
+    partsExceeded: boolean;
+}> {
+    const partsExceeded = parts.length > chatRuntimeProjectionPartsMaximum;
+    const sequenceExceeded = (parts.at(-1)?.sequence ?? 0) > chatRunEventMaximum;
+    if (!partsExceeded && !sequenceExceeded) return { parts, partsExceeded };
+    const selected = partsExceeded
+        ? parts.slice(-chatRuntimeProjectionPartsMaximum)
+        : parts;
+    return {
+        parts: selected.map((part, index) => ({ ...part, sequence: index + 1 })),
+        partsExceeded,
+    };
+}
+
 function mergeExternalInFlightParts(
     previous: ChatExternalRun | undefined,
     providerRunId: string,
@@ -571,17 +595,10 @@ function mergeExternalInFlightParts(
             )
             .map((part) => (part.kind === "assistant" ? { ...part, text } : part));
     }
-    const partsExceeded = merged.length > chatRuntimeProjectionPartsMaximum;
-    const sequenceExceeded = (merged.at(-1)?.sequence ?? 0) > chatRunEventMaximum;
-    if (!partsExceeded && !sequenceExceeded) {
-        return { parts: merged, projectionTruncated: wasProjectionTruncated };
-    }
-    const bounded = partsExceeded
-        ? merged.slice(-chatRuntimeProjectionPartsMaximum)
-        : merged;
+    const normalized = normalizeExternalProjectionParts(merged);
     return {
-        parts: bounded.map((part, index) => ({ ...part, sequence: index + 1 })),
-        projectionTruncated: wasProjectionTruncated || partsExceeded,
+        parts: normalized.parts,
+        projectionTruncated: wasProjectionTruncated || normalized.partsExceeded,
     };
 }
 
@@ -1383,10 +1400,9 @@ class ChatServiceImplementation implements ChatService, ChatHistoryObservationPo
             hasUnprojectedActivity = true;
             projectionTruncated = true;
         }
-        if (parts.length > chatRuntimeProjectionPartsMaximum) {
-            parts = parts
-                .slice(-chatRuntimeProjectionPartsMaximum)
-                .map((part, index) => ({ ...part, sequence: index + 1 }));
+        const normalizedParts = normalizeExternalProjectionParts(parts);
+        parts = normalizedParts.parts;
+        if (normalizedParts.partsExceeded) {
             hasUnprojectedActivity = true;
             projectionTruncated = true;
         }

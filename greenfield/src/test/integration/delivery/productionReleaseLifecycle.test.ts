@@ -1,6 +1,15 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, symlink } from "node:fs/promises";
+import {
+    chmod,
+    cp,
+    lstat,
+    mkdir,
+    mkdtemp,
+    readFile,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -9,7 +18,11 @@ import { Effect } from "effect";
 import * as v from "valibot";
 
 import type { BuildSourceIdentity } from "../../../../scripts/buildSourceIdentity.ts";
-import { buildDashboardRelease } from "../../../../scripts/delivery/buildRelease.ts";
+import { buildProcessArtifacts } from "../../../../scripts/delivery/buildProcesses.ts";
+import {
+    buildDashboardRelease,
+    type ReleaseBuildCommand,
+} from "../../../../scripts/delivery/buildRelease.ts";
 import { withDeploymentLease } from "../../../../scripts/delivery/deploymentLease.ts";
 import { prepareProductionDeliveryDirectories } from "../../../../scripts/delivery/productionDeliveryFilesystem.ts";
 import {
@@ -31,6 +44,8 @@ import { dashboardSessionCookieName } from "../../../server/rawHttp/authenticati
 
 const sourceProjectRoot = path.resolve(import.meta.dir, "../../../..");
 const releaseId = "d".repeat(40);
+const lifecycleBrowserHtml =
+    "<!doctype html><html><head><title>Mira Dashboard</title></head><body></body></html>";
 const temporaryDirectories: string[] = [];
 const excludedBuildEntries = new Set([".git", "coverage", "dist", "node_modules"]);
 const gatewayTestEnvironment = Object.freeze({
@@ -83,10 +98,37 @@ async function realReleaseFixture(
         state: "clean",
     });
     const release = await buildDashboardRelease(repositoryRoot, {
-        resolveSourceIdentity: () => sourceIdentity,
+        resolveSourceIdentity: () => Promise.resolve(sourceIdentity),
+        runCommand: materializeLifecycleBuildCommand,
         runtimeIdentity,
     });
     return release.releaseRoot;
+}
+
+async function materializeLifecycleBuildCommand(
+    command: ReleaseBuildCommand,
+    repositoryRoot: string
+): Promise<void> {
+    switch (command) {
+        case "bun run build:browser": {
+            const browserRoot = path.join(repositoryRoot, "dist/browser");
+            await mkdir(browserRoot, { recursive: true });
+            await writeFile(path.join(browserRoot, "index.html"), lifecycleBrowserHtml);
+            return;
+        }
+        case "bun run build:processes": {
+            await buildProcessArtifacts(
+                repositoryRoot,
+                path.join(repositoryRoot, "dist/processes")
+            );
+            return;
+        }
+        case "bun run db:check":
+        case "bun run docs:check": {
+            // Dedicated gates cover source validation; this test exercises built runtime bytes.
+            return;
+        }
+    }
 }
 
 function webEnvironment(projectRoot: string, port: number): Record<string, string> {
@@ -125,10 +167,17 @@ async function stopChild(
         throw new Error("Production child exited before the shutdown signal");
     }
     child.kill("SIGTERM");
-    const exitCodeBeforeDeadline = await Promise.race([
-        child.exited,
-        Bun.sleep(5000).then(() => null),
-    ]);
+    let deadlineHandle: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+        deadlineHandle = setTimeout(() => resolve(null), 5000);
+        deadlineHandle.unref?.();
+    });
+    let exitCodeBeforeDeadline: number | null;
+    try {
+        exitCodeBeforeDeadline = await Promise.race([child.exited, deadline]);
+    } finally {
+        if (deadlineHandle !== undefined) clearTimeout(deadlineHandle);
+    }
     let forced = false;
     if (exitCodeBeforeDeadline === null && child.exitCode === null) {
         child.kill("SIGKILL");
@@ -279,14 +328,10 @@ class DirectProcessController implements ProductionServiceController {
                 },
             }
         );
-        await Bun.sleep(100);
-        if (this.#worker.exitCode !== null) throw new Error("Worker exited early");
         this.#web = Bun.spawn(
             [runtime.executable, path.join(release.releaseRoot, "server/web.js")],
             { ...common, env: webEnvironment(this.#projectRoot, this.#port) }
         );
-        await Bun.sleep(100);
-        if (this.#web.exitCode !== null) throw new Error("Web exited early");
     }
 
     async stop(): Promise<void> {
@@ -404,7 +449,8 @@ describe("disposable production release lifecycle", () => {
                 });
                 const browser = await fetch(`http://127.0.0.1:${port}/`);
                 expect(browser.status).toBe(200);
-                expect(await browser.text()).toContain("<title>Mira Dashboard</title>");
+                expect(browser.headers.get("content-type")).toContain("text/html");
+                expect(await browser.text()).toBe(lifecycleBrowserHtml);
                 const smoke = await runBundledWorkerSmoke(
                     path.join(paths.stateDirectory, "mira-dashboard.db"),
                     port

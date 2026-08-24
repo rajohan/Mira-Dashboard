@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, readFile, readlink, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, readlink, symlink, unlink } from "node:fs/promises";
 import path from "node:path";
 
 import { configurationEnvironmentNamesForRole } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
@@ -221,6 +221,151 @@ describe("production user-systemd service control", () => {
         });
     });
 
+    test("removes crash-left pointer stages before replacing current", async () => {
+        const sourceReleases = sourceReleaseFixtures();
+        const { projectRoot, runtimeSource } =
+            await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishProductionDeliveryFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource,
+                runtimeIdentity
+            );
+            await pointProductionProcessesAtRelease(
+                lease,
+                paths,
+                fixtures.first,
+                fixtures.runtime
+            );
+            const releaseStage = `.current-${Bun.randomUUIDv7()}`;
+            const runtimeStage = `.current-${Bun.randomUUIDv7()}`;
+            await symlink(
+                firstReleaseId,
+                path.join(paths.releasesDirectory, releaseStage),
+                "dir"
+            );
+            await symlink(
+                runtimeIdentity.revision,
+                path.join(paths.runtimesDirectory, "bun", runtimeStage),
+                "dir"
+            );
+
+            await pointProductionProcessesAtRelease(
+                lease,
+                paths,
+                fixtures.second,
+                fixtures.runtime
+            );
+
+            expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
+                secondReleaseId
+            );
+            expect(
+                await readlink(path.join(paths.runtimesDirectory, "bun", "current"))
+            ).toBe(runtimeIdentity.revision);
+            expect(await readdir(paths.releasesDirectory)).not.toContain(releaseStage);
+            expect(
+                await readdir(path.join(paths.runtimesDirectory, "bun"))
+            ).not.toContain(runtimeStage);
+        });
+    });
+
+    test("refuses to remove an untrusted pointer-stage symlink", async () => {
+        const sourceReleases = sourceReleaseFixtures();
+        const { projectRoot, runtimeSource } =
+            await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishProductionDeliveryFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource,
+                runtimeIdentity
+            );
+            await pointProductionProcessesAtRelease(
+                lease,
+                paths,
+                fixtures.first,
+                fixtures.runtime
+            );
+            const validStageName = `.current-${Bun.randomUUIDv7()}`;
+            await symlink(
+                firstReleaseId,
+                path.join(paths.releasesDirectory, validStageName),
+                "dir"
+            );
+            const stageName = `.current-${Bun.randomUUIDv7()}`;
+            const stagePath = path.join(paths.releasesDirectory, stageName);
+            await symlink("../outside", stagePath, "dir");
+
+            const failure = await rejectionError(
+                pointProductionProcessesAtRelease(
+                    lease,
+                    paths,
+                    fixtures.second,
+                    fixtures.runtime
+                )
+            );
+
+            expect(failure.message).toBe("Production runtime pointer update failed");
+            expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
+                firstReleaseId
+            );
+            expect(await readdir(paths.releasesDirectory)).toContain(validStageName);
+            expect(await readlink(stagePath)).toBe("../outside");
+        });
+    });
+
+    test("bounds crash-left pointer-stage inventory before mutation", async () => {
+        const sourceReleases = sourceReleaseFixtures();
+        const { projectRoot, runtimeSource } =
+            await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await publishProductionDeliveryFixtures(
+                lease,
+                paths,
+                sourceReleases,
+                runtimeSource,
+                runtimeIdentity
+            );
+            await pointProductionProcessesAtRelease(
+                lease,
+                paths,
+                fixtures.first,
+                fixtures.runtime
+            );
+            for (let index = 0; index < 129; index += 1) {
+                await symlink(
+                    firstReleaseId,
+                    path.join(paths.releasesDirectory, `.current-${Bun.randomUUIDv7()}`),
+                    "dir"
+                );
+            }
+
+            const failure = await rejectionError(
+                pointProductionProcessesAtRelease(
+                    lease,
+                    paths,
+                    fixtures.second,
+                    fixtures.runtime
+                )
+            );
+
+            expect(failure.message).toBe("Production runtime pointer update failed");
+            expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
+                firstReleaseId
+            );
+        });
+    });
+
     test("refuses to replace an untrusted current entry", async () => {
         const sourceReleases = sourceReleaseFixtures();
         const { projectRoot, runtimeSource } =
@@ -299,7 +444,9 @@ describe("production user-systemd service control", () => {
             `--only-secrets ${configurationEnvironmentNamesForRole("web").join(",")}`
         );
         expect(webExecStart).not.toContain("MOLTBOOK_API_KEY");
-        expect(web).toContain("UnsetEnvironment=MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME");
+        expect(web).toContain(
+            "UnsetEnvironment=MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD MOLTBOOK_API_KEY MOLTBOOK_AGENT_NAME"
+        );
         expect(worker).toContain("Environment=MIRA_DASHBOARD_OPENCLAW_ROOT=%h/.openclaw");
         expect(worker).toContain(
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"

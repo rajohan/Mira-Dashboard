@@ -92,6 +92,44 @@ including restart during streaming.
 - keep `/opt/docker` as the separate Docker-stack project and source of truth. Dashboard is its
   control plane: reviewed worker adapters may inspect or queue bounded operations, but compose
   files, application data, and deployment ownership do not move into Dashboard state.
+- treat external topology as runtime data, never as a source-code or configuration allowlist.
+  PostgreSQL inventory must be re-enumerated from the server catalog on every observation and
+  Docker inventory must later be re-enumerated from the Docker Engine with batched inspect data.
+  Both projections are bounded, deterministically sorted, and reconcile additions, removals, and
+  renames without a Dashboard release or an operator-maintained name list. Approved Compose roots
+  and resource ceilings define authority boundaries; they
+  must not become inventories. Standard Compose labels may enrich observed Docker identity but may
+  not gate discovery. Reuse the existing `mira.updater.enabled`, `mira.updater.autoUpdate`,
+  `mira.updater.track`, `mira.updater.tagPattern`, and
+  `mira.updater.tagPatternIsRegex` Compose labels as update-policy input. Greenfield may migrate or
+  tighten those labels in `/opt/docker` when needed, but mutation must require explicit valid
+  opt-in; missing or invalid policy leaves a discovered service inventory-only. A transient source
+  or per-item failure remains explicit and preserves the last known good projection instead of
+  fabricating an empty topology.
+- database observability already applies that Engine rule narrowly for endpoint discovery: every
+  snapshot uses bounded ID-only `docker ps -a` plus one fixed-template batched inspect, accepts one
+  healthy `mira.dashboard.database-observability=pgbouncer-v1` capability, resolves its loopback
+  binding, and keeps only the observer password in Dashboard configuration. That single opt-in
+  capability owns the fixed `mira_dashboard_observability` PgBouncer control alias. Approved
+  provisioning creates a dedicated same-named physical database from `template0`; PgBouncer's
+  existing wildcard route preserves that name without an explicit mapping or environment lookup.
+  No second database-name label or setting exists. The inspect template
+  excludes container environment, mounts, unrelated labels, and resolved Compose output. The later
+  Docker slice expands this same source-derived pattern to the full inventory and updater without
+  copying endpoint identities into code or configuration.
+- preserve `/opt/docker/compose.yaml` as the canonical whole-stack Compose root and resolve its
+  bounded include graph beneath `/opt/docker` for update targeting. All Compose start/stop/apply
+  mutations must execute the fixed `/opt/docker/bin/docker-compose-doppler` wrapper with
+  worker-built argument vectors; Dashboard must not invoke an alternate Compose command or accept
+  caller-supplied paths/arguments. `/opt/docker/.env` and app-local `.env` files remain opaque
+  Compose/Doppler inputs: validate containment, ownership, and mode where required, but never read
+  them into contracts, logs, audit payloads, or browser state and never edit them from this slice.
+  Resolve each update target to the one canonical included app Compose file that owns both the
+  service `image` field and its `mira.updater.*` labels. Apply a compare-and-swap image edit to that
+  file only, preserve unrelated formatting/content, validate the full root Compose project, and
+  invoke the root wrapper for the resolved service. A missing, duplicated, moved, or concurrently
+  changed image definition fails closed and is rediscovered; never patch the root include list or
+  infer an app filename from a container name.
 - use Dashboard's worker-owned rotation engine for an exact manifest of reviewed Dashboard,
   OpenClaw, and application/container regular-file logs, including the selected files beneath
   `/opt/docker/data`. Use Ubuntu's system logrotate only through a fixed broker for the exact
@@ -116,6 +154,94 @@ including restart during streaming.
   principal. Separately approved provisioning must bind only that principal, exclude the web
   principal, validate immutable artifacts, and preserve explicit rollback; a shared-user/group
   grant is forbidden.
+- keep the implemented `database.overview` and `/database` read-only vertical bounded: compose live
+  Dashboard-SQLite lifecycle facts with a worker-owned, bounded last-known-good
+  PostgreSQL/PgBouncer projection; preserve the source picker, maintenance assessment, responsive
+  tables, freshness, and failure states without exposing SQL, paths, credentials, or mutations.
+  Both sources must surface explicit actionable maintenance reasons: SQLite reusable space plus
+  backup/schedule/run health, and PostgreSQL conservative bloat, dead-tuple/autovacuum, statement,
+  capability, and incomplete-assessment signals. Preserve the legacy thresholds as a reviewed
+  baseline while allowing additional bounded evidence; do not silently downgrade assessment when
+  broad monitoring roles are removed.
+  Provision one dedicated PostgreSQL/PgBouncer observer with zero role memberships plus an isolated
+  `NOLOGIN` capability owner whose exact authority is direct `pg_read_all_stats` membership and
+  direct per-database `SELECT` on `pg_catalog.pg_statistic`. The observer receives only direct
+  `CONNECT`, capability-schema `USAGE`, and `EXECUTE` on the exact no-input, bounded
+  `connection_metrics()`, identity-free `statement_metrics()`, `table_health()`, and
+  `maintenance_metrics()` functions. Revoke raw `pg_stat_statements` source-view and routine access
+  from both `PUBLIC` and the observer; do not expose query text, `queryid`, database identity, or
+  user identity. The existing hourly `cache.refresh.database-observability` job must compose a
+  separate privileged collection-lease port only when the provider is configured. Between runs the
+  observer must be `NOLOGIN`, expired, and have zero PostgreSQL sessions. Each attempt must close
+  leftovers; run `open-approved-collection`, which verifies identity and activation approval,
+  performs the full bounded idempotent reconcile, and prepares a one-use token while retaining
+  `NOLOGIN`; run `enable-approved-collection`, which rechecks identity, approval, policy, and the
+  exact catalog digest before atomically consuming the token and setting `LOGIN` plus a short
+  `VALID UNTIL`;
+  collect once; run shielded mandatory close to restore and prove the exact closed state; and only
+  then return the payload to the generic cache executor for commit. The port spawns only the exact
+  immutable-release Bun runner; the collector retains only observer authority. Activation alone
+  creates or refreshes an approval marker bound to the PostgreSQL `system_identifier` and the exact
+  current and previous immutable-release policy digests. A policy version is descriptive and is
+  never sufficient authorization. Lease operations may only read that approval. Every approved
+  open performs the full bounded, idempotent reconcile before a separate one-use enable; there is no
+  persisted fingerprint, verification-age state, or reduced path. Reconciliation removes `PUBLIC`
+  database authority, grants direct observer `CONNECT` only to current non-template connectable databases,
+  denies template access, and requires explicit privileges for non-owner application roles while
+  the observer retains no mutation authority. Do not encode application database names, container
+  names, or Compose service names in the general inventory. Newly created or removed databases
+  must appear or disappear on the next bounded observation without source, manifest, or manual
+  Dashboard configuration changes. A new or drifted database is reconciled before the next
+  approved collection can expose its details, and access never widens. Any open,
+  collection, or close failure must preserve last-known-good, prevent a fresh cache commit, and
+  settle as a retryable redacted failure. PostgreSQL's closed-state proof cannot prove the absence
+  of already-authenticated PgBouncer waiting clients; add no exclusive admission, and treat any
+  interference as a failed attempt while the closed role prevents a new backend. Add no second
+  action, schedule, loop, sidecar, systemd unit, or PostgreSQL login. The sole
+  named application exception is the
+  optional, count-only `mira_dashboard_observability.torrent_count` projection in Comet and
+  Bitmagnet; those probes may use fixed database/view identifiers but must remain independently
+  unavailable when absent and must never filter or fail the general inventory. Treat legacy raw
+  query text/copy as a reviewed security narrowing while retaining generic ranked aggregate
+  performance metrics.
+  The dedicated observer password is the only Dashboard configuration input for this provider.
+  Discover host and published port from the worker-validated single Docker capability on every
+  refresh. Route the capability-owned fixed PgBouncer alias through the existing wildcard to the
+  dedicated same-named physical control database, so it never becomes a manually synchronized
+  label, environment value, or machine-specific default. Keep dynamic application inventory
+  catalog-derived; the code-owned control database is a capability, not an application allowlist.
+  Run approval-gated provisioning from the immutable current release with the exact selected Bun
+  runtime; pin the local Docker socket and root Compose project, resolve the healthy PostgreSQL
+  dependency, and use container-local psql through a scrubbed fixed launcher. Revalidate the
+  probed superuser role OID and PostgreSQL system identity before every SQL payload; never depend
+  on host psql or ambient host/container `PG*` endpoint variables.
+  On initial provisioning, run explicit `activate-current-catalog --approved` after those manual
+  prerequisites and before `verify-current-catalog --approved`, because verification requires an
+  existing matching approval. On later releases, verification may run first only when the retained
+  current or previous policy digest already approves that release; otherwise activation runs first.
+  Before Phase 5 can close, finish the production credential cutover rather than inheriting
+  legacy defaults: provision a distinct `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD` through
+  Doppler, apply it to `mira_dashboard_observer` through a reviewed non-logging activation path,
+  and never fall back to `DATABASE_USERNAME`/`DATABASE_PASSWORD`, `postgres/postgres`, or a
+  superuser credential. `/opt/docker/apps/pgbouncer/userlist.txt` currently contains a tracked
+  SCRAM verifier. A private repository limits distribution but is not secret storage. Replace the
+  tracked file with a runtime-generated or equivalently secret-mounted PgBouncer auth file, keep
+  it out of Git and out of group/world-readable storage, then rotate the affected credential so
+  the verifier retained in Git history is no longer current. Verify the cutover through the
+  Doppler Compose wrapper without printing resolved configuration, auth-file contents, or secret
+  values. This remediation, the single PgBouncer capability label, its fixed control alias, and the
+  existing hourly job's separate privileged collection-lease port is mandatory cutover work,
+  even if their final Compose implementation lands with the Docker slice.
+  Compose only canonical scheduled and activation/cutover SQLite snapshots. Treat one immutable
+  activation snapshot as the reviewed secure consolidation of the legacy pre-deploy and
+  pre-migration recovery purposes; never synthesize unsupported provenance. Retain at most
+  fourteen scheduled snapshots and at most five cutover snapshots/two days of unreferenced
+  cutover age, protecting current, previous, and active-journal identities through descriptor-
+  anchored atomic-retire cleanup under the trusted same-UID deployment-lease boundary. A future
+  root-owned immutable handoff and different-principal garbage collector are required to defend
+  against malicious concurrent mutation by that UID.
+  Keep the six Kopia/WAL-G status/control rows and database backup/restore in their separate
+  privileged slices.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

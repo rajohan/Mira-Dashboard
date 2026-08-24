@@ -13,7 +13,10 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - scripts/
                     - src/
+                    - drizzle.config.ts
+                    - tailwind.config.ts
         patch:
             dashboard:
                 target: 85%
@@ -24,7 +27,10 @@ coverage:
                 flags:
                     - dashboard
                 paths:
+                    - scripts/
                     - src/
+                    - drizzle.config.ts
+                    - tailwind.config.ts
 
 comment:
     layout: "reach,diff,flags,tree"
@@ -34,4 +40,7 @@ comment:
 flags:
     dashboard:
         paths:
+            - scripts/
             - src/
+            - drizzle.config.ts
+            - tailwind.config.ts

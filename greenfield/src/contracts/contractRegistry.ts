@@ -12,6 +12,7 @@ import {
     chatRealtimeEventContract,
 } from "./chatRealtime.ts";
 import { chatSpeechRawHttpContracts } from "./chatSpeech.ts";
+import { databaseProcedureContracts } from "./database.ts";
 import { eventsStreamContract } from "./events.ts";
 import {
     workspaceFileProcedureContracts,
@@ -58,6 +59,7 @@ const registeredProcedureContracts = [
     ...automationSecurityProcedureContracts,
     ...cacheProcedureContracts,
     ...chatProcedureContracts,
+    ...databaseProcedureContracts,
     eventsStreamContract,
     ...workspaceFileProcedureContracts,
     ...gatewayConnectionProcedureContracts,

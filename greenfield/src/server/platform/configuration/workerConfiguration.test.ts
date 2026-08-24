@@ -73,6 +73,41 @@ describe("worker application configuration", () => {
         expect(Object.isFrozen(configuration)).toBe(true);
         expect(Object.isFrozen(configuration.gatewayToken)).toBe(true);
         expect(Object.isFrozen(configuration.moltbookApiKey)).toBe(true);
+        expect(configuration.databaseObservabilityPassword).toBeUndefined();
+    });
+
+    test("accepts only the database password without topology and redacts it", () => {
+        const environment = validEnvironment();
+        environment.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD = "private-password";
+        const configuration = parseWorkerConfiguration(environment);
+
+        expect(Redacted.value(configuration.databaseObservabilityPassword!)).toBe(
+            "private-password"
+        );
+        expect(JSON.stringify(configuration)).not.toContain("private-password");
+        expect(inspect(configuration)).not.toContain("private-password");
+        expect(JSON.stringify(configuration.databaseObservabilityPassword)).toBe(
+            '"<redacted:database-observability-password>"'
+        );
+
+        for (const accepted of ["pass/word", "pass%2Fword", "pass@word"]) {
+            const candidate = validEnvironment();
+            candidate.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD = accepted;
+            expect(
+                Redacted.value(
+                    parseWorkerConfiguration(candidate).databaseObservabilityPassword!
+                )
+            ).toBe(accepted);
+        }
+
+        for (const invalid of [" private-password", "private-password "]) {
+            const candidate = validEnvironment();
+            candidate.MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD = invalid;
+            expect(configurationFailure(candidate)).toMatchObject({
+                field: "MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD",
+                reason: "invalid",
+            });
+        }
     });
 
     test("observes only the worker registry projection", () => {
@@ -119,6 +154,7 @@ describe("worker application configuration", () => {
         for (const [field, value, reason] of [
             ["OPENCLAW_GATEWAY_TOKEN", ` ${secret}`, "invalid"],
             ["MOLTBOOK_API_KEY", ` ${secret}`, "invalid"],
+            ["MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD", ` ${secret}`, "invalid"],
             ["OPENCLAW_GATEWAY_URL", `ws://${secret}.example`, "invalid"],
         ] as const) {
             const environment = validEnvironment();

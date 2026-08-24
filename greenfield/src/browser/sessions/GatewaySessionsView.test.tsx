@@ -206,7 +206,7 @@ describe("Gateway sessions view", () => {
         expect(dialog).toHaveTextContent("cannot be undone");
 
         await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-        await waitFor(() => expect(document.activeElement).toBe(trigger));
+        await waitFor(() => expect(document.activeElement === trigger).toBeTrue());
     });
 
     test("retains unknown session kinds under ALL and shows unknown activity", () => {
@@ -287,7 +287,7 @@ describe("Gateway sessions view", () => {
             screen.queryByRole("dialog", { name: "Summarize older context?" })
         ).toBeNull();
         expect(onAction).toHaveBeenCalledTimes(1);
-        await waitFor(() => expect(document.activeElement).toBe(trigger));
+        await waitFor(() => expect(document.activeElement === trigger).toBeTrue());
     });
 
     test("marks last-known-good data separately from an initial unavailable state", () => {

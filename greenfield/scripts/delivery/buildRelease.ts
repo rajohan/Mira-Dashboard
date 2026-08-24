@@ -30,7 +30,9 @@ export type ReleaseBuildCommand = (typeof releaseBuildCommands)[number];
 
 /** Injectable command/source boundaries used by focused build orchestration tests. */
 export interface DashboardReleaseBuildDependencies {
-    readonly resolveSourceIdentity?: (repositoryRoot: string) => BuildSourceIdentity;
+    readonly resolveSourceIdentity?: (
+        repositoryRoot: string
+    ) => Promise<BuildSourceIdentity>;
     readonly runCommand?: (
         command: ReleaseBuildCommand,
         repositoryRoot: string
@@ -139,7 +141,7 @@ export async function buildDashboardRelease(
     let candidateRoot: string | undefined;
     try {
         await assertRepositoryRoot(repositoryRoot);
-        const source = sourceResolver(repositoryRoot);
+        const source = await sourceResolver(repositoryRoot);
         requireCleanSource(source);
         const paths = await createReleaseStagingPaths(repositoryRoot, source.commitSha);
         candidateRoot = paths.stagingRoot;
@@ -147,7 +149,7 @@ export async function buildDashboardRelease(
         for (const command of releaseBuildCommands) {
             await commandRunner(command, repositoryRoot);
         }
-        requireSameCleanSource(source, sourceResolver(repositoryRoot));
+        requireSameCleanSource(source, await sourceResolver(repositoryRoot));
 
         await stageReleaseArtifacts({
             browserRoot: path.join(repositoryRoot, "dist/browser"),
@@ -155,7 +157,7 @@ export async function buildDashboardRelease(
             repositoryRoot,
             stagingRoot: paths.stagingRoot,
         });
-        requireSameCleanSource(source, sourceResolver(repositoryRoot));
+        requireSameCleanSource(source, await sourceResolver(repositoryRoot));
         const manifest = await writeReleaseIdentity({
             releaseRoot: paths.stagingRoot,
             repositoryRoot,
@@ -163,7 +165,7 @@ export async function buildDashboardRelease(
             sourceIdentity: source,
         });
         await verifyReleaseIdentity(paths.stagingRoot, manifest.runtime);
-        requireSameCleanSource(source, sourceResolver(repositoryRoot));
+        requireSameCleanSource(source, await sourceResolver(repositoryRoot));
 
         await makeReleaseTreeImmutable(repositoryRoot, paths.stagingRoot);
         await promoteStagedRelease(repositoryRoot, paths);

@@ -32,6 +32,7 @@ import {
 } from "../../src/contracts/chat.ts";
 import { chatAttachmentTicketPrepareInputSchema } from "../../src/contracts/chatMedia.ts";
 import { chatSpeechSynthesisInputSchema } from "../../src/contracts/chatSpeech.ts";
+import { databaseOverviewSchema } from "../../src/contracts/database.ts";
 import { listIncidentsResultSchema } from "../../src/contracts/incidents.ts";
 import { scheduleCronExpressionSchema } from "../../src/contracts/jobModel.ts";
 import { jobRealtimeChangeSchemas } from "../../src/contracts/jobRealtime.ts";
@@ -74,6 +75,27 @@ import { convertContractSchema } from "./jsonSchema.ts";
 const parseHexadecimalCodePoint = (value: string): number => Number.parseInt(value, 16);
 
 describe("contract JSON Schema conversion", () => {
+    test("documents database overview runtime consistency checks", () => {
+        const schema = convertContractSchema(
+            databaseOverviewSchema,
+            "database.overview.output",
+            "output"
+        );
+        expect(JSON.stringify(schema)).toContain(
+            "SQLite observation and stale timestamps to remain causally ordered"
+        );
+        expect(JSON.stringify(schema)).toContain(
+            "applied migrations not to exceed the bundled graph"
+        );
+        expect(JSON.stringify(schema)).toContain("128 KiB UTF-8 payload budget");
+        expect(JSON.stringify(schema)).toContain(
+            "exact aggregate sizes and connection bounds"
+        );
+        expect(JSON.stringify(schema)).toContain(
+            `"maximum":${String(Number.MAX_SAFE_INTEGER)}`
+        );
+    });
+
     test("documents the fixed canonical Service Actions inventory", () => {
         expect(
             convertContractSchema(
@@ -285,6 +307,7 @@ describe("contract JSON Schema conversion", () => {
                     "cache:write",
                     "chat:read",
                     "chat:write",
+                    "database:read",
                     "files:read",
                     "files:write",
                     "gateway-sessions:read",
@@ -310,7 +333,7 @@ describe("contract JSON Schema conversion", () => {
                     "terminal:write",
                 ],
             },
-            maxItems: 29,
+            maxItems: 30,
             type: "array",
             uniqueItems: true,
         });

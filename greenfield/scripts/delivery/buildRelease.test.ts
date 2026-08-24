@@ -68,13 +68,8 @@ async function repositoryFixture(): Promise<string> {
             { recursive: true }
         ),
         cp(
-            path.join(sourceProjectRoot, "scripts/delivery/provisioning/host-operations"),
-            path.join(repositoryRoot, "scripts/delivery/provisioning/host-operations"),
-            { recursive: true }
-        ),
-        cp(
-            path.join(sourceProjectRoot, "scripts/delivery/provisioning/log-maintenance"),
-            path.join(repositoryRoot, "scripts/delivery/provisioning/log-maintenance"),
+            path.join(sourceProjectRoot, "scripts/delivery/provisioning"),
+            path.join(repositoryRoot, "scripts/delivery/provisioning"),
             { recursive: true }
         ),
         cp(
@@ -127,7 +122,7 @@ describe("Dashboard release build", () => {
         const repositoryRoot = await repositoryFixture();
         const commands: ReleaseBuildCommand[] = [];
         const result = await buildDashboardRelease(repositoryRoot, {
-            resolveSourceIdentity: () => cleanSource,
+            resolveSourceIdentity: () => Promise.resolve(cleanSource),
             runCommand: async (command, root) => {
                 commands.push(command);
                 await materializeCommandOutput(command, root);
@@ -155,7 +150,8 @@ describe("Dashboard release build", () => {
         let dirtyCommandRan = false;
         const dirtyFailure = await rejectionError(
             buildDashboardRelease(dirtyRoot, {
-                resolveSourceIdentity: () => ({ commitSha, state: "dirty" }),
+                resolveSourceIdentity: () =>
+                    Promise.resolve({ commitSha, state: "dirty" }),
                 runCommand: () => {
                     dirtyCommandRan = true;
                     return Promise.resolve();
@@ -172,9 +168,11 @@ describe("Dashboard release build", () => {
             buildDashboardRelease(changingRoot, {
                 resolveSourceIdentity: () => {
                     sourceReadCount += 1;
-                    return sourceReadCount === 1
-                        ? cleanSource
-                        : { commitSha, state: "dirty" };
+                    return Promise.resolve(
+                        sourceReadCount === 1
+                            ? cleanSource
+                            : { commitSha, state: "dirty" }
+                    );
                 },
                 runCommand: materializeCommandOutput,
                 runtimeIdentity,
@@ -192,7 +190,7 @@ describe("Dashboard release build", () => {
         let existingCommandRan = false;
         const existingFailure = await rejectionError(
             buildDashboardRelease(existingRoot, {
-                resolveSourceIdentity: () => cleanSource,
+                resolveSourceIdentity: () => Promise.resolve(cleanSource),
                 runCommand: () => {
                     existingCommandRan = true;
                     return Promise.resolve();
@@ -206,7 +204,7 @@ describe("Dashboard release build", () => {
         const failedRoot = await repositoryFixture();
         const commandFailure = await rejectionError(
             buildDashboardRelease(failedRoot, {
-                resolveSourceIdentity: () => cleanSource,
+                resolveSourceIdentity: () => Promise.resolve(cleanSource),
                 runCommand: async (command, root) => {
                     if (command === "bun run docs:check") throw new Error("failed");
                     await materializeCommandOutput(command, root);

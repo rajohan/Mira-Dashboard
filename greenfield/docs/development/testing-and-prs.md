@@ -22,8 +22,8 @@ git diff --check
 
 Use focused Bun tests while iterating, then run the full affected suite before handoff. The
 coverage gate requires at least 85% aggregate production line coverage, rejects executable
-`src/` modules missing entirely from LCOV, and publishes the same report for Codecov's 85% patch
-gate.
+`scripts/` or `src/` modules missing entirely from LCOV, and publishes the same report for
+Codecov's 85% patch gate.
 
 The non-browser coverage partition uses three isolated Bun worker processes. The checked-in
 `.bun-test-timings.json` file is only a scheduling hint: it starts the slowest files first without

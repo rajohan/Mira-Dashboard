@@ -14,6 +14,10 @@ import path from "node:path";
 import * as v from "valibot";
 
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
+import {
+    assertProductionArtifactCopyCapacity,
+    type ProductionArtifactCapacityDependencies,
+} from "./productionArtifactCapacity.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
 
@@ -28,6 +32,11 @@ const immutableFileMode = 0o500;
 const sourceFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const destinationFlags =
     constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_RDWR;
+const directoryFlags =
+    constants.O_RDONLY |
+    constants.O_DIRECTORY |
+    constants.O_NOFOLLOW |
+    constants.O_NONBLOCK;
 const runtimeIdentitySchema = v.strictObject({
     revision: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
     version: v.pipe(v.string(), v.regex(/^\d+\.\d+\.\d+$/u)),
@@ -46,6 +55,8 @@ export interface ProductionRuntimeVerificationDependencies {
 
 /** Runtime probe and mutation boundaries exposed only to focused tests. */
 export interface ProductionRuntimeDependencies {
+    readonly availableCapacity?: ProductionArtifactCapacityDependencies["availableCapacity"];
+    readonly beforeCopy?: (sourceExecutable: string) => Promise<void> | void;
     readonly afterCopy?: (destination: string) => Promise<void> | void;
     readonly probeRuntime?: (executable: string) => Promise<ReleaseRuntimeIdentity>;
     readonly sourceExecutable?: string;
@@ -118,6 +129,18 @@ async function closeHandle(handle: FileHandle | undefined): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+    let handle: FileHandle | undefined;
+    let failed = false;
+    try {
+        handle = await open(directory, directoryFlags);
+        await handle.sync();
+    } catch {
+        failed = true;
+    }
+    if (!(await closeHandle(handle)) || failed) throw productionRuntimeFailure();
 }
 
 async function readBoundedProbeOutput(
@@ -206,6 +229,8 @@ async function ensurePrivateDirectory(parent: string, name: string): Promise<str
         ) {
             throw productionRuntimeFailure();
         }
+        await syncDirectory(directory);
+        await syncDirectory(parent);
         return directory;
     } catch {
         throw productionRuntimeFailure();
@@ -259,6 +284,7 @@ async function hashFileHandle(
 async function copyRuntimeExecutable(
     sourceExecutable: string,
     destination: string,
+    availableCapacity?: ProductionRuntimeDependencies["availableCapacity"],
     afterCopy?: (destination: string) => Promise<void> | void
 ): Promise<void> {
     let source: FileHandle | undefined;
@@ -272,6 +298,15 @@ async function copyRuntimeExecutable(
         if (canonical !== sourceExecutable || (heldStatus.mode & 0o100n) === 0n) {
             throw productionRuntimeFailure();
         }
+
+        await assertProductionArtifactCopyCapacity(
+            path.dirname(path.dirname(destination)),
+            Object.freeze({
+                fileBytes: Object.freeze([heldBefore.size]),
+                newDirectoryCount: 0n,
+            }),
+            { availableCapacity }
+        );
 
         target = await open(destination, destinationFlags, privateFileMode);
         const buffer = Buffer.alloc(Math.min(copyBufferBytes, Number(heldBefore.size)));
@@ -325,6 +360,7 @@ async function copyRuntimeExecutable(
         closeHandle(target),
     ]);
     if (failed || !sourceClosed || !targetClosed) throw productionRuntimeFailure();
+    await syncDirectory(path.dirname(destination));
 }
 
 async function assertInstalledRuntimeFile(executable: string): Promise<void> {
@@ -386,6 +422,7 @@ async function removeOwnedRuntimeCandidate(
             await chmod(executable, privateFileMode);
         }
         await rm(stageRoot, { force: false, recursive: true });
+        await syncDirectory(bunRoot);
     } catch (error) {
         if (errorCode(error) !== "ENOENT") throw productionRuntimeFailure();
     }
@@ -443,10 +480,13 @@ export async function installProductionRuntime(
         ownedRoot = stageRoot;
         ownedName = stageName;
         await mkdir(stageRoot, { mode: privateDirectoryMode });
+        await syncDirectory(bunRoot);
         const stageExecutable = path.join(stageRoot, "bun");
+        await dependencies.beforeCopy?.(sourceExecutable);
         await copyRuntimeExecutable(
             sourceExecutable,
             stageExecutable,
+            dependencies.availableCapacity,
             dependencies.afterCopy
         );
         const stagedIdentity = await probe(stageExecutable);
@@ -454,9 +494,11 @@ export async function installProductionRuntime(
             throw productionRuntimeFailure();
         }
         await chmod(stageRoot, immutableDirectoryMode);
+        await syncDirectory(stageRoot);
         await rename(stageRoot, finalRoot);
         ownedRoot = finalRoot;
         ownedName = expectedIdentity.revision;
+        await syncDirectory(bunRoot);
         await assertInstalledRuntimeFile(finalExecutable);
         const observed = await probe(finalExecutable);
         if (!sameRuntimeIdentity(expectedIdentity, observed)) {
@@ -532,10 +574,46 @@ export async function loadInstalledProductionRuntime(
     identity: ReleaseRuntimeIdentity,
     dependencies: ProductionRuntimeVerificationDependencies = {}
 ): Promise<InstalledProductionRuntime> {
-    const runtime = Object.freeze({
-        executable: path.join(paths.runtimesDirectory, "bun", identity.revision, "bun"),
-        identity,
-    });
-    await verifyInstalledProductionRuntime(paths, runtime, dependencies);
-    return runtime;
+    try {
+        if (!v.is(runtimeIdentitySchema, identity)) throw productionRuntimeFailure();
+        const runtime = await inspectInstalledProductionRuntime(
+            paths,
+            identity.revision,
+            dependencies
+        );
+        if (!sameRuntimeIdentity(identity, runtime.identity)) {
+            throw productionRuntimeFailure();
+        }
+        return runtime;
+    } catch {
+        throw productionRuntimeFailure();
+    }
+}
+
+/**
+ * Reconstructs and verifies one installed runtime from its immutable directory identity.
+ * This is used by retention to validate orphaned runtimes whose release was already retired.
+ * @param paths Exact prepared production delivery roots.
+ * @param revision Full Bun revision naming the immutable runtime directory.
+ * @param dependencies Injectable probe boundary for focused tests.
+ * @returns Verified installed runtime executable and observed identity.
+ */
+export async function inspectInstalledProductionRuntime(
+    paths: PreparedProductionDeliveryPaths,
+    revision: string,
+    dependencies: ProductionRuntimeVerificationDependencies = {}
+): Promise<InstalledProductionRuntime> {
+    try {
+        if (!/^[a-f\d]{40}$/u.test(revision)) throw productionRuntimeFailure();
+        const executable = path.join(paths.runtimesDirectory, "bun", revision, "bun");
+        await assertPrivateRuntimeRoot(paths.runtimesDirectory);
+        await assertInstalledRuntimeFile(executable);
+        const identity = await (dependencies.probeRuntime ?? probeProductionRuntime)(
+            executable
+        );
+        if (identity.revision !== revision) throw productionRuntimeFailure();
+        return Object.freeze({ executable, identity });
+    } catch {
+        throw productionRuntimeFailure();
+    }
 }

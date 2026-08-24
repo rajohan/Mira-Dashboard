@@ -5,7 +5,9 @@ peer = false
 preload = ["./src/test/setup.ts"]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
-    "scripts/**",
+    "scripts/**/testSupport/**",
+    "scripts/**/testSupport.ts",
+    "scripts/**/testSupport.tsx",
     "src/**/*.d.ts",
     "src/**/*.stories.tsx",
     "src/**/storySupport/**",

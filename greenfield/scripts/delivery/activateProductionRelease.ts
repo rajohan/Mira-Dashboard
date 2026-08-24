@@ -5,12 +5,29 @@ import * as v from "valibot";
 
 import { healthReadinessPath } from "../../src/contracts/system.ts";
 import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
+import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { fullCommitShaSchema } from "../../src/shared/validation.ts";
+import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
-import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
-import { activatePublishedProductionRelease } from "./productionReleaseActivation.ts";
-import { publishProductionRelease } from "./productionReleasePublication.ts";
-import { installProductionRuntime } from "./productionRuntime.ts";
+import { assertProductionArtifactCapacity } from "./productionArtifactCapacity.ts";
+import {
+    prepareProductionDeliveryDirectories,
+    type PreparedProductionDeliveryPaths,
+} from "./productionDeliveryFilesystem.ts";
+import {
+    activatePublishedProductionRelease,
+    prepareProductionArtifactAdmission,
+    type ProductionReleaseActivationDependencies,
+    type ProductionServiceController,
+} from "./productionReleaseActivation.ts";
+import {
+    publishProductionRelease,
+    type PublishedProductionRelease,
+} from "./productionReleasePublication.ts";
+import {
+    installProductionRuntime,
+    type InstalledProductionRuntime,
+} from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./systemdProductionServices.ts";
@@ -85,6 +102,15 @@ export interface ActivateProductionReleaseCliDependencies {
     ) => Promise<ProductionActivationRecord>;
 }
 
+/** Install/publication boundaries exposed to focused admission-lifecycle tests. */
+export interface ProductionArtifactDeliveryDependencies {
+    readonly activateRelease?: typeof activatePublishedProductionRelease;
+    readonly artifactAdmission?: typeof prepareProductionArtifactAdmission;
+    readonly capacityAdmission?: typeof assertProductionArtifactCapacity;
+    readonly installRuntime?: typeof installProductionRuntime;
+    readonly publishRelease?: typeof publishProductionRelease;
+}
+
 function readNamedArguments(arguments_: readonly string[]): Record<string, string> {
     const values = Object.create(null) as Record<string, string>;
     for (const argument of arguments_) {
@@ -130,6 +156,65 @@ export function parseActivateProductionReleaseArguments(
     return Object.freeze(parsed.output);
 }
 
+/**
+ * Runs pre-admission recovery/retention, capacity admission, copy, and activation under one lease.
+ * A failed runtime install or publication immediately repeats journal-aware retention so repeated
+ * attempts with distinct identities cannot accumulate immutable artifacts.
+ * @returns The authoritative activation record after candidate readiness commits.
+ */
+export async function deliverProductionReleaseUnderLease(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    options: ActivateProductionReleaseArguments,
+    sourceManifest: ReleaseManifest,
+    services: ProductionServiceController,
+    dependencies: ProductionArtifactDeliveryDependencies = {}
+): Promise<ProductionActivationRecord> {
+    const artifactAdmission =
+        dependencies.artifactAdmission ?? prepareProductionArtifactAdmission;
+    const activationDependencies: ProductionReleaseActivationDependencies = {
+        services,
+    };
+    const runtimeSource = options.runtimeSource ?? process.execPath;
+    await artifactAdmission(lease, paths, activationDependencies);
+    await (dependencies.capacityAdmission ?? assertProductionArtifactCapacity)(
+        lease,
+        paths,
+        options.releaseRoot,
+        sourceManifest,
+        runtimeSource
+    );
+
+    let runtime: InstalledProductionRuntime;
+    let release: PublishedProductionRelease;
+    try {
+        runtime = await (dependencies.installRuntime ?? installProductionRuntime)(
+            lease,
+            paths,
+            sourceManifest.runtime,
+            { sourceExecutable: runtimeSource }
+        );
+        release = await (dependencies.publishRelease ?? publishProductionRelease)(
+            lease,
+            paths,
+            options.releaseRoot,
+            sourceManifest.runtime
+        );
+    } catch {
+        await artifactAdmission(lease, paths, activationDependencies);
+        throw new Error(activationCliFailureMessage);
+    }
+    return Effect.runPromise(
+        (dependencies.activateRelease ?? activatePublishedProductionRelease)(
+            lease,
+            paths,
+            release,
+            runtime,
+            activationDependencies
+        )
+    );
+}
+
 async function activateProductionRelease(
     options: ActivateProductionReleaseArguments
 ): Promise<ProductionActivationRecord> {
@@ -137,27 +222,15 @@ async function activateProductionRelease(
     const sourceManifest = await verifyReleaseArtifactIdentity(options.releaseRoot);
     return withDeploymentLease(state.stateDirectory, async (lease) => {
         const paths = await prepareProductionDeliveryDirectories(state);
-        const runtime = await installProductionRuntime(
-            lease,
-            paths,
-            sourceManifest.runtime,
-            options.runtimeSource === undefined
-                ? undefined
-                : { sourceExecutable: options.runtimeSource }
-        );
-        const release = await publishProductionRelease(
-            lease,
-            paths,
-            options.releaseRoot,
-            sourceManifest.runtime
-        );
         const services = createSystemdProductionServiceController(lease, paths, {
             readinessUrl: options.readinessUrl,
         });
-        return Effect.runPromise(
-            activatePublishedProductionRelease(lease, paths, release, runtime, {
-                services,
-            })
+        return deliverProductionReleaseUnderLease(
+            lease,
+            paths,
+            options,
+            sourceManifest,
+            services
         );
     });
 }

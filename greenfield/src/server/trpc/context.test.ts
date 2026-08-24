@@ -14,6 +14,7 @@ import {
     createTestApplicationRuntime,
     createTestAuthenticationLifecycleService,
     createTestAutomationSecurityLifecycleService,
+    createTestDatabaseObservabilityService,
     createTestGatewayConnectionService,
     createTestGatewaySessionsService,
     createTestMfaAccountLifecycleService,
@@ -45,6 +46,7 @@ describe("tRPC request context", () => {
         const monitoringService = createTestMonitoringService();
         const jobService = createTestJobService();
         const cacheService = createTestCacheService();
+        const databaseObservabilityService = createTestDatabaseObservabilityService();
         const responseHeaders = new Headers();
         const serviceActionsService = createTestServiceActionsService();
 
@@ -75,6 +77,7 @@ describe("tRPC request context", () => {
                 };
             },
             cacheService,
+            databaseObservabilityService,
             gatewayConnectionService: createTestGatewayConnectionService(),
             gatewaySessionsService: createTestGatewaySessionsService(),
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
@@ -115,6 +118,7 @@ describe("tRPC request context", () => {
         expect(context.monitoringService).toBe(monitoringService);
         expect(context.jobService).toBe(jobService);
         expect(context.cacheService).toBe(cacheService);
+        expect(context.databaseObservabilityService).toBe(databaseObservabilityService);
         expect(context.authenticationClientSourceId).toBe("client-source-1");
         expect(context.pendingLoginCredential).toEqual({
             kind: "present",
@@ -148,6 +152,7 @@ describe("tRPC request context", () => {
             automationSecurityLifecycle: createTestAutomationSecurityLifecycleService(),
             authenticateCredential: () => ({ authentication: { kind: "anonymous" } }),
             cacheService: createTestCacheService(),
+            databaseObservabilityService: createTestDatabaseObservabilityService(),
             gatewayConnectionService: createTestGatewayConnectionService(),
             gatewaySessionsService: createTestGatewaySessionsService(),
             mfaAccountLifecycle: createTestMfaAccountLifecycleService(),
@@ -197,6 +202,7 @@ describe("tRPC request context", () => {
                     },
                 }),
                 cacheService: createTestCacheService(),
+                databaseObservabilityService: createTestDatabaseObservabilityService(),
                 gatewayConnectionService: createTestGatewayConnectionService(),
                 gatewaySessionsService: createTestGatewaySessionsService(),
                 mfaAccountLifecycle: createTestMfaAccountLifecycleService(),

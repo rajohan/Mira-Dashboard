@@ -1981,6 +1981,58 @@ describe("durable job worker coordinator", () => {
         });
     });
 
+    test("persists cache attempts for an internal domain-only cache action", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const baseRegistration = jobActionDefinitions.find(
+            (definition) =>
+                definition.actionKey === "cache.refresh.database-observability"
+        );
+        if (baseRegistration === undefined) {
+            throw new Error("Missing database observability cache definition");
+        }
+        const run = claimedRun(workerId, baseRegistration.actionKey);
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const committedAttempts: unknown[] = [];
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            execute: (context) =>
+                Effect.tryPromise(() =>
+                    context.commitCacheAttempt({
+                        durationMs: 1,
+                        failureCode: "provider/database-observability-unavailable",
+                        failureMessage: "Database observability provider unavailable.",
+                        key: "database.observability",
+                        kind: "failed",
+                    })
+                ).pipe(Effect.as({})),
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            commitCacheAttempt: (attempt) => {
+                committedAttempts.push(attempt);
+                return Promise.resolve("committed");
+            },
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(committedAttempts).toEqual([
+            expect.objectContaining({
+                outcome: expect.objectContaining({
+                    key: "database.observability",
+                    kind: "failed",
+                }),
+                runId: run.id,
+                workerId,
+            }),
+        ]);
+        expect(fixture.settlements[0]?.outcome).toMatchObject({ kind: "succeeded" });
+    });
+
     test("interrupts and retry-safely settles active work before worker stop", async () => {
         const workerId = Bun.randomUUIDv7();
         const run = claimedRun(workerId, "test.shutdown");

@@ -279,8 +279,9 @@ describe("Notification center", () => {
 
             await waitFor(() => {
                 expect(
-                    screen.getByRole("button", { name: "Notifications, 1 unread" })
-                ).toBe(trigger);
+                    screen.getByRole("button", { name: "Notifications, 1 unread" }) ===
+                        trigger
+                ).toBeTrue();
                 expect(trigger).toHaveAttribute("aria-expanded", "true");
                 expect(
                     screen.getByRole("heading", { level: 2, name: "Notifications" })
@@ -293,8 +294,10 @@ describe("Notification center", () => {
                 await sameIdentityCheck;
             });
             expect(
-                await screen.findByRole("button", { name: "Notifications, 1 unread" })
-            ).toBe(trigger);
+                (await screen.findByRole("button", {
+                    name: "Notifications, 1 unread",
+                })) === trigger
+            ).toBeTrue();
             expect(trigger).toHaveAttribute("aria-expanded", "true");
             expect(
                 await screen.findByRole("heading", { level: 2, name: "Notifications" })
@@ -314,8 +317,9 @@ describe("Notification center", () => {
             });
             await waitFor(() => {
                 expect(
-                    screen.getByRole("button", { name: "Notifications, 1 unread" })
-                ).toBe(trigger);
+                    screen.getByRole("button", { name: "Notifications, 1 unread" }) ===
+                        trigger
+                ).toBeTrue();
                 expect(trigger).toHaveAttribute("aria-expanded", "true");
                 expect(harness.realtimeClient.activeSubscriptionCount).toBe(1);
             });
@@ -358,8 +362,10 @@ describe("Notification center", () => {
 
             await waitFor(() => {
                 expect(
-                    screen.getByRole("button", { name: "Notifications, none unread" })
-                ).toBe(trigger);
+                    screen.getByRole("button", {
+                        name: "Notifications, none unread",
+                    }) === trigger
+                ).toBeTrue();
                 expect(trigger).toHaveAttribute("aria-expanded", "true");
                 expect(harness.realtimeClient.activeSubscriptionCount).toBe(1);
             });

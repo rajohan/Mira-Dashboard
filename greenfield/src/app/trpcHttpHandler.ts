@@ -3,6 +3,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import type { AgentService } from "../server/domains/agents/service.ts";
 import type { CacheService } from "../server/domains/cache/service.ts";
 import type { ChatService } from "../server/domains/chat/service.ts";
+import type { DatabaseObservabilityService } from "../server/domains/database/service.ts";
 import type { WorkspaceFilesService } from "../server/domains/files/service.ts";
 import type { GatewayConnectionService } from "../server/domains/gatewayConnection/service.ts";
 import type { GatewaySessionsService } from "../server/domains/gatewaySessions/service.ts";
@@ -52,6 +53,7 @@ export interface TrpcHttpHandlerOptions {
     readonly browserOrigin?: string;
     readonly cacheService: CacheService["Service"];
     readonly chatService?: ChatService;
+    readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly workspaceFilesService?: WorkspaceFilesService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
@@ -245,6 +247,7 @@ export function createTrpcHttpHandler(options: TrpcHttpHandlerOptions) {
                     ...(options.chatService === undefined
                         ? {}
                         : { chatService: options.chatService }),
+                    databaseObservabilityService: options.databaseObservabilityService,
                     ...(options.workspaceFilesService === undefined
                         ? {}
                         : { workspaceFilesService: options.workspaceFilesService }),

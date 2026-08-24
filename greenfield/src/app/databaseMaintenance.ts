@@ -9,15 +9,18 @@ import {
 } from "../server/database/runtime/databaseCandidateMigrationOwner.ts";
 import type { DatabaseCandidateMigrationLayerOptions } from "../server/database/runtime/databaseService.ts";
 import {
+    createVerifiedSqliteMaintenanceSnapshot,
     createVerifiedDatabaseSnapshot,
     type DatabaseSnapshotOptions,
     type DatabaseSnapshotResult,
+    type SqliteMaintenanceSnapshotOptions,
+    type SqliteMaintenanceSnapshotResult,
 } from "../server/database/runtime/databaseSnapshot.ts";
 import { fullCommitShaSchema, lowercaseUuidV7Schema } from "../shared/validation.ts";
 
 const databaseMaintenanceFailureMessage = "Dashboard database maintenance failed";
 const databaseMaintenanceUsage =
-    "Usage: bun database-maintenance.js --operation=migrate-candidate|snapshot with the exact operation arguments";
+    "Usage: bun database-maintenance.js --operation=migrate-candidate|snapshot|sqlite-maintenance with the exact operation arguments";
 const absolutePathSchema = v.pipe(
     v.string(),
     v.maxLength(4096),
@@ -51,11 +54,19 @@ const snapshotArgumentsSchema = v.variant("expectedState", [
         transitionId: lowercaseUuidV7Schema(databaseMaintenanceUsage),
     }),
 ]);
+const sqliteMaintenanceArgumentsSchema = v.strictObject({
+    migrationsDirectory: absolutePathSchema,
+    operation: v.literal("sqlite-maintenance"),
+    releaseId: fullCommitShaSchema(databaseMaintenanceUsage),
+    stateDirectory: absolutePathSchema,
+    transitionId: lowercaseUuidV7Schema(databaseMaintenanceUsage),
+});
 
 /** Validated command for candidate migration or live-state snapshot creation. */
 export type DashboardDatabaseMaintenanceCommand =
     | Readonly<v.InferOutput<typeof candidateMigrationArgumentsSchema>>
-    | Readonly<v.InferOutput<typeof snapshotArgumentsSchema>>;
+    | Readonly<v.InferOutput<typeof snapshotArgumentsSchema>>
+    | Readonly<v.InferOutput<typeof sqliteMaintenanceArgumentsSchema>>;
 
 /** Injectable retained-runtime boundary used by deterministic lifecycle tests. */
 export interface DashboardDatabaseMaintenanceDependencies {
@@ -65,12 +76,17 @@ export interface DashboardDatabaseMaintenanceDependencies {
     readonly createSnapshot: (
         options: DatabaseSnapshotOptions
     ) => Promise<DatabaseSnapshotResult>;
+    readonly createSqliteMaintenance?: (
+        options: SqliteMaintenanceSnapshotOptions
+    ) => Promise<SqliteMaintenanceSnapshotResult>;
 }
 
 const defaultDependencies = Object.freeze({
     createRuntime: createDatabaseCandidateMigrationOwner,
     createSnapshot: (options: DatabaseSnapshotOptions) =>
         Effect.runPromise(createVerifiedDatabaseSnapshot(options)),
+    createSqliteMaintenance: (options: SqliteMaintenanceSnapshotOptions) =>
+        Effect.runPromise(createVerifiedSqliteMaintenanceSnapshot(options)),
 } satisfies DashboardDatabaseMaintenanceDependencies);
 
 function databaseMaintenanceFailure(error?: unknown): Error {
@@ -128,13 +144,26 @@ export function parseDatabaseMaintenanceArguments(
             stateDirectory: readArgument(arguments_, "state"),
             transitionId: readArgument(arguments_, "transition"),
         };
+    } else if (operation === "sqlite-maintenance" && arguments_.length === 5) {
+        candidate = {
+            migrationsDirectory: readArgument(arguments_, "migrations"),
+            operation,
+            releaseId: readArgument(arguments_, "release"),
+            stateDirectory: readArgument(arguments_, "state"),
+            transitionId: readArgument(arguments_, "transition"),
+        };
     } else {
         throw new TypeError(databaseMaintenanceUsage);
     }
-    const schema =
-        operation === "migrate-candidate"
-            ? candidateMigrationArgumentsSchema
-            : snapshotArgumentsSchema;
+    const schema = (() => {
+        if (operation === "migrate-candidate") {
+            return candidateMigrationArgumentsSchema;
+        }
+        if (operation === "sqlite-maintenance") {
+            return sqliteMaintenanceArgumentsSchema;
+        }
+        return snapshotArgumentsSchema;
+    })();
     const parsed = v.safeParse(schema, candidate, {
         abortEarly: true,
     });
@@ -151,10 +180,17 @@ export function parseDatabaseMaintenanceArguments(
 export async function runDashboardDatabaseMaintenance(
     command: DashboardDatabaseMaintenanceCommand,
     dependencies: DashboardDatabaseMaintenanceDependencies = defaultDependencies
-): Promise<DatabaseSnapshotResult | undefined> {
+): Promise<DatabaseSnapshotResult | SqliteMaintenanceSnapshotResult | undefined> {
     if (command.operation === "snapshot") {
         const { operation: _operation, ...options } = command;
         return dependencies.createSnapshot(options);
+    }
+    if (command.operation === "sqlite-maintenance") {
+        const { operation: _operation, ...options } = command;
+        return (
+            dependencies.createSqliteMaintenance ??
+            defaultDependencies.createSqliteMaintenance
+        )(options);
     }
     const { operation: _operation, ...options } = command;
     const runtime = dependencies.createRuntime(options);
@@ -177,13 +213,15 @@ if (import.meta.main) {
     try {
         const options = parseDatabaseMaintenanceArguments(Bun.argv.slice(2));
         const result = await runDashboardDatabaseMaintenance(options);
-        process.stdout.write(
-            `${JSON.stringify(
-                result === undefined
-                    ? { status: "MAINTAINED" }
-                    : { ...result, status: "SNAPSHOT" }
-            )}\n`
-        );
+        let output: unknown;
+        if (result === undefined) {
+            output = { status: "MAINTAINED" };
+        } else if ("checkpoint" in result) {
+            output = { processStatus: "SQLITE_MAINTENANCE", result };
+        } else {
+            output = { ...result, status: "SNAPSHOT" };
+        }
+        process.stdout.write(`${JSON.stringify(output)}\n`);
     } catch (error) {
         const message =
             error instanceof TypeError

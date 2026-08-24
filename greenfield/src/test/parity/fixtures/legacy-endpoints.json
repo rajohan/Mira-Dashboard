@@ -376,10 +376,10 @@
             "id": "GET /api/database/overview",
             "method": "GET",
             "path": "/api/database/overview",
-            "purpose": "Reads Postgres/PgBouncer plus Dashboard SQLite lifecycle overview.",
+            "purpose": "Reads one bounded, read-only PostgreSQL/PgBouncer plus Dashboard SQLite observability projection. Scheduled and cutover backup kinds are canonical; one immutable activation/cutover snapshot securely consolidates legacy pre-deploy and pre-migration recovery purposes without importing those old artifact kinds. Kopia/WAL-G status and control and database restore mutations remain separate privileged boundaries.",
             "section": "Backups, Cache, Metrics, Ops",
             "target": {
-                "delivery": "planned",
+                "delivery": "implemented",
                 "kind": "procedure",
                 "names": ["database.overview"],
                 "phase": "phase-5"

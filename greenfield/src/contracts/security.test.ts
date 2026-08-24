@@ -22,6 +22,7 @@ describe("request authentication contract", () => {
             "cache:write",
             "chat:read",
             "chat:write",
+            "database:read",
             "files:read",
             "files:write",
             "gateway-sessions:read",

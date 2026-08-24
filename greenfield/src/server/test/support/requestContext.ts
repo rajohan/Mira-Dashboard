@@ -6,10 +6,12 @@ import type {
     RequestAuthentication,
 } from "../../../contracts/security.ts";
 import type { SystemHealthDiagnostics } from "../../../contracts/system.ts";
+import type { DatabaseRuntimeObservation } from "../../database/runtime/databaseService.ts";
 import type { AgentService } from "../../domains/agents/service.ts";
 import { createTestAgentService } from "../../domains/agents/testSupport/service.ts";
 import type { CacheService } from "../../domains/cache/service.ts";
 import { createTestCacheService } from "../../domains/cache/testSupport/service.ts";
+import type { DatabaseObservabilityService } from "../../domains/database/service.ts";
 import {
     createGatewayConnectionService,
     type GatewayConnectionService,
@@ -73,6 +75,37 @@ const anonymousAuthentication: RequestAuthentication = { kind: "anonymous" };
 export const testSecurityUserId = "019fc968-1a9b-7770-8f1b-d5b863b0e7b4";
 export const testSessionSelector = "a".repeat(32);
 export const testAutomationCredentialId = "019fc968-1a9b-7771-9f1b-d5b863b0e7b4";
+export const testDatabaseRuntimeDiagnostics = Object.freeze({
+    appliedMigrations: 1,
+    connection: Object.freeze({
+        busyTimeoutMs: 0,
+        checksEnforced: true,
+        foreignKeysEnabled: true,
+        journalMode: "wal",
+        synchronousLevel: 2,
+        trustedSchemaEnabled: false,
+        walAutoCheckpointPages: 1000,
+    }),
+    databaseFileName: "mira-dashboard.db",
+    migrationCount: 1,
+    sqlite: Object.freeze({
+        databaseBytes: 8192,
+        freeBytes: 0,
+        freePages: 0,
+        freePercent: 0,
+        pageCount: 2,
+        pageSizeBytes: 4096,
+        permissions: Object.freeze({
+            dataDirectory: "0700",
+            database: "0600",
+            secure: true,
+        }),
+        shmBytes: 0,
+        storageBytes: 8192,
+        walBytes: 0,
+    }),
+    startupMode: "initialize-empty",
+} satisfies DatabaseRuntimeObservation);
 
 const inertStructuredLogSink = Object.freeze({
     write(): undefined {},
@@ -140,6 +173,21 @@ const unavailableSystemHealthDiagnostics = Object.freeze({
  */
 export function createTestSystemHealthDiagnosticsService(): SystemHealthDiagnosticsService {
     return Object.freeze({ read: () => unavailableSystemHealthDiagnostics });
+}
+
+/**
+ * Creates stable fail-closed SQLite observability for generic request tests.
+ * @returns An inert identity-free database observability service.
+ */
+export function createTestDatabaseObservabilityService(): DatabaseObservabilityService {
+    return Object.freeze({
+        read: () =>
+            Promise.resolve({
+                checkedAtMs: 1_800_000_000_000,
+                postgresql: { state: "unavailable" as const },
+                sqlite: { state: "unavailable" as const },
+            }),
+    });
 }
 
 /**
@@ -532,6 +580,7 @@ export interface TestServerSecurityServices {
     readonly authenticationLifecycle: AuthenticationLifecycleService;
     readonly automationSecurityLifecycle: AutomationSecurityLifecycleService;
     readonly cacheService: CacheService["Service"];
+    readonly databaseObservabilityService: DatabaseObservabilityService;
     readonly gatewayConnectionService: GatewayConnectionService;
     readonly gatewaySessionsService: GatewaySessionsService;
     readonly mfaAccountLifecycle: MfaAccountLifecycleService;
@@ -567,6 +616,9 @@ export function createTestServerSecurityServices(
             overrides.automationSecurityLifecycle ??
             createTestAutomationSecurityLifecycleService(),
         cacheService: overrides.cacheService ?? createTestCacheService(),
+        databaseObservabilityService:
+            overrides.databaseObservabilityService ??
+            createTestDatabaseObservabilityService(),
         gatewayConnectionService:
             overrides.gatewayConnectionService ?? createTestGatewayConnectionService(),
         gatewaySessionsService:
@@ -639,6 +691,7 @@ export function withTestDashboardDatabase(
     return Object.freeze({
         ...applicationRuntime,
         database: Object.freeze({
+            diagnostics: () => Promise.resolve(testDatabaseRuntimeDiagnostics),
             orm: () => Promise.resolve(database),
             run: runTestImmediateDatabaseWrite,
         }),
@@ -673,6 +726,7 @@ export function createTestRequestContext(
         readonly authenticationLifecycle?: AuthenticationLifecycleService;
         readonly automationSecurityLifecycle?: AutomationSecurityLifecycleService;
         readonly cacheService?: CacheService["Service"];
+        readonly databaseObservabilityService?: DatabaseObservabilityService;
         readonly gatewayConnectionService?: GatewayConnectionService;
         readonly gatewaySessionsService?: GatewaySessionsService;
         readonly mfaAccountLifecycle?: MfaAccountLifecycleService;
@@ -706,6 +760,9 @@ export function createTestRequestContext(
             createTestAutomationSecurityLifecycleService(),
         authenticateCredential: () => createTestAuthenticationResolution(authentication),
         cacheService: options.cacheService ?? createTestCacheService(),
+        databaseObservabilityService:
+            options.databaseObservabilityService ??
+            createTestDatabaseObservabilityService(),
         gatewayConnectionService:
             options.gatewayConnectionService ?? createTestGatewayConnectionService(),
         gatewaySessionsService:

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import drizzleConfiguration from "../drizzle.config.ts";
 import {
     assertDrizzleKitOutput,
     checkDatabaseSchema,
@@ -19,6 +20,18 @@ function commandResult(
 }
 
 describe("database schema gate", () => {
+    test("keeps the executable Drizzle root configuration under coverage", () => {
+        expect(drizzleConfiguration).toMatchObject({
+            breakpoints: true,
+            dbCredentials: { url: "./data/drizzle-kit.db" },
+            dialect: "sqlite",
+            out: "./migrations",
+            schema: "./src/server/database/schema/drizzleSchema.ts",
+            strict: true,
+            verbose: true,
+        });
+    });
+
     test("checks history before a non-writing schema drift comparison", () => {
         const commands: string[][] = [];
         const results = [commandResult("ok"), commandResult("no_changes")];

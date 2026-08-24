@@ -10,8 +10,10 @@ import {
 describe("coverage runner", () => {
     test("keeps Bun coverage free of browser globals", () => {
         expect(createCoverageTestArguments("/tmp/coverage-output", "bun")).toEqual([
+            "--timings=.bun-test-timings.json",
             "--bail=1",
             "--only-failures",
+            "--parallel=3",
             "--coverage",
             "--coverage-reporter",
             "lcov",
@@ -27,9 +29,12 @@ describe("coverage runner", () => {
         ]);
     });
 
-    test("runs browser coverage in one isolated process", () => {
+    test("runs browser coverage with three isolated workers", () => {
         expect(createCoverageTestArguments("/tmp/coverage-browser", "browser")).toEqual([
+            "--timings=.bun-browser-test-timings.json",
+            "--bail=1",
             "--only-failures",
+            "--parallel=3",
             "--coverage",
             "--coverage-reporter",
             "lcov",
@@ -37,7 +42,6 @@ describe("coverage runner", () => {
             "/tmp/coverage-browser",
             "--preload",
             "./src/browser/test/setup.ts",
-            "--bail=1",
             "src/browser",
         ]);
     });
@@ -95,7 +99,12 @@ describe("coverage runner", () => {
         expect(mergedPatterns).toEqual(["/tmp/coverage/*/lcov.info"]);
         expect(writes).toEqual([["/tmp/coverage/lcov.info", "TN:\nend_of_record"]]);
         expect(checks).toHaveLength(1);
-        expect(checks[0]?.[0]).toBe("/tmp/coverage/lcov.info");
+        expect(checks[0]).toEqual([
+            "/tmp/coverage/lcov.info",
+            "85",
+            "scripts,src,drizzle.config.ts,tailwind.config.ts",
+            "/tmp/project",
+        ]);
         expect(logs).toEqual(["Coverage 90.00% meets required 85.00% (18/20 lines)"]);
     });
 

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
+import { buildBrowserArtifact } from "./buildBrowser.ts";
+
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
 const scriptPath = path.join(import.meta.dir, "buildBrowser.ts");
 const outputDirectories: string[] = [];
@@ -110,10 +112,14 @@ describe("Dashboard browser artifact", () => {
     }, 60_000);
 
     test("rejects output outside the repository build boundary", async () => {
-        const execution = await runBuild(path.join(repositoryRoot, "dist"));
+        const outputDirectory = path.join(repositoryRoot, "dist");
+        const execution = await runBuild(outputDirectory);
 
         expect(execution.exitCode).toBe(1);
         expect(execution.stdout).toBe("");
         expect(execution.stderr).toBe("Browser build paths are invalid\n");
+        expect(buildBrowserArtifact(repositoryRoot, outputDirectory)).rejects.toThrow(
+            "Browser build paths are invalid"
+        );
     });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { dashboardNavigationItems } from "./dashboardNavigation.ts";
 import {
     dashboardContentContainerClassName,
     dashboardMainClassName,
@@ -7,6 +8,12 @@ import {
 } from "./dashboardShellLayout.ts";
 
 describe("Dashboard shell layout", () => {
+    test("keeps Database before Moltbook in reviewed navigation order", () => {
+        const paths = dashboardNavigationItems.map(({ to }) => to);
+        expect(paths.indexOf("/database")).toBeGreaterThan(-1);
+        expect(paths.indexOf("/database")).toBeLessThan(paths.indexOf("/moltbook"));
+    });
+
     test("keeps the Terminal workspace full-height with the standard responsive gutter", () => {
         expect(dashboardMainClassName("/terminal").split(" ")).toEqual(
             expect.arrayContaining([

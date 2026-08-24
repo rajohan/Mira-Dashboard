@@ -31,8 +31,7 @@
         "**/*.tsbuildinfo",
         ".git/**",
         ".vscode/**",
-        "build/**",
-        "greenfield/**"
+        "build/**"
     ],
     "options": {
         "denyWarnings": true,

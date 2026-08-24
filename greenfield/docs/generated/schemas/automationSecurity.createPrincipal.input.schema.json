@@ -12,6 +12,7 @@
           "cache:write",
           "chat:read",
           "chat:write",
+          "database:read",
           "files:read",
           "files:write",
           "gateway-sessions:read",
@@ -38,7 +39,7 @@
         ],
         "type": "string"
       },
-      "maxItems": 29,
+      "maxItems": 30,
       "uniqueItems": true
     },
     "id": {

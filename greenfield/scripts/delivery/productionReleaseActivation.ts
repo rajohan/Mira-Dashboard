@@ -11,6 +11,7 @@ import {
     runDatabaseCandidateMaintenance,
     runDatabaseSnapshotMaintenance,
 } from "./databaseMaintenanceProcess.ts";
+import { retainProductionDatabaseSnapshots } from "./databaseSnapshotRetention.ts";
 import {
     discardDatabaseTransitionWorkspace,
     discardOrphanDatabaseTransitionWorkspace,
@@ -38,6 +39,10 @@ import {
     restorePreviousProductionActivationState,
     type ProductionActivationState,
 } from "./productionActivationState.ts";
+import {
+    retainProductionArtifacts,
+    type ProductionArtifactReference,
+} from "./productionArtifactRetention.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import {
     loadPublishedProductionRelease,
@@ -48,6 +53,7 @@ import {
     loadInstalledProductionRuntime,
     type ProductionRuntimeVerificationDependencies,
 } from "./productionRuntime.ts";
+import { clearProductionProcessPointers } from "./productionRuntimePointers.ts";
 
 const TaggedErrorClass = Schema.TaggedError;
 const activationFailureMessage = "Production release activation failed";
@@ -76,6 +82,7 @@ export interface ProductionServiceController {
 
 /** Activation dependencies kept explicit for disposable-host lifecycle tests. */
 export interface ProductionReleaseActivationDependencies {
+    readonly artifactRetention?: typeof retainProductionArtifacts;
     readonly maintenance?: DatabaseMaintenanceProcessDependencies;
     readonly runtimeVerification?: ProductionRuntimeVerificationDependencies;
     readonly services: ProductionServiceController;
@@ -130,6 +137,82 @@ function sameRecord(
 
 function activationError(): ProductionReleaseActivationError {
     return new ProductionReleaseActivationError({ message: activationFailureMessage });
+}
+
+function activationSnapshotReferences(
+    record: ProductionActivationRecord
+): readonly string[] {
+    return Object.freeze([
+        record.transitionId,
+        ...(record.previous === null
+            ? []
+            : [record.previous.databaseSnapshotTransitionId]),
+    ]);
+}
+
+async function retainCommittedDatabaseSnapshots(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    activation: ProductionActivationState
+): Promise<void> {
+    await retainProductionDatabaseSnapshots(lease, paths, {
+        activationTransitionIds:
+            activation.record === undefined
+                ? []
+                : activationSnapshotReferences(activation.record),
+    });
+}
+
+function activationArtifactReferences(
+    record: ProductionActivationRecord | undefined,
+    candidate?: ActiveArtifacts
+): readonly ProductionArtifactReference[] {
+    const candidates: readonly (ProductionArtifactReference | undefined)[] = [
+        record === undefined
+            ? undefined
+            : {
+                  releaseId: record.current.releaseId,
+                  runtimeRevision: record.current.runtimeRevision,
+              },
+        record?.previous === null || record?.previous === undefined
+            ? undefined
+            : {
+                  releaseId: record.previous.releaseId,
+                  runtimeRevision: record.previous.runtimeRevision,
+              },
+        candidate === undefined
+            ? undefined
+            : {
+                  releaseId: candidate.release.manifest.source.commitSha,
+                  runtimeRevision: candidate.runtime.identity.revision,
+              },
+    ];
+    const references = candidates.filter(
+        (reference): reference is ProductionArtifactReference => reference !== undefined
+    );
+    return Object.freeze(
+        references.filter(
+            (reference, index) =>
+                references.findIndex(
+                    ({ releaseId }) => releaseId === reference.releaseId
+                ) === index
+        )
+    );
+}
+
+async function retainCommittedProductionArtifacts(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    activation: ProductionActivationState,
+    dependencies: ProductionReleaseActivationDependencies,
+    candidate?: ActiveArtifacts
+): Promise<void> {
+    await (dependencies.artifactRetention ?? retainProductionArtifacts)(
+        lease,
+        paths,
+        activationArtifactReferences(activation.record, candidate),
+        { runtimeVerification: dependencies.runtimeVerification }
+    );
 }
 
 async function loadActiveArtifacts(
@@ -321,6 +404,20 @@ async function discardTransitionWorkspace(
         : discardOrphanDatabaseTransitionWorkspace(lease, paths, transitionId));
 }
 
+async function restorePreviousProcessState(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    previous: ActiveArtifacts | undefined,
+    dependencies: ProductionReleaseActivationDependencies
+): Promise<void> {
+    if (previous) {
+        await prepareAndStartServices(dependencies.services, previous);
+        await dependencies.services.verifyReady(previous.release, previous.runtime);
+        return;
+    }
+    await clearProductionProcessPointers(lease, paths);
+}
+
 function activationMatchesCandidate(
     activation: ProductionActivationState,
     journal: ProductionActivationTransition
@@ -372,10 +469,7 @@ async function rollbackTransition(
             paths,
             journal.transitionId
         );
-        if (previous) {
-            await prepareAndStartServices(dependencies.services, previous);
-            await dependencies.services.verifyReady(previous.release, previous.runtime);
-        }
+        await restorePreviousProcessState(lease, paths, previous, dependencies);
         await clearProductionActivationJournal(lease, paths, journal);
         return activation;
     }
@@ -399,10 +493,7 @@ async function rollbackTransition(
           )
         : activation;
     await discardOrphanDatabaseTransitionWorkspace(lease, paths, journal.transitionId);
-    if (previous) {
-        await prepareAndStartServices(dependencies.services, previous);
-        await dependencies.services.verifyReady(previous.release, previous.runtime);
-    }
+    await restorePreviousProcessState(lease, paths, previous, dependencies);
     await clearProductionActivationJournal(lease, paths, journal);
     return restoredActivation;
 }
@@ -440,6 +531,28 @@ async function recoverExistingTransition(
     return rollbackTransition(lease, paths, journal, activation, dependencies);
 }
 
+/**
+ * Reconciles any durable transition before a new release/runtime copy is admitted, then
+ * removes every artifact not referenced by the authoritative current/rollback state.
+ * Recovery runs first so an in-flight journal candidate remains available until its outcome is
+ * known. Callers must hold the same deployment lease for the later install and publication.
+ * @param lease Active wider deployment lease.
+ * @param paths Exact project-local production paths.
+ * @param dependencies Process control and verification boundaries required by recovery.
+ */
+export async function prepareProductionArtifactAdmission(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    dependencies: ProductionReleaseActivationDependencies
+): Promise<void> {
+    try {
+        const activation = await recoverExistingTransition(lease, paths, dependencies);
+        await retainCommittedProductionArtifacts(lease, paths, activation, dependencies);
+    } catch {
+        throw activationError();
+    }
+}
+
 async function activateRelease(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
@@ -448,11 +561,19 @@ async function activateRelease(
     dependencies: ProductionReleaseActivationDependencies
 ): Promise<ProductionActivationRecord> {
     const activation = await recoverExistingTransition(lease, paths, dependencies);
+    await retainCommittedDatabaseSnapshots(lease, paths, activation);
     const candidate = await verifyCandidateArtifacts(
         paths,
         candidateRelease,
         candidateRuntime,
         dependencies
+    );
+    await retainCommittedProductionArtifacts(
+        lease,
+        paths,
+        activation,
+        dependencies,
+        candidate
     );
     if (
         activation.record?.current.releaseId ===
@@ -541,6 +662,13 @@ async function activateRelease(
         await clearProductionActivationJournal(lease, paths, journal);
         journal = undefined;
         await dependencies.testHooks?.afterActivationJournalClear?.();
+        await retainCommittedDatabaseSnapshots(lease, paths, committedState);
+        await retainCommittedProductionArtifacts(
+            lease,
+            paths,
+            committedState,
+            dependencies
+        );
         return committed;
     } catch {
         const observedJournal = await loadProductionActivationJournal(lease, paths).catch(
@@ -553,12 +681,26 @@ async function activateRelease(
         if (observedJournal) {
             const recovered = await recoverExistingTransition(lease, paths, dependencies);
             if (sameRecord(recovered.record, expectedCommitted)) {
+                await retainCommittedDatabaseSnapshots(lease, paths, recovered);
+                await retainCommittedProductionArtifacts(
+                    lease,
+                    paths,
+                    recovered,
+                    dependencies
+                );
                 return expectedCommitted;
             }
             throw activationError();
         }
         if (sameRecord(observedActivation.record, expectedCommitted)) {
             await discardTransitionWorkspace(lease, paths, transitionId, workspace);
+            await retainCommittedDatabaseSnapshots(lease, paths, observedActivation);
+            await retainCommittedProductionArtifacts(
+                lease,
+                paths,
+                observedActivation,
+                dependencies
+            );
             return expectedCommitted;
         }
 

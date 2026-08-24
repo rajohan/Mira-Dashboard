@@ -54,6 +54,9 @@ describe("generated contract documentation", () => {
             "| `ELEVENLABS_API_KEY` | `elevenLabsApiKey` | `opaque-secret`; values withheld | When present, a trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Optional; no default | `web` | Yes | None |"
         );
         expect(configurationDocumentation).toContain(
+            "| `MIRA_DASHBOARD_DATABASE_OBSERVABILITY_PASSWORD` | `databaseObservabilityPassword` | `opaque-secret`; values withheld | When present, a trimmed nonblank opaque credential at most 4096 code units; no database, container, service, project, image, host, or port value is accepted, and the credential is never persisted, logged, or browser-exposed. | Optional; no default | `worker` | Yes | None |"
+        );
+        expect(configurationDocumentation).toContain(
             "| `MOLTBOOK_API_KEY` | `moltbookApiKey` | `opaque-secret`; values withheld | Trimmed nonblank control-safe secret at most 4096 code units; never persisted, logged, or browser-exposed. | Required; value withheld | `worker` | Yes | None |"
         );
         const procedureDocumentation = first.get("procedures.md");
@@ -178,12 +181,15 @@ describe("generated contract documentation", () => {
             "| `/moltbook` | Browser session | Moltbook | `moltbook` |"
         );
         expect(routeDocumentation).toContain(
+            "| `/database` | Browser session | Database | `database` |"
+        );
+        expect(routeDocumentation).toContain(
             "| `/settings` | Browser session | Settings | `settings` |"
         );
         expect(routeDocumentation).toContain(
             "| `/terminal` | Browser session | Terminal | `terminal` |"
         );
-        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(15);
+        expect(routeDocumentation?.match(/^\| `\//gmu)).toHaveLength(16);
         expect(first.has("schemas/files.upload.accepted.schema.json")).toBe(true);
         expect(first.has("schemas/logs.tail.output.schema.json")).toBe(true);
         expect(first.has("schemas/moltbook.feed.result.v1.schema.json")).toBe(true);

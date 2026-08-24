@@ -39,6 +39,7 @@ export async function startDevelopmentFrontend(
     const frontend = Bun.serve<DevelopmentProxySocketData>({
         development: { console: true, hmr: configuration.hotReload },
         hostname: configuration.host,
+        idleTimeout: 0,
         port: configuration.port,
         routes: {
             "/api": backendRequest,
@@ -52,8 +53,12 @@ export async function startDevelopmentFrontend(
     let remoteProxy: Bun.Server<DevelopmentRemoteProxySocketData> | undefined;
     try {
         if (configuration.remoteProxyPort !== undefined) {
+            const frontendPort = frontend.port;
+            if (frontendPort === undefined) {
+                throw new Error("Development frontend did not open a TCP listener");
+            }
             remoteProxy = startDevelopmentRemoteProxy({
-                frontendTarget: `http://127.0.0.1:${configuration.port}`,
+                frontendTarget: `http://127.0.0.1:${frontendPort}`,
                 port: configuration.remoteProxyPort,
                 publicOrigin: configuration.publicOrigin,
             });

@@ -230,18 +230,8 @@ export async function stageReleaseArtifacts(
             path.join(stagingRoot, "systemd")
         ),
         copyArtifactTree(
-            path.join(
-                sources.repositoryRoot,
-                "scripts/delivery/provisioning/log-maintenance"
-            ),
-            path.join(stagingRoot, "scripts/delivery/provisioning/log-maintenance")
-        ),
-        copyArtifactTree(
-            path.join(
-                sources.repositoryRoot,
-                "scripts/delivery/provisioning/host-operations"
-            ),
-            path.join(stagingRoot, "scripts/delivery/provisioning/host-operations")
+            path.join(sources.repositoryRoot, "scripts/delivery/provisioning"),
+            path.join(stagingRoot, "scripts/delivery/provisioning")
         ),
         copyMetadataFile(
             path.join(sources.repositoryRoot, ".bun-version"),
