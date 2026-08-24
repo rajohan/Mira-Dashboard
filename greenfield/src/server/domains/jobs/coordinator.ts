@@ -7,9 +7,16 @@ import {
     jobPayloadSchema,
     jobRunResultSchema,
     jobWorkerFreshnessMs,
+    retiredScheduledActionTerminalCode,
+    retiredScheduledActionTerminalMessage,
 } from "../../../contracts/jobModel.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import {
+    type LinuxBootIdentity,
+    linuxBootIdentitySchema,
+} from "../../../shared/linuxBootIdentity.ts";
+import { serializeWorkerActionKeys } from "../../database/validation/workerInstances.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import {
     type JobActionDefinition,
@@ -18,6 +25,7 @@ import {
     type JobCacheAttemptCommit,
     type JobCacheAttemptWriteResult,
     type JobExecutableActionDefinition,
+    JobActionOutcomeUnknownError,
     JobActionRetryableError,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
@@ -55,8 +63,10 @@ export const jobExpiredClaimRecoveryLimit = 32;
 
 type JobWorkerRepository = Pick<
     JobRepository,
+    | "armHostRestartClaimFence"
     | "appendClaimEvent"
     | "beginWorkerDrain"
+    | "clearHostRestartClaimFence"
     | "claimNextRun"
     | "enqueueNextDueSchedule"
     | "expireDisableIntents"
@@ -103,6 +113,7 @@ export interface JobWorkerCoordinatorTimings {
 export interface JobWorkerCoordinatorOptions {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly databaseReleaseId: string;
+    readonly bootIdentity: LinuxBootIdentity;
     readonly commitCacheAttempt?: (input: {
         readonly at: Date;
         readonly attempt: number;
@@ -466,6 +477,14 @@ function executionOutcome(
             terminalMessage: "The job action was cancelled.",
         };
     }
+    if (actionFailure instanceof JobActionOutcomeUnknownError) {
+        return {
+            kind: "failed",
+            terminalCode: "operation-outcome-unknown",
+            terminalMessage:
+                "The action may have taken effect; inspect current state before retrying.",
+        };
+    }
     const shutdown = abortReason instanceof JobCoordinatorShutdownError;
     return actionFailureOutcome(
         run,
@@ -534,6 +553,7 @@ async function waitForActiveExecution(
 }
 
 interface ExecuteClaimOptions {
+    readonly bootIdentity: LinuxBootIdentity;
     readonly commitCacheAttempt: JobWorkerCoordinatorOptions["commitCacheAttempt"];
     readonly databaseReleaseId: string;
     readonly findAction: (actionKey: string) => JobActionRegistration | undefined;
@@ -665,11 +685,49 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
         return result.kind;
     };
 
+    let hostRestartClaimFence:
+        | Extract<
+              Awaited<ReturnType<JobRepository["armHostRestartClaimFence"]>>,
+              { kind: "armed" }
+          >["fence"]
+        | undefined;
+
     let parsedActionPayload: JsonObject | undefined;
     const action = Effect.suspend(() => {
         parsedActionPayload = v.parse(jobPayloadSchema, parseJsonText(run.payloadJson));
         return registration.execute(
             Object.freeze({
+                armHostRestartClaimFence: async () => {
+                    if (hostRestartClaimFence !== undefined) {
+                        throw new Error("Host restart claim fence is already armed");
+                    }
+                    const arm = await options.repository.armHostRestartClaimFence({
+                        at: new Date(options.nowMs()),
+                        bootIdentity: options.bootIdentity,
+                        leaseToken,
+                        runId: run.id,
+                        workerId: options.workerInstanceId,
+                    });
+                    if (arm.kind === "lost-claim") throw new JobClaimLostError();
+                    hostRestartClaimFence = arm.fence;
+                },
+                clearHostRestartClaimFence: async () => {
+                    const fence = hostRestartClaimFence;
+                    if (fence === undefined) {
+                        throw new Error("Host restart claim fence is not armed");
+                    }
+                    const cleared = await options.repository.clearHostRestartClaimFence({
+                        armedAt: fence.armedAt,
+                        at: new Date(options.nowMs()),
+                        bootIdentity: fence.bootIdentity,
+                        expiresAt: fence.expiresAt,
+                        leaseToken,
+                        runId: run.id,
+                        workerId: options.workerInstanceId,
+                    });
+                    if (cleared.kind === "changed") throw new JobClaimLostError();
+                    hostRestartClaimFence = undefined;
+                },
                 commitCacheAttempt: async (outcome: JobCacheAttemptCommit) => {
                     if (
                         registration.manualExposure !== "cache-write" ||
@@ -767,11 +825,17 @@ async function executeClaim(options: ExecuteClaimOptions): Promise<void> {
 export function createJobWorkerCoordinator(
     options: JobWorkerCoordinatorOptions
 ): JobWorkerCoordinator {
+    const bootIdentity = v.parse(linuxBootIdentitySchema, options.bootIdentity);
     const timings = resolveTimings(options.timings);
     const nowMs = options.nowMs ?? Date.now;
     const generateId = options.generateId ?? (() => Bun.randomUUIDv7());
     const findAction = options.findAction ?? findNoAction;
     const actionDefinitions = options.actionDefinitions ?? jobActionDefinitions;
+    const actionKeysJson = serializeWorkerActionKeys(
+        actionDefinitions.flatMap(({ actionKey }) =>
+            findAction(actionKey) === undefined ? [] : [actionKey]
+        )
+    );
     const abortController = new AbortController();
     let activeExecution: Promise<void> | undefined;
     let initializePromise: Promise<void> | undefined;
@@ -981,6 +1045,7 @@ export function createJobWorkerCoordinator(
         const leaseToken = generateId();
         const claim = await options.repository.claimNextRun({
             at,
+            bootIdentity,
             ...(claimCursor === undefined ? {} : { cursor: claimCursor }),
             leaseExpiresAt: addMilliseconds(at, timings.claimLeaseMs),
             leaseToken,
@@ -1040,6 +1105,7 @@ export function createJobWorkerCoordinator(
             return;
         }
         activeExecution = executeClaim({
+            bootIdentity,
             commitCacheAttempt: options.commitCacheAttempt,
             databaseReleaseId: options.databaseReleaseId,
             findAction,
@@ -1086,6 +1152,16 @@ export function createJobWorkerCoordinator(
                 terminalMessage:
                     "Cancelled because the schedule was retired from the action registry",
             },
+            retiredRunFailure: {
+                sideEffectsForRun: (run) =>
+                    durableRunTransitionSideEffects(
+                        options.sideEffects,
+                        "jobs.run.action-unavailable",
+                        run
+                    ),
+                terminalCode: retiredScheduledActionTerminalCode,
+                terminalMessage: retiredScheduledActionTerminalMessage,
+            },
             schedules,
             sideEffectsForSchedule: (schedule) =>
                 options.sideEffects.forSchedule({
@@ -1096,6 +1172,7 @@ export function createJobWorkerCoordinator(
                 }),
         });
         const worker: WorkerInstanceInsert = {
+            actionKeysJson,
             capacity: jobWorkerCapacity,
             drainingAt: null,
             heartbeatAt: at,

@@ -52,10 +52,12 @@ const reviewedApplicationServerTargets: ReadonlyMap<
     [
         "src/app/worker.ts",
         new Set([
+            "src/server/domains/jobs/actionExecutors.ts",
             "src/server/domains/jobs/workerRuntime.ts",
             "src/server/domains/moltbook/provider.ts",
             "src/server/platform/configuration/workerConfiguration.ts",
             "src/server/platform/filesystem/projectLayout.ts",
+            "src/server/platform/gateway/persistentGatewayOpenClawServiceActionsProvider.ts",
             "src/server/platform/gateway/persistentGatewayTransport.ts",
             "src/server/platform/observability/projectFileLogSink.ts",
             "src/server/platform/observability/structuredLogger.ts",

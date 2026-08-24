@@ -90,7 +90,7 @@ describe("reviewed pre-cutover parity inventory", () => {
             "phase-2": 28,
             "phase-3": 39,
             "phase-4": 15,
-            "phase-5": 68,
+            "phase-5": 67,
         });
     });
 
@@ -265,6 +265,64 @@ describe("reviewed pre-cutover parity inventory", () => {
         ]);
     });
 
+    test("records the purpose-built Service Actions and interactive PTY exec replacement", async () => {
+        const reviewed = await loadReviewedParityInventory();
+        const endpoints = reviewed.legacyEndpoints.endpoints.filter(
+            ({ section }) => section === "Exec And Terminal"
+        );
+
+        expect(
+            endpoints.map(({ id, target }) => {
+                let identity: readonly string[] | string;
+                if (target.kind === "procedure") {
+                    identity = target.names;
+                } else if (target.kind === "raw-http") {
+                    identity = `${target.method} ${target.path}`;
+                } else {
+                    identity = target.consumerEvidence;
+                }
+                return [
+                    id,
+                    target.kind === "reviewed-removal" ? target.kind : target.delivery,
+                    identity,
+                ];
+            })
+        ).toEqual([
+            [
+                "GET /api/exec/:jobId",
+                "implemented",
+                ["jobs.getRun", "serviceActions.getStatus", "terminal.getActiveSession"],
+            ],
+            ["POST /api/exec", "reviewed-removal", "no-current-consumers"],
+            ["POST /api/exec/:jobId/stop", "implemented", ["terminal.terminateSession"]],
+            [
+                "POST /api/exec/start",
+                "planned",
+                ["serviceActions.request", "terminal.prepareSession"],
+            ],
+            [
+                "POST /api/terminal/cd",
+                "implemented",
+                "GET /api/terminal/sessions/:sessionId/socket",
+            ],
+            [
+                "POST /api/terminal/complete",
+                "implemented",
+                "GET /api/terminal/sessions/:sessionId/socket",
+            ],
+        ]);
+        expect(endpoints[1]?.target).toMatchObject({
+            consumerEvidence: "no-current-consumers",
+            kind: "reviewed-removal",
+            reason: expect.stringContaining("synchronous generic command endpoint"),
+        });
+        expect(endpoints[3]?.purpose).toContain("package autoremove/cache cleanup");
+        expect(endpoints[3]?.purpose).toContain("14-day and 1 GiB retention");
+        expect(endpoints[3]?.purpose).toContain("older than 168 hours");
+        expect(endpoints[3]?.purpose).toContain("never deletes volumes");
+        expect(endpoints[3]?.purpose).toContain("distinct-worker production topology");
+    });
+
     test("records the bounded OpenClaw settings and operations slice", async () => {
         const reviewed = await loadReviewedParityInventory();
         const settingsRoute = reviewed.frontend.routes.find(
@@ -300,7 +358,11 @@ describe("reviewed pre-cutover parity inventory", () => {
                 "implemented",
                 ["openClawSettings.createConfigurationBackup"],
             ],
-            ["POST /api/restart", "implemented", ["openClawSettings.restartGateway"]],
+            [
+                "POST /api/restart",
+                "implemented",
+                ["openClawSettings.restartGateway", "serviceActions.request"],
+            ],
             [
                 "POST /api/skills/:name",
                 "implemented",

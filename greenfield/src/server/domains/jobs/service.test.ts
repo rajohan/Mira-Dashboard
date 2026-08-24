@@ -277,6 +277,7 @@ describe("durable jobs service", () => {
             await repository.registerWorker({
                 ...noSideEffects,
                 worker: {
+                    actionKeysJson: '["system.worker-smoke"]',
                     capacity: 1,
                     drainingAt: null,
                     heartbeatAt: transitionAt,
@@ -290,6 +291,7 @@ describe("durable jobs service", () => {
             });
             expect(
                 await repository.claimNextRun({
+                    bootIdentity: "00000000-0000-0000-0000-000000000001",
                     at: transitionAt,
                     leaseExpiresAt: new Date(transitionAt.getTime() + 30_000),
                     leaseToken,
@@ -823,7 +825,7 @@ describe("durable jobs service", () => {
         }
     });
 
-    test("retires a schedule without cancelling its queued never-cancellable run", async () => {
+    test("fails a queued never-cancellable run whose action leaves the registry", async () => {
         const fixture = await openAuthenticationTestDatabase(authenticationTestNow);
         const repository = createJobRepository(
             fixture.database.orm,
@@ -880,10 +882,13 @@ describe("durable jobs service", () => {
             await reconcileJobSchedules({ generateId, nowMs: serviceNowMs, repository });
 
             expect(repository.findRun(run.id)).toMatchObject({
+                attemptCount: 0,
                 cancelRequestedAt: null,
-                eventCount: 1,
-                state: "queued",
-                terminalCode: null,
+                eventCount: 2,
+                firstStartedAt: null,
+                lastAttemptStartedAt: null,
+                state: "failed",
+                terminalCode: "action-unavailable",
                 updatedAt: runAt,
             });
             expect(repository.findSchedule(retiredScheduleId)?.schedule).toMatchObject({
@@ -904,6 +909,16 @@ describe("durable jobs service", () => {
                     .all()
             ).toEqual([
                 {
+                    entityId: run.id,
+                    occurredAt: runAt,
+                    topic: "jobs.runs",
+                },
+                {
+                    entityId: retiredScheduleId,
+                    occurredAt: runAt,
+                    topic: "schedules.records",
+                },
+                {
                     entityId: retiredScheduleId,
                     occurredAt: authenticationTestNow,
                     topic: "schedules.records",
@@ -913,14 +928,9 @@ describe("durable jobs service", () => {
                 fixture.database.orm
                     .select({ action: auditEvents.action })
                     .from(auditEvents)
-                    .where(
-                        and(
-                            eq(auditEvents.action, "jobs.run.cancel"),
-                            eq(auditEvents.targetId, run.id)
-                        )
-                    )
+                    .where(eq(auditEvents.targetId, run.id))
                     .all()
-            ).toEqual([]);
+            ).toEqual([{ action: "jobs.run.action-unavailable" }]);
 
             const eventCount = fixture.database.orm
                 .select()
@@ -1204,6 +1214,7 @@ describe("durable jobs service", () => {
                 id: string,
                 heartbeatAt: Date
             ): WorkerInstanceRecord => ({
+                actionKeysJson: "[]",
                 capacity: 1,
                 drainingAt: null,
                 heartbeatAt,

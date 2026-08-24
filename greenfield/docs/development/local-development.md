@@ -49,6 +49,12 @@ The browser development path follows Bun's native contracts:
 - production builds use the same compiler-first plugin order, while Bun removes the HMR-only data
   holder.
 
+The development-only `tanStackRouterHmrWorkaroundPlugin` narrowly transforms Router Core's ESM
+module around an upstream Bun evaluation cycle. It defers `replaceRouteChunk` access until the HMR
+callback runs and full-reloads only TanStack lazy-route updates instead of refreshing corrupted
+router state. Ordinary React and CSS Fast Refresh stay enabled, production builds do not load the
+workaround, and an unrecognized upstream implementation fails closed during development bundling.
+
 The implementation is anchored to Bun's official documentation:
 
 - [Hot reloading](https://bun.com/docs/bundler/hot-reloading)
@@ -114,10 +120,14 @@ running. A crashed coordinator's exact stale lease is recovered only after its p
 longer active; direct runtime children are parent-death guarded so they cannot continue using SQLite
 after that recovery.
 
-The database marker stores a deterministic fingerprint of the reviewed migration graph. When the
-mutable pre-cutover baseline changes, the next start removes only the development SQLite database
-and its sidecars, then initializes the current schema. The TOTP keyring, workspace, OpenClaw config,
-and other state remain intact.
+The database marker stores a deterministic fingerprint of the reviewed migration graph. The outer
+coordinator polls that exact graph independently of Bun's watched children. When the mutable
+pre-cutover baseline changes, it stops the frontend, web, and worker children, removes only the
+development SQLite database and its sidecars, updates the marker, and restarts all three children
+against the current schema. This also recovers automatically when a watched child observes a
+partially written migration graph and exits before the manifest edit lands. Ordinary React, CSS,
+and server-source edits remain on their existing Fast Refresh or Bun `--watch` paths. The TOTP
+keyring, workspace, OpenClaw config, and other state remain intact.
 
 Manual resets are deliberately separate:
 

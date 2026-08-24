@@ -489,6 +489,24 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
         role: "runtime-subscriptions",
     },
     {
+        fileNamePattern: /^session-accessor\.sqlite-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function collectSqliteSessionMaintenanceBaseKeys(store, activeSessionKey)",
+            "function applySqliteSessionEntryMaintenance(database, params)",
+            "async function applySqliteSessionEntryLifecycleMutation(params)",
+        ],
+        role: "session-accessor-sqlite-maintenance",
+    },
+    {
+        fileNamePattern: /^cleanup-service-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function serializeSessionCleanupResult(params)",
+            "async function previewStoreCleanup(params)",
+            "async function runSessionsCleanup(params)",
+        ],
+        role: "session-cleanup-service",
+    },
+    {
         fileNamePattern: /^session-companion-rpc-[A-Za-z0-9_-]+\.js$/u,
         markers: [
             '"sessions.companion.ask"',
@@ -560,6 +578,15 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "totalCount: list.totalCount",
         ],
         role: "session-list-projection",
+    },
+    {
+        fileNamePattern: /^session-entry-slot-keys-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function collectSessionMaintenancePreserveKeysForStore(params)",
+            "function shouldPreserveMaintenanceEntry(params)",
+            "function resolveMaintenanceConfig()",
+        ],
+        role: "session-maintenance-policy",
     },
     {
         fileNamePattern: /^session-reset-service-[A-Za-z0-9_-]+\.js$/u,
@@ -673,6 +700,43 @@ const distributionArtifactSpecs: readonly DistributionArtifactSpec[] = [
             "cascadeKilled",
         ],
         role: "subagent-control",
+    },
+    {
+        fileNamePattern: /^update-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const updateHandlers = {",
+            '"update.run": async',
+            "startManagedServiceUpdateHandoff",
+            "buildUpdateRestartSentinelPayload",
+        ],
+        role: "update-handlers",
+    },
+    {
+        fileNamePattern: /^update-startup-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const HANDOFF_READY_MARKER",
+            "function formatManagedServiceUpdateCommand(params)",
+            "async function startManagedServiceUpdateHandoff(params)",
+        ],
+        role: "update-managed-handoff",
+    },
+    {
+        fileNamePattern: /^update-runner-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "const MAX_LOG_CHARS = 8e3",
+            "async function runStep(opts)",
+            "async function runGatewayUpdate(opts = {})",
+        ],
+        role: "update-runner",
+    },
+    {
+        fileNamePattern: /^update-control-plane-sentinel-[A-Za-z0-9_-]+\.js$/u,
+        markers: [
+            "function buildUpdateRestartSentinelPayload(params)",
+            "CONTROL_PLANE_UPDATE_HANDOFF_STARTED_REASON",
+            "function isPendingControlPlaneUpdateRestartSentinel(payload)",
+        ],
+        role: "update-sentinel",
     },
     {
         fileNamePattern: /^task-registry-[A-Za-z0-9_-]+\.js$/u,
@@ -2931,6 +2995,610 @@ function assertPhase4SessionsSemantics(
             ],
             requestParams: [],
             requiredAcknowledgement: true,
+        },
+    };
+}
+
+function assertOpenClawOperationsSemantics(
+    artifacts: readonly LoadedSourceArtifact[]
+): SourceAuditResult["operations"] {
+    const protocol = artifactByRole(artifacts, "protocol-schemas").contents;
+    const cleanupParams = boundedSourceRegion(
+        protocol,
+        "/** Repairs or removes invalid session records from the selected agent scope. */",
+        "/** Reads short previews for selected session keys. */",
+        2 * 1024,
+        "sessions.cleanup params"
+    );
+    assertExactIndentedFields(
+        cleanupParams,
+        1,
+        ["activeKey", "agent", "allAgents", "enforce", "fixDmScope", "fixMissing"],
+        "sessions.cleanup params"
+    );
+    assertRequiredMarkers(cleanupParams, "sessions.cleanup optional params", [
+        "agent: Type.Optional(NonEmptyString)",
+        "allAgents: Type.Optional(Type.Boolean())",
+        "enforce: Type.Optional(Type.Boolean())",
+        "activeKey: Type.Optional(NonEmptyString)",
+        "fixMissing: Type.Optional(Type.Boolean())",
+        "fixDmScope: Type.Optional(Type.Boolean())",
+    ]);
+    assertForbiddenMarkers(cleanupParams, "sessions.cleanup request authority", [
+        "idempotencyKey",
+        "timeoutMs",
+    ]);
+
+    const updateParams = boundedSourceRegion(
+        protocol,
+        "/** Request payload for running an update/restart flow with optional channel delivery context. */",
+        "/** UI metadata attached to config schema paths. */",
+        2 * 1024,
+        "update.run params"
+    );
+    assertExactIndentedFields(
+        updateParams,
+        1,
+        [
+            "continuationMessage",
+            "deliveryContext",
+            "note",
+            "restartDelayMs",
+            "sessionKey",
+            "timeoutMs",
+        ],
+        "update.run params"
+    );
+    assertRequiredMarkers(updateParams, "update.run optional params", [
+        "sessionKey: Type.Optional(Type.String())",
+        "deliveryContext: Type.Optional(ConfigDeliveryContextSchema)",
+        "note: Type.Optional(Type.String())",
+        "continuationMessage: Type.Optional(Type.String())",
+        "restartDelayMs: Type.Optional(Type.Integer({ minimum: 0 }))",
+        "timeoutMs: Type.Optional(Type.Integer({ minimum: 1 }))",
+    ]);
+    assertForbiddenMarkers(updateParams, "update.run replay authority", [
+        "idempotencyKey",
+        "abortSignal",
+    ]);
+
+    const descriptors = artifactByRole(artifacts, "method-descriptors").contents;
+    assertMethodPermission(descriptors, "sessions.cleanup", "operator.admin", false);
+    assertMethodPermission(descriptors, "update.run", "operator.admin", true);
+
+    const sessionHandlers = artifactByRole(artifacts, "sessions-handlers").contents;
+    const cleanupHandler = boundedSourceRegion(
+        sessionHandlers,
+        '"sessions.cleanup": async',
+        '"sessions.preview":',
+        8 * 1024,
+        "sessions.cleanup handler"
+    );
+    assertRequiredMarkers(cleanupHandler, "sessions.cleanup handler", [
+        'assertValidParams(params, validateSessionsCleanupParams, "sessions.cleanup", respond)',
+        "const { mode, appliedSummaries } = await runSessionsCleanup({",
+        "agent: params.agent",
+        "allAgents: params.allAgents",
+        "enforce: params.enforce",
+        "activeKey: params.activeKey",
+        "fixMissing: params.fixMissing",
+        "fixDmScope: params.fixDmScope",
+        "serializeSessionCleanupResult({",
+        "summaries: appliedSummaries",
+        'reason: "cleanup"',
+        "errorShape(ErrorCodes.INVALID_REQUEST, formatErrorMessage(error))",
+    ]);
+
+    const cleanupService = artifactByRole(artifacts, "session-cleanup-service").contents;
+    const cleanupSerialization = boundedSourceRegion(
+        cleanupService,
+        "function serializeSessionCleanupResult(params) {",
+        "function pruneMissingTranscriptEntries(params) {",
+        2 * 1024,
+        "sessions.cleanup serialization"
+    );
+    assertRequiredMarkers(cleanupSerialization, "sessions.cleanup serialization", [
+        "if (params.summaries.length === 1) return params.summaries[0] ?? {}",
+        "allAgents: true",
+        "mode: params.mode",
+        "dryRun: params.dryRun",
+        "stores: params.summaries",
+    ]);
+    const cleanupExecution = boundedSourceRegion(
+        cleanupService,
+        "async function runSessionsCleanup(params) {",
+        "/** Purge session store entries for a deleted agent",
+        32 * 1024,
+        "sessions.cleanup execution"
+    );
+    const cleanupLifecycleMutationCall =
+        "const lifecycleResult = await applySqliteSessionEntryLifecycleMutation({";
+    const cleanupDiskBudgetCall =
+        "const appliedDiskBudget = await enforceSqliteSessionHistoryDiskBudget({";
+    assertRequiredMarkers(cleanupExecution, "sessions.cleanup execution", [
+        "const maintenance = resolveMaintenanceConfig()",
+        'const mode = opts.enforce ? "enforce" : maintenance.mode',
+        "fixMissing: Boolean(opts.fixMissing)",
+        "fixDmScope: Boolean(opts.fixDmScope)",
+        cleanupLifecycleMutationCall,
+        "activeSessionKey: opts.activeKey",
+        "maintenanceOverride: {",
+        'const appliedUnreferencedArtifacts = mode === "warn" ? null : await pruneUnreferencedSessionArtifacts({',
+        cleanupDiskBudgetCall,
+        "agentId: target.agentId",
+        "storePath: target.storePath",
+        "mode: appliedReport.mode",
+        "dryRun: false",
+        "beforeCount: appliedReport.beforeCount",
+        "afterCount: appliedReport.afterCount",
+        "missing: missingApplied",
+        "dmScopeRetired: dmScopeRetiredApplied",
+        "modelRunPruned: appliedReport.modelRunPruned",
+        "pruned: appliedReport.pruned",
+        "capped: appliedReport.capped",
+        "unreferencedArtifacts,",
+        "diskBudget: appliedDiskBudget",
+        "wouldMutate:",
+        "applied: true",
+        "appliedCount: lifecycleResult.afterCount",
+    ]);
+    if (
+        cleanupExecution.indexOf(cleanupLifecycleMutationCall) >
+        cleanupExecution.indexOf(cleanupDiskBudgetCall)
+    ) {
+        throw new Error(
+            "OpenClaw sessions.cleanup no longer applies lifecycle mutation before disk budget enforcement"
+        );
+    }
+
+    const maintenancePolicy = artifactByRole(
+        artifacts,
+        "session-maintenance-policy"
+    ).contents;
+    const activePreservation = boundedSourceRegion(
+        maintenancePolicy,
+        "/** Collects every runtime and active-work key protected from automatic maintenance. */",
+        "//#endregion",
+        2 * 1024,
+        "session cleanup active preservation"
+    );
+    assertRequiredMarkers(activePreservation, "session cleanup active preservation", [
+        "collectSessionMaintenancePreserveKeys(params.baseKeys)",
+        "collectActiveSessionWorkAdmissionKeys({",
+        "storePath: params.storePath",
+        "store: params.store",
+    ]);
+    const entryPreservation = boundedSourceRegion(
+        maintenancePolicy,
+        "function isProtectedSessionMaintenanceEntry(sessionKey, entry) {",
+        "function getActiveSessionMaintenanceWarning(params) {",
+        4 * 1024,
+        "session cleanup entry preservation"
+    );
+    assertRequiredMarkers(entryPreservation, "session cleanup entry preservation", [
+        "if (isPrimarySessionMaintenanceKey(sessionKey)) return true",
+        "if (parseSessionThreadInfoFast(sessionKey).threadId) return true",
+        "if (isTelegramTopicSessionKey(sessionKey)) return true",
+        "if (isExternalGroupOrChannelSessionKey(sessionKey)) return true",
+        'return chatType === "group" || chatType === "channel" || chatType === "thread"',
+        "if (params.entry?.archivedAt !== void 0) return true",
+        "params.entry?.modelSelectionLocked === true",
+        "params.preserveKeys?.has(params.key) === true",
+    ]);
+    const maintenanceConfig = boundedSourceRegion(
+        maintenancePolicy,
+        "function resolveMaintenanceConfig() {",
+        "//#endregion",
+        2 * 1024,
+        "session cleanup maintenance config"
+    );
+    assertRequiredMarkers(maintenanceConfig, "session cleanup maintenance config", [
+        "getRuntimeConfig().session?.maintenance",
+        "return resolveMaintenanceConfigFromInput(maintenance)",
+    ]);
+    const artifactPruning = boundedSourceRegion(
+        maintenancePolicy,
+        "async function pruneUnreferencedSessionArtifacts(params) {",
+        "async function enforceSessionDiskBudget(params) {",
+        16 * 1024,
+        "session cleanup unreferenced artifact result"
+    );
+    assertRequiredMarkers(
+        artifactPruning,
+        "session cleanup unreferenced artifact result",
+        [
+            "scannedFiles: files.length + promptBlobFiles.length",
+            "removedFiles,",
+            "freedBytes,",
+            "olderThanMs",
+        ]
+    );
+    const diskBudget = boundedSourceRegion(
+        maintenancePolicy,
+        "async function enforceSessionDiskBudget(params) {",
+        "//#endregion",
+        32 * 1024,
+        "session cleanup disk budget result"
+    );
+    assertRequiredMarkers(diskBudget, "session cleanup disk budget result", [
+        "totalBytesBefore: totalBefore",
+        "totalBytesAfter: total",
+        "removedFiles,",
+        "removedEntries,",
+        "freedBytes,",
+        "maxBytes,",
+        "highWaterBytes,",
+        "overBudget: true",
+    ]);
+
+    const sqliteMaintenance = artifactByRole(
+        artifacts,
+        "session-accessor-sqlite-maintenance"
+    ).contents;
+    const sqliteEntryMaintenance = boundedSourceRegion(
+        sqliteMaintenance,
+        "function collectSqliteSessionMaintenanceBaseKeys(store, activeSessionKey) {",
+        "function finalizeSqliteSessionEntryMaintenancePlansBestEffort(scope, plans) {",
+        24 * 1024,
+        "SQLite session cleanup preservation"
+    );
+    assertRequiredMarkers(sqliteEntryMaintenance, "SQLite session cleanup preservation", [
+        'currentKey = normalizeStoreSessionKey(store[currentKey]?.parentSessionKey ?? "")',
+        "collectSessionMaintenancePreserveKeysForStore({",
+        "baseKeys: collectSqliteSessionMaintenanceBaseKeys(store, params.activeSessionKey)",
+        "pruneStaleEntries(store, maintenance.pruneAfterMs",
+        "capEntryCount(store, maintenance.maxEntries",
+        "preserveKeys",
+    ]);
+    const lifecycleMutation = boundedSourceRegion(
+        sqliteMaintenance,
+        "async function applySqliteSessionEntryLifecycleMutation(params) {",
+        "/** Purges entries owned by a deleted agent from SQLite session rows. */",
+        32 * 1024,
+        "SQLite cleanup lifecycle mutation"
+    );
+    assertRequiredMarkers(lifecycleMutation, "SQLite cleanup lifecycle mutation", [
+        "if (!sqliteSessionEntriesEqual(entry, removal.expectedEntry))",
+        'activeSessionKey: params.activeSessionKey ?? ""',
+        "forceMaintenance: params.maintenanceOverride !== void 0",
+        "maintenanceConfig: params.maintenanceOverride ? {",
+    ]);
+
+    const updateHandlers = artifactByRole(artifacts, "update-handlers").contents;
+    const managedRestartPolicy = boundedSourceRegion(
+        updateHandlers,
+        "const MANAGED_HANDOFF_RESTART_DELAY_MS = 2e3;",
+        "const updateHandlers = {",
+        8 * 1024,
+        "managed update restart policy"
+    );
+    assertRequiredMarkers(managedRestartPolicy, "managed update restart policy", [
+        "const resolvedDelayMs = restartDelayMs ?? MANAGED_HANDOFF_RESTART_DELAY_MS",
+        'if (supervisor !== "systemd") return resolvedDelayMs',
+        "return Math.max(resolvedDelayMs, MANAGED_HANDOFF_RESTART_DELAY_MS)",
+        'if (supervisor === "systemd") return Boolean(env.OPENCLAW_SYSTEMD_UNIT?.trim())',
+    ]);
+    const updateRunHandler = boundedSourceRegion(
+        updateHandlers,
+        '"update.run": async',
+        "//#endregion",
+        48 * 1024,
+        "update.run handler"
+    );
+    assertRequiredMarkers(updateRunHandler, "update.run handler", [
+        'assertValidParams(params, validateUpdateRunParams, "update.run", respond)',
+        "const timeoutMsRaw = params.timeoutMs",
+        "Math.max(1e3, Math.floor(timeoutMsRaw))",
+        'const requiresManagedServiceHandoff = installSurface.kind === "global" || installSurface.kind === "git" && supervisor !== null',
+        "const hasHandoffContext = supervisor ? hasManagedServiceHandoffContext(process.env, supervisor) : false",
+        "const started = await startManagedServiceUpdateHandoff({",
+        'ownsManagedServiceHandoff = started.status === "started"',
+        "if (ownsManagedServiceHandoff) {",
+        "...started.pid ? { pid: started.pid } : {}",
+        "command: started.command",
+        "} else handoff = {",
+        'status: "already-running"',
+        'message: "Another managed update is already running; retry after it completes."',
+        "managedHandoffRestart = scheduleGatewaySigusr1Restart({",
+        'reason: "update.run"',
+        "skipDeferral: true",
+        "skipCooldown: true",
+        "result = await runGatewayUpdate({",
+        "allowGatewayServiceRepair: false",
+        "allowGatewayActivation: false",
+        "const payload = buildUpdateRestartSentinelPayload({",
+        "await writeRestartSentinel(payload)",
+        'const updateWasPackageSwap = result.status === "ok" && result.mode !== "git"',
+        'ok: result.status === "ok" || handoff?.status === "started"',
+        "result,",
+        "...handoff ? { handoff } : {}",
+        "restart,",
+        "sentinel: {",
+        "persisted: sentinelPersisted",
+        "payload",
+    ]);
+    if (updateRunHandler.includes("respond(false")) {
+        throw new Error(
+            "OpenClaw update.run operational settlement changed outside the reviewed shape"
+        );
+    }
+    assertForbiddenMarkers(updateRunHandler, "update.run replay authority", [
+        "abortSignal",
+        "idempotencyKey",
+    ]);
+
+    const managedHandoff = artifactByRole(artifacts, "update-managed-handoff").contents;
+    assertRequiredMarkers(managedHandoff, "managed update readiness deadline", [
+        "HANDOFF_READY_TIMEOUT_MS = 3e4",
+    ]);
+    const handoffCommand = boundedSourceRegion(
+        managedHandoff,
+        "function resolveUpdateCliArgv(params) {",
+        "function resolveGatewayServiceRecovery(supervisor, env) {",
+        8 * 1024,
+        "managed update command"
+    );
+    assertRequiredMarkers(handoffCommand, "managed update command", [
+        '"update"',
+        '"--yes"',
+        '"--json"',
+        'updateArgs.push("--timeout", String(Math.max(1, Math.ceil(params.timeoutMs / 1e3))))',
+        'args.push("--timeout", String(Math.max(1, Math.ceil(params.timeoutMs / 1e3))))',
+    ]);
+    const handoffSpawn = boundedSourceRegion(
+        managedHandoff,
+        "async function waitForHandoffReady(child) {",
+        "function buildManagedServiceHandoffUnavailableMessage(command) {",
+        24 * 1024,
+        "managed update handoff"
+    );
+    assertRequiredMarkers(handoffSpawn, "managed update handoff", [
+        "buffered.includes(HANDOFF_READY_MARKER)",
+        'new Error("managed update handoff did not signal readiness within 30 seconds")',
+        '"--user"',
+        '"--scope"',
+        '"--collect"',
+        "detached: true",
+        "sensitivePaths: [",
+        "scriptPath",
+        "paramsPath",
+        "metaPath",
+        "child.unref()",
+        "if (active) return {",
+        "...await active",
+        'status: "joined"',
+    ]);
+    assertRequiredMarkers(managedHandoff, "managed update sensitive cleanup", [
+        "function cleanupSensitiveFiles()",
+        "cleanupSensitiveFiles();",
+    ]);
+
+    const updateRunner = artifactByRole(artifacts, "update-runner").contents;
+    assertRequiredMarkers(updateRunner, "update result status", ['status: "ok"']);
+    const updateStep = boundedSourceRegion(
+        updateRunner,
+        "async function runStep(opts) {",
+        "function normalizeFallbackFailureReason(stepName) {",
+        8 * 1024,
+        "update command step"
+    );
+    assertRequiredMarkers(updateStep, "update command step", [
+        "const { runCommand, name, argv, cwd, timeoutMs",
+        "const result = await runCommand(argv, {",
+        "timeoutMs,",
+        "command,",
+        "cwd,",
+        "stdoutTail: trimLogTail(result.stdout, MAX_LOG_CHARS)",
+        "stderrTail,",
+    ]);
+    const updateRunnerEntry = boundedSourceRegion(
+        updateRunner,
+        "async function runGatewayUpdate(opts = {}) {",
+        "//#endregion",
+        8 * 1024,
+        "update runner entry"
+    );
+    assertRequiredMarkers(updateRunnerEntry, "update runner entry", [
+        "const timeoutMs = opts.timeoutMs ?? 12e5",
+        "return await runGitUpdate({",
+        "return await runGlobalUpdate({",
+        'status: "skipped"',
+        'reason: "not-git-install"',
+    ]);
+
+    const updateSentinel = artifactByRole(artifacts, "update-sentinel").contents;
+    const sentinelPayload = boundedSourceRegion(
+        updateSentinel,
+        "function buildUpdateRestartSentinelPayload(params) {",
+        "//#endregion",
+        8 * 1024,
+        "update restart sentinel"
+    );
+    assertRequiredMarkers(sentinelPayload, "update restart sentinel", [
+        'kind: "update"',
+        "status: result.status",
+        "message: meta.note ?? null",
+        "doctorHint: formatDoctorNonInteractiveHint()",
+        "root: result.root",
+        "handoffId: meta.handoffId",
+        "before: result.before ?? null",
+        "after: result.after ?? null",
+        "steps: result.steps.map((step) => ({",
+        "command: step.command",
+        "cwd: step.cwd",
+        "stdoutTail: step.stdoutTail ?? null",
+        "stderrTail: step.stderrTail ?? null",
+    ]);
+
+    return {
+        domain: "operations",
+        methodAccess: [
+            {
+                controlPlaneWrite: false,
+                lane: "one-shot-admin",
+                method: "sessions.cleanup",
+                scope: "operator.admin",
+            },
+            {
+                controlPlaneWrite: true,
+                lane: "one-shot-admin",
+                method: "update.run",
+                scope: "operator.admin",
+            },
+        ],
+        methods: ["sessions.cleanup", "update.run"],
+        schemaVersion: 1,
+        sessionsCleanup: {
+            handlerValidatesParams: true,
+            method: "sessions.cleanup",
+            mutation: {
+                diskBudgetEnforcedAfterEntryMaintenance: true,
+                entryStateRecheckedBeforeRemoval: true,
+                unreferencedArtifactsPrunedOutsideWarnMode: true,
+                usesSqliteLifecycleMutation: true,
+            },
+            outcome: {
+                automaticReplaySafe: false,
+                handlerTimeoutParameter: false,
+                idempotencyParameter: false,
+                postDispatchTransportTimeout: "outcome-unknown",
+            },
+            preservation: {
+                activeKeyAndParentsPreserved: true,
+                activeWorkAdmissionsPreserved: true,
+                archivedEntriesPreserved: true,
+                groupChannelAndThreadEntriesPreserved: true,
+                modelSelectionLockedEntriesPreserved: true,
+                primarySessionsPreserved: true,
+                registeredRuntimeKeysPreserved: true,
+            },
+            request: {
+                acceptedParams: [
+                    "activeKey",
+                    "agent",
+                    "allAgents",
+                    "enforce",
+                    "fixDmScope",
+                    "fixMissing",
+                ],
+                closedObject: true,
+                requiredParams: [],
+            },
+            response: {
+                appliedStoreFields: [
+                    "agentId",
+                    "storePath",
+                    "mode",
+                    "dryRun",
+                    "beforeCount",
+                    "afterCount",
+                    "missing",
+                    "dmScopeRetired",
+                    "modelRunPruned",
+                    "pruned",
+                    "capped",
+                    "unreferencedArtifacts",
+                    "diskBudget",
+                    "wouldMutate",
+                    "applied",
+                    "appliedCount",
+                ],
+                diskBudgetFields: [
+                    "totalBytesBefore",
+                    "totalBytesAfter",
+                    "removedFiles",
+                    "removedEntries",
+                    "freedBytes",
+                    "maxBytes",
+                    "highWaterBytes",
+                    "overBudget",
+                ],
+                formattedUpstreamErrorMustBeSanitized: true,
+                multiStoreFields: ["allAgents", "mode", "dryRun", "stores"],
+                sensitivePaths: ["storePath", "stores[].storePath"],
+                unreferencedArtifactFields: [
+                    "scannedFiles",
+                    "removedFiles",
+                    "freedBytes",
+                    "olderThanMs",
+                ],
+            },
+            semantics: {
+                activeKeyOptional: true,
+                enforceTrueOverridesConfiguredMode: true,
+                fixDmScopeDefaultsFalse: true,
+                fixMissingDefaultsFalse: true,
+                maintenanceConfigSource: "session.maintenance",
+                rpcAlwaysAppliesRatherThanDryRuns: true,
+            },
+        },
+        updateRun: {
+            handlerValidatesParams: true,
+            managedHandoff: {
+                activeFlightJoinedWithoutSecondSpawn: true,
+                detachedChild: true,
+                gitRequiresSupervisor: true,
+                globalInstallRequiresHandoff: true,
+                internalJoinedStatusCrossesRpc: false,
+                nonOwningWireStatus: "already-running",
+                readyMarkerTimeoutMs: 30_000,
+                sensitiveTemporaryFilesRemoved: true,
+                startedHandoffCountsAsAccepted: true,
+                systemdMinimumRestartDelayMs: 2000,
+                systemdRequiresUnitContext: true,
+                systemdUsesUserScope: true,
+            },
+            method: "update.run",
+            outcome: {
+                automaticReplaySafe: false,
+                handlerAbortSignal: false,
+                idempotencyParameter: false,
+                operationalErrorsUseRpcSuccess: true,
+                postDispatchTransportTimeout: "outcome-unknown",
+            },
+            request: {
+                acceptedParams: [
+                    "continuationMessage",
+                    "deliveryContext",
+                    "note",
+                    "restartDelayMs",
+                    "sessionKey",
+                    "timeoutMs",
+                ],
+                closedObject: true,
+                requiredParams: [],
+                restartDelayMinimumMs: 0,
+                timeoutMinimumMs: 1,
+            },
+            response: {
+                okWhenHandoffStarted: true,
+                okWhenResultStatusOk: true,
+                resultStatuses: ["error", "ok", "skipped"],
+                sentinelPersistenceBestEffort: true,
+                sensitivePaths: [
+                    "handoff.command",
+                    "handoff.message",
+                    "handoff.pid",
+                    "result.root",
+                    "result.steps[].command",
+                    "result.steps[].cwd",
+                    "result.steps[].stderrTail",
+                    "result.steps[].stdoutTail",
+                    "restart.pid",
+                    "sentinel.payload",
+                ],
+                topLevelFields: ["ok", "result", "handoff", "restart", "sentinel"],
+            },
+            restart: {
+                directSuccessSchedulesSigusr1: true,
+                managedSystemdSkipsCooldownAndDeferral: true,
+                packageSwapSkipsCooldownAndDeferral: true,
+            },
+            timeout: {
+                defaultRunnerPerStepMs: 1_200_000,
+                handlerFloorMs: 1000,
+                perStepRatherThanWholeOperation: true,
+            },
         },
     };
 }
@@ -5669,6 +6337,7 @@ export async function auditInstalledOpenClaw(
     const taskPromptChars = assertPlanCompanionAndTasks(artifacts);
     const tasksAdapter = assertPhase4TaskAdapterSemantics(artifacts);
     const sessionsAdapter = assertPhase4SessionsSemantics(artifacts);
+    const operations = assertOpenClawOperationsSemantics(artifacts);
     const cronAdapter = assertPhase4CronSemantics(artifacts);
     const settings = assertSettingsSemantics(artifacts);
 
@@ -5809,6 +6478,7 @@ export async function auditInstalledOpenClaw(
             schemaVersion: 1,
             sessionScopedEvents,
         },
+        operations,
         sessions: {
             adapter: sessionsAdapter,
             companion: {

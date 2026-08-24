@@ -2,15 +2,89 @@ import { createInsertSchema, createSelectSchema } from "drizzle-orm/valibot";
 import * as v from "valibot";
 
 import {
+    jobActionKeySchema,
     jobWorkerCapacityMaximum,
     jobWorkerStateSchema,
 } from "../../../contracts/jobModel.ts";
+import { utf8ByteLength } from "../../../shared/encoding.ts";
+import { parseJsonText } from "../../../shared/json.ts";
 import {
+    compareStrings,
     fullCommitShaSchema,
+    hasUniqueArrayItems,
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
+import {
+    workerActionKeyMaximum,
+    workerActionKeysMaximumBytes,
+} from "../schema/jobChecks.ts";
 import { workerInstances } from "../schema/workerInstances.ts";
 import { nonnegativeDateSchema, uuidV7TextSchema } from "./scalars.ts";
+
+function actionKeysAreCanonical(keys: string[]): boolean {
+    return (
+        hasUniqueArrayItems(keys) &&
+        keys.every((key, index) => {
+            const previous = keys[index - 1];
+            return previous === undefined || compareStrings(previous, key) < 0;
+        }) &&
+        utf8ByteLength(JSON.stringify(keys)) <= workerActionKeysMaximumBytes
+    );
+}
+
+/** Strict bounded canonical worker action inventory. */
+export const workerActionKeysSchema = v.pipe(
+    v.array(jobActionKeySchema, "Worker action keys are invalid"),
+    v.maxLength(workerActionKeyMaximum, "Worker action keys are outside their budget"),
+    v.check(actionKeysAreCanonical, "Worker action keys are not canonical")
+);
+
+/**
+ * Canonicalizes one validated release-owned executable-action inventory.
+ * @param actionKeys Candidate action identities from worker action definitions.
+ * @returns Frozen sorted unique keys safe to persist as worker identity.
+ */
+export function canonicalWorkerActionKeys(
+    actionKeys: readonly string[]
+): readonly string[] {
+    const sorted = actionKeys
+        .map((actionKey) => v.parse(jobActionKeySchema, actionKey))
+        .toSorted(compareStrings);
+    return Object.freeze([...v.parse(workerActionKeysSchema, sorted)]);
+}
+
+/**
+ * Serializes one canonical inventory without whitespace or unbounded fields.
+ * @param actionKeys Candidate action identities.
+ * @returns Canonical JSON text accepted by the worker persistence boundary.
+ */
+export function serializeWorkerActionKeys(actionKeys: readonly string[]): string {
+    return JSON.stringify(canonicalWorkerActionKeys(actionKeys));
+}
+
+/**
+ * Parses the immutable action inventory stored on one worker row.
+ * @param value Stored JSON text.
+ * @returns Frozen validated canonical action identities.
+ */
+export function parseWorkerActionKeysJson(value: string): readonly string[] {
+    const boundedValue = v.parse(
+        v.pipe(
+            v.string("Stored worker action keys are invalid"),
+            v.check(
+                (candidate) => utf8ByteLength(candidate) <= workerActionKeysMaximumBytes,
+                "Stored worker action keys are invalid"
+            )
+        ),
+        value
+    );
+    const parsed = v.parse(workerActionKeysSchema, parseJsonText(boundedValue));
+    v.parse(
+        v.literal(JSON.stringify(parsed), "Stored worker action keys are invalid"),
+        boundedValue
+    );
+    return Object.freeze([...parsed]);
+}
 
 const workerCapacitySchema = v.pipe(
     positiveSafeIntegerSchema("Stored worker capacity is invalid"),
@@ -19,6 +93,17 @@ const workerCapacitySchema = v.pipe(
 const workerPidSchema = v.pipe(
     positiveSafeIntegerSchema("Stored worker pid is invalid"),
     v.maxValue(2_147_483_647, "Stored worker pid is invalid")
+);
+const workerActionKeysJsonSchema = v.pipe(
+    v.string("Stored worker action keys are invalid"),
+    v.check((value) => {
+        try {
+            parseWorkerActionKeysJson(value);
+            return true;
+        } catch {
+            return false;
+        }
+    }, "Stored worker action keys are invalid")
 );
 
 interface StoredWorkerInstance {
@@ -49,6 +134,7 @@ function workerLifecycleIsConsistent(worker: StoredWorkerInstance): boolean {
 }
 
 const workerRefinements = {
+    actionKeysJson: () => workerActionKeysJsonSchema,
     capacity: () => workerCapacitySchema,
     drainingAt: nonnegativeDateSchema,
     heartbeatAt: nonnegativeDateSchema,
@@ -81,9 +167,10 @@ const generatedWorkerInstanceInsertSchema = createInsertSchema(
     workerInstances,
     workerRefinements
 );
-const workerInstanceInsertObjectSchema = v.strictObject(
-    generatedWorkerInstanceInsertSchema.entries
-);
+const workerInstanceInsertObjectSchema = v.strictObject({
+    ...generatedWorkerInstanceInsertSchema.entries,
+    actionKeysJson: workerActionKeysJsonSchema,
+});
 
 /** Validates one initially-online worker registration before insertion. */
 export const workerInstanceInsertSchema = v.pipe(

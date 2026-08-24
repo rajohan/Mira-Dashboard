@@ -49,6 +49,7 @@ import { openClawTaskGetOutputSchema } from "../../src/contracts/openClawTasks.t
 import { listReportsResultSchema } from "../../src/contracts/reports.ts";
 import { applicationCapabilityListSchema } from "../../src/contracts/security.ts";
 import { listSecurityAuditEventsResultSchema } from "../../src/contracts/securityAudit.ts";
+import { getServiceActionsStatusResultSchema } from "../../src/contracts/serviceActions.ts";
 import {
     taskDetailSchema,
     taskLabelInputSchema,
@@ -73,6 +74,24 @@ import { convertContractSchema } from "./jsonSchema.ts";
 const parseHexadecimalCodePoint = (value: string): number => Number.parseInt(value, 16);
 
 describe("contract JSON Schema conversion", () => {
+    test("documents the fixed canonical Service Actions inventory", () => {
+        expect(
+            convertContractSchema(
+                getServiceActionsStatusResultSchema,
+                "test.serviceActionsStatus",
+                "output"
+            )
+        ).toMatchObject({
+            properties: {
+                actions: {
+                    $comment:
+                        "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered.",
+                    maxItems: 6,
+                },
+            },
+        });
+    });
+
     test("documents ASCII-bounded Unicode-mode regular expressions", () => {
         const schema = v.pipe(v.string(), v.regex(/^[a-z]+$/u));
 
@@ -283,13 +302,15 @@ describe("contract JSON Schema conversion", () => {
                     "openclaw-tasks:write",
                     "reports:read",
                     "reports:write",
+                    "service-actions:read",
+                    "service-actions:write",
                     "tasks:read",
                     "tasks:write",
                     "terminal:read",
                     "terminal:write",
                 ],
             },
-            maxItems: 27,
+            maxItems: 29,
             type: "array",
             uniqueItems: true,
         });

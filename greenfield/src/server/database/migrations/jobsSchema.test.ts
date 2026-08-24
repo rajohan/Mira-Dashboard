@@ -45,6 +45,7 @@ interface QueuedRunFixture {
     idempotencyKey: string;
     requestedById: string;
     requestedByKind: "automation" | "system" | "user";
+    requiredWorkerReleaseId: string | null;
     resourceKeysJson: string;
     retrySafe: number;
     scheduledForAt: number | null;
@@ -170,6 +171,7 @@ function insertQueuedRun(
         cancellationPolicy: "cooperative",
         requestedById: "job-scheduler",
         requestedByKind: "system",
+        requiredWorkerReleaseId: null,
         resourceKeysJson: "[]",
         retrySafe: 1,
         scheduledForAt: null,
@@ -184,12 +186,13 @@ function insertQueuedRun(
             action_key, attempt_limit, available_at, cancellation_policy,
             display_name, enqueue_sha256, id, idempotency_key, payload_json,
             priority, queued_at, requested_by_id, requested_by_kind,
-            resource_class, resource_keys_json, retry_safe, scheduled_for_at,
+            required_worker_release_id, resource_class, resource_keys_json,
+            retry_safe, scheduled_for_at,
             scheduled_job_id, scheduled_job_version, state, timeout_ms,
             trigger_type, updated_at
         ) VALUES (
             'system.worker-smoke', ?, 1000, ?, 'Worker smoke', ?, ?, ?, '{}',
-            0, 1000, ?, ?, 'light', ?, ?, ?, ?, ?, 'queued', 10000, ?, 1000
+            0, 1000, ?, ?, ?, 'light', ?, ?, ?, ?, ?, 'queued', 10000, ?, 1000
         )`,
         [
             fixture.attemptLimit,
@@ -199,6 +202,7 @@ function insertQueuedRun(
             fixture.idempotencyKey,
             fixture.requestedById,
             fixture.requestedByKind,
+            fixture.requiredWorkerReleaseId,
             fixture.resourceKeysJson,
             fixture.retrySafe,
             fixture.scheduledForAt,
@@ -321,7 +325,8 @@ describe("jobs baseline schema", () => {
                         SELECT name, strict, wr
                         FROM pragma_table_list
                         WHERE name IN (
-                            'job_disable_intents', 'job_run_events', 'job_runs',
+                            'host_restart_claim_fence', 'job_disable_intents',
+                            'job_run_events', 'job_runs',
                             'job_worker_control', 'resource_leases',
                             'scheduled_jobs', 'worker_instances'
                         )
@@ -330,6 +335,7 @@ describe("jobs baseline schema", () => {
                     )
                     .all()
             ).toEqual([
+                { name: "host_restart_claim_fence", strict: 1, wr: 1 },
                 { name: "job_disable_intents", strict: 1, wr: 1 },
                 { name: "job_run_events", strict: 1, wr: 1 },
                 { name: "job_runs", strict: 1, wr: 1 },
@@ -665,6 +671,13 @@ describe("jobs baseline schema", () => {
                     resourceKeysJson: '["UPPER",7,"duplicate","duplicate"]',
                 })
             ).toThrow("job_runs resource keys must be canonical");
+            expect(() =>
+                insertQueuedRun(database, {
+                    id: uuid(13),
+                    idempotencyKey: idempotencyKey(13),
+                    requiredWorkerReleaseId: "A".repeat(40),
+                })
+            ).toThrow("job_runs_required_worker_release_id_check");
         } finally {
             database.sqlite.close(true);
         }
@@ -1033,6 +1046,94 @@ describe("jobs baseline schema", () => {
                     [neverRunId]
                 )
             ).toThrow("job_runs lifecycle transition is invalid");
+
+            const retiredScheduleId = "system.worker-smoke-retired-never";
+            const retiredRunId = uuid(29);
+            insertSchedule(database, {
+                cancellationPolicy: "never",
+                id: retiredScheduleId,
+            });
+            insertQueuedRun(database, {
+                cancellationPolicy: "never",
+                id: retiredRunId,
+                idempotencyKey: idempotencyKey(29),
+                scheduledForAt: 1000,
+                scheduledJobId: retiredScheduleId,
+                scheduledJobVersion: 1,
+                triggerType: "schedule",
+            });
+            insertEvent(database, {
+                jobRunId: retiredRunId,
+                kind: "queued",
+                sequence: 1,
+            });
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET finished_at = 1500, state = 'failed', state_version = 2,
+                         terminal_code = 'action-unavailable',
+                         terminal_message = 'The scheduled action is no longer available',
+                         updated_at = 1500
+                     WHERE id = ?`,
+                    [retiredRunId]
+                )
+            ).toThrow("job_runs lifecycle transition is invalid");
+            database.sqlite.run(
+                `UPDATE scheduled_jobs
+                 SET enabled = 0, next_run_at = NULL, updated_at = 1500, version = 2
+                 WHERE id = ?`,
+                [retiredScheduleId]
+            );
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE job_runs
+                     SET finished_at = 1500, state = 'failed', state_version = 2,
+                         terminal_code = 'action-unavailable',
+                         terminal_message = 'A different bounded failure message',
+                         updated_at = 1500
+                     WHERE id = ?`,
+                    [retiredRunId]
+                )
+            ).toThrow();
+            database.sqlite.run(
+                `UPDATE job_runs
+                 SET finished_at = 1500, state = 'failed', state_version = 2,
+                     terminal_code = 'action-unavailable',
+                     terminal_message = 'The scheduled action is no longer available',
+                     updated_at = 1500
+                 WHERE id = ?`,
+                [retiredRunId]
+            );
+            insertEvent(database, {
+                attempt: 0,
+                jobRunId: retiredRunId,
+                kind: "failed",
+                message: "The scheduled action is no longer available",
+                occurredAt: 1500,
+                sequence: 2,
+            });
+            expect(
+                database.sqlite
+                    .query<
+                        {
+                            attempt_count: number;
+                            first_started_at: number | null;
+                            last_attempt_started_at: number | null;
+                            state: string;
+                        },
+                        [string]
+                    >(
+                        `SELECT attempt_count, first_started_at,
+                                last_attempt_started_at, state
+                         FROM job_runs WHERE id = ?`
+                    )
+                    .get(retiredRunId)
+            ).toEqual({
+                attempt_count: 0,
+                first_started_at: null,
+                last_attempt_started_at: null,
+                state: "failed",
+            });
 
             const queuedOnlyRunId = uuid(27);
             insertQueuedRun(database, {
@@ -1662,6 +1763,25 @@ describe("jobs baseline schema", () => {
             insertWorker(database, workerId, 1001);
             insertWorker(database, otherWorkerId, 1002);
             insertWorker(database, lifecycleWorkerId, 1003);
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO worker_instances (
+                        action_keys_json, capacity, heartbeat_at, id, pid,
+                        release_id, started_at, state
+                    ) VALUES (?, 1, 1000, ?, 1004, ?, 1000, 'online')`,
+                    [
+                        '["openclaw.sessions.cleanup","host.system.update"]',
+                        uuid(43),
+                        releaseId,
+                    ]
+                )
+            ).toThrow("worker_instances action keys must be canonical");
+            expect(() =>
+                database.sqlite.run(
+                    `UPDATE worker_instances SET action_keys_json = '[]' WHERE id = ?`,
+                    [lifecycleWorkerId]
+                )
+            ).toThrow("worker_instances identity is immutable");
             insertQueuedRun(database, {
                 id: runId,
                 idempotencyKey: idempotencyKey(43),
@@ -2153,6 +2273,18 @@ describe("jobs baseline schema", () => {
                 "job_runs_action_payload_terminal_idx",
                 ['{"policyId":"docker-managed"}'],
                 "action_key=? AND payload_json=?"
+            );
+            expectUsesIndexWithoutTemporarySort(
+                database,
+                `SELECT id FROM job_runs
+                 WHERE action_key = ?
+                   AND action_key IN ('openclaw.sessions.cleanup', 'openclaw.gateway.restart', 'openclaw.installation.update', 'host.system.cleanup', 'host.system.restart', 'host.system.update')
+                   AND payload_json = '{}'
+                   AND state IN ('cancelled', 'failed', 'succeeded', 'timed-out')
+                 ORDER BY queued_at DESC, id DESC LIMIT 1`,
+                "job_runs_service_action_terminal_idx",
+                ["openclaw.sessions.cleanup"],
+                "action_key=?"
             );
             expectUsesIndexWithoutTemporarySort(
                 database,

@@ -148,6 +148,10 @@ async function procedureContractsFor(
             const module = await import("../../contracts/securityAudit.ts");
             return module.securityAuditProcedureContracts;
         }
+        case "serviceActions": {
+            const module = await import("../../contracts/serviceActions.ts");
+            return module.serviceActionProcedureContracts;
+        }
         case "system": {
             const module = await import("../../contracts/system.ts");
             return module.systemProcedureContracts;

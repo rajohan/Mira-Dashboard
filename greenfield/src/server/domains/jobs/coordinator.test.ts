@@ -9,6 +9,7 @@ import { createJobWorkerActionResolver } from "./actionExecutors.ts";
 import {
     type JobActionRegistration,
     type JobActionExecutionContext,
+    JobActionOutcomeUnknownError,
     JobActionRetryableError,
     jobActionDefinitions,
     openClawGatewayRestartJobActionDefinition,
@@ -80,6 +81,7 @@ function workerRecord(
     heartbeatAt = at
 ) {
     return {
+        actionKeysJson: '["system.worker-smoke"]',
         capacity: 1,
         drainingAt: state === "online" ? null : heartbeatAt,
         heartbeatAt,
@@ -121,6 +123,7 @@ function claimedRun(workerId: string, actionKey = "system.worker-smoke"): JobRun
         queuedAt: at,
         requestedById: "system.scheduler",
         requestedByKind: "system",
+        requiredWorkerReleaseId: null,
         resourceClass: "light",
         resourceKeysJson: '["database"]',
         resultJson: null,
@@ -267,6 +270,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const expiryEligibility: boolean[] = [];
     const expiryNextRuns: Date[] = [];
     const recoverySideEffects: JobMutationSideEffects[] = [];
+    const registrations: Array<Parameters<JobRepository["registerWorker"]>[0]> = [];
     const reconciliationInputs: Array<
         Parameters<JobRepository["reconcileSchedules"]>[0]
     > = [];
@@ -283,6 +287,9 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
     const eventRun = claims.find((result) => result.kind === "claimed")?.run;
     let dueSchedules = [...(options.dueSchedules ?? [])];
     const repository = {
+        armHostRestartClaimFence() {
+            return Promise.resolve({ kind: "lost-claim" as const });
+        },
         appendClaimEvent(input) {
             events.push(`append:${input.kind}`);
             const result = options.appendEvent?.(input) ?? { kind: "dropped" };
@@ -314,6 +321,9 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
                 kind: "updated" as const,
                 worker,
             });
+        },
+        clearHostRestartClaimFence() {
+            return Promise.resolve({ kind: "changed" as const });
         },
         async claimNextRun(input) {
             claimInputs.push(input);
@@ -383,6 +393,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         },
         registerWorker(input) {
             events.push("register");
+            registrations.push(input);
             return options.registrationFailure === undefined
                 ? Promise.resolve(workerRecord(input.worker.id, "online"))
                 : Promise.reject(options.registrationFailure);
@@ -430,6 +441,7 @@ function repositoryFixture(options: RepositoryFixtureOptions = {}) {
         expiryNextRuns,
         lifecycleSideEffects,
         reconciliationInputs,
+        registrations,
         recoverySideEffects,
         repository,
         settlements,
@@ -454,6 +466,7 @@ function coordinatorOptions(
     );
     if (smokeDefinition === undefined) throw new Error("Missing smoke definition");
     return {
+        bootIdentity: "00000000-0000-0000-0000-000000000001",
         databaseReleaseId: releaseId,
         actionDefinitions: [smokeDefinition],
         findAction: findJobWorkerAction,
@@ -494,10 +507,33 @@ describe("durable job worker coordinator", () => {
         expect(fixture.events.indexOf("register")).toBeGreaterThan(
             fixture.events.indexOf("reconcile:1")
         );
+        expect(fixture.registrations[0]?.worker.actionKeysJson).toBe(
+            '["system.worker-smoke"]'
+        );
         expect(fixture.events.indexOf("drain")).toBeLessThan(
             fixture.events.indexOf("stop")
         );
         expect(await coordinator.completion).toBeUndefined();
+    });
+
+    test("advertises only action definitions backed by an executable resolver", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const fixture = repositoryFixture();
+        const options = coordinatorOptions(fixture.repository, workerId);
+        const coordinator = createJobWorkerCoordinator({
+            ...options,
+            actionDefinitions: Object.freeze([
+                ...(options.actionDefinitions ?? []),
+                openClawGatewayRestartJobActionDefinition,
+            ]),
+        });
+
+        await coordinator.initialize();
+        await coordinator.dispose();
+
+        expect(fixture.registrations[0]?.worker.actionKeysJson).toBe(
+            '["system.worker-smoke"]'
+        );
     });
 
     test("claims the conditionally registered Gateway restart without scheduling it", async () => {
@@ -726,7 +762,7 @@ describe("durable job worker coordinator", () => {
         ]);
     });
 
-    test("starts after retiring a queued never-cancellable schedule run", async () => {
+    test("fails a queued never-cancellable run before starting after schedule retirement", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(
             database.orm,
@@ -800,7 +836,7 @@ describe("durable job worker coordinator", () => {
             });
             expect(repository.findRun(run.id)).toMatchObject({
                 cancelRequestedAt: null,
-                eventCount: 3,
+                eventCount: 2,
                 state: "failed",
                 terminalCode: "action-unavailable",
             });
@@ -1837,6 +1873,35 @@ describe("durable job worker coordinator", () => {
             kind: "failed",
             terminalCode: "action-failed",
             terminalMessage: "The job action failed.",
+        });
+    });
+
+    test("persists an explicit non-retryable outcome-unknown settlement", async () => {
+        const workerId = Bun.randomUUIDv7();
+        const run = claimedRun(workerId, "test.outcome-unknown");
+        const fixture = repositoryFixture({ claim: { kind: "claimed", run } });
+        const baseRegistration = jobActionDefinitions.at(0);
+        if (baseRegistration === undefined) throw new Error("Missing smoke action");
+        const registration: JobActionRegistration = {
+            ...baseRegistration,
+            actionKey: run.actionKey,
+            execute: () => Effect.fail(new JobActionOutcomeUnknownError()),
+        };
+        const coordinator = createJobWorkerCoordinator({
+            ...coordinatorOptions(fixture.repository, workerId),
+            findAction: (actionKey) =>
+                actionKey === registration.actionKey ? registration : undefined,
+        });
+
+        await coordinator.initialize();
+        await waitUntil(() => fixture.settlements.length === 1);
+        await coordinator.dispose();
+
+        expect(fixture.settlements[0]?.outcome).toEqual({
+            kind: "failed",
+            terminalCode: "operation-outcome-unknown",
+            terminalMessage:
+                "The action may have taken effect; inspect current state before retrying.",
         });
     });
 

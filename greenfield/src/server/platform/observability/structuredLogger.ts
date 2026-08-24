@@ -2,6 +2,10 @@ import {
     logMaintenancePolicyIds,
     type LogMaintenancePolicyId,
 } from "../../../contracts/logs.ts";
+import {
+    type ServiceActionId,
+    serviceActionIds,
+} from "../../../contracts/serviceActions.ts";
 import type { SafeFailureDescriptor } from "../errors/safeFailure.ts";
 import { describeSafeFailure } from "../errors/safeFailure.ts";
 
@@ -22,6 +26,14 @@ const defaultStructuredLogLimits: StructuredLogLimits = Object.freeze({
     maximumSerializedBytes: 16 * 1024,
 });
 const structuredLogEncoder = new TextEncoder();
+const serviceActionIdInventory: ReadonlySet<ServiceActionId> = new Set(serviceActionIds);
+
+function isServiceActionId(value: unknown): value is ServiceActionId {
+    return (
+        typeof value === "string" &&
+        serviceActionIdInventory.has(value as ServiceActionId)
+    );
+}
 
 export type StructuredLogLevel = "debug" | "error" | "fatal" | "info" | "warn";
 
@@ -87,6 +99,11 @@ export type StructuredLogFields =
     | {
           readonly kind: "openclaw-settings-mutation-queue";
           readonly queueDepth: number;
+      }
+    | {
+          readonly actionId: ServiceActionId;
+          readonly kind: "service-actions-audit-settlement";
+          readonly settlement: "failed" | "partial" | "succeeded";
       }
     | {
           readonly kind: "http-request";
@@ -165,6 +182,7 @@ const structuredEventComponents = Object.freeze({
     "runtime.start_failed": "runtime",
     "runtime.started": "runtime",
     "runtime.stopped": "runtime",
+    "service_actions.audit_settlement.failed": "service-actions-audit",
     "trpc.request.defect": "trpc",
 } as const);
 
@@ -376,6 +394,21 @@ function safeEventFields(
                 return undefined;
             }
             return { queueDepth: fields.queueDepth };
+        }
+        case "service-actions-audit-settlement": {
+            if (
+                eventName !== "service_actions.audit_settlement.failed" ||
+                !isServiceActionId(fields.actionId) ||
+                (fields.settlement !== "failed" &&
+                    fields.settlement !== "partial" &&
+                    fields.settlement !== "succeeded")
+            ) {
+                return undefined;
+            }
+            return {
+                actionId: fields.actionId,
+                settlement: fields.settlement,
+            };
         }
         case "realtime-runner-failure": {
             return eventName === "realtime.runner.failed" &&

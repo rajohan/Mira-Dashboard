@@ -213,7 +213,7 @@ Every application operation controlled by this repository becomes a tRPC procedu
 - settings, authentication, MFA, WebAuthn, and session administration;
 - Docker inventory, updater policy, and actions;
 - database, cache, quota, backup, and log-rotation operations;
-- Moltbook, files, logs, terminal helpers, and exec jobs; and
+- Moltbook, files, logs, terminal sessions, and purpose-built Service Actions; and
 - TypeScript automation calls from OpenClaw scripts.
 
 The browser uses `@trpc/tanstack-react-query`, a singleton `QueryClient`, and a singleton
@@ -463,6 +463,52 @@ shutdown and never enter tRPC, Query cache, audit, logs, or durable records. Res
 is exclusive, caller-idempotent, single-attempt, non-retry-safe, and non-cancellable; only the
 worker owns its fixed no-shell lifecycle command. Ambiguous enqueue or terminal settlement is
 reconciled by durable run identity and never blindly dispatches a second restart.
+
+### Purpose-built Service Actions replace consumed generic exec behavior
+
+The Overview exposes exactly six fixed Service Actions through
+`serviceActions.getStatus` and `serviceActions.request`: OpenClaw session cleanup, OpenClaw Gateway
+restart, OpenClaw installation update, bounded host cleanup, host restart, and host update. The browser submits only
+a fixed action ID and a caller-owned idempotency key. The web process commits a sanitized attempt
+audit, checks a fresh exact-release worker advertisement, and revalidates the browser session plus
+recent MFA at the durable enqueue handoff. It returns a job-run ID rather than waiting for a
+privileged effect and links all progress and terminal state to the existing Jobs surface.
+
+OpenClaw cleanup and update are implemented worker-only through the hash-pinned
+`sessions.cleanup` and `update.run` Gateway methods. Their providers accept no browser parameters,
+persist only bounded schema-validated summaries, never return raw Gateway results, and never
+blindly replay a post-dispatch unknown outcome. Cleanup deliberately uses OpenClaw's source-owned
+session/artifact maintenance instead of reproducing legacy recursive deletion.
+
+OpenClaw restart reuses the same existing `openclaw.gateway.restart` definition, executor, and
+provider as Settings. Service Actions add only a second fixed admission surface and durable run
+projection; they do not introduce another lifecycle command or remove the Settings control.
+
+System cleanup is one fixed root-brokered operation, not a caller-composed command. It attempts
+package autoremove and cache cleanup, rotates journald and enforces both a 14-day and 1 GiB
+retention bound, then prunes only unused Docker content older than 168 hours. It never passes
+`--volumes`, continues through every fixed phase so partial cleanup is not silently skipped, and
+fails the durable job if any phase fails. Its result contains only the validated terminal status.
+The action owns `host.mutation` and `host.logs`, so it cannot overlap other privileged host or log
+maintenance work.
+
+Host cleanup, restart, and update have a fixed `/usr/bin/systemctl` worker broker and exact
+root-owned service units. No command, argument, path, environment, secret, or raw process output
+crosses the port. The release ships manifest-verified provisioning and explicit rollback assets,
+but production does not compose or install that authority while web and worker share one Unix
+identity. A later separately approved topology change must give the worker a distinct OS principal,
+keep the web principal outside its host-operation group, install and reload the reviewed assets,
+and only then compose the broker. Until then all three rows remain fail-closed `unavailable`.
+
+The interactive PTY remains the sole terminal boundary. Shell `cd` and completion are owned by the
+connected shell/readline protocol, termination uses the bounded terminal session control, and no
+new generic command, cwd, or completion API is introduced. The unused synchronous `POST /api/exec`
+endpoint is a reviewed removal because no current browser or scoped automation consumer depends on
+it. Implemented long-running exec consumers map to either the PTY or the fixed durable Service
+Actions queue. The fixed cleanup foundation and bounded PTY cover the consumed behavior without
+restoring a generic command surface, but `POST /api/exec/start` remains planned until the distinct
+worker topology and separately approved provisioning make `system-cleanup` executable in
+production.
 
 ### Current-protocol Control UI projections
 
@@ -897,27 +943,27 @@ suppress the next session's transport request.
 The rewrite may replace every component, store, hook, and API call, but it is incomplete until
 the following behavior is covered by automated tests and a manual parity checklist.
 
-| Surface       | Required behavior after rewrite                                                                                                                                                                                        |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Global shell  | Authentication boundary, responsive navigation, theme/layout behavior, notification bell/modal, connection status, errors, and route recovery.                                                                         |
-| `/`           | Health, agent, task, job, notification, Docker, Git, database, quota, weather, and operational overview cards retain cached values through transient refresh errors.                                                   |
-| `/tasks`      | Kanban/list behavior, create/edit/delete, status and assignee movement, labels, updates, automation configuration, full current search/filter semantics, and live deltas.                                              |
-| `/agents`     | Agent state, metadata, current task, history, status transitions, and live updates.                                                                                                                                    |
-| `/sessions`   | Gateway session listing, filtering, metadata, actions, refresh, and live state.                                                                                                                                        |
-| `/chat`       | All streaming, thinking/tool display, cancel/retry/steer/concurrent send, history, attachment, settings, session, unread/follow/scroll, compaction, and restart/reconnect behavior described above.                    |
-| `/logs`       | Named-source selection, redacted bounded tail/search, custom reviewed app/container rotation, fixed system-logrotate host policies, and non-blocking errors.                                                           |
-| `/jobs`       | Dashboard schedules, OpenClaw cron jobs, enable/disable intent and expiry, run history, manual run/cancel, worker state, output, and aggregate counts.                                                                 |
-| `/reports`    | Daily briefs, summaries, heartbeats, custom reports, filters, pagination/detail linking, Markdown display, cached refresh behavior, and incident links.                                                                |
-| Notifications | Read/unread behavior, source links, filtering, badges, and exactly-once notification per active incident generation.                                                                                                   |
-| `/delivery`   | PR review queues, trusted PR development, previews, release records, deploy/rollback actions, progress, blocking reasons, and retention.                                                                               |
-| `/files`      | Safe workspace browsing, edit/save, upload/download/preview, Markdown/code rendering, path policy, and conflict/error handling.                                                                                        |
-| `/docker`     | Inventory, independently refreshed live stats, managed update policy, checks/actions, history, console commands, and duplicate-submit prevention.                                                                      |
-| `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, metrics, maintenance assessment/actions, cached fallback, and balanced layout.                                                                         |
-| `/moltbook`   | Cached/API data, refresh behavior, status and error presentation, and existing actions.                                                                                                                                |
-| `/settings`   | Persistent OpenClaw/Dashboard tab, OpenClaw configuration, password, WebAuthn/passkeys, TOTP, recovery codes, browser sessions, secret handling, and restart actions.                                                  |
-| `/terminal`   | Real PTY input/output, ANSI/UTF-8, resize, signals, bounded reconnect replay, cancellation, backpressure, and narrow-screen interaction. The selected workspace root is a starting location, not a filesystem sandbox. |
-| Media/STT/TTS | Existing upload constraints, MIME normalization, preview/download, transcription, speech generation, and scoped errors.                                                                                                |
-| New `/docs`   | Generated procedure, raw HTTP, realtime, database, configuration, runtime, package, and route references, searchable without exposing secrets.                                                                         |
+| Surface       | Required behavior after rewrite                                                                                                                                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Global shell  | Authentication boundary, responsive navigation, theme/layout behavior, notification bell/modal, connection status, errors, and route recovery.                                                                                                                |
+| `/`           | Health, agent, task, job, notification, Docker, Git, database, quota, weather, and operational overview cards retain cached values through transient refresh errors.                                                                                          |
+| `/tasks`      | Kanban/list behavior, create/edit/delete, status and assignee movement, labels, updates, automation configuration, full current search/filter semantics, and live deltas.                                                                                     |
+| `/agents`     | Agent state, metadata, current task, history, status transitions, and live updates.                                                                                                                                                                           |
+| `/sessions`   | Gateway session listing, filtering, metadata, actions, refresh, and live state.                                                                                                                                                                               |
+| `/chat`       | All streaming, thinking/tool display, cancel/retry/steer/concurrent send, history, attachment, settings, session, unread/follow/scroll, compaction, and restart/reconnect behavior described above.                                                           |
+| `/logs`       | Named-source selection, redacted bounded tail/search, custom reviewed app/container rotation, fixed system-logrotate host policies, and non-blocking errors.                                                                                                  |
+| `/jobs`       | Dashboard schedules, OpenClaw cron jobs, the full six-item fixed Service Action inventory even before its first run, exact run-ID detail links, enable/disable intent and expiry, run history, manual run/cancel, worker state, output, and aggregate counts. |
+| `/reports`    | Daily briefs, summaries, heartbeats, custom reports, filters, pagination/detail linking, Markdown display, cached refresh behavior, and incident links.                                                                                                       |
+| Notifications | Read/unread behavior, source links, filtering, badges, and exactly-once notification per active incident generation.                                                                                                                                          |
+| `/delivery`   | PR review queues, trusted PR development, previews, release records, deploy/rollback actions, progress, blocking reasons, and retention.                                                                                                                      |
+| `/files`      | Safe workspace browsing, edit/save, upload/download/preview, Markdown/code rendering, path policy, and conflict/error handling.                                                                                                                               |
+| `/docker`     | Inventory, independently refreshed live stats, managed update policy, checks/actions, history, console commands, and duplicate-submit prevention.                                                                                                             |
+| `/database`   | PostgreSQL/PgBouncer and Dashboard SQLite views, source picker, metrics, maintenance assessment/actions, cached fallback, and balanced layout.                                                                                                                |
+| `/moltbook`   | Cached/API data, refresh behavior, status and error presentation, and existing actions.                                                                                                                                                                       |
+| `/settings`   | Persistent OpenClaw/Dashboard tab, OpenClaw configuration, password, WebAuthn/passkeys, TOTP, recovery codes, browser sessions, secret handling, and restart actions.                                                                                         |
+| `/terminal`   | Real PTY input/output, ANSI/UTF-8, resize, signals, bounded reconnect replay, cancellation, backpressure, and narrow-screen interaction. The selected workspace root is a starting location, not a filesystem sandbox.                                        |
+| Media/STT/TTS | Existing upload constraints, MIME normalization, preview/download, transcription, speech generation, and scoped errors.                                                                                                                                       |
+| New `/docs`   | Generated procedure, raw HTTP, realtime, database, configuration, runtime, package, and route references, searchable without exposing secrets.                                                                                                                |
 
 The existing API endpoint list is an input to the parity inventory, not a contract to preserve.
 Each old endpoint must map to a new procedure, a raw protocol route, or an explicit removal

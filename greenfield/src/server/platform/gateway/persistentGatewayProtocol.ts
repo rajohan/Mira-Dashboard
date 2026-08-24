@@ -29,6 +29,17 @@ export const persistentGatewayChatOutboundFrameMaximumBytes = 24 * 1024 * 1024;
 export const persistentGatewayChatHistoryMaximumChars = 500_000;
 /** Exact serialized raw-patch ceiling shared by the Settings provider and protocol. */
 export const persistentGatewayOpenClawSettingsPatchMaximumBytes = 64 * 1024;
+/** Fixed audited per-step timeout sent to OpenClaw's update runner. */
+export const persistentGatewayOpenClawUpdateTimeoutMs = 20 * 60_000;
+/** Exact outer deadlines admitted only for the two worker-owned OpenClaw operations. */
+export const persistentGatewayOpenClawServiceActionRequestTimeoutMs = Object.freeze({
+    "sessions.cleanup": 10 * 60_000,
+    "update.run": 35 * 60_000,
+} as const);
+/** Dashboard-owned bound applied before parsing privileged operation results. */
+export const persistentGatewayOpenClawServiceActionResponseMaximumBytes = 2 * 1024 * 1024;
+/** Dashboard-owned maximum number of cleanup stores aggregated into one result. */
+export const persistentGatewayOpenClawCleanupStoreMaximum = 256;
 
 export const persistentGatewayWebReadScopes = Object.freeze(["operator.read"] as const);
 export const persistentGatewayTaskNotificationScopes = Object.freeze([
@@ -114,6 +125,14 @@ export type PersistentGatewayOpenClawSettingsReadMethod =
 export type PersistentGatewayOpenClawSettingsWriteMethod =
     (typeof persistentGatewayOpenClawSettingsWriteMethods)[number];
 
+/** Worker-only OpenClaw operations admitted only to fresh operator.admin sockets. */
+export const persistentGatewayOpenClawServiceActionMethods = Object.freeze([
+    "sessions.cleanup",
+    "update.run",
+] as const);
+export type PersistentGatewayOpenClawServiceActionMethod =
+    (typeof persistentGatewayOpenClawServiceActionMethods)[number];
+
 /** Installed protocol-v4 top-level request error discriminants. */
 export const persistentGatewayErrorCodes = Object.freeze([
     "AGENT_TIMEOUT",
@@ -173,6 +192,9 @@ const openClawSettingsReadMethodSet = new Set<string>(
 );
 const openClawSettingsWriteMethodSet = new Set<string>(
     persistentGatewayOpenClawSettingsWriteMethods
+);
+const openClawServiceActionMethodSet = new Set<string>(
+    persistentGatewayOpenClawServiceActionMethods
 );
 const eventNameSet = new Set<string>(persistentGatewayEventNames);
 
@@ -638,6 +660,92 @@ const gatewayOpenClawSettingsEmptyParamsSchema = v.strictObject({});
 const gatewayOpenClawSkillUpdateParamsSchema = v.strictObject({
     enabled: v.boolean("OpenClaw skill enabled state is invalid"),
     skillKey: openClawSkillKeySchema,
+});
+const gatewayOpenClawSessionsCleanupParamsSchema = v.strictObject({
+    allAgents: v.literal(true),
+    enforce: v.literal(true),
+});
+const gatewayOpenClawInstallationUpdateParamsSchema = v.strictObject({
+    timeoutMs: v.literal(persistentGatewayOpenClawUpdateTimeoutMs),
+});
+const gatewayOpenClawOperationSensitiveTextSchema = v.pipe(
+    v.string("OpenClaw operation response text is invalid"),
+    v.maxLength(32 * 1024, "OpenClaw operation response text is invalid")
+);
+const gatewayOpenClawCleanupArtifactsSchema = v.strictObject({
+    freedBytes: nonnegativeSafeIntegerSchema,
+    olderThanMs: nonnegativeSafeIntegerSchema,
+    removedFiles: nonnegativeSafeIntegerSchema,
+    scannedFiles: nonnegativeSafeIntegerSchema,
+});
+const gatewayOpenClawCleanupDiskBudgetSchema = v.nullable(
+    v.strictObject({
+        freedBytes: nonnegativeSafeIntegerSchema,
+        highWaterBytes: nonnegativeSafeIntegerSchema,
+        maxBytes: nonnegativeSafeIntegerSchema,
+        overBudget: v.boolean(),
+        removedEntries: nonnegativeSafeIntegerSchema,
+        removedFiles: nonnegativeSafeIntegerSchema,
+        totalBytesAfter: nonnegativeSafeIntegerSchema,
+        totalBytesBefore: nonnegativeSafeIntegerSchema,
+    })
+);
+const gatewayOpenClawCleanupStoreSchema = v.strictObject({
+    afterCount: nonnegativeSafeIntegerSchema,
+    agentId: v.pipe(v.string(), v.minLength(1), v.maxLength(256)),
+    applied: v.literal(true),
+    appliedCount: nonnegativeSafeIntegerSchema,
+    beforeCount: nonnegativeSafeIntegerSchema,
+    capped: nonnegativeSafeIntegerSchema,
+    diskBudget: gatewayOpenClawCleanupDiskBudgetSchema,
+    dmScopeRetired: nonnegativeSafeIntegerSchema,
+    dryRun: v.literal(false),
+    missing: nonnegativeSafeIntegerSchema,
+    mode: v.literal("enforce"),
+    modelRunPruned: nonnegativeSafeIntegerSchema,
+    pruned: nonnegativeSafeIntegerSchema,
+    storePath: gatewayOpenClawOperationSensitiveTextSchema,
+    unreferencedArtifacts: gatewayOpenClawCleanupArtifactsSchema,
+    wouldMutate: v.boolean(),
+});
+const gatewayOpenClawCleanupResponseSchema = v.union([
+    gatewayOpenClawCleanupStoreSchema,
+    v.strictObject({
+        allAgents: v.literal(true),
+        dryRun: v.literal(false),
+        mode: v.literal("enforce"),
+        stores: v.pipe(
+            v.array(gatewayOpenClawCleanupStoreSchema),
+            v.maxLength(persistentGatewayOpenClawCleanupStoreMaximum)
+        ),
+    }),
+]);
+const gatewayOpenClawVersionSchema = v.pipe(
+    v.string("OpenClaw update version is invalid"),
+    v.minLength(1, "OpenClaw update version is invalid"),
+    v.maxLength(128, "OpenClaw update version is invalid"),
+    v.regex(
+        /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u,
+        "OpenClaw update version is invalid"
+    )
+);
+const gatewayOpenClawUpdateVersionProjectionSchema = v.object({
+    version: gatewayOpenClawVersionSchema,
+});
+const gatewayOpenClawUpdateResultSchema = v.object({
+    after: v.optional(gatewayOpenClawUpdateVersionProjectionSchema),
+    before: v.optional(gatewayOpenClawUpdateVersionProjectionSchema),
+    status: v.picklist(["error", "ok", "skipped"]),
+});
+const gatewayOpenClawUpdateHandoffSchema = v.object({
+    status: v.picklist(["already-running", "started", "unavailable"]),
+});
+const gatewayOpenClawUpdateResponseSchema = v.strictObject({
+    handoff: v.optional(gatewayOpenClawUpdateHandoffSchema),
+    ok: v.boolean(),
+    restart: v.unknown(),
+    result: gatewayOpenClawUpdateResultSchema,
+    sentinel: v.unknown(),
 });
 const gatewayOpenClawSettingsNullableTextSchema = (maximum: number) =>
     v.nullable(
@@ -1232,6 +1340,12 @@ export function isPersistentGatewayOpenClawSettingsWriteMethod(
     return openClawSettingsWriteMethodSet.has(method);
 }
 
+export function isPersistentGatewayOpenClawServiceActionMethod(
+    method: string
+): method is PersistentGatewayOpenClawServiceActionMethod {
+    return openClawServiceActionMethodSet.has(method);
+}
+
 /**
  * Enforces the installed Gateway's dynamic least-privilege rules before a
  * request reaches the long-lived read/write socket.
@@ -1281,6 +1395,127 @@ export function assertPersistentGatewayOpenClawSettingsWriteParameters(
     if (!valid) {
         throw new TypeError("Persistent Gateway request parameters are invalid");
     }
+}
+
+/** Locks worker-owned Service Actions to their source-audited fixed arguments. */
+export function assertPersistentGatewayOpenClawServiceActionParameters(
+    method: PersistentGatewayOpenClawServiceActionMethod,
+    parameters: unknown
+): asserts parameters is Readonly<Record<string, unknown>> {
+    const schema =
+        method === "sessions.cleanup"
+            ? gatewayOpenClawSessionsCleanupParamsSchema
+            : gatewayOpenClawInstallationUpdateParamsSchema;
+    if (!v.safeParse(schema, parameters).success) {
+        throw new TypeError(
+            "Persistent Gateway OpenClaw operation parameters are invalid"
+        );
+    }
+}
+
+export interface PersistentGatewayOpenClawCleanupStoreProjection {
+    readonly artifactsRemoved: number;
+    readonly bytesFreed: number;
+    readonly diskEntriesRemoved: number;
+    readonly diskFilesRemoved: number;
+    readonly dmScopesRetired: number;
+    readonly entriesAfter: number;
+    readonly entriesBefore: number;
+    readonly entriesCapped: number;
+    readonly entriesPruned: number;
+    readonly missingEntriesRemoved: number;
+    readonly modelRunsPruned: number;
+}
+
+export type PersistentGatewayOpenClawServiceActionResponse =
+    | {
+          readonly method: "sessions.cleanup";
+          readonly stores: readonly PersistentGatewayOpenClawCleanupStoreProjection[];
+      }
+    | {
+          readonly afterVersion?: string;
+          readonly beforeVersion?: string;
+          readonly method: "update.run";
+          readonly status: "accepted" | "completed" | "failed";
+      };
+
+function addGatewayOperationCounts(left: number, right: number): number {
+    const total = left + right;
+    if (!Number.isSafeInteger(total) || total < 0) {
+        throw new TypeError("Persistent Gateway OpenClaw operation response is invalid");
+    }
+    return total;
+}
+
+/**
+ * Removes paths, commands, process metadata, and output before the worker provider
+ * can observe a privileged OpenClaw response.
+ * @returns A bounded path-free operation projection.
+ */
+export function parsePersistentGatewayOpenClawServiceActionResponse(
+    method: PersistentGatewayOpenClawServiceActionMethod,
+    payload: unknown
+): PersistentGatewayOpenClawServiceActionResponse {
+    if (
+        !jsonValueFitsByteBudget(
+            payload,
+            persistentGatewayOpenClawServiceActionResponseMaximumBytes
+        )
+    ) {
+        throw new TypeError("Persistent Gateway OpenClaw operation response is invalid");
+    }
+    if (method === "sessions.cleanup") {
+        const parsed = v.safeParse(gatewayOpenClawCleanupResponseSchema, payload);
+        if (!parsed.success) {
+            throw new TypeError(
+                "Persistent Gateway OpenClaw operation response is invalid"
+            );
+        }
+        const stores = "stores" in parsed.output ? parsed.output.stores : [parsed.output];
+        return Object.freeze({
+            method,
+            stores: Object.freeze(
+                stores.map((store) =>
+                    Object.freeze({
+                        artifactsRemoved: store.unreferencedArtifacts.removedFiles,
+                        bytesFreed: addGatewayOperationCounts(
+                            store.unreferencedArtifacts.freedBytes,
+                            store.diskBudget?.freedBytes ?? 0
+                        ),
+                        diskEntriesRemoved: store.diskBudget?.removedEntries ?? 0,
+                        diskFilesRemoved: store.diskBudget?.removedFiles ?? 0,
+                        dmScopesRetired: store.dmScopeRetired,
+                        entriesAfter: store.afterCount,
+                        entriesBefore: store.beforeCount,
+                        entriesCapped: store.capped,
+                        entriesPruned: store.pruned,
+                        missingEntriesRemoved: store.missing,
+                        modelRunsPruned: store.modelRunPruned,
+                    })
+                )
+            ),
+        });
+    }
+    const parsed = v.safeParse(gatewayOpenClawUpdateResponseSchema, payload);
+    if (!parsed.success) {
+        throw new TypeError("Persistent Gateway OpenClaw operation response is invalid");
+    }
+    let status: "accepted" | "completed" | "failed" = "failed";
+    if (parsed.output.handoff?.status === "started") {
+        status = "accepted";
+    } else if (parsed.output.ok && parsed.output.result.status === "ok") {
+        status = "completed";
+    }
+    return Object.freeze({
+        ...(parsed.output.result.after === undefined
+            ? {}
+            : { afterVersion: parsed.output.result.after.version }),
+        ...(parsed.output.result.before === undefined
+            ? {}
+            : { beforeVersion: parsed.output.result.before.version }),
+        method,
+        status,
+    });
 }
 
 export function assertPersistentGatewayChatReadParameters(

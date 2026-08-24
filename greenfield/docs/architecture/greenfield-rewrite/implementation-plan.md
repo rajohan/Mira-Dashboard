@@ -101,6 +101,21 @@ including restart during streaming.
 - treat the configured Terminal workspace root as an initial working-directory catalog only. A
   real interactive shell can change directory and access anything permitted by its OS identity;
   filesystem isolation requires a separate mount, namespace, or container sandbox.
+- keep shell `cd`, completion, and termination inside the implemented bounded PTY. Replace consumed
+  legacy exec behavior only with purpose-built durable Service Actions; do not restore a generic
+  command, shell, or cwd API for the unused synchronous exec route. Stage the replacement for the
+  consumed `POST /api/exec/start` behavior as that PTY plus one fixed `system-cleanup` operation
+  that preserves package cleanup, bounded journald retention, and age-filtered Docker pruning
+  without deleting volumes. Keep the parity row planned until the host operation is executable in
+  the approved production topology.
+- expose the six fixed Service Action intents in contract/UI, but advertise only exact executors
+  owned by a fresh worker on the current release. OpenClaw cleanup/update use reviewed worker-only
+  Gateway methods, while OpenClaw restart reuses the existing fixed restart executor/provider also
+  exposed in Settings. Host cleanup/restart/update use only exact root-owned systemd units through the
+  fixed worker broker. Production must not compose that broker until the worker has a distinct OS
+  principal. Separately approved provisioning must bind only that principal, exclude the web
+  principal, validate immutable artifacts, and preserve explicit rollback; a shared-user/group
+  grant is forbidden.
 
 **Exit gate:** capability, step-up, audit, cancellation, resource-limit, and failure-recovery
 tests pass for every privileged operation.

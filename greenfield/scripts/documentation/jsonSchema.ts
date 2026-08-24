@@ -217,6 +217,7 @@ import {
     securityAuditEventsHaveStableOrder,
     securityAuditPageCursorIsConsistent,
 } from "../../src/contracts/securityAudit.ts";
+import { serviceActionStatusesAreCanonical } from "../../src/contracts/serviceActions.ts";
 import {
     systemHealthDiagnosticsGatewayIsConsistent,
     systemHealthDiagnosticsIsConsistent,
@@ -279,6 +280,10 @@ const controlSafeTextJsonSchemaPattern = `^(?![\\s\\S]*(?:${controlSafeTextExclu
 const noNulJsonSchemaPattern = String.raw`^[^\u0000]*$`;
 
 const runtimeCheckComments = new Map<unknown, string>([
+    [
+        serviceActionStatusesAreCanonical,
+        "Live Valibot validation additionally requires the six fixed service-action rows to be complete, unique, and canonically ordered.",
+    ],
     [
         workspaceFileContentTicketIsConsistent,
         "Live Valibot validation additionally requires truncated workspace-file representations to carry a larger source size and stay within the bounded text-prefix budget, while full representations omit source-size metadata.",

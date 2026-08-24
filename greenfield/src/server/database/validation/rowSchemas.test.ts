@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
+import { workerActionKeysMaximumBytes } from "../schema/jobChecks.ts";
 import { incidentObservationInsertSchema } from "./incidentObservations.ts";
 import {
     incidentInsertSchema,
@@ -116,6 +117,7 @@ const validJobRunRow = Object.freeze({
     queuedAt: jobUpdatedAt,
     requestedById: jobUserId,
     requestedByKind: "user" as const,
+    requiredWorkerReleaseId: null,
     resourceClass: "light" as const,
     resourceKeysJson: '["database"]',
     resultJson: null,
@@ -511,6 +513,7 @@ describe("Drizzle-generated Valibot row schemas", () => {
         expect(v.parse(jobRunEventSelectSchema, jobEvent)).toBeDefined();
 
         const worker = {
+            actionKeysJson: '["host.system.update"]',
             capacity: 2,
             drainingAt: null,
             heartbeatAt: jobUpdatedAt,
@@ -679,8 +682,38 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 workerInstanceId: null,
             })
         ).toThrow();
+        const retiredUnstartedRun = {
+            ...validJobRunRow,
+            cancellationPolicy: "never" as const,
+            finishedAt: jobUpdatedAt,
+            scheduledForAt: jobCreatedAt,
+            state: "failed" as const,
+            terminalCode: "action-unavailable",
+            terminalMessage: "The scheduled action is no longer available",
+            triggerType: "schedule" as const,
+        };
+        expect(v.parse(jobRunSelectSchema, retiredUnstartedRun)).toBeDefined();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...retiredUnstartedRun,
+                terminalCode: "action-failed",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...retiredUnstartedRun,
+                terminalMessage: "A different bounded failure message",
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(jobRunSelectSchema, {
+                ...retiredUnstartedRun,
+                triggerType: "manual",
+            })
+        ).toThrow();
         expect(() =>
             v.parse(workerInstanceSelectSchema, {
+                actionKeysJson: "[]",
                 capacity: 1,
                 drainingAt: null,
                 heartbeatAt: jobUpdatedAt,
@@ -692,6 +725,31 @@ describe("Drizzle-generated Valibot row schemas", () => {
                 stoppedAt: null,
             })
         ).toThrow();
+        const validWorkerInsert = {
+            actionKeysJson: '["host.system.restart","host.system.update"]',
+            capacity: 2,
+            drainingAt: null,
+            heartbeatAt: jobUpdatedAt,
+            id: jobWorkerId,
+            pid: 1234,
+            releaseId: "b".repeat(40),
+            startedAt: jobCreatedAt,
+            state: "online" as const,
+            stoppedAt: null,
+        };
+        expect(v.parse(workerInstanceInsertSchema, validWorkerInsert)).toBeDefined();
+        for (const actionKeysJson of [
+            '["host.system.update","host.system.restart"]',
+            ' ["host.system.restart","host.system.update"]',
+            `${" ".repeat(workerActionKeysMaximumBytes)}[]`,
+        ]) {
+            expect(() =>
+                v.parse(workerInstanceInsertSchema, {
+                    ...validWorkerInsert,
+                    actionKeysJson,
+                })
+            ).toThrow("Stored worker action keys are invalid");
+        }
         expect(() =>
             v.parse(resourceLeaseSelectSchema, {
                 acquiredAt: jobCreatedAt,

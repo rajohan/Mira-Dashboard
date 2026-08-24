@@ -7,8 +7,13 @@ import {
     type LogMaintenanceExecutionSummary,
     logMaintenancePolicyIdSchema,
 } from "../../../contracts/logs.ts";
+import type { HostOperationId } from "../../../shared/hostOperations.ts";
 import type { JsonObject } from "../../../shared/json.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
+import {
+    OpenClawServiceActionsExecutionError,
+    type OpenClawServiceActionsExecutionPort,
+} from "../../../shared/openClawServiceActions.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
 import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
@@ -17,18 +22,52 @@ import {
     type JobExecutableActionDefinition,
     type JobActionRegistration,
     type JobActionSuccessfulSettlementHandler,
+    JobActionOutcomeUnknownError,
     JobActionRetryableError,
+    hostSystemCleanupJobActionDefinition,
+    hostSystemCleanupJobActionKey,
+    hostSystemCleanupJobResultSchema,
+    hostSystemRestartJobActionDefinition,
+    hostSystemRestartJobActionKey,
+    hostSystemRestartJobResultSchema,
+    hostSystemUpdateJobActionDefinition,
+    hostSystemUpdateJobActionKey,
+    hostSystemUpdateJobResultSchema,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
     openClawGatewayRestartJobActionDefinition,
     openClawGatewayRestartJobActionKey,
     openClawGatewayRestartJobResultSchema,
+    openClawInstallationUpdateJobActionDefinition,
+    openClawInstallationUpdateJobActionKey,
+    openClawInstallationUpdateJobResultSchema,
+    openClawSessionsCleanupJobActionDefinition,
+    openClawSessionsCleanupJobActionKey,
+    openClawSessionsCleanupJobResultSchema,
     validateJobActionRegistration,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileReplaceJobActionKey,
     workspaceFileWriteJobActionDefinition,
     workspaceFileWriteJobActionKey,
 } from "./actionRegistry.ts";
+
+export { hostOperationIds } from "../../../shared/hostOperations.ts";
+
+/** Secret-free result returned by one future, separately privileged host adapter. */
+export type FixedHostOperationResult =
+    | Readonly<{ status: "accepted" }>
+    | Readonly<{ status: "completed" }>;
+
+/** Worker-only fixed-operation authority; no command or path crosses this port. */
+export interface FixedHostOperationsExecutionPort {
+    readonly availableOperations: (
+        signal?: AbortSignal
+    ) => Promise<readonly HostOperationId[]>;
+    readonly request: (
+        operationId: HostOperationId,
+        signal?: AbortSignal
+    ) => Promise<FixedHostOperationResult>;
+}
 
 const emptyPayloadSchema = v.strictObject({});
 const systemHostActionPayloadSchema = v.strictObject({ key: v.literal("system.host") });
@@ -292,6 +331,81 @@ export function createOpenClawGatewayRestartJobExecutor(
 }
 
 /**
+ * Adapts a separately privileged fixed host-operation port without persisting output.
+ * @param hostOperations Worker-only separately privileged fixed-operation authority.
+ * @param operationId Exact reviewed host operation.
+ * @returns A non-retryable empty-payload executor with a constant result surface.
+ */
+export function createHostOperationJobExecutor(
+    hostOperations: FixedHostOperationsExecutionPort,
+    operationId: HostOperationId
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.tryPromise({
+            catch: () => new Error("Fixed host operation failed"),
+            try: async (signal) => {
+                v.parse(emptyPayloadSchema, payload);
+                if (operationId === "system-restart") {
+                    await context.armHostRestartClaimFence();
+                    // The fixed broker cannot prove that an error happened before
+                    // `systemctl start --no-block` accepted the reboot timer. Once
+                    // armed, retain the fence for new-boot reconciliation or its
+                    // bounded same-boot expiry on every ambiguous dispatch outcome.
+                    const result = await hostOperations.request(operationId, signal);
+                    return v.parse(hostSystemRestartJobResultSchema, {
+                        completedAtMs: context.nowMs(),
+                        status: result.status,
+                    });
+                }
+                const result = await hostOperations.request(operationId, signal);
+                if (operationId === "system-cleanup") {
+                    return v.parse(hostSystemCleanupJobResultSchema, {
+                        completedAtMs: context.nowMs(),
+                        status: result.status,
+                    });
+                }
+                return v.parse(hostSystemUpdateJobResultSchema, {
+                    completedAtMs: context.nowMs(),
+                    status: result.status,
+                });
+            },
+        });
+}
+
+/**
+ * Adapts one exact worker-only OpenClaw operation to a secret-free job result.
+ * @returns A non-retryable empty-payload executor for the selected operation.
+ */
+export function createOpenClawServiceActionJobExecutor(
+    serviceActions: OpenClawServiceActionsExecutionPort,
+    operationId: "openclaw-cleanup" | "openclaw-update"
+): JobActionExecutor {
+    return (context, payload) =>
+        Effect.tryPromise({
+            catch: (error) =>
+                error instanceof OpenClawServiceActionsExecutionError &&
+                error.reason === "unknown-outcome"
+                    ? new JobActionOutcomeUnknownError()
+                    : new Error("Fixed OpenClaw Service Action failed"),
+            try: async (signal) => {
+                v.parse(emptyPayloadSchema, payload);
+                if (operationId === "openclaw-cleanup") {
+                    const result = await serviceActions.cleanupSessions(signal);
+                    return v.parse(openClawSessionsCleanupJobResultSchema, {
+                        ...result,
+                        completedAtMs: context.nowMs(),
+                    });
+                }
+                const result = await serviceActions.updateInstallation(signal);
+                return v.parse(openClawInstallationUpdateJobResultSchema, {
+                    ...result,
+                    completedAtMs: context.nowMs(),
+                });
+            },
+        });
+}
+
+/**
  * Adapts one schema-validated spooled command to the worker-only structural writer.
  * @param writer Worker-owned descriptor writer.
  * @returns Durable action executor without web-process filesystem authority.
@@ -390,8 +504,10 @@ export function createJobWorkerActionRegistry(
 export interface JobWorkerActionResolverDependencies {
     readonly actionDefinitions?: readonly JobExecutableActionDefinition[];
     readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
     readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
+    readonly openClawServiceActions?: OpenClawServiceActionsExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort;
 }
 
@@ -406,6 +522,19 @@ export function createJobWorkerActionResolver(
             ...(dependencies.openClawGateway === undefined
                 ? []
                 : [openClawGatewayRestartJobActionDefinition]),
+            ...(dependencies.openClawServiceActions === undefined
+                ? []
+                : [
+                      openClawSessionsCleanupJobActionDefinition,
+                      openClawInstallationUpdateJobActionDefinition,
+                  ]),
+            ...(dependencies.hostOperations === undefined
+                ? []
+                : [
+                      hostSystemCleanupJobActionDefinition,
+                      hostSystemRestartJobActionDefinition,
+                      hostSystemUpdateJobActionDefinition,
+                  ]),
             ...(workspaceFiles === undefined
                 ? []
                 : [
@@ -413,6 +542,14 @@ export function createJobWorkerActionResolver(
                       workspaceFileReplaceJobActionDefinition,
                   ]),
         ]);
+    const registeredActionKeys = new Set(definitions.map(({ actionKey }) => actionKey));
+    const gatedExecutor = (
+        actionKey: string,
+        execute: JobActionExecutor | undefined
+    ): readonly JobActionExecutorEntry[] =>
+        execute === undefined || !registeredActionKeys.has(actionKey)
+            ? []
+            : [Object.freeze({ actionKey, execute })];
     const executors = [
         Object.freeze({
             actionKey: "cache.refresh.system-host",
@@ -438,6 +575,51 @@ export function createJobWorkerActionResolver(
                       ),
                   }),
               ]),
+        ...gatedExecutor(
+            openClawSessionsCleanupJobActionKey,
+            dependencies.openClawServiceActions === undefined
+                ? undefined
+                : createOpenClawServiceActionJobExecutor(
+                      dependencies.openClawServiceActions,
+                      "openclaw-cleanup"
+                  )
+        ),
+        ...gatedExecutor(
+            openClawInstallationUpdateJobActionKey,
+            dependencies.openClawServiceActions === undefined
+                ? undefined
+                : createOpenClawServiceActionJobExecutor(
+                      dependencies.openClawServiceActions,
+                      "openclaw-update"
+                  )
+        ),
+        ...gatedExecutor(
+            hostSystemCleanupJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "system-cleanup"
+                  )
+        ),
+        ...gatedExecutor(
+            hostSystemRestartJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "system-restart"
+                  )
+        ),
+        ...gatedExecutor(
+            hostSystemUpdateJobActionKey,
+            dependencies.hostOperations === undefined
+                ? undefined
+                : createHostOperationJobExecutor(
+                      dependencies.hostOperations,
+                      "system-update"
+                  )
+        ),
         Object.freeze({
             actionKey: "system.worker-smoke",
             execute: workerSmokeExecutor,

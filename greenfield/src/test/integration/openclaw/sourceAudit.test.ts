@@ -1213,6 +1213,359 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             }
             //#endregion
         `,
+        "cleanup-service-fixture.js": `
+            function serializeSessionCleanupResult(params) {
+                if (params.summaries.length === 1) return params.summaries[0] ?? {};
+                return {
+                    allAgents: true,
+                    mode: params.mode,
+                    dryRun: params.dryRun,
+                    stores: params.summaries
+                };
+            }
+            function pruneMissingTranscriptEntries(params) { return 0; }
+            async function previewStoreCleanup(params) { return params; }
+            /** Runs session cleanup preview/apply for the selected store targets. */
+            async function runSessionsCleanup(params) {
+                const { cfg, opts } = params;
+                const maintenance = resolveMaintenanceConfig();
+                const mode = opts.enforce ? "enforce" : maintenance.mode;
+                previewStoreCleanup({
+                    fixMissing: Boolean(opts.fixMissing),
+                    fixDmScope: Boolean(opts.fixDmScope)
+                });
+                const lifecycleResult = await applySqliteSessionEntryLifecycleMutation({
+                    activeSessionKey: opts.activeKey,
+                    maintenanceOverride: {
+                        ...maintenance,
+                        mode
+                    }
+                });
+                const appliedUnreferencedArtifacts = mode === "warn" ? null : await pruneUnreferencedSessionArtifacts({});
+                const appliedDiskBudget = await enforceSqliteSessionHistoryDiskBudget({});
+                const missingApplied = 0;
+                const dmScopeRetiredApplied = 0;
+                const unreferencedArtifacts = appliedUnreferencedArtifacts;
+                const appliedReport = {
+                    mode,
+                    beforeCount: 2,
+                    afterCount: 1,
+                    modelRunPruned: 0,
+                    pruned: 1,
+                    capped: 0
+                };
+                const summary = {
+                    agentId: target.agentId,
+                    storePath: target.storePath,
+                    mode: appliedReport.mode,
+                    dryRun: false,
+                    beforeCount: appliedReport.beforeCount,
+                    afterCount: appliedReport.afterCount,
+                    missing: missingApplied,
+                    dmScopeRetired: dmScopeRetiredApplied,
+                    modelRunPruned: appliedReport.modelRunPruned,
+                    pruned: appliedReport.pruned,
+                    capped: appliedReport.capped,
+                    unreferencedArtifacts,
+                    diskBudget: appliedDiskBudget,
+                    wouldMutate: true,
+                    applied: true,
+                    appliedCount: lifecycleResult.afterCount
+                };
+                return { mode, previewResults: [], appliedSummaries: [summary] };
+            }
+            /** Purge session store entries for a deleted agent (#65524). Best-effort. */
+        `,
+        "session-entry-slot-keys-fixture.js": `
+            function collectSessionMaintenancePreserveKeys(baseKeys) { return new Set(baseKeys); }
+            function collectActiveSessionWorkAdmissionKeys(params) { return new Set(); }
+            /** Collects every runtime and active-work key protected from automatic maintenance. */
+            function collectSessionMaintenancePreserveKeysForStore(params) {
+                const keys = collectSessionMaintenancePreserveKeys(params.baseKeys) ?? new Set();
+                for (const key of collectActiveSessionWorkAdmissionKeys({
+                    storePath: params.storePath,
+                    store: params.store
+                }) ?? []) keys.add(key);
+                return keys.size > 0 ? keys : void 0;
+            }
+            //#endregion
+            function isPrimarySessionMaintenanceKey(sessionKey) { return sessionKey === "main"; }
+            function isTelegramTopicSessionKey(sessionKey) { return false; }
+            function isExternalGroupOrChannelSessionKey(sessionKey) { return false; }
+            function isProtectedSessionMaintenanceEntry(sessionKey, entry) {
+                if (isPrimarySessionMaintenanceKey(sessionKey)) return true;
+                if (parseSessionThreadInfoFast(sessionKey).threadId) return true;
+                if (isTelegramTopicSessionKey(sessionKey)) return true;
+                if (isExternalGroupOrChannelSessionKey(sessionKey)) return true;
+                const chatType = normalizeLowercaseStringOrEmpty(entry?.chatType ?? sessionDeliveryOrigin(entry)?.chatType);
+                return chatType === "group" || chatType === "channel" || chatType === "thread";
+            }
+            function shouldPreserveMaintenanceEntry(params) {
+                if (params.entry?.archivedAt !== void 0) return true;
+                return params.entry?.modelSelectionLocked === true ||
+                    params.preserveKeys?.has(params.key) === true ||
+                    isProtectedSessionMaintenanceEntry(params.key, params.entry);
+            }
+            function getActiveSessionMaintenanceWarning(params) { return null; }
+            function resolveMaintenanceConfig() {
+                let maintenance;
+                try {
+                    maintenance = getRuntimeConfig().session?.maintenance;
+                } catch {}
+                return resolveMaintenanceConfigFromInput(maintenance);
+            }
+            async function pruneUnreferencedSessionArtifacts(params) {
+                return {
+                    scannedFiles: files.length + promptBlobFiles.length,
+                    removedFiles,
+                    freedBytes,
+                    olderThanMs
+                };
+            }
+            async function enforceSessionDiskBudget(params) {
+                return {
+                    totalBytesBefore: totalBefore,
+                    totalBytesAfter: total,
+                    removedFiles,
+                    removedEntries,
+                    freedBytes,
+                    maxBytes,
+                    highWaterBytes,
+                    overBudget: true
+                };
+            }
+            //#endregion
+        `,
+        "session-accessor.sqlite-fixture.js": `
+            function collectSqliteSessionMaintenanceBaseKeys(store, activeSessionKey) {
+                const keys = [];
+                let currentKey = normalizeStoreSessionKey(activeSessionKey);
+                while (currentKey) {
+                    keys.push(currentKey);
+                    currentKey = normalizeStoreSessionKey(store[currentKey]?.parentSessionKey ?? "");
+                }
+                return keys;
+            }
+            function hasStaleSqliteSessionEntryCandidate() { return false; }
+            function applySqliteSessionEntryMaintenance(database, params) {
+                const store = {};
+                const preserveKeys = collectSessionMaintenancePreserveKeysForStore({
+                    storePath: params.storePath,
+                    store,
+                    baseKeys: collectSqliteSessionMaintenanceBaseKeys(store, params.activeSessionKey)
+                }) ?? new Set();
+                pruneStaleEntries(store, maintenance.pruneAfterMs, { preserveKeys });
+                capEntryCount(store, maintenance.maxEntries, { preserveKeys });
+                return { entryRemovals: [], stateDeletePlans: [] };
+            }
+            function finalizeSqliteSessionEntryMaintenancePlansBestEffort(scope, plans) { return []; }
+            /** Applies exact lifecycle removals/upserts using SQLite session rows. */
+            async function applySqliteSessionEntryLifecycleMutation(params) {
+                if (!sqliteSessionEntriesEqual(entry, removal.expectedEntry)) throw new Error("changed");
+                applySqliteSessionEntryMaintenance(database, {
+                    activeSessionKey: params.activeSessionKey ?? "",
+                    forceMaintenance: params.maintenanceOverride !== void 0,
+                    maintenanceConfig: params.maintenanceOverride ? {
+                        ...resolveMaintenanceConfig(),
+                        ...params.maintenanceOverride
+                    } : void 0
+                });
+                return { afterCount: 1 };
+            }
+            /** Purges entries owned by a deleted agent from SQLite session rows. */
+        `,
+        "update-fixture.js": `
+            const MANAGED_HANDOFF_RESTART_DELAY_MS = 2e3;
+            function hasManagedServiceHandoffContext(env, supervisor) {
+                if (supervisor === "systemd") return Boolean(env.OPENCLAW_SYSTEMD_UNIT?.trim());
+                return false;
+            }
+            function resolveManagedServiceHandoffRestartDelayMs(restartDelayMs, supervisor) {
+                const resolvedDelayMs = restartDelayMs ?? MANAGED_HANDOFF_RESTART_DELAY_MS;
+                if (supervisor !== "systemd") return resolvedDelayMs;
+                return Math.max(resolvedDelayMs, MANAGED_HANDOFF_RESTART_DELAY_MS);
+            }
+            const updateHandlers = {
+                "update.status": async () => {},
+                "update.run": async ({ params, respond, client, context }) => {
+                    if (!assertValidParams(params, validateUpdateRunParams, "update.run", respond)) return;
+                    const timeoutMsRaw = params.timeoutMs;
+                    const timeoutMs = typeof timeoutMsRaw === "number" && Number.isFinite(timeoutMsRaw) ? Math.max(1e3, Math.floor(timeoutMsRaw)) : void 0;
+                    const installSurface = {};
+                    const supervisor = "systemd";
+                    const hasHandoffContext = supervisor ? hasManagedServiceHandoffContext(process.env, supervisor) : false;
+                    const requiresManagedServiceHandoff = installSurface.kind === "global" || installSurface.kind === "git" && supervisor !== null;
+                    let result;
+                    let handoff = null;
+                    let managedHandoffRestart = null;
+                    let ownsManagedServiceHandoff = true;
+                    if (requiresManagedServiceHandoff && hasHandoffContext) {
+                        const started = await startManagedServiceUpdateHandoff({ timeoutMs });
+                        ownsManagedServiceHandoff = started.status === "started";
+                        if (ownsManagedServiceHandoff) {
+                            handoff = {
+                                status: "started",
+                                ...started.pid ? { pid: started.pid } : {},
+                                command: started.command
+                            };
+                            managedHandoffRestart = scheduleGatewaySigusr1Restart({
+                                reason: "update.run",
+                                skipDeferral: true,
+                                skipCooldown: true
+                            });
+                        } else handoff = {
+                            status: "already-running",
+                            command: started.command,
+                            message: "Another managed update is already running; retry after it completes."
+                        };
+                    } else {
+                        result = await runGatewayUpdate({
+                            timeoutMs,
+                            allowGatewayServiceRepair: false,
+                            allowGatewayActivation: false
+                        });
+                    }
+                    const payload = buildUpdateRestartSentinelPayload({ result, meta: {} });
+                    let sentinelPersisted = false;
+                    if (ownsManagedServiceHandoff) try {
+                        await writeRestartSentinel(payload);
+                        sentinelPersisted = true;
+                    } catch {}
+                    const updateWasPackageSwap = result.status === "ok" && result.mode !== "git";
+                    const restart = managedHandoffRestart ?? (result.status === "ok" ? scheduleGatewaySigusr1Restart({
+                        delayMs: updateWasPackageSwap ? 0 : undefined,
+                        reason: "update.run",
+                        skipDeferral: updateWasPackageSwap,
+                        skipCooldown: updateWasPackageSwap
+                    }) : null);
+                    respond(true, {
+                        ok: result.status === "ok" || handoff?.status === "started",
+                        result,
+                        ...handoff ? { handoff } : {},
+                        restart,
+                        sentinel: {
+                            persisted: sentinelPersisted,
+                            payload
+                        }
+                    }, void 0);
+                }
+            };
+            //#endregion
+        `,
+        "update-startup-fixture.js": `
+            const HANDOFF_READY_TIMEOUT_MS = 3e4;
+            const HANDOFF_READY_MARKER = "OPENCLAW_UPDATE_HANDOFF_READY\\n";
+            const HANDOFF_SCRIPT = String.raw\`
+                function cleanupSensitiveFiles() {}
+                cleanupSensitiveFiles();
+            \`;
+            function resolveUpdateCliArgv(params) {
+                const updateArgs = ["update", "--yes", "--json"];
+                if (typeof params.timeoutMs === "number" && Number.isFinite(params.timeoutMs)) updateArgs.push("--timeout", String(Math.max(1, Math.ceil(params.timeoutMs / 1e3))));
+                return ["openclaw", ...updateArgs];
+            }
+            function formatManagedServiceUpdateCommand(params) {
+                const args = ["openclaw", "update", "--yes"];
+                if (typeof params?.timeoutMs === "number" && Number.isFinite(params.timeoutMs)) args.push("--timeout", String(Math.max(1, Math.ceil(params.timeoutMs / 1e3))));
+                return args.join(" ");
+            }
+            function resolveGatewayServiceRecovery(supervisor, env) { return {}; }
+            async function waitForHandoffReady(child) {
+                if (buffered.includes(HANDOFF_READY_MARKER)) finish();
+                setTimeout(() => finish(new Error("managed update handoff did not signal readiness within 30 seconds")), HANDOFF_READY_TIMEOUT_MS);
+            }
+            async function resolveHandoffSpawn(params) {
+                return { args: ["--user", "--scope", "--collect"] };
+            }
+            async function spawnManagedServiceUpdateHandoff(params, onExit) {
+                const helperParams = {
+                    sensitivePaths: [scriptPath, paramsPath, metaPath]
+                };
+                const child = spawn(command, args, { detached: true });
+                child.unref();
+                return { status: "started", command: "openclaw update --yes" };
+            }
+            async function startManagedServiceUpdateHandoff(params) {
+                const active = activeManagedServiceUpdateHandoff;
+                if (active) return {
+                    ...await active,
+                    status: "joined"
+                };
+                return await spawnManagedServiceUpdateHandoff(params, () => {});
+            }
+            function buildManagedServiceHandoffUnavailableMessage(command) { return command; }
+        `,
+        "update-runner-fixture.js": `
+            const MAX_LOG_CHARS = 8e3;
+            async function runStep(opts) {
+                const { runCommand, name, argv, cwd, timeoutMs, progress, stepIndex, totalSteps } = opts;
+                const command = argv.join(" ");
+                const result = await runCommand(argv, {
+                    cwd,
+                    timeoutMs,
+                    env
+                });
+                const stderrTail = trimLogTail(result.stderr, MAX_LOG_CHARS);
+                return {
+                    name,
+                    command,
+                    cwd,
+                    durationMs: 1,
+                    exitCode: result.code,
+                    stdoutTail: trimLogTail(result.stdout, MAX_LOG_CHARS),
+                    stderrTail,
+                    signal: result.signal
+                };
+            }
+            function normalizeFallbackFailureReason(stepName) { return "unexpected-error"; }
+            function successfulUpdateResult() { return { status: "ok" }; }
+            async function runGatewayUpdate(opts = {}) {
+                const timeoutMs = opts.timeoutMs ?? 12e5;
+                if (gitRoot) return await runGitUpdate({ timeoutMs });
+                if (globalManager) return await runGlobalUpdate({ timeoutMs });
+                return {
+                    status: "skipped",
+                    mode: "unknown",
+                    root: pkgRoot,
+                    reason: "not-git-install",
+                    before: { version: beforeVersion },
+                    steps: [],
+                    durationMs: 0
+                };
+            }
+            //#endregion
+        `,
+        "update-control-plane-sentinel-fixture.js": `
+            function buildUpdateRestartSentinelPayload(params) {
+                const { result, meta } = params;
+                return {
+                    kind: "update",
+                    status: result.status,
+                    message: meta.note ?? null,
+                    doctorHint: formatDoctorNonInteractiveHint(),
+                    stats: {
+                        mode: result.mode,
+                        ...result.root ? { root: result.root } : {},
+                        ...meta.handoffId ? { handoffId: meta.handoffId } : {},
+                        before: result.before ?? null,
+                        after: result.after ?? null,
+                        steps: result.steps.map((step) => ({
+                            command: step.command,
+                            cwd: step.cwd,
+                            log: {
+                                stdoutTail: step.stdoutTail ?? null,
+                                stderrTail: step.stderrTail ?? null
+                            }
+                        }))
+                    }
+                };
+            }
+            //#endregion
+            const CONTROL_PLANE_UPDATE_HANDOFF_STARTED_REASON = "managed-service-handoff-started";
+            function isPendingControlPlaneUpdateRestartSentinel(payload) {
+                return payload.stats?.reason === CONTROL_PLANE_UPDATE_HANDOFF_STARTED_REASON;
+            }
+        `,
         "reset-policy-fixture.js": `
             const DEFAULT_RESET_MODE = "none";
             const DEFAULT_RESET_AT_HOUR = 4;
@@ -1268,6 +1621,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             { name: "sessions.compact", scope: "operator.admin" },
             { name: "sessions.delete", scope: "dynamic" },
             { name: "sessions.list", scope: "operator.read" },
+            { name: "sessions.cleanup", scope: "operator.admin" },
             { name: "sessions.reset", scope: "operator.admin" },
             { name: "sessions.subscribe", scope: "operator.read" },
             { name: "cron.get", scope: "operator.read" },
@@ -1280,6 +1634,7 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
             { name: "config.patch", scope: "operator.admin", controlPlaneWrite: true },
             { name: "skills.status", scope: "operator.read" },
             { name: "skills.update", scope: "operator.admin" },
+            { name: "update.run", scope: "operator.admin", controlPlaneWrite: true },
         `,
         "method-scopes-fixture.js": `
             /**
@@ -1350,6 +1705,17 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
 \treplacePaths: Type.Optional(Type.Array(NonEmptyString, { maxItems: 256 }))
             });
             /** Empty request payload for fetching the generated config schema. */
+            const UpdateStatusParamsSchema = closedObject({});
+            /** Request payload for running an update/restart flow with optional channel delivery context. */
+            const UpdateRunParamsSchema = closedObject({
+\tsessionKey: Type.Optional(Type.String()),
+\tdeliveryContext: Type.Optional(ConfigDeliveryContextSchema),
+\tnote: Type.Optional(Type.String()),
+\tcontinuationMessage: Type.Optional(Type.String()),
+\trestartDelayMs: Type.Optional(Type.Integer({ minimum: 0 })),
+\ttimeoutMs: Type.Optional(Type.Integer({ minimum: 1 }))
+            });
+            /** UI metadata attached to config schema paths. */
             /** Reads installed skill status, optionally for a selected agent. */
             const SkillsStatusParamsSchema = closedObject({ agentId: Type.Optional(NonEmptyString) });
             /** Empty request payload for listing available skill bins. */
@@ -1607,6 +1973,18 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
 \tarchived: Type.Optional(Type.Boolean())
             });
             /** Searches one agent's indexed session transcripts */
+
+            /** Repairs or removes invalid session records from the selected agent scope. */
+            const SessionsCleanupParamsSchema = closedObject({
+\tagent: Type.Optional(NonEmptyString),
+\tallAgents: Type.Optional(Type.Boolean()),
+\tenforce: Type.Optional(Type.Boolean()),
+\tactiveKey: Type.Optional(NonEmptyString),
+\tfixMissing: Type.Optional(Type.Boolean()),
+\tfixDmScope: Type.Optional(Type.Boolean())
+            });
+            /** Reads short previews for selected session keys. */
+            const SessionsPreviewParamsSchema = closedObject({});
 
             /** Subscribes a client to live message updates for one session. */
             const SessionsMessagesSubscribeParamsSchema = closedObject({
@@ -2168,6 +2546,31 @@ async function writeSyntheticOpenClawPackage(sourceRoot: string): Promise<void> 
                         activeRunIds: activeRunState.runIds
                     } : {}
                 }),
+                "sessions.cleanup": async ({ params, respond, context }) => {
+                    if (!assertValidParams(params, validateSessionsCleanupParams, "sessions.cleanup", respond)) return;
+                    try {
+                        const { mode, appliedSummaries } = await runSessionsCleanup({
+                            cfg: context.getRuntimeConfig(),
+                            opts: {
+                                agent: params.agent,
+                                allAgents: params.allAgents,
+                                enforce: params.enforce,
+                                activeKey: params.activeKey,
+                                fixMissing: params.fixMissing,
+                                fixDmScope: params.fixDmScope
+                            }
+                        });
+                        respond(true, serializeSessionCleanupResult({
+                            mode,
+                            dryRun: false,
+                            summaries: appliedSummaries
+                        }), void 0);
+                        emitSessionsChanged(context, { reason: "cleanup" });
+                    } catch (error) {
+                        respond(false, void 0, errorShape(ErrorCodes.INVALID_REQUEST, formatErrorMessage(error)));
+                    }
+                },
+                "sessions.preview": async () => {},
                 "sessions.patch": async () => {
                     const expectedSessionChanged = p.expectedSessionId !== void 0 && currentLifecycleEntry?.sessionId !== p.expectedSessionId;
                     respond(true, {
@@ -2611,7 +3014,7 @@ describe("reviewed OpenClaw protocol fixtures", () => {
             "chat-delta",
             "chat-terminal",
         ]);
-        expect(reviewed.audit.sourceArtifacts).toHaveLength(83);
+        expect(reviewed.audit.sourceArtifacts).toHaveLength(90);
         expect(reviewed.audit.chat.adapter.media.localHistory).toEqual({
             canonical: {
                 fields: [
@@ -3226,6 +3629,7 @@ describe("reviewed OpenClaw protocol fixtures", () => {
                 "cron.json",
                 "gateway.json",
                 "manifest.json",
+                "operations.json",
                 "sessions.json",
                 "settings.json",
                 "tasks.json",
@@ -3418,7 +3822,74 @@ describe("explicit OpenClaw source audit", () => {
                 schedulerSuccess: { ok: true },
                 sentinelRequiresRestartPath: "sentinel.payload.stats.requiresRestart",
             });
-            expect(audit.sourceArtifacts).toHaveLength(83);
+            expect(audit.operations.methodAccess).toEqual([
+                {
+                    controlPlaneWrite: false,
+                    lane: "one-shot-admin",
+                    method: "sessions.cleanup",
+                    scope: "operator.admin",
+                },
+                {
+                    controlPlaneWrite: true,
+                    lane: "one-shot-admin",
+                    method: "update.run",
+                    scope: "operator.admin",
+                },
+            ]);
+            expect(audit.operations.sessionsCleanup).toMatchObject({
+                outcome: {
+                    automaticReplaySafe: false,
+                    handlerTimeoutParameter: false,
+                    idempotencyParameter: false,
+                    postDispatchTransportTimeout: "outcome-unknown",
+                },
+                request: {
+                    acceptedParams: [
+                        "activeKey",
+                        "agent",
+                        "allAgents",
+                        "enforce",
+                        "fixDmScope",
+                        "fixMissing",
+                    ],
+                    closedObject: true,
+                    requiredParams: [],
+                },
+                response: {
+                    sensitivePaths: ["storePath", "stores[].storePath"],
+                },
+            });
+            expect(audit.operations.updateRun).toMatchObject({
+                managedHandoff: {
+                    internalJoinedStatusCrossesRpc: false,
+                    nonOwningWireStatus: "already-running",
+                    readyMarkerTimeoutMs: 30_000,
+                    sensitiveTemporaryFilesRemoved: true,
+                    startedHandoffCountsAsAccepted: true,
+                },
+                outcome: {
+                    automaticReplaySafe: false,
+                    handlerAbortSignal: false,
+                    idempotencyParameter: false,
+                    operationalErrorsUseRpcSuccess: true,
+                    postDispatchTransportTimeout: "outcome-unknown",
+                },
+                response: {
+                    sentinelPersistenceBestEffort: true,
+                    sensitivePaths: expect.arrayContaining([
+                        "handoff.command",
+                        "result.root",
+                        "result.steps[].stdoutTail",
+                        "sentinel.payload",
+                    ]),
+                },
+                timeout: {
+                    defaultRunnerPerStepMs: 1_200_000,
+                    handlerFloorMs: 1000,
+                    perStepRatherThanWholeOperation: true,
+                },
+            });
+            expect(audit.sourceArtifacts).toHaveLength(90);
             expect(audit.chat.adapter.media.localHistory.precedence.url).toEqual([
                 "canonical.url",
                 "MediaUrls[index]",
@@ -3514,6 +3985,94 @@ describe("explicit OpenClaw source audit", () => {
                     const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
                     expect(error.message).toContain(driftCase.expected);
                 }
+            }
+        );
+    });
+
+    test("rejects drift in privileged operations access and execution facts", async () => {
+        const driftCases = [
+            {
+                expected: "permission descriptor changed for sessions.cleanup",
+                fileName: "core-descriptors-fixture.js",
+                from: '{ name: "sessions.cleanup", scope: "operator.admin" }',
+                to: '{ name: "sessions.cleanup", scope: "operator.read" }',
+            },
+            {
+                expected: "update.run optional params changed",
+                fileName: "src-fixture.js",
+                from: "timeoutMs: Type.Optional(Type.Integer({ minimum: 1 }))",
+                to: "timeoutMs: Type.Optional(Type.Integer({ minimum: 0 }))",
+            },
+            {
+                expected: "sessions.cleanup execution changed",
+                fileName: "cleanup-service-fixture.js",
+                from: 'const appliedUnreferencedArtifacts = mode === "warn" ? null',
+                to: 'const appliedUnreferencedArtifacts = mode === "enforce" ? null',
+            },
+            {
+                expected: "update.run handler changed",
+                fileName: "update-fixture.js",
+                from: 'ok: result.status === "ok" || handoff?.status === "started"',
+                to: "ok: true",
+            },
+        ] as const;
+
+        for (const driftCase of driftCases) {
+            await withTemporaryDirectory(
+                "mira-openclaw-operations-drift-",
+                async (sourceRoot) => {
+                    await writeSyntheticOpenClawPackage(sourceRoot);
+                    const artifactPath = path.join(
+                        sourceRoot,
+                        "dist",
+                        driftCase.fileName
+                    );
+                    const source = await readFile(artifactPath, "utf8");
+                    expect(source).toContain(driftCase.from);
+                    await writeFile(
+                        artifactPath,
+                        source.replace(driftCase.from, driftCase.to),
+                        "utf8"
+                    );
+
+                    const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                    expect(error.message).toContain(driftCase.expected);
+                }
+            );
+        }
+    });
+
+    test("rejects cleanup disk-budget enforcement before lifecycle mutation", async () => {
+        await withTemporaryDirectory(
+            "mira-openclaw-cleanup-order-drift-",
+            async (sourceRoot) => {
+                await writeSyntheticOpenClawPackage(sourceRoot);
+                const artifactPath = path.join(
+                    sourceRoot,
+                    "dist",
+                    "cleanup-service-fixture.js"
+                );
+                const source = await readFile(artifactPath, "utf8");
+                const lifecycleCall =
+                    "const lifecycleResult = await applySqliteSessionEntryLifecycleMutation({";
+                const diskBudgetCall =
+                    "const appliedDiskBudget = await enforceSqliteSessionHistoryDiskBudget({";
+                const lifecycleIndex = source.indexOf(lifecycleCall);
+                const diskBudgetIndex = source.indexOf(diskBudgetCall);
+                expect(lifecycleIndex).toBeGreaterThanOrEqual(0);
+                expect(diskBudgetIndex).toBeGreaterThan(lifecycleIndex);
+                const reordered =
+                    source.slice(0, lifecycleIndex) +
+                    diskBudgetCall +
+                    source.slice(lifecycleIndex + lifecycleCall.length, diskBudgetIndex) +
+                    lifecycleCall +
+                    source.slice(diskBudgetIndex + diskBudgetCall.length);
+                await writeFile(artifactPath, reordered, "utf8");
+
+                const error = await rejectedError(auditInstalledOpenClaw(sourceRoot));
+                expect(error.message).toContain(
+                    "sessions.cleanup no longer applies lifecycle mutation before disk budget enforcement"
+                );
             }
         );
     });

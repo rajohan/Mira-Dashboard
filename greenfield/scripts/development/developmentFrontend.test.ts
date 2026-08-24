@@ -138,6 +138,10 @@ test("serves remote Bun HMR, React Fast Refresh, and React Compiler output toget
         expect(javascript).toContain("/_bun/hmr");
         expect(javascript).toContain("react-refresh/runtime");
         expect(javascript).toContain("dashboardBrowserRoot");
+        expect(javascript).toMatch(
+            /\.prototype\._replaceRouteChunk = \(\.\.\.([A-Za-z_$][\w$]*)\) => [A-Za-z_$][\w$]*\.replaceRouteChunk\(\.\.\.\1\);/u
+        );
+        expect(javascript).toContain("globalThis.location.reload()");
         expect(javascript).toContain("useMemoCache");
     } finally {
         await stopChild(child);

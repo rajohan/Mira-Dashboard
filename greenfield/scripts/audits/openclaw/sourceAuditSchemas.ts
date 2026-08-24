@@ -902,6 +902,199 @@ export const sessionsFixtureSchema = v.strictObject({
     plan: planSchema,
 });
 
+const operationsMethodAccessSchema = v.tuple([
+    v.strictObject({
+        controlPlaneWrite: v.literal(false),
+        lane: v.literal("one-shot-admin"),
+        method: v.literal("sessions.cleanup"),
+        scope: v.literal("operator.admin"),
+    }),
+    v.strictObject({
+        controlPlaneWrite: v.literal(true),
+        lane: v.literal("one-shot-admin"),
+        method: v.literal("update.run"),
+        scope: v.literal("operator.admin"),
+    }),
+]);
+
+/** Exact installed-OpenClaw privileged operation and RPC source facts. */
+export const operationsFixtureSchema = v.strictObject({
+    domain: v.literal("operations"),
+    methodAccess: operationsMethodAccessSchema,
+    methods: v.tuple([v.literal("sessions.cleanup"), v.literal("update.run")]),
+    schemaVersion: fixtureSchemaVersion,
+    sessionsCleanup: v.strictObject({
+        handlerValidatesParams: v.literal(true),
+        method: v.literal("sessions.cleanup"),
+        mutation: v.strictObject({
+            diskBudgetEnforcedAfterEntryMaintenance: v.literal(true),
+            entryStateRecheckedBeforeRemoval: v.literal(true),
+            unreferencedArtifactsPrunedOutsideWarnMode: v.literal(true),
+            usesSqliteLifecycleMutation: v.literal(true),
+        }),
+        outcome: v.strictObject({
+            automaticReplaySafe: v.literal(false),
+            handlerTimeoutParameter: v.literal(false),
+            idempotencyParameter: v.literal(false),
+            postDispatchTransportTimeout: v.literal("outcome-unknown"),
+        }),
+        preservation: v.strictObject({
+            activeKeyAndParentsPreserved: v.literal(true),
+            activeWorkAdmissionsPreserved: v.literal(true),
+            archivedEntriesPreserved: v.literal(true),
+            groupChannelAndThreadEntriesPreserved: v.literal(true),
+            modelSelectionLockedEntriesPreserved: v.literal(true),
+            primarySessionsPreserved: v.literal(true),
+            registeredRuntimeKeysPreserved: v.literal(true),
+        }),
+        request: v.strictObject({
+            acceptedParams: v.tuple([
+                v.literal("activeKey"),
+                v.literal("agent"),
+                v.literal("allAgents"),
+                v.literal("enforce"),
+                v.literal("fixDmScope"),
+                v.literal("fixMissing"),
+            ]),
+            closedObject: v.literal(true),
+            requiredParams: v.tuple([]),
+        }),
+        response: v.strictObject({
+            appliedStoreFields: v.tuple([
+                v.literal("agentId"),
+                v.literal("storePath"),
+                v.literal("mode"),
+                v.literal("dryRun"),
+                v.literal("beforeCount"),
+                v.literal("afterCount"),
+                v.literal("missing"),
+                v.literal("dmScopeRetired"),
+                v.literal("modelRunPruned"),
+                v.literal("pruned"),
+                v.literal("capped"),
+                v.literal("unreferencedArtifacts"),
+                v.literal("diskBudget"),
+                v.literal("wouldMutate"),
+                v.literal("applied"),
+                v.literal("appliedCount"),
+            ]),
+            diskBudgetFields: v.tuple([
+                v.literal("totalBytesBefore"),
+                v.literal("totalBytesAfter"),
+                v.literal("removedFiles"),
+                v.literal("removedEntries"),
+                v.literal("freedBytes"),
+                v.literal("maxBytes"),
+                v.literal("highWaterBytes"),
+                v.literal("overBudget"),
+            ]),
+            formattedUpstreamErrorMustBeSanitized: v.literal(true),
+            multiStoreFields: v.tuple([
+                v.literal("allAgents"),
+                v.literal("mode"),
+                v.literal("dryRun"),
+                v.literal("stores"),
+            ]),
+            sensitivePaths: v.tuple([
+                v.literal("storePath"),
+                v.literal("stores[].storePath"),
+            ]),
+            unreferencedArtifactFields: v.tuple([
+                v.literal("scannedFiles"),
+                v.literal("removedFiles"),
+                v.literal("freedBytes"),
+                v.literal("olderThanMs"),
+            ]),
+        }),
+        semantics: v.strictObject({
+            activeKeyOptional: v.literal(true),
+            enforceTrueOverridesConfiguredMode: v.literal(true),
+            fixDmScopeDefaultsFalse: v.literal(true),
+            fixMissingDefaultsFalse: v.literal(true),
+            maintenanceConfigSource: v.literal("session.maintenance"),
+            rpcAlwaysAppliesRatherThanDryRuns: v.literal(true),
+        }),
+    }),
+    updateRun: v.strictObject({
+        handlerValidatesParams: v.literal(true),
+        managedHandoff: v.strictObject({
+            activeFlightJoinedWithoutSecondSpawn: v.literal(true),
+            detachedChild: v.literal(true),
+            gitRequiresSupervisor: v.literal(true),
+            globalInstallRequiresHandoff: v.literal(true),
+            internalJoinedStatusCrossesRpc: v.literal(false),
+            nonOwningWireStatus: v.literal("already-running"),
+            readyMarkerTimeoutMs: v.literal(30_000),
+            sensitiveTemporaryFilesRemoved: v.literal(true),
+            startedHandoffCountsAsAccepted: v.literal(true),
+            systemdMinimumRestartDelayMs: v.literal(2000),
+            systemdRequiresUnitContext: v.literal(true),
+            systemdUsesUserScope: v.literal(true),
+        }),
+        method: v.literal("update.run"),
+        outcome: v.strictObject({
+            automaticReplaySafe: v.literal(false),
+            handlerAbortSignal: v.literal(false),
+            idempotencyParameter: v.literal(false),
+            operationalErrorsUseRpcSuccess: v.literal(true),
+            postDispatchTransportTimeout: v.literal("outcome-unknown"),
+        }),
+        request: v.strictObject({
+            acceptedParams: v.tuple([
+                v.literal("continuationMessage"),
+                v.literal("deliveryContext"),
+                v.literal("note"),
+                v.literal("restartDelayMs"),
+                v.literal("sessionKey"),
+                v.literal("timeoutMs"),
+            ]),
+            closedObject: v.literal(true),
+            requiredParams: v.tuple([]),
+            restartDelayMinimumMs: v.literal(0),
+            timeoutMinimumMs: v.literal(1),
+        }),
+        response: v.strictObject({
+            okWhenHandoffStarted: v.literal(true),
+            okWhenResultStatusOk: v.literal(true),
+            resultStatuses: v.tuple([
+                v.literal("error"),
+                v.literal("ok"),
+                v.literal("skipped"),
+            ]),
+            sentinelPersistenceBestEffort: v.literal(true),
+            sensitivePaths: v.tuple([
+                v.literal("handoff.command"),
+                v.literal("handoff.message"),
+                v.literal("handoff.pid"),
+                v.literal("result.root"),
+                v.literal("result.steps[].command"),
+                v.literal("result.steps[].cwd"),
+                v.literal("result.steps[].stderrTail"),
+                v.literal("result.steps[].stdoutTail"),
+                v.literal("restart.pid"),
+                v.literal("sentinel.payload"),
+            ]),
+            topLevelFields: v.tuple([
+                v.literal("ok"),
+                v.literal("result"),
+                v.literal("handoff"),
+                v.literal("restart"),
+                v.literal("sentinel"),
+            ]),
+        }),
+        restart: v.strictObject({
+            directSuccessSchedulesSigusr1: v.literal(true),
+            managedSystemdSkipsCooldownAndDeferral: v.literal(true),
+            packageSwapSkipsCooldownAndDeferral: v.literal(true),
+        }),
+        timeout: v.strictObject({
+            defaultRunnerPerStepMs: v.literal(1_200_000),
+            handlerFloorMs: v.literal(1000),
+            perStepRatherThanWholeOperation: v.literal(true),
+        }),
+    }),
+});
+
 export const agentsFixtureSchema = v.strictObject({
     ...domainFixtureEntries,
     domain: v.literal("agents"),
@@ -2006,12 +2199,15 @@ export const sourceArtifactSchema = v.strictObject({
         "protocol-version",
         "provider-model-id-normalization",
         "runtime-subscriptions",
+        "session-accessor-sqlite-maintenance",
+        "session-cleanup-service",
         "session-companion-rpc",
         "session-companion-runtime",
         "session-change-event",
         "session-event-payload",
         "session-lifecycle",
         "session-list-projection",
+        "session-maintenance-policy",
         "session-operation-event",
         "session-reset-policy",
         "session-reset-service",
@@ -2031,6 +2227,10 @@ export const sourceArtifactSchema = v.strictObject({
         "tasks-handlers",
         "tool-policy-normalization",
         "transcript-media-persistence",
+        "update-handlers",
+        "update-managed-handoff",
+        "update-runner",
+        "update-sentinel",
         "web-fetch-runtime",
         "web-search-runtime",
     ]),
@@ -2039,7 +2239,7 @@ export const sourceArtifactSchema = v.strictObject({
 
 const sourceArtifactsSchema = v.pipe(
     v.array(sourceArtifactSchema),
-    v.length(83),
+    v.length(90),
     v.check(
         (artifacts) => isSortedAndUnique(artifacts.map((artifact) => artifact.role)),
         "Source artifact roles must be sorted and unique"
@@ -2057,6 +2257,7 @@ const fixtureManifestEntrySchema = v.strictObject({
         "chat.json",
         "cron.json",
         "gateway.json",
+        "operations.json",
         "sessions.json",
         "settings.json",
         "tasks.json",
@@ -2067,7 +2268,7 @@ const fixtureManifestEntrySchema = v.strictObject({
 export const fixtureManifestSchema = v.strictObject({
     components: v.pipe(
         v.array(fixtureManifestEntrySchema),
-        v.length(7),
+        v.length(8),
         v.check(
             (components) =>
                 isSortedAndUnique(components.map((component) => component.file)),
@@ -2092,6 +2293,7 @@ export const sourceAuditResultSchema = v.pipe(
         chat: chatFixtureSchema,
         cron: cronFixtureSchema,
         gateway: gatewayFixtureSchema,
+        operations: operationsFixtureSchema,
         sessions: sessionsFixtureSchema,
         settings: settingsFixtureSchema,
         tasks: tasksFixtureSchema,
@@ -2109,6 +2311,7 @@ export type ChatFixture = v.InferOutput<typeof chatFixtureSchema>;
 export type CronFixture = v.InferOutput<typeof cronFixtureSchema>;
 export type FixtureManifest = v.InferOutput<typeof fixtureManifestSchema>;
 export type GatewayFixture = v.InferOutput<typeof gatewayFixtureSchema>;
+export type OperationsFixture = v.InferOutput<typeof operationsFixtureSchema>;
 export type SessionsFixture = v.InferOutput<typeof sessionsFixtureSchema>;
 export type SettingsFixture = v.InferOutput<typeof settingsFixtureSchema>;
 export type TasksFixture = v.InferOutput<typeof tasksFixtureSchema>;

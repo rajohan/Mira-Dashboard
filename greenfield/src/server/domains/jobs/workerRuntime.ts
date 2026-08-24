@@ -1,6 +1,8 @@
 import { Cause, Effect, Exit, Fiber, ManagedRuntime } from "effect";
 
+import type { LinuxBootIdentity } from "../../../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../../../shared/openClawGatewayLifecycle.ts";
+import type { OpenClawServiceActionsExecutionPort } from "../../../shared/openClawServiceActions.ts";
 import type {
     TaskNotificationChatSender,
     TaskNotificationQueue,
@@ -19,12 +21,19 @@ import type { MoltbookDashboardCollector } from "../moltbook/provider.ts";
 import { createTaskNotificationQueue } from "../tasks/taskNotificationQueue.ts";
 import {
     createJobWorkerActionResolver,
+    hostOperationIds,
+    type FixedHostOperationsExecutionPort,
     type LogMaintenanceExecutionPort,
     type WorkspaceFileWriteExecutionPort,
 } from "./actionExecutors.ts";
 import {
     jobActionDefinitions,
+    hostSystemCleanupJobActionDefinition,
+    hostSystemRestartJobActionDefinition,
+    hostSystemUpdateJobActionDefinition,
     openClawGatewayRestartJobActionDefinition,
+    openClawInstallationUpdateJobActionDefinition,
+    openClawSessionsCleanupJobActionDefinition,
     workspaceFileReplaceJobActionDefinition,
     workspaceFileWriteJobActionDefinition,
 } from "./actionRegistry.ts";
@@ -41,10 +50,13 @@ import {
 } from "./sideEffects.ts";
 
 export interface DashboardWorkerRuntimeOptions {
+    readonly bootIdentity: LinuxBootIdentity;
     readonly database: DatabaseRuntimeLayerOptions;
     readonly logMaintenance: LogMaintenanceExecutionPort;
+    readonly hostOperations?: FixedHostOperationsExecutionPort;
     readonly moltbook: MoltbookDashboardCollector;
-    readonly openClawGateway: OpenClawGatewayLifecycleExecutionPort;
+    readonly openClawGateway?: OpenClawGatewayLifecycleExecutionPort;
+    readonly openClawServiceActions?: OpenClawServiceActionsExecutionPort;
     readonly workspaceFiles?: WorkspaceFileWriteExecutionPort & {
         readonly dispose: () => Promise<void> | void;
     };
@@ -404,9 +416,39 @@ export function createDashboardWorkerRuntime(
                 database.database,
                 database.writeAdmission
             );
+            const availableHostOperations =
+                (await options.hostOperations?.availableOperations()) ?? [];
+            if (
+                availableHostOperations.length > hostOperationIds.length ||
+                new Set(availableHostOperations).size !==
+                    availableHostOperations.length ||
+                availableHostOperations.some(
+                    (operationId) => !hostOperationIds.includes(operationId)
+                )
+            ) {
+                throw new Error("Fixed host operation availability is invalid");
+            }
+            const availableHostOperationSet = new Set(availableHostOperations);
             const actionDefinitions = Object.freeze([
                 ...jobActionDefinitions,
-                openClawGatewayRestartJobActionDefinition,
+                ...(options.openClawGateway === undefined
+                    ? []
+                    : [openClawGatewayRestartJobActionDefinition]),
+                ...(options.openClawServiceActions === undefined
+                    ? []
+                    : [
+                          openClawSessionsCleanupJobActionDefinition,
+                          openClawInstallationUpdateJobActionDefinition,
+                      ]),
+                ...(availableHostOperationSet.has("system-cleanup")
+                    ? [hostSystemCleanupJobActionDefinition]
+                    : []),
+                ...(availableHostOperationSet.has("system-restart")
+                    ? [hostSystemRestartJobActionDefinition]
+                    : []),
+                ...(availableHostOperationSet.has("system-update")
+                    ? [hostSystemUpdateJobActionDefinition]
+                    : []),
                 ...(options.workspaceFiles === undefined
                     ? []
                     : [
@@ -416,15 +458,25 @@ export function createDashboardWorkerRuntime(
             ]);
             const findAction = createJobWorkerActionResolver({
                 actionDefinitions,
+                ...(availableHostOperations.length === 0 ||
+                options.hostOperations === undefined
+                    ? {}
+                    : { hostOperations: options.hostOperations }),
                 logMaintenance: options.logMaintenance,
                 moltbook: options.moltbook,
-                openClawGateway: options.openClawGateway,
+                ...(options.openClawGateway === undefined
+                    ? {}
+                    : { openClawGateway: options.openClawGateway }),
+                ...(options.openClawServiceActions === undefined
+                    ? {}
+                    : { openClawServiceActions: options.openClawServiceActions }),
                 ...(options.workspaceFiles === undefined
                     ? {}
                     : { workspaceFiles: options.workspaceFiles }),
             });
             coordinator = dependencies.createCoordinator({
                 actionDefinitions,
+                bootIdentity: options.bootIdentity,
                 commitCacheAttempt: (input) => cacheRepository.commitAttempt(input),
                 databaseReleaseId: options.releaseId,
                 findAction,

@@ -31,6 +31,7 @@ import {
     jobResourceClasses,
     jobResourceKeysSchema,
     jobRunStates,
+    jobTimestampSchema,
     jobWorkerSummaryMaximum,
     type JobResourceClass,
     type JobRunState,
@@ -49,11 +50,17 @@ import {
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import { parseJsonText } from "../../../shared/json.ts";
 import {
+    linuxBootIdentitySchema,
+    type LinuxBootIdentity,
+} from "../../../shared/linuxBootIdentity.ts";
+import {
     logMaintenanceJobActionKey,
     logMaintenanceJobPayloadIndexMaximumBytes,
 } from "../../../shared/logMaintenanceUnits.ts";
+import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWriteAdmission.ts";
 import { auditEvents } from "../../database/schema/auditEvents.ts";
+import { hostRestartClaimFence } from "../../database/schema/hostRestartClaimFence.ts";
 import { jobDisableIntents } from "../../database/schema/jobDisableIntents.ts";
 import { jobRunEvents } from "../../database/schema/jobRunEvents.ts";
 import { jobRuns } from "../../database/schema/jobRuns.ts";
@@ -63,6 +70,10 @@ import { resourceLeases } from "../../database/schema/resourceLeases.ts";
 import { scheduledJobs } from "../../database/schema/scheduledJobs.ts";
 import { workerInstances } from "../../database/schema/workerInstances.ts";
 import { auditEventInsertSchema } from "../../database/validation/auditEvents.ts";
+import {
+    hostRestartClaimFenceInsertSchema,
+    hostRestartClaimFenceSelectSchema,
+} from "../../database/validation/hostRestartClaimFence.ts";
 import {
     jobDisableIntentCloseSchema,
     jobDisableIntentInsertSchema,
@@ -90,11 +101,23 @@ import {
     scheduledJobSelectSchema,
 } from "../../database/validation/scheduledJobs.ts";
 import {
+    canonicalWorkerActionKeys,
+    parseWorkerActionKeysJson,
+    workerActionKeysSchema,
     workerInstanceInsertSchema,
     workerInstanceSelectSchema,
 } from "../../database/validation/workerInstances.ts";
 import type { SecurityAuditEvent } from "../security/audit.ts";
 import {
+    hostSystemCleanupJobActionKey,
+    hostSystemRestartJobActionKey,
+    hostSystemUpdateJobActionKey,
+    openClawGatewayRestartJobActionKey,
+    openClawInstallationUpdateJobActionKey,
+    openClawSessionsCleanupJobActionKey,
+} from "./actionRegistry.ts";
+import {
+    type HostRestartClaimFenceRecord,
     type JobDisableIntentRecord,
     type JobRunEventRecord,
     type JobRunRecord,
@@ -109,11 +132,14 @@ type JobPersistenceDatabase = JobTransaction | SQLiteBunDatabase;
 
 export type JobDisableIntentInsert = v.InferOutput<typeof jobDisableIntentInsertSchema>;
 export type JobDisableIntentClose = v.InferOutput<typeof jobDisableIntentCloseSchema>;
-export type JobRunInsert = v.InferOutput<typeof jobRunInsertSchema>;
+export type JobRunInsert = v.InferInput<typeof jobRunInsertSchema>;
 export type JobRunEventInsert = v.InferOutput<typeof jobRunEventInsertSchema>;
 export type JobRealtimeEventInsert = v.InferOutput<typeof realtimeEventInsertSchema>;
 export type ScheduledJobInsert = v.InferOutput<typeof scheduledJobInsertSchema>;
 export type WorkerInstanceInsert = v.InferOutput<typeof workerInstanceInsertSchema>;
+
+/** Same-boot recovery ceiling when an accepted restart never reboots the host. */
+export const hostRestartClaimFenceDurationMs = 5 * 60_000;
 
 export interface JobMutationSideEffects {
     readonly auditEvents: readonly SecurityAuditEvent[];
@@ -158,6 +184,19 @@ export interface JobHealthState {
 export interface ReadJobHealthStateInput {
     readonly expectedReleaseId?: string;
     readonly minimumHeartbeatAt: Date;
+}
+
+export interface ReadWorkerActionAvailabilityInput {
+    readonly actionKeys: readonly string[];
+    readonly expectedReleaseId: string;
+    readonly minimumHeartbeatAt: Date;
+}
+
+/** Narrow exact-release executable-action inventory reader. */
+export interface WorkerActionAvailabilityReader {
+    readWorkerActionAvailability(
+        input: ReadWorkerActionAvailabilityInput
+    ): readonly string[];
 }
 
 /** Narrow aggregate reader kept separate from the ordinary job-service repository port. */
@@ -224,6 +263,11 @@ export interface ReconcileSchedulesInput {
         readonly terminalCode: string;
         readonly terminalMessage: string;
     };
+    readonly retiredRunFailure?: {
+        readonly sideEffectsForRun: (run: JobRunRecord) => JobMutationSideEffects;
+        readonly terminalCode: string;
+        readonly terminalMessage: string;
+    };
     readonly schedules: readonly ScheduledJobInsert[];
     readonly sideEffectsForSchedule: (
         schedule: ScheduledJobRecord
@@ -249,7 +293,7 @@ export interface ScheduleUpdateChanges {
     readonly schedule?: ScheduleConfiguration;
 }
 
-export interface ScheduleQueuedCancellation {
+export interface ScheduleQueuedTermination {
     readonly at: Date;
     readonly terminalCode: string;
     readonly terminalMessage: string;
@@ -263,7 +307,7 @@ export interface UpdateScheduleRepositoryInput extends JobMutationSideEffects {
     readonly id: string;
     readonly insertDisableIntent?: JobDisableIntentInsert;
     readonly patch: ScheduleUpdateChanges;
-    readonly queuedCancellation?: ScheduleQueuedCancellation;
+    readonly queuedCancellation?: ScheduleQueuedTermination;
     readonly queuedCancellationSideEffects?: (
         run: JobRunRecord
     ) => JobMutationSideEffects;
@@ -395,6 +439,7 @@ export interface JobClaimCursor {
 
 export interface ClaimNextRunInput {
     readonly at: Date;
+    readonly bootIdentity: LinuxBootIdentity;
     readonly cursor?: JobClaimCursor;
     readonly leaseExpiresAt: Date;
     readonly leaseToken: string;
@@ -411,6 +456,7 @@ export type JobClaimResult =
           readonly kind: "page-exhausted";
       }
     | { readonly kind: "paused" }
+    | { readonly kind: "restart-fenced" }
     | { readonly kind: "worker-unavailable" };
 
 export interface ClaimFenceInput {
@@ -419,6 +465,24 @@ export interface ClaimFenceInput {
     readonly runId: string;
     readonly workerId: string;
 }
+
+export interface ArmHostRestartClaimFenceInput extends ClaimFenceInput {
+    readonly bootIdentity: LinuxBootIdentity;
+}
+
+export type ArmHostRestartClaimFenceResult =
+    | { readonly fence: HostRestartClaimFenceRecord; readonly kind: "armed" }
+    | { readonly kind: "lost-claim" };
+
+export interface ClearHostRestartClaimFenceInput extends ClaimFenceInput {
+    readonly armedAt: Date;
+    readonly bootIdentity: LinuxBootIdentity;
+    readonly expiresAt: Date;
+}
+
+export type ClearHostRestartClaimFenceResult =
+    | { readonly kind: "cleared" }
+    | { readonly kind: "changed" };
 
 export interface RenewClaimInput extends ClaimFenceInput {
     readonly leaseExpiresAt: Date;
@@ -511,11 +575,20 @@ export interface JobRunPageSnapshot {
 }
 
 export interface JobRepository extends JobRepositoryReader {
+    armHostRestartClaimFence(
+        input: ArmHostRestartClaimFenceInput
+    ): Promise<ArmHostRestartClaimFenceResult>;
     appendClaimEvent(input: AppendClaimEventInput): Promise<JobAppendEventResult>;
     beginWorkerDrain(input: WorkerLifecycleMutationInput): Promise<WorkerLifecycleResult>;
     cancelRun(input: CancelRunRepositoryInput): Promise<CancelRunRepositoryResult>;
+    clearHostRestartClaimFence(
+        input: ClearHostRestartClaimFenceInput
+    ): Promise<ClearHostRestartClaimFenceResult>;
     claimNextRun(input: ClaimNextRunInput): Promise<JobClaimResult>;
-    enqueueManualRun(input: EnqueueManualRunInput): Promise<EnqueueManualRunResult>;
+    enqueueManualRun(
+        input: EnqueueManualRunInput,
+        authorizeAdmittedEnqueue?: () => void
+    ): Promise<EnqueueManualRunResult>;
     enqueueNextDueSchedule(
         input: DueScheduleEnqueueInput
     ): Promise<DueScheduleEnqueueResult>;
@@ -555,6 +628,15 @@ const terminalRunStateList = [
     "succeeded",
     "timed-out",
 ] as const satisfies readonly JobRunState[];
+const serviceActionJobActionKeyList = [
+    openClawSessionsCleanupJobActionKey,
+    openClawGatewayRestartJobActionKey,
+    openClawInstallationUpdateJobActionKey,
+    hostSystemCleanupJobActionKey,
+    hostSystemRestartJobActionKey,
+    hostSystemUpdateJobActionKey,
+] as const;
+const serviceActionJobActionKeys = new Set<string>(serviceActionJobActionKeyList);
 // SQLite partial-index matching requires the same literal state predicates as the DDL.
 function literalStateList(states: readonly JobRunState[]): SQL {
     return sql.raw(states.map((state) => `'${state}'`).join(", "));
@@ -562,6 +644,7 @@ function literalStateList(states: readonly JobRunState[]): SQL {
 const activeStateFilter = sql`${jobRuns.state} IN (${literalStateList(activeRunStateList)})`;
 const terminalStateFilter = sql`${jobRuns.state} IN (${literalStateList(terminalRunStateList)})`;
 const logMaintenanceSnapshotScopeFilter = sql`${jobRuns.actionKey} = ${sql.raw(`'${logMaintenanceJobActionKey}'`)} AND length(CAST(${jobRuns.payloadJson} AS BLOB)) <= ${sql.raw(String(logMaintenanceJobPayloadIndexMaximumBytes))}`;
+const serviceActionSnapshotScopeFilter = sql`${jobRuns.actionKey} IN (${sql.raw(serviceActionJobActionKeyList.map((actionKey) => `'${actionKey}'`).join(", "))}) AND ${jobRuns.payloadJson} = '{}'`;
 const terminalRunStates = new Set<JobRunState>(terminalRunStateList);
 
 function requiredRow<T>(row: T | undefined, operation: string): T {
@@ -843,6 +926,7 @@ class DrizzleJobReader implements JobRepositoryReader {
             "action payload run snapshot"
         );
         const usesMaintenanceStatusIndex = actionKey === logMaintenanceJobActionKey;
+        const usesServiceActionStatusIndex = serviceActionJobActionKeys.has(actionKey);
         const payloadJsons = input.payloadJsons.map((payloadJson) => {
             if (utf8ByteLength(payloadJson) > jobPayloadMaximumBytes) {
                 throw new TypeError(
@@ -869,6 +953,12 @@ class DrizzleJobReader implements JobRepositoryReader {
         }
         return payloadJsons.map((payloadJson) => {
             const actionCondition = eq(jobRuns.actionKey, actionKey);
+            let terminalScopeCondition = actionCondition;
+            if (usesMaintenanceStatusIndex) {
+                terminalScopeCondition = logMaintenanceSnapshotScopeFilter;
+            } else if (usesServiceActionStatusIndex && payloadJson === "{}") {
+                terminalScopeCondition = sql`${actionCondition} AND ${serviceActionSnapshotScopeFilter}`;
+            }
             const activeRow = this.database
                 .select()
                 .from(jobRuns)
@@ -886,9 +976,7 @@ class DrizzleJobReader implements JobRepositoryReader {
                 .from(jobRuns)
                 .where(
                     and(
-                        usesMaintenanceStatusIndex
-                            ? logMaintenanceSnapshotScopeFilter
-                            : actionCondition,
+                        terminalScopeCondition,
                         eq(jobRuns.payloadJson, payloadJson),
                         terminalStateFilter
                     )
@@ -1159,6 +1247,47 @@ class DrizzleJobReader implements JobRepositoryReader {
         };
     }
 
+    public readWorkerActionAvailability(
+        input: ReadWorkerActionAvailabilityInput
+    ): readonly string[] {
+        const actionKeys = canonicalWorkerActionKeys(input.actionKeys);
+        if (actionKeys.length === 0) return Object.freeze([]);
+        const expectedReleaseId = v.parse(
+            fullCommitShaSchema("Expected worker release id is invalid"),
+            input.expectedReleaseId
+        );
+        const minimumHeartbeatAtMs = v.parse(
+            jobTimestampSchema,
+            getTime(input.minimumHeartbeatAt)
+        );
+        const rows = this.database.all<unknown>(sql`
+            SELECT DISTINCT CAST(action.value AS TEXT) AS actionKey
+            FROM ${workerInstances} AS worker
+            JOIN json_each(worker.action_keys_json) AS action
+            WHERE worker.state = 'online'
+              AND worker.release_id = ${expectedReleaseId}
+              AND worker.heartbeat_at >= ${minimumHeartbeatAtMs}
+              AND CAST(action.value AS TEXT) IN (${sql.join(
+                  actionKeys.map((actionKey) => sql`${actionKey}`),
+                  sql`, `
+              )})
+            ORDER BY actionKey ASC
+            LIMIT ${actionKeys.length}
+        `);
+        const parsed = v
+            .parse(
+                v.array(
+                    v.strictObject({
+                        actionKey: v.string("Worker action key is invalid"),
+                    }),
+                    "Worker action availability is invalid"
+                ),
+                rows
+            )
+            .map(({ actionKey }) => actionKey);
+        return Object.freeze([...v.parse(workerActionKeysSchema, parsed)]);
+    }
+
     public readWorkerControl(): JobWorkerControlRecord {
         const row = this.database
             .select()
@@ -1268,6 +1397,136 @@ class DrizzleJobWriter extends DrizzleJobReader {
         this.#transaction = transaction;
     }
 
+    #reconcileHostRestartClaimFence(
+        bootIdentity: LinuxBootIdentity,
+        at: Date
+    ): HostRestartClaimFenceRecord | undefined {
+        const row = this.#transaction
+            .select()
+            .from(hostRestartClaimFence)
+            .where(eq(hostRestartClaimFence.id, 1))
+            .get();
+        if (row === undefined) return;
+        const fence = v.parse(hostRestartClaimFenceSelectSchema, row);
+        if (
+            fence.bootIdentity === bootIdentity &&
+            getTime(fence.expiresAt) > getTime(at)
+        ) {
+            return fence;
+        }
+        const removed = this.#transaction
+            .delete(hostRestartClaimFence)
+            .where(
+                and(
+                    eq(hostRestartClaimFence.id, fence.id),
+                    eq(hostRestartClaimFence.armedAt, fence.armedAt),
+                    eq(hostRestartClaimFence.bootIdentity, fence.bootIdentity),
+                    eq(hostRestartClaimFence.expiresAt, fence.expiresAt),
+                    eq(hostRestartClaimFence.jobRunId, fence.jobRunId),
+                    eq(hostRestartClaimFence.leaseToken, fence.leaseToken),
+                    eq(hostRestartClaimFence.workerInstanceId, fence.workerInstanceId)
+                )
+            )
+            .returning({ id: hostRestartClaimFence.id })
+            .get();
+        if (removed === undefined) {
+            throw new Error("Host restart claim fence reconciliation failed");
+        }
+        return;
+    }
+
+    public armHostRestartClaimFence(
+        input: ArmHostRestartClaimFenceInput
+    ): ArmHostRestartClaimFenceResult {
+        const bootIdentity = v.parse(linuxBootIdentitySchema, input.bootIdentity);
+        const atMs = v.parse(jobTimestampSchema, getTime(input.at));
+        const at = new Date(atMs);
+        if (this.#reconcileHostRestartClaimFence(bootIdentity, at) !== undefined) {
+            return { kind: "lost-claim" };
+        }
+        const run = this.#transaction
+            .select()
+            .from(jobRuns)
+            .where(
+                and(
+                    eq(jobRuns.id, input.runId),
+                    eq(jobRuns.actionKey, hostSystemRestartJobActionKey),
+                    eq(jobRuns.payloadJson, "{}"),
+                    eq(jobRuns.state, "running"),
+                    eq(jobRuns.leaseOwnerId, input.workerId),
+                    eq(jobRuns.leaseToken, input.leaseToken),
+                    gt(jobRuns.leaseExpiresAt, at)
+                )
+            )
+            .get();
+        if (run === undefined) return { kind: "lost-claim" };
+        parseRun(run);
+        const runningCount = requiredRow(
+            this.#transaction
+                .select({ value: count() })
+                .from(jobRuns)
+                .where(eq(jobRuns.state, "running"))
+                .get(),
+            "host restart global running count"
+        ).value;
+        if (runningCount !== 1) return { kind: "lost-claim" };
+        const expiresAt = new Date(
+            v.parse(jobTimestampSchema, atMs + hostRestartClaimFenceDurationMs)
+        );
+        const inserted = this.#transaction
+            .insert(hostRestartClaimFence)
+            .values(
+                v.parse(hostRestartClaimFenceInsertSchema, {
+                    armedAt: at,
+                    bootIdentity,
+                    expiresAt,
+                    id: 1,
+                    jobRunId: input.runId,
+                    leaseToken: input.leaseToken,
+                    workerInstanceId: input.workerId,
+                })
+            )
+            .returning()
+            .get();
+        return {
+            fence: v.parse(
+                hostRestartClaimFenceSelectSchema,
+                requiredRow(inserted, "host restart claim fence insert")
+            ),
+            kind: "armed",
+        };
+    }
+
+    public clearHostRestartClaimFence(
+        input: ClearHostRestartClaimFenceInput
+    ): ClearHostRestartClaimFenceResult {
+        const expected = v.parse(hostRestartClaimFenceInsertSchema, {
+            armedAt: input.armedAt,
+            bootIdentity: input.bootIdentity,
+            expiresAt: input.expiresAt,
+            id: 1,
+            jobRunId: input.runId,
+            leaseToken: input.leaseToken,
+            workerInstanceId: input.workerId,
+        });
+        const removed = this.#transaction
+            .delete(hostRestartClaimFence)
+            .where(
+                and(
+                    eq(hostRestartClaimFence.id, expected.id),
+                    eq(hostRestartClaimFence.armedAt, expected.armedAt),
+                    eq(hostRestartClaimFence.bootIdentity, expected.bootIdentity),
+                    eq(hostRestartClaimFence.expiresAt, expected.expiresAt),
+                    eq(hostRestartClaimFence.jobRunId, expected.jobRunId),
+                    eq(hostRestartClaimFence.leaseToken, expected.leaseToken),
+                    eq(hostRestartClaimFence.workerInstanceId, expected.workerInstanceId)
+                )
+            )
+            .returning({ id: hostRestartClaimFence.id })
+            .get();
+        return { kind: removed === undefined ? "changed" : "cleared" };
+    }
+
     public reconcileSchedules(input: ReconcileSchedulesInput): ScheduledJobRecord[] {
         const records: ScheduledJobRecord[] = [];
         const registeredScheduleIds = new Set(
@@ -1343,20 +1602,28 @@ class DrizzleJobWriter extends DrizzleJobReader {
             .filter((schedule) => !registeredScheduleIds.has(schedule.id));
         for (const schedule of retiredSchedules) {
             const queuedScheduleRun = this.#findQueuedScheduleRun(schedule.id);
-            // Registry retirement disables future scheduling. A queued `never` run keeps
-            // its immutable execution snapshot and completes through the normal worker
-            // action-availability path; retirement must not reinterpret it as cancellable.
-            const cancellableQueuedScheduleRun =
+            const neverCancellableQueuedRun =
                 queuedScheduleRun?.cancellationPolicy === "never"
-                    ? undefined
-                    : queuedScheduleRun;
+                    ? queuedScheduleRun
+                    : undefined;
+            const cancellableQueuedScheduleRun =
+                neverCancellableQueuedRun === undefined ? queuedScheduleRun : undefined;
             const retiredRunCancellation = input.retiredRunCancellation;
+            const retiredRunFailure = input.retiredRunFailure;
             if (
                 cancellableQueuedScheduleRun !== undefined &&
                 retiredRunCancellation === undefined
             ) {
                 throw new Error(
                     "Removed schedule retirement requires queued-run cancellation metadata"
+                );
+            }
+            if (
+                neverCancellableQueuedRun !== undefined &&
+                retiredRunFailure === undefined
+            ) {
+                throw new Error(
+                    "Removed schedule retirement requires immutable-run failure metadata"
                 );
             }
             const retired = this.#transaction
@@ -1394,6 +1661,17 @@ class DrizzleJobWriter extends DrizzleJobReader {
                 this.#insertSideEffects(
                     retiredRunCancellation.sideEffectsForRun(cancelled)
                 );
+            }
+            if (
+                neverCancellableQueuedRun !== undefined &&
+                retiredRunFailure !== undefined
+            ) {
+                const failed = this.#failQueuedRun(neverCancellableQueuedRun, {
+                    at: retiredSchedule.updatedAt,
+                    terminalCode: retiredRunFailure.terminalCode,
+                    terminalMessage: retiredRunFailure.terminalMessage,
+                });
+                this.#insertSideEffects(retiredRunFailure.sideEffectsForRun(failed));
             }
             this.#insertSideEffects(input.sideEffectsForSchedule(retiredSchedule));
         }
@@ -2050,6 +2328,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
     }
 
     public claimNextRun(input: ClaimNextRunInput): JobClaimResult {
+        const bootIdentity = v.parse(linuxBootIdentitySchema, input.bootIdentity);
+        const at = new Date(v.parse(jobTimestampSchema, getTime(input.at)));
+        if (this.#reconcileHostRestartClaimFence(bootIdentity, at) !== undefined) {
+            return { kind: "restart-fenced" };
+        }
         if (getTime(input.leaseExpiresAt) <= getTime(input.at)) {
             throw new RangeError("Claim lease expiry must be after claim time");
         }
@@ -2084,6 +2367,8 @@ class DrizzleJobWriter extends DrizzleJobReader {
             "worker active count"
         ).value;
         if (activeCount >= worker.capacity) return { kind: "worker-unavailable" };
+        const workerActionKeys = parseWorkerActionKeysJson(worker.actionKeysJson);
+        if (workerActionKeys.length === 0) return { kind: "empty" };
 
         const availableThrough = input.cursor?.availableThrough ?? input.at;
         const candidates: JobRunRecord[] = [];
@@ -2098,6 +2383,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         and(
                             eq(jobRuns.state, "queued"),
                             lte(jobRuns.availableAt, availableThrough),
+                            inArray(jobRuns.actionKey, workerActionKeys),
+                            or(
+                                isNull(jobRuns.requiredWorkerReleaseId),
+                                eq(jobRuns.requiredWorkerReleaseId, worker.releaseId)
+                            ),
                             range
                         )
                     )
@@ -2176,7 +2466,11 @@ class DrizzleJobWriter extends DrizzleJobReader {
                         eq(jobRuns.id, candidate.id),
                         eq(jobRuns.state, "queued"),
                         eq(jobRuns.stateVersion, candidate.stateVersion),
-                        lte(jobRuns.availableAt, availableThrough)
+                        lte(jobRuns.availableAt, availableThrough),
+                        or(
+                            isNull(jobRuns.requiredWorkerReleaseId),
+                            eq(jobRuns.requiredWorkerReleaseId, worker.releaseId)
+                        )
                     )
                 )
                 .returning()
@@ -2452,7 +2746,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
     #cancelQueuedRun(
         run: JobRunRecord,
         actor: JobActor,
-        input: ScheduleQueuedCancellation
+        input: ScheduleQueuedTermination
     ): JobRunRecord {
         const at = maximumDate(run.updatedAt, input.at);
         const row = this.#transaction
@@ -2492,6 +2786,38 @@ class DrizzleJobWriter extends DrizzleJobReader {
             workerInstanceId: null,
         });
         return requiredRow(this.findRun(run.id), "cancelled run refresh");
+    }
+
+    #failQueuedRun(run: JobRunRecord, input: ScheduleQueuedTermination): JobRunRecord {
+        const at = maximumDate(run.updatedAt, input.at);
+        const row = this.#transaction
+            .update(jobRuns)
+            .set({
+                finishedAt: at,
+                state: "failed",
+                stateVersion: run.stateVersion + 1,
+                terminalCode: input.terminalCode,
+                terminalMessage: input.terminalMessage,
+                updatedAt: at,
+            })
+            .where(
+                and(
+                    eq(jobRuns.id, run.id),
+                    eq(jobRuns.state, "queued"),
+                    eq(jobRuns.stateVersion, run.stateVersion)
+                )
+            )
+            .returning()
+            .get();
+        requiredRow(row, "queued run failure");
+        this.#appendEvent(run.id, {
+            attempt: run.attemptCount,
+            kind: "failed",
+            message: boundedStructuralMessage(input.terminalMessage),
+            occurredAt: at,
+            workerInstanceId: null,
+        });
+        return requiredRow(this.findRun(run.id), "failed queued run refresh");
     }
 
     #claimFence(input: ClaimFenceInput): SQL {
@@ -2700,7 +3026,7 @@ class DrizzleJobWriter extends DrizzleJobReader {
 export function createJobRepository(
     database: SQLiteBunDatabase,
     writeAdmission: ImmediateDatabaseWriteAdmission
-): JobRepository & JobHealthStateReader {
+): JobRepository & JobHealthStateReader & WorkerActionAvailabilityReader {
     // Drizzle exposes the synchronous transaction overload through a conditional
     // return type that cannot preserve our generic callback without this narrowing.
     const runTransaction = database.transaction.bind(database) as unknown as <T>(
@@ -2711,28 +3037,38 @@ export function createJobRepository(
         runTransaction((transaction) => callback(new DrizzleJobReader(transaction)), {
             behavior: "deferred",
         });
-    const write = <T>(callback: (writer: DrizzleJobWriter) => T): Promise<T> =>
-        writeAdmission.run((markTransactionStarted) =>
-            runTransaction(
+    const write = <T>(
+        callback: (writer: DrizzleJobWriter) => T,
+        authorizeAdmittedWrite?: () => void
+    ): Promise<T> =>
+        writeAdmission.run((markTransactionStarted) => {
+            authorizeAdmittedWrite?.();
+            return runTransaction(
                 (transaction) => {
                     markTransactionStarted();
                     return callback(new DrizzleJobWriter(transaction));
                 },
                 { behavior: "immediate" }
-            )
-        );
+            );
+        });
 
     return Object.freeze({
+        armHostRestartClaimFence: (input: ArmHostRestartClaimFenceInput) =>
+            write((writer) => writer.armHostRestartClaimFence(input)),
         appendClaimEvent: (input: AppendClaimEventInput) =>
             write((writer) => writer.appendClaimEvent(input)),
         beginWorkerDrain: (input: WorkerLifecycleMutationInput) =>
             write((writer) => writer.beginWorkerDrain(input)),
         cancelRun: (input: CancelRunRepositoryInput) =>
             write((writer) => writer.cancelRun(input)),
+        clearHostRestartClaimFence: (input: ClearHostRestartClaimFenceInput) =>
+            write((writer) => writer.clearHostRestartClaimFence(input)),
         claimNextRun: (input: ClaimNextRunInput) =>
             write((writer) => writer.claimNextRun(input)),
-        enqueueManualRun: (input: EnqueueManualRunInput) =>
-            write((writer) => writer.enqueueManualRun(input)),
+        enqueueManualRun: (
+            input: EnqueueManualRunInput,
+            authorizeAdmittedEnqueue?: () => void
+        ) => write((writer) => writer.enqueueManualRun(input), authorizeAdmittedEnqueue),
         enqueueNextDueSchedule: (input: DueScheduleEnqueueInput) =>
             write((writer) => writer.enqueueNextDueSchedule(input)),
         expireDisableIntents: (input: ExpireDisableIntentsInput) =>
@@ -2783,6 +3119,8 @@ export function createJobRepository(
         readQueueState: (input: ReadQueueStateInput) =>
             read((reader) => reader.readQueueState(input)),
         readWorkerControl: () => read((reader) => reader.readWorkerControl()),
+        readWorkerActionAvailability: (input: ReadWorkerActionAvailabilityInput) =>
+            read((reader) => reader.readWorkerActionAvailability(input)),
         reconcileSchedules: (input: ReconcileSchedulesInput) =>
             write((writer) => writer.reconcileSchedules(input)),
         recoverExpiredClaims: (input: RecoverExpiredClaimsInput) =>

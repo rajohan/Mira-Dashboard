@@ -480,6 +480,14 @@
         },
         {
             "kind": "query",
+            "name": "serviceActions.getStatus"
+        },
+        {
+            "kind": "mutation",
+            "name": "serviceActions.request"
+        },
+        {
+            "kind": "query",
             "name": "system.healthDiagnostics"
         },
         {

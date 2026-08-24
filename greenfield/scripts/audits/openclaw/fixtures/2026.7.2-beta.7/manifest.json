@@ -17,6 +17,10 @@
             "sha256": "dbd4311e4e31b71855527459aa0f7f389c99dba58ba79c066f77334c1d1cf6e3"
         },
         {
+            "file": "operations.json",
+            "sha256": "e7db22e0c9ab48c08da94cad87c3a2b8c8b59c9457a11b12486c5c41c71bb6e5"
+        },
+        {
             "file": "sessions.json",
             "sha256": "91785d6d4ee208b2dace06c48473341195c5782b8a371317cc63e463e75757a1"
         },
@@ -382,10 +386,22 @@
             "sha256": "171c52bd6a3d10e8555fdaf00aed3ce225fd465911ef8958ce8235751a4c6f7b"
         },
         {
+            "bytes": 199139,
+            "path": "dist/session-accessor.sqlite-2Th60fFl.js",
+            "role": "session-accessor-sqlite-maintenance",
+            "sha256": "a028cf6a72edd7fd19d51985eb32111b836dd6336c98843c0ec1291e28d3c11a"
+        },
+        {
             "bytes": 2077,
             "path": "dist/session-change-event-B7AM9yTQ.js",
             "role": "session-change-event",
             "sha256": "3fa61e8f0664d4943c474f22d680dc391cff689044328129a02e9fc21b7ce0ea"
+        },
+        {
+            "bytes": 15719,
+            "path": "dist/cleanup-service-BAH9Mem2.js",
+            "role": "session-cleanup-service",
+            "sha256": "281f338cbd533c6438d345c2eed7c74f72f9f97cdf12cb5f988d783ca478678a"
         },
         {
             "bytes": 3364,
@@ -416,6 +432,12 @@
             "path": "dist/session-utils-list-DjMXRYTe.js",
             "role": "session-list-projection",
             "sha256": "f0025237779a8fd3ea2ac3f79b9f45c12ccf05850995dd525014b9321b1d5328"
+        },
+        {
+            "bytes": 106305,
+            "path": "dist/session-entry-slot-keys-DRaa8e03.js",
+            "role": "session-maintenance-policy",
+            "sha256": "da1a930f1d759f8648c5786c0a921cb623c60cfd871d4ffaa4375170d552cf96"
         },
         {
             "bytes": 7598,
@@ -530,6 +552,30 @@
             "path": "dist/session-accessor.sqlite-transcript-store-D9IEgzu1.js",
             "role": "transcript-media-persistence",
             "sha256": "73fef1dff84be8783531dae1528e25dbfd2cfe2d3d7abdaa1eefea0320529f0e"
+        },
+        {
+            "bytes": 17875,
+            "path": "dist/update-CkwHKf6r.js",
+            "role": "update-handlers",
+            "sha256": "b7ee1ea9336b1b8d496a2610b041d3af8849fe92a0ccf09b3ca559965061c330"
+        },
+        {
+            "bytes": 50211,
+            "path": "dist/update-startup-uZ_Jn11N.js",
+            "role": "update-managed-handoff",
+            "sha256": "77e3141db24e6eea7cb10ee10725c4feed72f22db6d2dfc57520ec894747e852"
+        },
+        {
+            "bytes": 118137,
+            "path": "dist/update-runner-DBlb9fqo.js",
+            "role": "update-runner",
+            "sha256": "547191d6df5f35a1dcf930881a2d931febd56a09c4057af487eab943dd8f22b9"
+        },
+        {
+            "bytes": 5490,
+            "path": "dist/update-control-plane-sentinel-CC-WfVRy.js",
+            "role": "update-sentinel",
+            "sha256": "d74fed63f194afdf67fefbac58cdfefd69bf679fa9355bedcd2e5eb1181dc804"
         },
         {
             "bytes": 6633,

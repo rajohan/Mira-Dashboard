@@ -85,3 +85,12 @@ export function timestampMillisecondsCheck(column: SQLWrapper) {
 export function uuidV7TextCheck(column: SQLWrapper) {
     return sql`length(${column}) = 36 AND ${nulFreeTextCheck(column)} AND length(replace(${column}, '-', '')) = 32 AND replace(${column}, '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(${column}, 9, 1) = '-' AND substr(${column}, 14, 1) = '-' AND substr(${column}, 15, 1) = '7' AND substr(${column}, 19, 1) = '-' AND substr(${column}, 20, 1) GLOB '[89ab]' AND substr(${column}, 24, 1) = '-'`;
 }
+
+/**
+ * Builds a SQLite check matching a canonical lowercase UUID of any version.
+ * @param column SQLite text column to validate.
+ * @returns Drizzle SQL expression for the storage constraint.
+ */
+export function lowercaseUuidTextCheck(column: SQLWrapper) {
+    return sql`length(${column}) = 36 AND ${nulFreeTextCheck(column)} AND length(replace(${column}, '-', '')) = 32 AND replace(${column}, '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(${column}, 9, 1) = '-' AND substr(${column}, 14, 1) = '-' AND substr(${column}, 19, 1) = '-' AND substr(${column}, 24, 1) = '-'`;
+}

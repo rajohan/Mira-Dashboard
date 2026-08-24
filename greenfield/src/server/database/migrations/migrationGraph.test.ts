@@ -44,6 +44,7 @@ const expectedTables: string[] = [
     "chat_runs",
     "chat_runtime_snapshots",
     "chat_transcript_generations",
+    "host_restart_claim_fence",
     "incident_observations",
     "incidents",
     "job_disable_intents",
@@ -131,6 +132,8 @@ describe("database migration graph", () => {
             "chat_transcript_generations_reject_identity_update",
             "chat_transcript_generations_reject_replace",
             "chat_transcript_generations_validate_monotonic_update",
+            "host_restart_claim_fence_reject_update",
+            "host_restart_claim_fence_validate_insert",
             "reports_validate_metadata_insert",
             "reports_validate_metadata_update",
             "incidents_validate_details_insert",
@@ -173,6 +176,7 @@ describe("database migration graph", () => {
             "worker_instances_reject_active_delete",
             "worker_instances_reject_identity_update",
             "worker_instances_reject_replace",
+            "worker_instances_validate_action_keys_insert",
             "worker_instances_validate_lifecycle_update",
         ]) {
             expect(foundationSql).toContain(`CREATE TRIGGER ${trigger}`);
@@ -182,6 +186,9 @@ describe("database migration graph", () => {
         );
         expect(foundationSql).toContain(
             'CONSTRAINT "monitor_runs_submission_sha256_check" CHECK(length("submission_sha256") = 64 AND instr("submission_sha256", char(0)) = 0'
+        );
+        expect(foundationSql).toContain(
+            'CONSTRAINT "worker_instances_action_keys_json_check" CHECK(length(CAST("action_keys_json" AS BLOB)) <= 4096 AND CASE WHEN json_valid("action_keys_json") THEN json_type("action_keys_json") = \'array\' ELSE 0 END AND CASE WHEN json_valid("action_keys_json") THEN json_array_length("action_keys_json") <= 32 ELSE 0 END)'
         );
         expect(foundationSql).not.toContain("legacy");
         expect(foundationSql).not.toContain("SET fingerprint = fingerprint");
@@ -216,6 +223,7 @@ describe("database migration graph", () => {
             ).toBe(1);
             for (const tableName of [
                 "cache_entries",
+                "host_restart_claim_fence",
                 "job_disable_intents",
                 "job_run_events",
                 "job_runs",

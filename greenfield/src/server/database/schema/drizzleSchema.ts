@@ -18,6 +18,7 @@ export { chatRuntimeSnapshots } from "./chatRuntimeSnapshots.ts";
 export { chatTranscriptGenerations } from "./chatTranscriptGenerations.ts";
 export { incidentObservations } from "./incidentObservations.ts";
 export { incidents } from "./incidents.ts";
+export { hostRestartClaimFence } from "./hostRestartClaimFence.ts";
 export { jobDisableIntents } from "./jobDisableIntents.ts";
 export { jobRunEvents } from "./jobRunEvents.ts";
 export { jobRuns } from "./jobRuns.ts";

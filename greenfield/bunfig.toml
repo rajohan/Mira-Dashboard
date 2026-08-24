@@ -16,5 +16,9 @@ coveragePathIgnorePatterns = [
 ]
 
 [serve.static]
-plugins = ["./scripts/reactCompilerPlugin.ts", "bun-plugin-tailwind"]
+plugins = [
+    "./scripts/reactCompilerPlugin.ts",
+    "./scripts/development/tanStackRouterHmrWorkaroundPlugin.ts",
+    "bun-plugin-tailwind",
+]
 environment = "PUBLIC_*"

@@ -423,6 +423,60 @@ target-directory write access for its private stage file, `renameat2` exchange, 
 at runtime. Descriptor validation, per-file bounds, CAS, and the fixed worker manifest are the write
 boundary.
 
+The fixed Service Actions contract and Overview include host cleanup, host restart, and host
+update. A fixed `/usr/bin/systemctl` broker and root-owned helper, policy, service/timer, and
+manifest-verified installer artifacts ship in the release, but the current production composition
+does not instantiate the broker or mutate root-owned host state. Web and worker still share one
+Unix identity, so group-authorizing that identity would also authorize the internet-facing web
+process. Consequently all host actions remain `unavailable` and enqueue rechecks fail closed.
+
+Before the worker can request the fixed restart unit, it atomically arms the database-global
+restart claim fence using the validated Linux `/proc/sys/kernel/random/boot_id` identity. Arming
+requires that exact owned restart lease to be the only globally running job; once armed, all
+worker processes stop claiming new jobs. The current broker has no proof that a rejection, abort,
+timeout, or lost response occurred before `systemctl start --no-block` accepted the reboot timer;
+therefore every outcome after dispatch begins retains the fence. A new boot identity reconciles
+it, while five-minute same-boot expiry restores admission if no reboot occurs. This safety fence
+is independent of the operator-controlled queue pause.
+
+Host-action enablement is a reviewed delivery/topology operation rather than an application
+toggle. It must first move the worker to a distinct OS principal, keep the web principal outside
+that identity and its groups, execute only root-owned immutable code/configuration, constrain
+authorization to the three exact units, verify no-follow identity/ownership/mode/content, retain
+explicit rollback to the previous immutable release, and then compose the broker. Only that
+boundary may make the worker advertise a host action.
+The root installer must never consume the application-owned release tree directly. A reviewed
+handoff first transfers the exact release into a dedicated root-owned immutable staging path. The
+release root and every traversed source directory must be `root:root 0500`; the release identity,
+manifest, and every admitted helper/unit/policy artifact must be `root:root 0400`. Source hashes
+from an application-owned release do not establish authority, even when internally consistent.
+The handoff also provisions one exact root-owned Bun runtime at
+`/var/lib/mira-dashboard-host-provisioning/runtime/bun` with mode `0555`; every ancestor is
+root-owned and not group/other-writable beneath the root-owned, non-group/other-writable
+`/var/lib/mira-dashboard-host-provisioning` trust root. It invokes the root-owned staged installer
+by absolute path, never a package script or application-checkout module. This pre-execution boundary is
+mandatory because Bun loads the entrypoint and its local dependencies before their in-process
+runtime/source checks can execute. The installer then validates its exact `process.execPath` and
+ancestor ownership/modes again before admitting release bytes.
+Before ownership transfer or launch, change control independently verifies the candidate against
+the reviewed Git commit/tree and supplies the exact release-manifest SHA-256 out of band. The root
+command must not derive that trust anchor from the application checkout. The installer compares
+the supplied digest to the held root-owned manifest bytes before parsing any artifact digest, so an
+internally consistent app-forged release and manifest are insufficient.
+OpenClaw cleanup, restart, and update do not use this deferred host authority: their exact
+worker-only Gateway operations are already implemented and remain available only when a fresh
+exact-release worker advertises them. Restart reuses the same fixed action provider as the Settings
+control rather than adding a second lifecycle executor.
+
+The fixed `system-cleanup` unit preserves the consumed cleanup behavior behind one reviewed
+authority. It attempts package autoremove and cache cleanup, journald rotate plus 14-day/1 GiB
+vacuum bounds, and Docker system prune for unused content older than 168 hours; it never passes
+`--volumes`. Each phase is attempted, any failure fails the unit, output is discarded, and the
+worker receives only a completed status. Together with the bounded PTY this defines the narrow
+replacement for the legacy `POST /api/exec/start` behavior without recreating the old shared shell
+boundary. That parity row remains planned until the distinct worker identity and separately
+approved root provisioning make `system-cleanup` executable in production.
+
 The web process also derives the fixed `<MIRA_DASHBOARD_OPENCLAW_ROOT>/media` descriptor boundary
 from that same reviewed root. It exposes no configurable media directory, recursive listing, or
 browser-supplied path route. Local-history transcript carriers become opaque session/message-bound

@@ -16,6 +16,7 @@ import {
 import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
+    createDefaultDashboardWorkerProcessDependencies,
     createWorkerLogMaintenanceExecutor,
     type DashboardWorkerProcessDependencies,
     runDashboardWorkerProcess,
@@ -27,6 +28,7 @@ const workspaceRoot = "/srv/mira-workspace";
 const releaseId = "b".repeat(40);
 const revision = "a".repeat(40);
 const checksum = "c".repeat(64);
+const bootIdentity = "00000000-0000-0000-0000-000000000001";
 const layout = deriveDashboardProjectLayout(projectRoot);
 const release: RuntimeRelease = Object.freeze({
     manifest: parseReleaseManifest({
@@ -92,6 +94,8 @@ function processFixture(
         }),
     } satisfies ProjectFileLogDestination);
     const gatewayTransport = Object.freeze({
+        requestOpenClawServiceAction: () =>
+            Promise.reject(new Error("OpenClaw operations are unavailable in fixture")),
         start() {
             events.push("gateway-start");
         },
@@ -123,6 +127,10 @@ function processFixture(
     });
     const openClawGateway = Object.freeze({
         restart: () => Promise.resolve(),
+    });
+    const openClawServiceActions = Object.freeze({
+        cleanupSessions: () => Promise.reject(new Error("fixture cleanup unavailable")),
+        updateInstallation: () => Promise.reject(new Error("fixture update unavailable")),
     });
     const runtime: DashboardWorkerRuntime = Object.freeze({
         completion,
@@ -190,21 +198,30 @@ function processFixture(
             expect(observedOpenClawRoot).toBe(openClawRoot);
             return openClawGateway;
         },
+        createOpenClawServiceActions(observedGatewayTransport) {
+            expect(observedGatewayTransport).toBe(gatewayTransport);
+            return openClawServiceActions;
+        },
         createRuntime(
             observedLayout,
             observedRelease,
             logger,
             observedGatewayTransport,
             observedOpenClawGateway,
+            observedOpenClawServiceActions,
             observedWorkspaceRoot,
             observedOpenClawRoot,
-            observedLogMaintenance
+            observedLogMaintenance,
+            _observedMoltbook,
+            observedHostOperations,
+            observedBootIdentity
         ) {
             expect(observedLayout).toBe(layout);
             expect(observedRelease).toBe(release);
             expect(logger).toBeDefined();
             expect(observedGatewayTransport).toBe(gatewayTransport);
             expect(observedOpenClawGateway).toBe(openClawGateway);
+            expect(observedOpenClawServiceActions).toBe(openClawServiceActions);
             expect(observedWorkspaceRoot).toEqual({
                 id: "workspace",
                 path: workspaceRoot,
@@ -228,7 +245,10 @@ function processFixture(
                 writable: true,
             });
             expect(observedLogMaintenance).toBe(logMaintenance);
+            expect(observedHostOperations).toBeUndefined();
+            expect(observedBootIdentity).toBe(bootIdentity);
             expect(Object.keys(observedGatewayTransport).toSorted()).toEqual([
+                "requestOpenClawServiceAction",
                 "start",
                 "stop",
                 "taskNotificationSender",
@@ -290,6 +310,9 @@ function processFixture(
                     writable: true,
                 })
             );
+        },
+        readBootIdentity() {
+            return Promise.resolve(bootIdentity);
         },
         startLogMaintenanceAvailability(options) {
             expect(options.availablePolicies).toBe(logMaintenance.availablePolicies);
@@ -360,6 +383,12 @@ const processOptions = Object.freeze({
 });
 
 describe("Dashboard worker process", () => {
+    test("does not compose shared-identity host-operation authority", () => {
+        expect(
+            createDefaultDashboardWorkerProcessDependencies().createHostOperations
+        ).toBeUndefined();
+    });
+
     test("binds managed rotation state to protected project-local paths", () => {
         let observedManifest: ManagedLogManifest | undefined;
         const executor = createWorkerLogMaintenanceExecutor(layout, {

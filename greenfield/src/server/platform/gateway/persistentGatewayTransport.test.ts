@@ -4,11 +4,13 @@ import { Effect, Layer, Redacted } from "effect";
 
 import { chatAttachmentLimits } from "../../../contracts/chatMedia.ts";
 import { captureFailure } from "../../test/support/promise.ts";
+import { createPersistentGatewayOpenClawServiceActionsProvider } from "./persistentGatewayOpenClawServiceActionsProvider.ts";
 import {
     persistentGatewayAuthenticatedFrameMaximumBytes,
     persistentGatewayBufferedAmountMaximumBytes,
     persistentGatewayBufferedAmountPolicyMaximumBytes,
     persistentGatewayChatOutboundFrameMaximumBytes,
+    persistentGatewayOpenClawServiceActionRequestTimeoutMs,
     type PersistentGatewayAdminMethod,
     type PersistentGatewayReadWriteMethod,
 } from "./persistentGatewayProtocol.ts";
@@ -1054,6 +1056,336 @@ describe("persistent native Gateway transport", () => {
         const stopping = transport.stop();
         socket.finishClose();
         await stopping;
+    });
+
+    test("runs fixed worker OpenClaw operations only on fresh admin sockets", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTaskNotificationTransport(harness, scheduler);
+        transport.start();
+        const persistentSocket = harness.sockets[0];
+        if (persistentSocket === undefined) throw new Error("Expected worker socket");
+        completeHandshake(persistentSocket, {
+            lane: "task-notification-worker",
+            methods: ["chat.send"],
+        });
+
+        const invalid = transport.requestOpenClawServiceAction("sessions.cleanup", {
+            allAgents: true,
+            enforce: true,
+            fixMissing: true,
+        });
+        expect(await captureFailure(() => invalid)).toBeInstanceOf(
+            PersistentGatewayUnavailableError
+        );
+        expect(harness.sockets).toHaveLength(1);
+
+        const cleanup = transport.requestOpenClawServiceAction("sessions.cleanup", {
+            allAgents: true,
+            enforce: true,
+        });
+        const adminSocket = harness.sockets[1];
+        if (adminSocket === undefined) throw new Error("Expected fresh admin socket");
+        const connect = completeHandshake(adminSocket, {
+            lane: "admin",
+            methods: ["sessions.cleanup"],
+        });
+        expect(connect.params).toMatchObject({ scopes: ["operator.admin"] });
+        const request = sentFrame(adminSocket, 1);
+        expect(request).toMatchObject({
+            method: "sessions.cleanup",
+            params: { allAgents: true, enforce: true },
+        });
+        adminSocket.receive({
+            id: request.id,
+            ok: true,
+            payload: {
+                afterCount: 4,
+                agentId: "main",
+                applied: true,
+                appliedCount: 4,
+                beforeCount: 5,
+                capped: 0,
+                diskBudget: null,
+                dmScopeRetired: 0,
+                dryRun: false,
+                missing: 0,
+                mode: "enforce",
+                modelRunPruned: 0,
+                pruned: 1,
+                storePath: "/private/openclaw/sessions.db",
+                unreferencedArtifacts: {
+                    freedBytes: 200,
+                    olderThanMs: 86_400_000,
+                    removedFiles: 1,
+                    scannedFiles: 10,
+                },
+                wouldMutate: true,
+            },
+            type: "res",
+        });
+        await flushMicrotasks();
+        adminSocket.finishClose();
+        expect(await cleanup).toEqual({
+            method: "sessions.cleanup",
+            stores: [
+                {
+                    artifactsRemoved: 1,
+                    bytesFreed: 200,
+                    diskEntriesRemoved: 0,
+                    diskFilesRemoved: 0,
+                    dmScopesRetired: 0,
+                    entriesAfter: 4,
+                    entriesBefore: 5,
+                    entriesCapped: 0,
+                    entriesPruned: 1,
+                    missingEntriesRemoved: 0,
+                    modelRunsPruned: 0,
+                },
+            ],
+        });
+        expect(persistentSocket.closeCalls).toHaveLength(0);
+        const stopping = transport.stop();
+        persistentSocket.finishClose();
+        await stopping;
+    });
+
+    test("admits the exact production OpenClaw Service Action provider deadlines", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTaskNotificationTransport(harness, scheduler);
+        const provider = createPersistentGatewayOpenClawServiceActionsProvider(transport);
+
+        const cleanup = provider.cleanupSessions();
+        const cleanupSocket = harness.sockets[0];
+        if (cleanupSocket === undefined) throw new Error("Expected cleanup admin socket");
+        completeHandshake(cleanupSocket, {
+            lane: "admin",
+            methods: ["sessions.cleanup"],
+        });
+        const cleanupRequest = sentFrame(cleanupSocket, 1);
+        expect(cleanupRequest).toMatchObject({
+            method: "sessions.cleanup",
+            params: { allAgents: true, enforce: true },
+        });
+        cleanupSocket.receive({
+            id: cleanupRequest.id,
+            ok: true,
+            payload: {
+                afterCount: 0,
+                agentId: "main",
+                applied: true,
+                appliedCount: 0,
+                beforeCount: 0,
+                capped: 0,
+                diskBudget: null,
+                dmScopeRetired: 0,
+                dryRun: false,
+                missing: 0,
+                mode: "enforce",
+                modelRunPruned: 0,
+                pruned: 0,
+                storePath: "/private/openclaw/sessions.db",
+                unreferencedArtifacts: {
+                    freedBytes: 0,
+                    olderThanMs: 86_400_000,
+                    removedFiles: 0,
+                    scannedFiles: 0,
+                },
+                wouldMutate: false,
+            },
+            type: "res",
+        });
+        await flushMicrotasks();
+        cleanupSocket.finishClose();
+        expect(await cleanup).toEqual({
+            artifactsRemoved: 0,
+            bytesFreed: 0,
+            diskEntriesRemoved: 0,
+            diskFilesRemoved: 0,
+            dmScopesRetired: 0,
+            entriesAfter: 0,
+            entriesBefore: 0,
+            entriesCapped: 0,
+            entriesPruned: 0,
+            missingEntriesRemoved: 0,
+            modelRunsPruned: 0,
+            status: "completed",
+            storesProcessed: 1,
+        });
+
+        const update = provider.updateInstallation();
+        const updateSocket = harness.sockets[1];
+        if (updateSocket === undefined) throw new Error("Expected update admin socket");
+        completeHandshake(updateSocket, { lane: "admin", methods: ["update.run"] });
+        const updateRequest = sentFrame(updateSocket, 1);
+        expect(updateRequest).toMatchObject({
+            method: "update.run",
+            params: { timeoutMs: 1_200_000 },
+        });
+        updateSocket.receive({
+            id: updateRequest.id,
+            ok: true,
+            payload: {
+                ok: true,
+                restart: null,
+                result: {
+                    after: { version: "2026.8.0" },
+                    before: { version: "2026.7.2-beta.7" },
+                    status: "ok",
+                },
+                sentinel: {},
+            },
+            type: "res",
+        });
+        await flushMicrotasks();
+        updateSocket.finishClose();
+        expect(await update).toEqual({
+            afterVersion: "2026.8.0",
+            beforeVersion: "2026.7.2-beta.7",
+            status: "completed",
+        });
+        expect(harness.sockets).toHaveLength(2);
+        await transport.stop();
+    });
+
+    test("settles Service Action deadlines above each exact method ceiling", async () => {
+        for (const method of ["sessions.cleanup", "update.run"] as const) {
+            const scheduler = new ManualScheduler();
+            const harness = new SocketHarness();
+            const transport = createFixtureTaskNotificationTransport(harness, scheduler);
+            const request = transport.requestOpenClawServiceAction(
+                method,
+                method === "sessions.cleanup"
+                    ? { allAgents: true, enforce: true }
+                    : { timeoutMs: 1_200_000 },
+                {
+                    timeoutMs:
+                        persistentGatewayOpenClawServiceActionRequestTimeoutMs[method] +
+                        1,
+                }
+            );
+            const socket = harness.sockets[0];
+            if (socket === undefined) throw new Error("Expected operation admin socket");
+            completeHandshake(socket, { lane: "admin", methods: [method] });
+            await flushMicrotasks();
+
+            expect(socket.sent).toHaveLength(1);
+            expect(socket.closeCalls).toEqual([
+                { code: 1000, reason: "gateway lane complete" },
+            ]);
+            socket.finishClose();
+            expect(await captureFailure(() => request)).toEqual(
+                new TypeError("Persistent Gateway request timeout is invalid")
+            );
+            await transport.stop();
+        }
+    });
+
+    test("retains the five-minute ceiling for ordinary one-shot admin methods", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTransport(harness, scheduler);
+        const request = transport.requestAdmin(
+            "cron.run",
+            { id: "cron-job-1" },
+            { timeoutMs: 5 * 60_000 + 1 }
+        );
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected ordinary admin socket");
+        completeHandshake(socket, { lane: "admin", methods: ["cron.run"] });
+        await flushMicrotasks();
+
+        expect(socket.sent).toHaveLength(1);
+        expect(socket.closeCalls).toEqual([
+            { code: 1000, reason: "gateway lane complete" },
+        ]);
+        socket.finishClose();
+        expect(await captureFailure(() => request)).toEqual(
+            new TypeError("Persistent Gateway request timeout is invalid")
+        );
+        await transport.stop();
+    });
+
+    test("classifies invalid operation acknowledgements as unknown without replay", async () => {
+        const scheduler = new ManualScheduler();
+        const harness = new SocketHarness();
+        const transport = createFixtureTaskNotificationTransport(harness, scheduler);
+        const update = transport.requestOpenClawServiceAction("update.run", {
+            timeoutMs: 1_200_000,
+        });
+        const socket = harness.sockets[0];
+        if (socket === undefined) throw new Error("Expected fresh admin socket");
+        completeHandshake(socket, { lane: "admin", methods: ["update.run"] });
+        const request = sentFrame(socket, 1);
+        socket.receive({
+            id: request.id,
+            ok: true,
+            payload: {
+                ok: true,
+                restart: null,
+                result: { status: "unexpected" },
+                sentinel: {},
+            },
+            type: "res",
+        });
+        await flushMicrotasks();
+        socket.finishClose();
+        expect(await captureFailure(() => update)).toBeInstanceOf(
+            PersistentGatewayUnknownOutcomeError
+        );
+        expect(harness.sockets).toHaveLength(1);
+        await transport.stop();
+    });
+
+    test("keeps post-dispatch OpenClaw operation close and timeout outcome-unknown", async () => {
+        const closeScheduler = new ManualScheduler();
+        const closeHarness = new SocketHarness();
+        const closeTransport = createFixtureTaskNotificationTransport(
+            closeHarness,
+            closeScheduler
+        );
+        const lostAcknowledgement = closeTransport.requestOpenClawServiceAction(
+            "sessions.cleanup",
+            { allAgents: true, enforce: true }
+        );
+        const closeSocket = closeHarness.sockets[0];
+        if (closeSocket === undefined) throw new Error("Expected fresh admin socket");
+        completeHandshake(closeSocket, {
+            lane: "admin",
+            methods: ["sessions.cleanup"],
+        });
+        expect(sentFrame(closeSocket, 1).method).toBe("sessions.cleanup");
+        closeSocket.finishClose();
+        expect(await captureFailure(() => lostAcknowledgement)).toBeInstanceOf(
+            PersistentGatewayUnknownOutcomeError
+        );
+        expect(closeHarness.sockets).toHaveLength(1);
+        await closeTransport.stop();
+
+        const timeoutScheduler = new ManualScheduler();
+        const timeoutHarness = new SocketHarness();
+        const timeoutTransport = createFixtureTaskNotificationTransport(
+            timeoutHarness,
+            timeoutScheduler
+        );
+        const timedOut = timeoutTransport.requestOpenClawServiceAction(
+            "update.run",
+            { timeoutMs: 1_200_000 },
+            { timeoutMs: 5 }
+        );
+        const timeoutSocket = timeoutHarness.sockets[0];
+        if (timeoutSocket === undefined) throw new Error("Expected fresh admin socket");
+        completeHandshake(timeoutSocket, { lane: "admin", methods: ["update.run"] });
+        expect(sentFrame(timeoutSocket, 1).method).toBe("update.run");
+        timeoutScheduler.advance(5);
+        await flushMicrotasks();
+        timeoutSocket.finishClose();
+        expect(await captureFailure(() => timedOut)).toBeInstanceOf(
+            PersistentGatewayUnknownOutcomeError
+        );
+        expect(timeoutHarness.sockets).toHaveLength(1);
+        await timeoutTransport.stop();
     });
 
     test("settles an idempotent task-notification retry after a lost chat-send acknowledgement", async () => {
@@ -3005,6 +3337,11 @@ describe("persistent native Gateway transport", () => {
             parameters: Readonly<Record<string, unknown>>,
             options?: PersistentGatewayRequestOptions
         ) => Promise<unknown>;
+        const runtimeServiceAction = (
+            transport as unknown as {
+                requestOpenClawServiceAction: RuntimeRequest;
+            }
+        ).requestOpenClawServiceAction.bind(transport);
 
         for (const method of [
             "config.get",
@@ -3025,6 +3362,11 @@ describe("persistent native Gateway transport", () => {
             expect(await captureFailure(() => runtimeAdmin(method, {}))).toBeInstanceOf(
                 PersistentGatewayUnavailableError
             );
+        }
+        for (const method of ["sessions.cleanup", "update.run"]) {
+            expect(
+                await captureFailure(() => runtimeServiceAction(method, {}))
+            ).toBeInstanceOf(PersistentGatewayUnavailableError);
         }
         expect(harness.sockets).toHaveLength(0);
         await transport.stop();

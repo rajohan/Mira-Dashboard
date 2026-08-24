@@ -18,6 +18,7 @@ import {
 } from "../buildSourceIdentity.ts";
 import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import { resolveDirectPackageVersions } from "../packageIdentity.ts";
+import { hostOperationsProvisioningReleaseArtifactPaths } from "./hostOperationsProvisioningPolicy.ts";
 import { logMaintenanceProvisioningReleaseArtifactPaths } from "./logMaintenanceProvisioningPolicy.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
 import {
@@ -54,7 +55,12 @@ const exactMetadataPaths = Object.freeze([
 const exactSystemdPaths = Object.freeze(
     productionSystemdUnits.map(({ artifactPath }) => artifactPath)
 );
-const exactScriptPaths = logMaintenanceProvisioningReleaseArtifactPaths;
+const exactScriptPaths = Object.freeze(
+    [
+        ...hostOperationsProvisioningReleaseArtifactPaths,
+        ...logMaintenanceProvisioningReleaseArtifactPaths,
+    ].toSorted()
+);
 
 /** Bun identity observed by release creation and activation verification. */
 export interface ReleaseRuntimeIdentity {

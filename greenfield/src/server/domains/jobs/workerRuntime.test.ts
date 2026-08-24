@@ -21,8 +21,10 @@ const noSideEffects = Object.freeze({
     auditEvents: Object.freeze([]),
     realtimeEvents: Object.freeze([]),
 });
+const bootIdentity = "00000000-0000-0000-0000-000000000001";
 
 const baseRuntimeOptions = {
+    bootIdentity,
     database: {
         migrationsDirectory: "/srv/mira-dashboard/releases/test/migrations",
         releaseId: "a".repeat(40),
@@ -35,6 +37,25 @@ const baseRuntimeOptions = {
     moltbook: testMoltbookCollector,
     openClawGateway: Object.freeze({
         restart: () => Promise.resolve(),
+    }),
+    openClawServiceActions: Object.freeze({
+        cleanupSessions: () =>
+            Promise.resolve({
+                artifactsRemoved: 0,
+                bytesFreed: 0,
+                diskEntriesRemoved: 0,
+                diskFilesRemoved: 0,
+                dmScopesRetired: 0,
+                entriesAfter: 0,
+                entriesBefore: 0,
+                entriesCapped: 0,
+                entriesPruned: 0,
+                missingEntriesRemoved: 0,
+                modelRunsPruned: 0,
+                status: "completed" as const,
+                storesProcessed: 0,
+            }),
+        updateInstallation: () => Promise.resolve({ status: "accepted" as const }),
     }),
     pid: 123,
     releaseId: "a".repeat(40),
@@ -100,6 +121,8 @@ function runtimeFixture(initializationFailure?: Error) {
     });
     let dieNotificationLoop: ((error: unknown) => void) | undefined;
     const persistentGatewayTransport = Object.freeze({
+        requestOpenClawServiceAction: () =>
+            Promise.reject(new Error("OpenClaw operations are unavailable in fixture")),
         start() {
             events.push("gateway-start");
         },
@@ -134,6 +157,7 @@ function runtimeFixture(initializationFailure?: Error) {
         },
         createCoordinator(options) {
             events.push("coordinator-create");
+            expect(options.bootIdentity).toBe(bootIdentity);
             expect(options.repository).toBe(repository);
             expect(options.commitCacheAttempt).toBeFunction();
             expect(options.findAction?.("maintenance.rotate-logs")).toBeDefined();
@@ -152,6 +176,8 @@ function runtimeFixture(initializationFailure?: Error) {
                 resourceClass: "exclusive",
                 retrySafe: false,
             });
+            expect(options.findAction?.("openclaw.sessions.cleanup")).toBeDefined();
+            expect(options.findAction?.("openclaw.installation.update")).toBeDefined();
             return coordinator;
         },
         createDatabaseRuntime() {
@@ -331,6 +357,57 @@ describe("Dashboard worker runtime", () => {
         expect(fixture.events.indexOf("workspace-files-dispose")).toBeLessThan(
             fixture.events.indexOf("gateway-stop")
         );
+    });
+
+    test("registers only fixed host operations reported available at worker startup", async () => {
+        const fixture = runtimeFixture();
+        let requests = 0;
+        const options: DashboardWorkerRuntimeOptions = {
+            ...fixture.options,
+            hostOperations: {
+                availableOperations: () =>
+                    Promise.resolve(["system-restart", "system-cleanup"]),
+                request: (operationId) => {
+                    requests += 1;
+                    return Promise.resolve(
+                        operationId === "system-restart"
+                            ? ({ status: "accepted" } as const)
+                            : ({ status: "completed" } as const)
+                    );
+                },
+            },
+        };
+        const dependencies: DashboardWorkerRuntimeDependencies = {
+            ...fixture.dependencies,
+            createCoordinator(coordinatorOptions) {
+                expect(
+                    coordinatorOptions.findAction?.("host.system.restart")
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.("host.system.cleanup")
+                ).toBeDefined();
+                expect(
+                    coordinatorOptions.findAction?.("host.system.update")
+                ).toBeUndefined();
+                expect(
+                    coordinatorOptions.actionDefinitions?.map(
+                        ({ actionKey }) => actionKey
+                    )
+                ).toContain("host.system.restart");
+                expect(
+                    coordinatorOptions.actionDefinitions?.map(
+                        ({ actionKey }) => actionKey
+                    )
+                ).toContain("host.system.cleanup");
+                return fixture.dependencies.createCoordinator(coordinatorOptions);
+            },
+        };
+        const runtime = createDashboardWorkerRuntime(options, dependencies);
+
+        await runtime.initialize();
+        await runtime.dispose();
+
+        expect(requests).toBe(0);
     });
 
     test("forces teardown when durable notification release stalls", async () => {

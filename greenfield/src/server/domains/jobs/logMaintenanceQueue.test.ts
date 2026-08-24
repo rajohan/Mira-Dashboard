@@ -33,6 +33,7 @@ function repositoryFixture() {
                 eventBytes: 0,
                 eventCount: 1,
                 payloadEventCount: 0,
+                requiredWorkerReleaseId: input.run.requiredWorkerReleaseId ?? null,
                 stateVersion: 1,
             };
             runs.push(stored);

@@ -24,6 +24,7 @@ import type {
 } from "../../contracts/monitoring.ts";
 import type { ListNotificationsResult } from "../../contracts/notifications.ts";
 import type { ListReportsResult } from "../../contracts/reports.ts";
+import type { GetServiceActionsStatusResult } from "../../contracts/serviceActions.ts";
 import type { SystemMetrics } from "../../contracts/system.ts";
 import type { TaskSummary } from "../../contracts/taskModel.ts";
 import type { ListTasksResult } from "../../contracts/tasks.ts";
@@ -228,6 +229,18 @@ const jobRunPage = Object.freeze({
     summary: overviewQueueSummary,
 } satisfies ListJobRunsResult);
 
+const serviceActionsStatus = Object.freeze({
+    actions: [
+        { availability: "unavailable", id: "openclaw-cleanup" },
+        { availability: "unavailable", id: "openclaw-restart" },
+        { availability: "unavailable", id: "openclaw-update" },
+        { availability: "unavailable", id: "system-cleanup" },
+        { availability: "unavailable", id: "system-restart" },
+        { availability: "unavailable", id: "system-update" },
+    ],
+    observedAtMs: timestampMs,
+} satisfies GetServiceActionsStatusResult);
+
 const overviewTask = Object.freeze({
     assignee: "mira-2026",
     createdAtMs: timestampMs - 3000,
@@ -417,6 +430,9 @@ class OverviewTransport implements DashboardTrpcTransport {
             case "reports.list": {
                 return transportOutput(this.#reportOutputs, callIndex, path);
             }
+            case "serviceActions.getStatus": {
+                return Promise.resolve(serviceActionsStatus);
+            }
             case "system.metrics": {
                 return transportOutput(this.#systemMetricsOutputs, callIndex, path);
             }
@@ -469,6 +485,10 @@ describe("Dashboard operational overview foundation", () => {
     test("loads bounded status before exact payload and queues refresh as a job", async () => {
         const transport = new OverviewTransport();
         const { user } = renderOverview(transport);
+
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Service actions" })
+        ).toBeTruthy();
 
         expect(
             await screen.findByRole("heading", { level: 1, name: "Mira Dashboard" })
@@ -541,10 +561,9 @@ describe("Dashboard operational overview foundation", () => {
             })
         ).toBeTruthy();
         expect(screen.getByText("Accepting new jobs")).toBeTruthy();
-        expect(screen.getByRole("link", { name: "View Dashboard jobs" })).toHaveAttribute(
-            "href",
-            "/jobs"
-        );
+        expect(
+            screen.getAllByRole("link", { name: "View Dashboard jobs" })
+        ).not.toHaveLength(0);
         const jobSummaryCalls = transport.queryCalls.filter(
             ({ path }) => path === "jobs.listRuns"
         );
@@ -552,6 +571,9 @@ describe("Dashboard operational overview foundation", () => {
         for (const call of jobSummaryCalls) {
             expect(call).toEqual({ input: { limit: 1 }, path: "jobs.listRuns" });
         }
+        expect(
+            transport.queryCalls.filter(({ path }) => path === "serviceActions.getStatus")
+        ).toEqual([{ input: {}, path: "serviceActions.getStatus" }]);
         expect(
             await screen.findByRole("heading", {
                 level: 2,

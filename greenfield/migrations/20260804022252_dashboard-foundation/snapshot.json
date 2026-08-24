@@ -63,6 +63,10 @@
       "entityType": "tables"
     },
     {
+      "name": "host_restart_claim_fence",
+      "entityType": "tables"
+    },
+    {
       "name": "incident_observations",
       "entityType": "tables"
     },
@@ -1729,6 +1733,76 @@
       "table": "chat_transcript_generations"
     },
     {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "armed_at",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "boot_identity",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "job_run_id",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lease_token",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "worker_instance_id",
+      "entityType": "columns",
+      "table": "host_restart_claim_fence"
+    },
+    {
       "type": "text",
       "notNull": true,
       "autoincrement": false,
@@ -2435,6 +2509,16 @@
       "default": null,
       "generated": null,
       "name": "requested_by_kind",
+      "entityType": "columns",
+      "table": "job_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "required_worker_release_id",
       "entityType": "columns",
       "table": "job_runs"
     },
@@ -4139,6 +4223,16 @@
       "table": "users"
     },
     {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'[]'",
+      "generated": null,
+      "name": "action_keys_json",
+      "entityType": "columns",
+      "table": "worker_instances"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -4392,6 +4486,36 @@
       "name": "fk_chat_runtime_snapshots_chat_run_id_chat_runs_id_fk",
       "entityType": "fks",
       "table": "chat_runtime_snapshots"
+    },
+    {
+      "columns": [
+        "job_run_id"
+      ],
+      "tableTo": "job_runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_host_restart_claim_fence_job_run_id_job_runs_id_fk",
+      "entityType": "fks",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "columns": [
+        "worker_instance_id"
+      ],
+      "tableTo": "worker_instances",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "RESTRICT",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_host_restart_claim_fence_worker_instance_id_worker_instances_id_fk",
+      "entityType": "fks",
+      "table": "host_restart_claim_fence"
     },
     {
       "columns": [
@@ -4824,6 +4948,15 @@
       "nameExplicit": false,
       "name": "chat_runtime_snapshots_pk",
       "table": "chat_runtime_snapshots",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "host_restart_claim_fence_pk",
+      "table": "host_restart_claim_fence",
       "entityType": "pks"
     },
     {
@@ -6085,6 +6218,28 @@
     {
       "columns": [
         {
+          "value": "action_key",
+          "isExpression": false
+        },
+        {
+          "value": "\"queued_at\" desc",
+          "isExpression": true
+        },
+        {
+          "value": "\"id\" desc",
+          "isExpression": true
+        }
+      ],
+      "isUnique": false,
+      "where": "\"job_runs\".\"action_key\" IN ('openclaw.sessions.cleanup', 'openclaw.gateway.restart', 'openclaw.installation.update', 'host.system.cleanup', 'host.system.restart', 'host.system.update') AND \"job_runs\".\"payload_json\" = '{}' AND \"job_runs\".\"state\" IN ('cancelled', 'failed', 'succeeded', 'timed-out')",
+      "origin": "manual",
+      "name": "job_runs_service_action_terminal_idx",
+      "entityType": "indexes",
+      "table": "job_runs"
+    },
+    {
+      "columns": [
+        {
           "value": "queued_at",
           "isExpression": false
         },
@@ -7097,7 +7252,7 @@
       "table": "automation_credentials"
     },
     {
-      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
+      "value": "\"capability\" IN ('agents:read', 'agents:write', 'cache:read', 'cache:write', 'chat:read', 'chat:write', 'files:read', 'files:write', 'gateway-sessions:read', 'gateway-sessions:write', 'jobs:read', 'jobs:write', 'logs:read', 'logs:write', 'monitoring:write', 'notifications:read', 'notifications:write', 'openclaw-settings:read', 'openclaw-settings:write', 'openclaw-tasks:read', 'openclaw-tasks:write', 'reports:read', 'reports:write', 'service-actions:read', 'service-actions:write', 'tasks:read', 'tasks:write', 'terminal:read', 'terminal:write')",
       "name": "automation_principal_capabilities_capability_check",
       "entityType": "checks",
       "table": "automation_principal_capabilities"
@@ -7451,6 +7606,30 @@
       "table": "chat_transcript_generations"
     },
     {
+      "value": "length(\"boot_identity\") = 36 AND instr(\"boot_identity\", char(0)) = 0 AND length(replace(\"boot_identity\", '-', '')) = 32 AND replace(\"boot_identity\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"boot_identity\", 9, 1) = '-' AND substr(\"boot_identity\", 14, 1) = '-' AND substr(\"boot_identity\", 19, 1) = '-' AND substr(\"boot_identity\", 24, 1) = '-'",
+      "name": "host_restart_claim_fence_boot_identity_check",
+      "entityType": "checks",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "value": "\"id\" = 1",
+      "name": "host_restart_claim_fence_id_check",
+      "entityType": "checks",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "value": "length(\"lease_token\") = 36 AND instr(\"lease_token\", char(0)) = 0 AND length(replace(\"lease_token\", '-', '')) = 32 AND replace(\"lease_token\", '-', '') NOT GLOB '*[^0-9a-f]*' AND substr(\"lease_token\", 9, 1) = '-' AND substr(\"lease_token\", 14, 1) = '-' AND substr(\"lease_token\", 15, 1) = '7' AND substr(\"lease_token\", 19, 1) = '-' AND substr(\"lease_token\", 20, 1) GLOB '[89ab]' AND substr(\"lease_token\", 24, 1) = '-'",
+      "name": "host_restart_claim_fence_lease_token_check",
+      "entityType": "checks",
+      "table": "host_restart_claim_fence"
+    },
+    {
+      "value": "\"armed_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" BETWEEN 0 AND 8640000000000000 AND \"expires_at\" > \"armed_at\"",
+      "name": "host_restart_claim_fence_time_check",
+      "entityType": "checks",
+      "table": "host_restart_claim_fence"
+    },
+    {
       "value": "CASE WHEN json_valid(\"details_json\") THEN json_type(\"details_json\") = 'object' ELSE 0 END",
       "name": "incident_observations_details_json_check",
       "entityType": "checks",
@@ -7691,6 +7870,12 @@
       "table": "job_runs"
     },
     {
+      "value": "\"required_worker_release_id\" IS NULL OR length(\"required_worker_release_id\") = 40 AND instr(\"required_worker_release_id\", char(0)) = 0 AND \"required_worker_release_id\" NOT GLOB '*[^0-9a-f]*'",
+      "name": "job_runs_required_worker_release_id_check",
+      "entityType": "checks",
+      "table": "job_runs"
+    },
+    {
       "value": "\"resource_class\" IN ('exclusive', 'host-heavy', 'interactive', 'light', 'network')",
       "name": "job_runs_resource_class_check",
       "entityType": "checks",
@@ -7721,7 +7906,7 @@
       "table": "job_runs"
     },
     {
-      "value": "\"state\" IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND ((\"state\" = 'queued' AND \"finished_at\" IS NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" = 'running' AND \"attempt_count\" > 0 AND \"finished_at\" IS NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" = 'succeeded' AND \"attempt_count\" > 0 AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NOT NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" IN ('failed', 'timed-out') AND \"attempt_count\" > 0 AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NOT NULL AND \"terminal_message\" IS NOT NULL) OR (\"state\" = 'cancelled' AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NOT NULL AND \"terminal_message\" IS NOT NULL))",
+      "value": "\"state\" IN ('cancelled', 'failed', 'queued', 'running', 'succeeded', 'timed-out') AND ((\"state\" = 'queued' AND \"finished_at\" IS NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" = 'running' AND \"attempt_count\" > 0 AND \"finished_at\" IS NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" = 'succeeded' AND \"attempt_count\" > 0 AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NOT NULL AND \"terminal_code\" IS NULL AND \"terminal_message\" IS NULL) OR (\"state\" IN ('failed', 'timed-out') AND (\"attempt_count\" > 0 OR (\"state\" = 'failed' AND \"attempt_count\" = 0 AND \"cancellation_policy\" = 'never' AND \"trigger_type\" = 'schedule' AND \"terminal_code\" = 'action-unavailable' AND \"terminal_message\" = 'The scheduled action is no longer available')) AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NOT NULL AND \"terminal_message\" IS NOT NULL) OR (\"state\" = 'cancelled' AND \"finished_at\" IS NOT NULL AND \"result_json\" IS NULL AND \"terminal_code\" IS NOT NULL AND \"terminal_message\" IS NOT NULL))",
       "name": "job_runs_state_check",
       "entityType": "checks",
       "table": "job_runs"
@@ -8415,6 +8600,12 @@
       "name": "users_username_check",
       "entityType": "checks",
       "table": "users"
+    },
+    {
+      "value": "length(CAST(\"action_keys_json\" AS BLOB)) <= 4096 AND CASE WHEN json_valid(\"action_keys_json\") THEN json_type(\"action_keys_json\") = 'array' ELSE 0 END AND CASE WHEN json_valid(\"action_keys_json\") THEN json_array_length(\"action_keys_json\") <= 32 ELSE 0 END",
+      "name": "worker_instances_action_keys_json_check",
+      "entityType": "checks",
+      "table": "worker_instances"
     },
     {
       "value": "\"capacity\" BETWEEN 1 AND 16",

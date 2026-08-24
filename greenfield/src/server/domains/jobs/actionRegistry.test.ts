@@ -1,9 +1,18 @@
 import { describe, expect, test } from "bun:test";
 
+import * as v from "valibot";
+
 import {
     findJobActionDefinition,
+    hostSystemCleanupJobActionDefinition,
+    hostSystemRestartJobActionDefinition,
+    hostSystemUpdateJobActionDefinition,
     isRegisteredJobSchedule,
     openClawGatewayRestartJobActionDefinition,
+    openClawInstallationUpdateJobActionDefinition,
+    openClawInstallationUpdateJobResultSchema,
+    openClawSessionsCleanupJobActionDefinition,
+    openClawSessionsCleanupJobResultSchema,
     parseJobActionOutputMessage,
     parseJobActionProgress,
     validateJobActionRegistration,
@@ -135,11 +144,89 @@ describe("durable job action registry", () => {
             cancellationPolicy: "never",
             manualExposure: "none",
             resourceClass: "exclusive",
-            resourceKeys: ["openclaw.gateway"],
+            resourceKeys: ["host.mutation", "openclaw.gateway"],
             retrySafe: false,
         });
         expect(openClawGatewayRestartJobActionDefinition).not.toHaveProperty(
             "scheduleId"
         );
+    });
+
+    test("publishes six fixed Service Actions with cross-domain exclusive locks", () => {
+        for (const definition of [
+            openClawSessionsCleanupJobActionDefinition,
+            openClawGatewayRestartJobActionDefinition,
+            hostSystemCleanupJobActionDefinition,
+            hostSystemRestartJobActionDefinition,
+            hostSystemUpdateJobActionDefinition,
+        ]) {
+            expect(definition).toMatchObject({
+                attemptLimit: 1,
+                cancellationPolicy: "never",
+                manualExposure: "none",
+                priority: 20,
+                resourceClass: "exclusive",
+                retrySafe: false,
+            });
+            expect(definition).not.toHaveProperty("scheduleId");
+        }
+        expect(openClawSessionsCleanupJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+            "openclaw.gateway",
+        ]);
+        expect(openClawGatewayRestartJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+            "openclaw.gateway",
+        ]);
+        expect(hostSystemRestartJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+        ]);
+        expect(hostSystemCleanupJobActionDefinition.resourceKeys).toEqual([
+            "host.logs",
+            "host.mutation",
+        ]);
+        expect(hostSystemUpdateJobActionDefinition.resourceKeys).toEqual([
+            "host.mutation",
+        ]);
+        expect(openClawInstallationUpdateJobActionDefinition).toMatchObject({
+            attemptLimit: 1,
+            cancellationPolicy: "never",
+            manualExposure: "none",
+            resourceClass: "exclusive",
+            resourceKeys: ["host.mutation", "openclaw.gateway"],
+            retrySafe: false,
+        });
+        expect(hostSystemRestartJobActionDefinition.timeoutMs).toBe(60_000);
+        expect(hostSystemCleanupJobActionDefinition.timeoutMs).toBe(2_100_000);
+        expect(hostSystemUpdateJobActionDefinition.timeoutMs).toBe(7_200_000);
+        expect(openClawSessionsCleanupJobActionDefinition.timeoutMs).toBe(630_000);
+        expect(openClawInstallationUpdateJobActionDefinition.timeoutMs).toBe(2_130_000);
+    });
+
+    test("reports explicit validation errors for invalid OpenClaw result statuses", () => {
+        expect(() =>
+            v.parse(openClawSessionsCleanupJobResultSchema, {
+                artifactsRemoved: 0,
+                bytesFreed: 0,
+                completedAtMs: 1,
+                diskEntriesRemoved: 0,
+                diskFilesRemoved: 0,
+                dmScopesRetired: 0,
+                entriesAfter: 0,
+                entriesBefore: 0,
+                entriesCapped: 0,
+                entriesPruned: 0,
+                missingEntriesRemoved: 0,
+                modelRunsPruned: 0,
+                status: "failed",
+                storesProcessed: 0,
+            })
+        ).toThrow("OpenClaw cleanup result is invalid");
+        expect(() =>
+            v.parse(openClawInstallationUpdateJobResultSchema, {
+                completedAtMs: 1,
+                status: "failed",
+            })
+        ).toThrow("OpenClaw update result is invalid");
     });
 });

@@ -26,6 +26,10 @@ import type {
     RunScheduleInput,
     UpdateScheduleInput,
 } from "../../contracts/schedules.ts";
+import {
+    type GetServiceActionsStatusResult,
+    serviceActionIds,
+} from "../../contracts/serviceActions.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import type { DashboardRealtimeClient } from "../api/realtimeClient.ts";
 import {
@@ -132,6 +136,37 @@ function runDetail(run: JobRunSummary): JobRunDetail {
     };
 }
 
+function serviceActionRun(): JobRunSummary {
+    return {
+        ...queuedRun({
+            displayName: "OpenClaw session cleanup",
+            id: runId,
+        }),
+        actionKey: "openclaw.sessions.cleanup",
+        attemptLimit: 1,
+        cancellationPolicy: "never",
+        priority: 20,
+        resourceClass: "exclusive",
+        resourceKeys: ["host.mutation"],
+        retrySafe: false,
+        timeoutMs: 600_000,
+        triggerType: "manual",
+    };
+}
+
+function serviceActionsStatus(activeRun?: JobRunSummary): GetServiceActionsStatusResult {
+    return {
+        actions: serviceActionIds.map((id) => ({
+            ...(id === "openclaw-cleanup" && activeRun !== undefined
+                ? { activeRun }
+                : {}),
+            availability: "available" as const,
+            id,
+        })),
+        observedAtMs: timestampMs,
+    };
+}
+
 function scheduleSummary(
     id = scheduleId,
     overrides: Partial<ScheduleSummary> = {}
@@ -229,6 +264,7 @@ class JobsRouteTransport implements DashboardTrpcTransport {
     readonly scheduleDetails = new Map<string, ScheduleSummary>();
     scheduleRuns: JobRunSummary[] = [];
     schedules: ScheduleSummary[] = [];
+    serviceActionsStatus = serviceActionsStatus();
 
     addRunDetail(run: JobRunSummary): void {
         this.runDetails.set(run.id, runDetail(run));
@@ -478,6 +514,9 @@ class JobsRouteTransport implements DashboardTrpcTransport {
                     total: 0,
                 });
             }
+            case "serviceActions.getStatus": {
+                return Promise.resolve(this.serviceActionsStatus);
+            }
             case "schedules.list": {
                 if (this.failScheduleList) {
                     return Promise.reject(new TypeError("Schedule list unavailable"));
@@ -525,7 +564,7 @@ const queryClients: ReturnType<typeof createDashboardQueryClient>[] = [];
 const collectionRegistries: DashboardBrowserCollections[] = [];
 const mountedViews: ReturnType<typeof render>[] = [];
 
-function renderJobsRoute(
+async function renderJobsRoute(
     path: string,
     transport: JobsRouteTransport,
     realtimeClient: DashboardRealtimeClient = noOpDashboardRealtimeClient
@@ -555,6 +594,9 @@ function renderJobsRoute(
             />
         )
     );
+    if (transport.authStatus.state === "authenticated") {
+        await screen.findByRole("heading", { level: 3, name: "OpenClaw cleanup" });
+    }
     return { queryClient, router };
 }
 
@@ -567,6 +609,56 @@ afterEach(async () => {
 });
 
 describe("Dashboard jobs route", () => {
+    test("shows fixed Service Actions and exposes their durable run history and detail", async () => {
+        const transport = new JobsRouteTransport();
+        const run = serviceActionRun();
+        transport.runs = [run];
+        transport.addRunDetail(run);
+        transport.serviceActionsStatus = serviceActionsStatus(run);
+        await renderJobsRoute("/jobs", transport);
+        const user = userEvent.setup();
+
+        expect(
+            await screen.findByRole("heading", { level: 2, name: "Service actions" })
+        ).toBeTruthy();
+        const serviceActions = screen.getByRole("region", {
+            name: "Service actions",
+        });
+        expect(within(serviceActions).getAllByRole("heading", { level: 3 })).toHaveLength(
+            serviceActionIds.length
+        );
+        expect(
+            within(serviceActions).getByRole("heading", { name: "OpenClaw cleanup" })
+        ).toBeTruthy();
+        expect(
+            within(serviceActions).getByRole("heading", { name: "OpenClaw restart" })
+        ).toBeTruthy();
+        expect(
+            within(serviceActions).getByRole("heading", { name: "System cleanup" })
+        ).toBeTruthy();
+        expect(
+            within(serviceActions).getByRole("heading", { name: "System restart" })
+        ).toBeTruthy();
+        expect(screen.queryByRole("link", { name: "View Dashboard jobs" })).toBeNull();
+        expect(transport.callsFor("serviceActions.getStatus")).toEqual([
+            { input: {}, kind: "query", path: "serviceActions.getStatus" },
+        ]);
+
+        const openRun = await screen.findByRole("button", {
+            name: `Open run ${run.displayName}; action ${run.actionKey}; id ${run.id}`,
+        });
+        await user.click(openRun);
+        const detailHeading = await screen.findByRole("heading", {
+            level: 2,
+            name: run.displayName,
+        });
+        await waitFor(() => expect(detailHeading).toHaveFocus());
+        expect(transport.callsFor("jobs.getRun").at(-1)?.input).toEqual({
+            eventLimit: 100,
+            id: run.id,
+        });
+    });
+
     test("loads independent exact deep links and wires navigation and realtime refresh", async () => {
         const transport = new JobsRouteTransport();
         const run = queuedRun({
@@ -578,7 +670,7 @@ describe("Dashboard jobs route", () => {
         transport.addRunDetail(run);
         transport.addScheduleDetail(schedule);
         const realtimeClient = new ControlledDashboardRealtimeClient();
-        const { queryClient } = renderJobsRoute(
+        const { queryClient } = await renderJobsRoute(
             `/jobs?runId=${runId}&scheduleId=${scheduleId}`,
             transport,
             realtimeClient
@@ -682,7 +774,7 @@ describe("Dashboard jobs route", () => {
         transport.runDetails.set(runId, eventPage(initialRun, 202, 100, 103));
         transport.addRunEventDetail(runId, 103, eventPage(initialRun, 102, 100, 3));
         const realtimeClient = new ControlledDashboardRealtimeClient();
-        const { queryClient } = renderJobsRoute(
+        const { queryClient } = await renderJobsRoute(
             `/jobs?runId=${runId}`,
             transport,
             realtimeClient
@@ -797,7 +889,7 @@ describe("Dashboard jobs route", () => {
 
     test("drops malformed selections without issuing exact-detail calls", async () => {
         const transport = new JobsRouteTransport();
-        const { queryClient } = renderJobsRoute(
+        const { queryClient } = await renderJobsRoute(
             "/jobs?runId=not-a-run&scheduleId=Bad%20Schedule",
             transport
         );
@@ -827,7 +919,7 @@ describe("Dashboard jobs route", () => {
         });
         transport.addRunDetail(run);
         transport.addScheduleDetail(schedule);
-        renderJobsRoute(`/jobs?runId=${runId}&scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?runId=${runId}&scheduleId=${scheduleId}`, transport);
 
         expect(
             await screen.findByRole("heading", {
@@ -865,7 +957,7 @@ describe("Dashboard jobs route", () => {
         transport.schedules = [schedule];
         transport.addRunDetail(run);
         transport.addScheduleDetail(schedule);
-        const { queryClient } = renderJobsRoute(
+        const { queryClient } = await renderJobsRoute(
             `/jobs?runId=${runId}&scheduleId=${scheduleId}`,
             transport
         );
@@ -950,7 +1042,7 @@ describe("Dashboard jobs route", () => {
 
     test("clears a schedule filter error while the draft is corrected", async () => {
         const transport = new JobsRouteTransport();
-        const { queryClient } = renderJobsRoute("/jobs", transport);
+        const { queryClient } = await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
         const historyCalls = () =>
             transport
@@ -995,7 +1087,7 @@ describe("Dashboard jobs route", () => {
 
     test("applies all run filter drafts as one global-history query", async () => {
         const transport = new JobsRouteTransport();
-        const { queryClient } = renderJobsRoute("/jobs", transport);
+        const { queryClient } = await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
         const historyCalls = () =>
             transport
@@ -1048,7 +1140,7 @@ describe("Dashboard jobs route", () => {
         });
         transport.runs = [newest, older];
         transport.runPages = [[newest], [newest, older]];
-        renderJobsRoute("/jobs", transport);
+        await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
 
         expect(
@@ -1086,7 +1178,7 @@ describe("Dashboard jobs route", () => {
         });
         transport.runs = [run];
         transport.addRunDetail(run);
-        renderJobsRoute(`/jobs?runId=${runId}`, transport);
+        await renderJobsRoute(`/jobs?runId=${runId}`, transport);
         const user = userEvent.setup();
 
         expect(
@@ -1143,7 +1235,7 @@ describe("Dashboard jobs route", () => {
         transport.scheduleRuns = [run];
         transport.addRunDetail(run);
         transport.addScheduleDetail(schedule);
-        renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
         const user = userEvent.setup();
 
         await user.click(
@@ -1163,7 +1255,7 @@ describe("Dashboard jobs route", () => {
         const schedule = scheduleSummary();
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
-        renderJobsRoute("/jobs", transport);
+        await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
 
         await user.click(
@@ -1183,7 +1275,7 @@ describe("Dashboard jobs route", () => {
         const schedule = scheduleSummary();
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
-        const { queryClient } = renderJobsRoute(
+        const { queryClient } = await renderJobsRoute(
             `/jobs?scheduleId=${scheduleId}`,
             transport
         );
@@ -1227,7 +1319,7 @@ describe("Dashboard jobs route", () => {
         const schedule = scheduleSummary();
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
-        renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
         const user = userEvent.setup();
 
         expect(
@@ -1294,7 +1386,7 @@ describe("Dashboard jobs route", () => {
         const schedule = scheduleSummary();
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
-        renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
         const user = userEvent.setup();
 
         expect(
@@ -1324,7 +1416,7 @@ describe("Dashboard jobs route", () => {
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
         transport.failNextCommittedScheduleRunResponses = 1;
-        renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
         const user = userEvent.setup();
 
         expect(
@@ -1374,7 +1466,7 @@ describe("Dashboard jobs route", () => {
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
         transport.failNextMutationCounts.set("schedules.update", 1);
-        renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
         const user = userEvent.setup();
         const failureMessage = "The request could not be completed. Try again.";
 
@@ -1400,7 +1492,7 @@ describe("Dashboard jobs route", () => {
         transport.schedules = [schedule];
         transport.addScheduleDetail(schedule);
         transport.failNextMutationCounts.set("schedules.run", 1);
-        renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
+        await renderJobsRoute(`/jobs?scheduleId=${scheduleId}`, transport);
         const user = userEvent.setup();
         const failureMessage = "The request could not be completed. Try again.";
 
@@ -1425,7 +1517,7 @@ describe("Dashboard jobs route", () => {
 
     test("switches to the isolated OpenClaw cron source with one exact bounded query", async () => {
         const transport = new JobsRouteTransport();
-        const { router } = renderJobsRoute("/jobs", transport);
+        const { router } = await renderJobsRoute("/jobs", transport);
         const user = userEvent.setup();
 
         const source = await screen.findByRole("group", { name: "Job source" });
@@ -1472,7 +1564,7 @@ describe("Dashboard jobs route", () => {
         const transport = new JobsRouteTransport();
         transport.authStatus = { state: "anonymous" };
         const realtimeClient = new ControlledDashboardRealtimeClient();
-        const { queryClient, router } = renderJobsRoute(
+        const { queryClient, router } = await renderJobsRoute(
             `/jobs?runId=${runId}`,
             transport,
             realtimeClient

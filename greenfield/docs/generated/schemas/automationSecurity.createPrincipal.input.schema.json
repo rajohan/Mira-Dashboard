@@ -29,6 +29,8 @@
           "openclaw-tasks:write",
           "reports:read",
           "reports:write",
+          "service-actions:read",
+          "service-actions:write",
           "tasks:read",
           "tasks:write",
           "terminal:read",
@@ -36,7 +38,7 @@
         ],
         "type": "string"
       },
-      "maxItems": 27,
+      "maxItems": 29,
       "uniqueItems": true
     },
     "id": {

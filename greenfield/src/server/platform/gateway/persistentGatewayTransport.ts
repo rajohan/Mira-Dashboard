@@ -16,6 +16,7 @@ import {
     assertPersistentGatewayChatWriteParameters,
     assertPersistentGatewayOpenClawSettingsReadParameters,
     assertPersistentGatewayOpenClawSettingsWriteParameters,
+    assertPersistentGatewayOpenClawServiceActionParameters,
     assertPersistentGatewayReadWriteParameters,
     assertPersistentGatewayTaskReadParameters,
     assertPersistentGatewayTaskWriteParameters,
@@ -26,6 +27,7 @@ import {
     isPersistentGatewayChatWriteMethod,
     isPersistentGatewayOpenClawSettingsReadMethod,
     isPersistentGatewayOpenClawSettingsWriteMethod,
+    isPersistentGatewayOpenClawServiceActionMethod,
     isPersistentGatewayReadWriteMethod,
     isPersistentGatewayTaskReadMethod,
     isPersistentGatewayTaskWriteMethod,
@@ -46,6 +48,9 @@ import {
     type PersistentGatewayPrivateChatEvent,
     type PersistentGatewayOpenClawSettingsReadMethod,
     type PersistentGatewayOpenClawSettingsWriteMethod,
+    type PersistentGatewayOpenClawServiceActionMethod,
+    type PersistentGatewayOpenClawServiceActionResponse,
+    persistentGatewayOpenClawServiceActionRequestTimeoutMs,
     persistentGatewayOutboundFrameMaximumBytes,
     type PersistentGatewayReadWriteMethod,
     type PersistentGatewayTaskReadMethod,
@@ -56,6 +61,7 @@ import {
     parsePersistentGatewayEventEnvelope,
     parsePersistentGatewayHello,
     parsePersistentGatewayPrivateChatEvent,
+    parsePersistentGatewayOpenClawServiceActionResponse,
     parsePersistentGatewayResponse,
     parsePersistentGatewaySessionMessagesSubscriptionAcknowledgement,
     parsePersistentGatewaySessionsSubscriptionAcknowledgement,
@@ -69,6 +75,7 @@ const policyCloseCode = 1008;
 const watchdogCloseCode = 4000;
 const safeCloseReasonMaximumBytes = 123;
 const taskNotificationIdempotencyKeyPrefix = "tasks-notify-";
+const requestTimeoutMaximumDefaultMs = 5 * 60_000;
 export const persistentGatewayChatEventQueueMaximum = 256;
 /** Per-listener encoded projection budget retained while async delivery is blocked. */
 export const persistentGatewayChatEventQueueMaximumBytes = 2 * 1024 * 1024;
@@ -224,6 +231,8 @@ interface PersistentGatewayOneShotRequestOptions extends PersistentGatewayReques
 interface GatewaySocketLaneRequestOptions extends PersistentGatewayRequestOptions {
     /** Runs synchronously only after the native socket accepted the encoded frame. */
     readonly onDispatched?: () => void;
+    /** Internal per-method ceiling; callers retain the five-minute default. */
+    readonly timeoutMaximumMs?: number;
 }
 
 export type PersistentGatewayWebSocketFactory = (url: string) => WebSocket;
@@ -934,7 +943,7 @@ class GatewaySocketLane {
             options.timeoutMs,
             this.#resolved.requestTimeoutMs,
             1,
-            5 * 60 * 1000,
+            options.timeoutMaximumMs ?? requestTimeoutMaximumDefaultMs,
             "Persistent Gateway request timeout"
         );
         let id: string;
@@ -1615,9 +1624,14 @@ export interface PersistentGatewayTransport extends PersistentGatewayTransportLi
     ): () => void;
 }
 
-/** Worker-only port with no generic read or admin request capability. */
+/** Worker-only port with notification sending and exact privileged operation methods. */
 export interface PersistentGatewayTaskNotificationTransport extends PersistentGatewayTransportLifecycle {
     readonly taskNotificationSender: TaskNotificationChatSender;
+    requestOpenClawServiceAction(
+        method: PersistentGatewayOpenClawServiceActionMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options?: PersistentGatewayRequestOptions
+    ): Promise<PersistentGatewayOpenClawServiceActionResponse>;
 }
 
 class PersistentGatewayTransportImplementation
@@ -1895,6 +1909,39 @@ class PersistentGatewayTransportImplementation
             this.#resolved.bufferedAmountMaximumBytes,
             this.#resolved.outboundFrameMaximumBytes
         );
+    }
+
+    async requestOpenClawServiceAction(
+        method: PersistentGatewayOpenClawServiceActionMethod,
+        parameters: Readonly<Record<string, unknown>>,
+        options: PersistentGatewayRequestOptions = {}
+    ): Promise<PersistentGatewayOpenClawServiceActionResponse> {
+        if (
+            this.#resolved.profile !== "task-notification-worker" ||
+            !isPersistentGatewayOpenClawServiceActionMethod(method)
+        ) {
+            throw new PersistentGatewayUnavailableError();
+        }
+        try {
+            assertPersistentGatewayOpenClawServiceActionParameters(method, parameters);
+        } catch {
+            throw new PersistentGatewayUnavailableError();
+        }
+        this.#assertOneShotAdmission(options);
+        const response = await this.#runOneShotRequest(
+            "admin",
+            method,
+            parameters,
+            options,
+            this.#resolved.bufferedAmountMaximumBytes,
+            this.#resolved.outboundFrameMaximumBytes,
+            persistentGatewayOpenClawServiceActionRequestTimeoutMs[method]
+        );
+        try {
+            return parsePersistentGatewayOpenClawServiceActionResponse(method, response);
+        } catch {
+            throw new PersistentGatewayUnknownOutcomeError();
+        }
     }
 
     start(): void {
@@ -2552,12 +2599,14 @@ class PersistentGatewayTransportImplementation
             | PersistentGatewayAdminMethod
             | PersistentGatewayChatReadMutationMethod
             | PersistentGatewayChatWriteMethod
+            | PersistentGatewayOpenClawServiceActionMethod
             | PersistentGatewayOpenClawSettingsWriteMethod
             | PersistentGatewayTaskWriteMethod,
         parameters: Readonly<Record<string, unknown>>,
         options: PersistentGatewayOneShotRequestOptions,
         bufferedAmountMaximumBytes: number,
-        outboundFrameMaximumBytes: number
+        outboundFrameMaximumBytes: number,
+        timeoutMaximumMs: number = requestTimeoutMaximumDefaultMs
     ): Promise<unknown> {
         let dispatched = false;
         let settled = false;
@@ -2587,14 +2636,20 @@ class PersistentGatewayTransportImplementation
                 },
                 onConnected: () => {
                     const dispatch = (): void => {
-                        void lane
-                            .request(method, parameters, {
+                        let request: Promise<unknown>;
+                        try {
+                            request = lane.request(method, parameters, {
                                 ...options,
                                 onDispatched: () => {
                                     dispatched = true;
                                 },
-                            })
-                            .then(resolveOutcome, rejectOutcome);
+                                timeoutMaximumMs,
+                            });
+                        } catch (error) {
+                            rejectOutcome(error);
+                            return;
+                        }
+                        void request.then(resolveOutcome, rejectOutcome);
                     };
                     const beforeDispatch = options.beforeDispatch;
                     if (beforeDispatch === undefined) {

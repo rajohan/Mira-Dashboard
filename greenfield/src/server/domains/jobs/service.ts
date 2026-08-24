@@ -9,6 +9,8 @@ import {
     type ScheduleSummary,
     jobWorkerFreshnessMs,
     jobTimestampSchema,
+    retiredScheduledActionTerminalCode,
+    retiredScheduledActionTerminalMessage,
 } from "../../../contracts/jobModel.ts";
 import {
     type JobRunDetail,
@@ -875,6 +877,16 @@ export async function reconcileJobSchedules(
             terminalCode: "cancelled/schedule-retired",
             terminalMessage:
                 "Cancelled because the schedule was retired from the action registry",
+        },
+        retiredRunFailure: {
+            sideEffectsForRun: (run) =>
+                durableRunMutationSideEffects(generateId, run, {
+                    action: "jobs.run.action-unavailable",
+                    actor: systemActor,
+                    outcome: "failed",
+                }),
+            terminalCode: retiredScheduledActionTerminalCode,
+            terminalMessage: retiredScheduledActionTerminalMessage,
         },
         schedules: jobActionDefinitions.map((definition) =>
             scheduleInsertShape(definition, at)
