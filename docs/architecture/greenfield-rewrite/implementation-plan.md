@@ -37,12 +37,14 @@ credential rotation pass. Automation administration must be browser-session-only
 recent MFA inside the state-change transaction, and prove that revocation, capability replacement,
 and terminal disablement affect new requests and renewable leases without a process restart.
 
-The automation lifecycle slice implements its eight server-side procedures, database-owned
-principals and credentials, stable history pagination, exact capability replacement, staged
-rotation plus explicit revocation, and terminal disablement. Phase 2 remains open until the narrow
-native Gateway credential-verifier composition adapter and consolidated threat-model/rotation exit
-evidence are delivered; the greenfield browser UI and production credential cutover belong to
-later parity and release work.
+The server-side Phase 2 exit is now evidenced by the automation lifecycle, native one-shot Gateway
+credential verifier, authenticated resumable SSE, and the consolidated
+[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md). The Gateway verifier
+uses a protocol-v4 handshake audited against installed OpenClaw `2026.7.2-beta.7 (dabe191)` and is
+restricted to the installed protocol's direct-loopback backend path. It requires token-mode proof
+in the authenticated hello and is bounded by the process-owned authentication Effect service. This
+closes trust and transport for the stated server scope; the greenfield browser UI, persistent
+Gateway client, chat, production credential cutover, and complete rewrite remain later phases.
 
 ### Phase 3: core operator domains
 
@@ -54,8 +56,10 @@ later parity and release work.
 
 ### Phase 4: Gateway and chat
 
-- implement the native Gateway client, session operations, chat state machine/journal, adapters,
-  attachments, reconciliation, recovery, and the full virtualized frontend.
+- re-audit the current installed OpenClaw source and protocol before implementation, then implement
+  the native persistent Gateway client, session operations, chat state machine/journal, adapters,
+  attachments, reconciliation, recovery, and the full virtualized frontend. Current-production
+  Dashboard Gateway/chat/session/agent/cron code is parity evidence, not protocol authority.
 
 **Exit gate:** recorded Gateway fixtures and live smoke tests cover every chat parity item,
 including restart during streaming.
@@ -104,6 +108,11 @@ The target choices are fixed unless one of these tests disproves the underlying 
    child-process cleanup under systemd stop/restart.
 8. **Resource budgets:** measure build/test and representative privileged jobs in cgroups before
    finalizing service/job limits.
+
+The OpenClaw audit is deliberately point-in-time. The Phase 2 one-shot verifier records the
+installed `2026.7.2-beta.7 (dabe191)` protocol-v4 behavior, but it does not qualify persistent
+transport. Repeat the installed-source/protocol audit before every later OpenClaw integration
+slice; do not infer current protocol requirements from legacy Dashboard implementation details.
 
 A failed spike changes the design before implementation. It does not create a permanent dual
 path.

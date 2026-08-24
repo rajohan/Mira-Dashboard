@@ -48,11 +48,11 @@ describe("Dashboard security composition", () => {
             applicationRuntime: createTestApplicationRuntime(),
             browserOrigin: "https://dashboard.example",
             database: fixture.database.orm,
+            gatewayUrl: "ws://127.0.0.1:1",
             now: () => authenticationTestNow,
             port: 0,
             readiness: createReadinessController(),
             totpSecretCipher: testTotpSecretCipher,
-            verifyGatewayCredential: () => Promise.resolve(false),
         });
 
         try {

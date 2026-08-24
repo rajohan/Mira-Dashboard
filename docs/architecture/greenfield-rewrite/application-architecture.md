@@ -15,7 +15,8 @@ build it as a **Bun-native modular monolith**:
   automations.
 - The browser receives live updates over one multiplexed tRPC SSE subscription. It does not
   open a separate application WebSocket.
-- The server still uses Bun's native `WebSocket` client for the OpenClaw Gateway connection.
+- The Phase 2 bootstrap verifier uses Bun's native `WebSocket` client for one current-protocol
+  OpenClaw Gateway handshake. The persistent Gateway connection remains a Phase 4 target.
 - Valibot owns transport, persistence, generated JSON Schema, tests, and documentation schemas.
   Effect Schema is limited to server-internal typed/tagged errors and does not replace Valibot at
   those boundaries.
@@ -233,6 +234,54 @@ work stay ordinary TypeScript. They neither wait on external resources nor benef
 Effect service. Effect remains responsible for the process orchestration that actually needs
 cancellation, deadlines, bounded asynchronous concurrency, or scoped lifetime; a route being
 `async` is not by itself a reason to move it into Effect.
+
+### Native Gateway bootstrap verification
+
+First-user bootstrap composes a one-shot Bun-native WebSocket verifier rather than accepting an
+arbitrary injected production callback. Its protocol shape was audited against the OpenClaw
+version installed on the target host on 2026-08-06: `2026.7.2-beta.7 (dabe191)`. The audit used
+the installed v4 protocol document and compiled client/server protocol exports, not legacy
+Dashboard code.
+
+The verifier accepts only an explicit direct-loopback root endpoint,
+`ws://127.0.0.1:<port>/` or `ws://[::1]:<port>/`; remote, DNS, `wss://`, path, query, userinfo, and
+fragment forms fail composition. The native upgrade sends no Origin, authorization, forwarding,
+or WebSocket-subprotocol header, and the credential never appears in the URL.
+
+Protocol v4 accepts text JSON frames only. The verifier permits exactly one `connect.challenge`
+text frame of at most 4 KiB, sends one device-less local-backend v4 `connect` request with the
+submitted credential, and then permits exactly one matching text response up to the installed
+protocol's current 25 MiB hello limit. Binary data, unknown event or frame types, duplicate
+challenges, response-before-challenge, wrong response IDs, contradictory response shapes, and
+every frame outside that active two-frame flow fail immediately instead of being ignored. The handshake requests
+`operator.admin` only because the current protocol reveals `snapshot.authMode` at that scope. The
+verifier never sends a post-connect RPC.
+
+Success requires the matching protocol-4 `hello-ok`, operator role, negotiated
+`operator.admin`, and `snapshot.authMode: "token"`; an auth-disabled Gateway cannot validate an
+arbitrary candidate. A structured `AUTH_TOKEN_MISMATCH` is the only invalid-credential result.
+Malformed, oversized, duplicated, mismatched, incompatible, closed, or otherwise rejected flows
+become one redacted unavailable result. `startup-sidecars` is unavailable rather than an internal
+retry signal. The verifier never reconnects or retries; the operator/client must repeat the whole
+HTTP bootstrap request under durable cooldown. The candidate credential is never persisted or
+logged.
+
+The native adapter remains Promise-facing. The process `ManagedRuntime` owns its separate bounded
+admission, active-work lifetime, cancellation, and deadline through the authentication Effect
+service. Once a socket exists, success, invalid credential, setup failure, transport error, and
+abort only initiate close. The Promise, and therefore the Effect permit, settles after native
+socket close is actually observed. This deliberately does not turn short synchronous policy,
+parsing, hashing, or SQLite transactions into Effect programs.
+
+The 4 KiB and 25 MiB application checks run after Bun's native WebSocket has allocated the inbound
+wire frame. Literal-loopback composition, the installed Gateway's own limits, and bounded
+concurrency constrain that residual allocation exposure; these are not pre-allocation frame caps.
+
+This is **not** the Phase 4 persistent Gateway client. Before implementing persistent connections,
+sessions, chat, Gateway events, or cron integration, inspect the then-installed OpenClaw source and
+protocol again. Current-production Gateway/chat/session/agent/cron code supplies parity evidence,
+not protocol authority. The consolidated controls and executable evidence are in the
+[Phase 2 threat model](../../security/greenfield-phase-two-threat-model.md).
 
 ### Raw HTTP exists only for protocol edges
 

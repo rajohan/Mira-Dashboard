@@ -58,6 +58,11 @@ environment against the exact candidate binary:
 6. `bun test --isolate` tests for fake timers, leaked handles, deterministic shutdown, and
    bounded concurrency.
 
+The current one-shot Phase 2 verifier qualifies complete text `MessageEvent` delivery only. Raw
+continuation-frame reassembly and fragmented-message behavior remain an explicit open Phase 0
+native-WebSocket gate and must be qualified against the then-current Bun candidate before the
+repository baseline is locked.
+
 `.bun-version` selects the `canary` channel through the official `setup-bun` action. The serving
 process enforces Bun `1.4.0`, while the runtime revision remains diagnostic until release creation
 records it as part of the immutable build identity. When Bun 1.4 is officially released, the
@@ -124,11 +129,13 @@ non-secret settings, and encrypted secrets. A setting is not duplicated across e
 database with implicit precedence. If bootstrap requires a temporary precedence rule, it is
 explicitly modeled as a bootstrap state and disappears after completion.
 
-The repository uses a base TypeScript configuration plus browser, server/worker, and script
-project references. All are strict. Browser libraries are unavailable to server code and Bun/
-filesystem types are unavailable to browser code. `bunfig.toml` contains only shared Bun test
-and selected serve-plugin configuration; operational policy lives in typed source, not hidden
-shell environment.
+The target repository uses a base TypeScript configuration plus strict browser, server/worker, and
+script project references so browser libraries are unavailable to server code and Bun/filesystem
+types are unavailable to browser code. The current rewrite has a complete strict server graph and
+selected restricted-import/composition tests, but it does not yet have every target project
+reference or path boundary. Completing and mechanically enforcing those partitions remains a
+cutover gate. `bunfig.toml` contains only shared Bun test and selected serve-plugin configuration;
+operational policy lives in typed source, not hidden shell environment.
 
 ## Generated Documentation
 
@@ -153,6 +160,10 @@ created by applying every tracked migration, then inspects `sqlite_schema`,
 to parse SQL with regular expressions.
 
 ### Generated outputs
+
+The following is the **target** artifact set. The checked-in
+`docs/generated/README.md` identifies the smaller subset the current generator actually emits and
+lists the references still required before cutover.
 
 ```text
 docs/generated/
@@ -267,12 +278,15 @@ Additional safeguards:
 
 ### Required scripts
 
-The exact naming may change, but the greenfield repository provides these roles through Bun:
+The exact naming may change. This is the **target** Bun command-role inventory, not a claim that
+the current `package.json` already exposes every alias. Today the rewrite uses separate strict
+`typecheck:server` and `typecheck:qualification` graphs plus the existing frontend/backend lanes;
+the complete project-reference partitions remain the future cutover gate described above.
 
 ```text
 dev                     local Bun server + worker + frontend development
 build                   deterministic browser and server/worker artifacts
-typecheck               TypeScript project references, no emit
+typecheck               target project-reference partitions, no emit (future cutover gate)
 lint                    fast oxlint rules
 lint:typed              oxlint type-aware rules in a separately budgeted process
 format / format:check   oxfmt

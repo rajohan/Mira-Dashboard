@@ -2,18 +2,24 @@ import { createTRPCClient, httpSubscriptionLink } from "@trpc/client";
 import { secondsToMilliseconds } from "date-fns";
 import { EventSource, type EventSourceFetchInit } from "eventsource";
 import superjson from "superjson";
+import * as v from "valibot";
 
+import { createDashboardServer } from "../../../app/dashboardServer.ts";
 import type { ApplicationServer } from "../../../app/server.ts";
+import { createAutomationPrincipalResultSchema } from "../../../contracts/automationSecurity.ts";
 import type { RealtimeStreamOutput } from "../../../contracts/events.ts";
 import { monitoringRealtimeTopics } from "../../../contracts/monitoringRealtime.ts";
 import {
     authenticationTestUserId,
     openAuthenticationTestDatabase,
+    testTotpSecretCipher,
 } from "../../domains/security/testSupport/authentication.ts";
+import { createReadinessController } from "../../platform/readiness/readinessState.ts";
 import type { RealtimeEventDelivery } from "../../platform/realtime/eventPump.ts";
+import type { ApplicationRuntime } from "../../platform/runtime/applicationRuntime.ts";
 import { dashboardSessionCookieName } from "../../rawHttp/authenticationCredentials.ts";
 import type { AppRouter } from "../../trpc/appRouter.ts";
-import { CookieJar } from "./mfaHttpSystem.ts";
+import { CookieJar, postTrpcMutation, trpcData } from "./mfaHttpSystem.ts";
 import { withTestTimeout } from "./promise.ts";
 
 export const automationHttpSystemBrowserOrigin = "https://dashboard.example";
@@ -107,6 +113,82 @@ export async function openAutomationAuthenticationFixture(): Promise<{
         return { fixture, jar };
     } catch (error) {
         fixture.database.sqlite.close(true);
+        throw error;
+    }
+}
+
+interface AutomationHttpSystemOptions {
+    readonly applicationRuntime: ApplicationRuntime;
+    readonly authenticationLeaseDurationMs?: number;
+    readonly principalId?: string;
+}
+
+/**
+ * Starts the real persisted automation-security HTTP composition and creates one reader.
+ * @param options Runtime and optional lease/principal overrides for the focused system test.
+ * @returns The running server, browser session, initial credential, and deterministic cleanup.
+ */
+export async function openAutomationHttpSystem(options: AutomationHttpSystemOptions) {
+    const { fixture, jar } = await openAutomationAuthenticationFixture();
+    let server: ApplicationServer | undefined;
+
+    try {
+        server = await createDashboardServer({
+            applicationRuntime: options.applicationRuntime,
+            ...(options.authenticationLeaseDurationMs === undefined
+                ? {}
+                : {
+                      authenticationLeaseDurationMs:
+                          options.authenticationLeaseDurationMs,
+                  }),
+            browserOrigin: automationHttpSystemBrowserOrigin,
+            database: fixture.database.orm,
+            gatewayUrl: "ws://127.0.0.1:1",
+            now: () => new Date(),
+            port: 0,
+            readiness: createReadinessController(),
+            totpSecretCipher: testTotpSecretCipher,
+        });
+        const creationResponse = await postTrpcMutation(
+            server.url,
+            "automationSecurity.createPrincipal",
+            {
+                capabilities: ["reports:read"],
+                id: options.principalId ?? automationHttpSystemPrincipalId,
+                initialCredential: { label: "Initial system credential" },
+                label: "System automation reader",
+            },
+            { jar }
+        );
+        if (creationResponse.response.status !== 200) {
+            throw new Error(
+                `Automation system principal creation failed with HTTP ${creationResponse.response.status}`
+            );
+        }
+        const created = v.parse(
+            createAutomationPrincipalResultSchema,
+            trpcData(creationResponse)
+        );
+
+        return {
+            created,
+            fixture,
+            jar,
+            server,
+            async close(): Promise<void> {
+                try {
+                    await server?.stop(true);
+                } finally {
+                    fixture.database.sqlite.close(true);
+                }
+            },
+        };
+    } catch (error) {
+        try {
+            await server?.stop(true);
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
         throw error;
     }
 }

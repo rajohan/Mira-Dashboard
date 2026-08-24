@@ -1,9 +1,6 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 
-import {
-    createAuthenticationLifecycleService,
-    type VerifyGatewayCredential,
-} from "../server/domains/security/authenticationLifecycle.ts";
+import { createAuthenticationLifecycleService } from "../server/domains/security/authenticationLifecycle.ts";
 import { createAuthenticationLifecycleRepository } from "../server/domains/security/authenticationLifecycleRepository.ts";
 import {
     authenticationWorkBudgetMaximumUnits,
@@ -24,6 +21,7 @@ import { createWebAuthnAdapter } from "../server/domains/security/mfa/webauthn/a
 import type { WebAuthnRelyingPartyConfiguration } from "../server/domains/security/mfa/webauthn/relyingPartyConfiguration.ts";
 import { createRequestAuthenticator } from "../server/domains/security/requestAuthentication.ts";
 import { createRequestAuthenticationRepository } from "../server/domains/security/requestAuthenticationRepository.ts";
+import { createGatewayCredentialVerifier } from "../server/platform/gateway/gatewayCredentialVerifier.ts";
 import { parseBrowserOrigin } from "../server/rawHttp/requestSecurity.ts";
 import { createServer, type ApplicationServer, type ServerOptions } from "./server.ts";
 
@@ -42,6 +40,8 @@ export interface DashboardServerOptions extends Omit<
     /** Canonical public origin used by browser Origin checks behind the proxy. */
     readonly browserOrigin: string;
     readonly database: SQLiteBunDatabase;
+    /** Explicit native WebSocket endpoint used only for one-shot bootstrap verification. */
+    readonly gatewayUrl: string;
     readonly gatewayVerificationTimeoutMs?: number;
     /** Shared composition clock for deterministic lifecycle and request-auth behavior. */
     readonly now?: () => Date;
@@ -49,7 +49,6 @@ export interface DashboardServerOptions extends Omit<
     readonly sessionIdleDurationMs?: number;
     readonly totpSecretCipher: TotpSecretCipher;
     readonly trustedProxyAddresses?: readonly string[];
-    readonly verifyGatewayCredential: VerifyGatewayCredential;
     /** Explicit WebAuthn trust configuration; request host headers are never used. */
     readonly webAuthnRelyingParty?: WebAuthnRelyingPartyConfiguration;
     readonly webAuthnVerificationTimeoutMs?: number;
@@ -90,6 +89,9 @@ export function createDashboardServer(
         options.browserOrigin,
         options.webAuthnRelyingParty
     );
+    const verifyGatewayCredential = createGatewayCredentialVerifier({
+        url: options.gatewayUrl,
+    });
     const authenticationWork = options.applicationRuntime.services.authentication;
     const passwordWorkGate = authenticationWork.passwordWorkGate;
     const passwordWorkBudget = createAuthenticationWorkBudget(
@@ -171,7 +173,7 @@ export function createDashboardServer(
         recentAuthenticationWindowMs: options.recentAuthenticationWindowMs,
         repository: createAuthenticationLifecycleRepository(options.database),
         sessionIdleDurationMs: options.sessionIdleDurationMs,
-        verifyGatewayCredential: options.verifyGatewayCredential,
+        verifyGatewayCredential,
     });
     const automationSecurityLifecycle = createAutomationSecurityLifecycleService({
         ...(options.now !== undefined && { now: options.now }),
