@@ -111,7 +111,10 @@
             "files": [
                 "backend/**/*.ts",
                 "frontend/src/test/**/*.{ts,tsx}",
+                "qualification/**/*.ts",
                 "scripts/**/*.ts",
+                "src/app/**/*.ts",
+                "src/server/**/*.ts",
                 "*.config.{js,mjs,cjs,ts}"
             ],
             "globals": {
@@ -158,7 +161,13 @@
             }
         },
         {
-            "files": ["backend/src/**/*.ts"],
+            "files": ["backend/src/**/*.ts", "src/app/**/*.ts", "src/server/**/*.ts"],
+            "rules": {
+                "no-console": "error"
+            }
+        },
+        {
+            "files": ["qualification/**/*.ts"],
             "rules": {
                 "no-console": "error"
             }
