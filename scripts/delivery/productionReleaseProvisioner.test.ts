@@ -515,14 +515,10 @@ describe("production release root provisioner", () => {
         });
         failSelectorSync = true;
         await expectProvisioningFailure(
-            provisionProductionRelease(
-                `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
-                environment
-            )
+            provisionProductionRelease(`${releaseId}--local`, environment)
         );
         expect(await readdir(provisioningPairsRoot)).toContain(releaseId);
-        expect(assetDownloads).toBe(2);
-        assetDownloads = 0;
+        expect(assetDownloads).toBe(0);
 
         activationRecord = Object.freeze({
             current: Object.freeze({ releaseId, runtimeRevision: runtime.revision }),
