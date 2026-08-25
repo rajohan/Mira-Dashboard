@@ -7,6 +7,9 @@ export const maximumProductionReleaseArtifactTreeBytes = 512 * 1024 * 1024;
 export const maximumProductionReleaseArchiveBytes =
     maximumProductionReleaseArtifactTreeBytes + 32 * 1024 * 1024;
 
+/** Maximum accepted JSON receipt published beside one production release archive. */
+export const maximumProductionReleaseReceiptBytes = 4 * 1024 * 1024;
+
 /** Digest-bound receipt published beside one immutable production release archive. */
 export const productionReleaseArtifactReceiptSchema = v.strictObject({
     archive: v.strictObject({

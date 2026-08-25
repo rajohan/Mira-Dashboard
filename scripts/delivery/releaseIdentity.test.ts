@@ -258,6 +258,7 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-production-authority.conf",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
             "scripts/delivery/provisioning/host-operations/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/60-mira-dashboard-log-maintenance.rules",

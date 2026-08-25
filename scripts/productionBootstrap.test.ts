@@ -535,6 +535,16 @@ describe("production bootstrap admission", () => {
                 command.some((argument) => argument.endsWith("/runtime/bun")) &&
                 command.at(-1)?.includes("/.pair-stage-") === true
         );
+        const releaseSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1)?.endsWith(`/releases/${releaseId}`) === true
+        );
+        const releasesParentSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1)?.endsWith("/releases") === true
+        );
         const pairMoveIndex = commands.findIndex(
             (command) => command.includes("/usr/bin/mv") && command.includes("-T")
         );
@@ -552,6 +562,9 @@ describe("production bootstrap admission", () => {
                 command.at(-1) === productionHostProvisioningRoot
         );
         expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
+        expect(releaseSyncIndex).toBeGreaterThanOrEqual(0);
+        expect(releasesParentSyncIndex).toBeGreaterThan(releaseSyncIndex);
+        expect(runtimeInstallIndex).toBeGreaterThan(releasesParentSyncIndex);
         expect(pairSyncIndex).toBeGreaterThan(pairMoveIndex);
         expect(selectorMoveIndex).toBeGreaterThan(pairSyncIndex);
         expect(selectorSyncIndex).toBeGreaterThan(selectorMoveIndex);
@@ -852,10 +865,14 @@ describe("production bootstrap admission", () => {
         let prerequisitesInspected = false;
         let manualDeployDelivered = false;
         let provisioningBoundaryAvailable = false;
+        let preparationCapacityAdmitted = false;
         let groupLookupCount = 0;
         let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
-            download: () => Promise.resolve(),
+            download: () => {
+                expect(preparationCapacityAdmitted).toBeTrue();
+                return Promise.resolve();
+            },
             deliverPublishedRelease: async (prepare) => {
                 const admitted = await prepare();
                 expect(admitted.releaseId).toBe(releaseId);
@@ -865,6 +882,12 @@ describe("production bootstrap admission", () => {
             inspectPrerequisites: () => {
                 prerequisitesInspected = true;
                 return Promise.resolve({ runtimeSha256: "e".repeat(64) });
+            },
+            preparationCapacityAdmission: (checkoutRoot, hostDirectory) => {
+                expect(checkoutRoot).toBe(targetRepositoryRoot);
+                expect(hostDirectory).toBe("/var/lib");
+                preparationCapacityAdmitted = true;
+                return Promise.resolve();
             },
             run: async (command, cwd) => {
                 const invocation = command.join(" ");
@@ -963,6 +986,7 @@ describe("production bootstrap admission", () => {
         });
 
         expect(prerequisitesInspected).toBe(true);
+        expect(preparationCapacityAdmitted).toBe(true);
         expect(
             commands.some((command) => command.includes("prepareProductionState.js"))
         ).toBe(true);

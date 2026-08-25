@@ -13,26 +13,40 @@ const systemdRoot = path.resolve(import.meta.dir, "../../systemd/host-operations
 
 describe("host-operations provisioning artifact policy", () => {
     test("injects only the ordinary GitHub credential into release provisioning", async () => {
-        const unit = await readFile(
-            path.join(systemdRoot, "mira-dashboard-production-provisioning@.service"),
-            "utf8"
-        );
+        const [unit, launcher] = await Promise.all([
+            readFile(
+                path.join(systemdRoot, "mira-dashboard-production-provisioning@.service"),
+                "utf8"
+            ),
+            readFile(
+                path.join(sourceRoot, "mira-dashboard-production-provisioning"),
+                "utf8"
+            ),
+        ]);
 
-        expect(unit).toContain("--no-read-env");
-        expect(unit).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
-        expect(unit).toContain("--config-dir=/home/ubuntu/.doppler");
-        expect(unit).toContain("--authority=%i");
         expect(unit).toContain(
-            "--chdir=/var/lib/mira-dashboard-host-provisioning/current ./bun ./productionProvisioning.js"
+            "ExecStart=/usr/local/libexec/mira-dashboard-production-provisioning %i"
         );
-        expect(unit).not.toContain(
+        expect(unit).not.toContain("doppler");
+        expect(launcher).toContain("--no-read-env");
+        expect(launcher).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
+        expect(launcher).toContain("--config-dir=/home/ubuntu/.doppler");
+        expect(launcher).toContain('"--authority=$authority"');
+        expect(launcher).toContain("*--local|*--local--settled)");
+        expect(launcher).toContain(
+            "/usr/bin/env --chdir=/var/lib/mira-dashboard-host-provisioning/current"
+        );
+        expect(launcher).toContain("./bun ./productionProvisioning.js");
+        expect(launcher).not.toContain(
             "/var/lib/mira-dashboard-host-provisioning/runtime/bun"
         );
-        expect(unit).not.toContain(
+        expect(launcher).not.toContain(
             "/usr/local/libexec/mira-dashboard-production-provisioning.js"
         );
-        expect(unit).not.toContain("--authority=%I");
-        expect(unit).not.toContain("RAJOHAN_GITHUB_TOKEN");
+        expect(launcher).not.toContain("RAJOHAN_GITHUB_TOKEN");
+        expect(launcher.indexOf("*--local|*--local--settled)")).toBeLessThan(
+            launcher.indexOf("/usr/local/bin/doppler run")
+        );
     });
 
     test("inventories the exact root-owned authority artifacts and installer support", async () => {
@@ -55,6 +69,13 @@ describe("host-operations provisioning artifact policy", () => {
                 artifactPath:
                     "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
                 destinationPath: "/usr/local/libexec/mira-dashboard-host-operation",
+                mode: 0o755,
+            },
+            {
+                artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning",
+                destinationPath:
+                    "/usr/local/libexec/mira-dashboard-production-provisioning",
                 mode: 0o755,
             },
             {
@@ -153,6 +174,7 @@ describe("host-operations provisioning artifact policy", () => {
             "installHostOperationsProvisioning.ts",
             "mira-dashboard-host-operation",
             "mira-dashboard-production-authority.conf",
+            "mira-dashboard-production-provisioning",
             "mira-dashboard-web-runtime",
             "policy.ts",
         ]);

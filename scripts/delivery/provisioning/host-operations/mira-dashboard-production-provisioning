@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+[ "$#" -eq 1 ] || exit 64
+authority=$1
+
+case "$authority" in
+    *--local|*--local--settled)
+        exec /usr/bin/flock --exclusive \
+            /run/lock/mira-dashboard-production-provisioning.lock \
+            /usr/bin/env --chdir=/var/lib/mira-dashboard-host-provisioning/current \
+            ./bun ./productionProvisioning.js "--authority=$authority"
+        ;;
+    *)
+        exec /usr/local/bin/doppler run \
+            --config=prd \
+            --project=rajohan \
+            --config-dir=/home/ubuntu/.doppler \
+            --no-read-env \
+            --only-secrets=MIRA_GITHUB_TOKEN \
+            -- /usr/bin/flock --exclusive \
+            /run/lock/mira-dashboard-production-provisioning.lock \
+            /usr/bin/env --chdir=/var/lib/mira-dashboard-host-provisioning/current \
+            ./bun ./productionProvisioning.js "--authority=$authority"
+        ;;
+esac

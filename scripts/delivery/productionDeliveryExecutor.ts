@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
-import { lstat, readFile, realpath, statfs } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { Effect } from "effect";
@@ -21,10 +20,6 @@ import {
     type DeliveryProductionTerminalResult,
 } from "../../src/shared/deliveryProductionOperation.ts";
 import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
-import {
-    maximumProductionReleaseArchiveBytes,
-    maximumProductionReleaseArtifactTreeBytes,
-} from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { lowercaseUuidV7Schema } from "../../src/shared/validation.ts";
 import { resolveBuildSourceIdentity } from "../buildSourceIdentity.ts";
 import {
@@ -54,6 +49,7 @@ import {
     type ProductionReleaseActivationOptions,
     type ProductionServiceController,
 } from "./productionReleaseActivation.ts";
+import { admitProductionReleasePreparation } from "./productionReleasePreparationCapacity.ts";
 import {
     discardOwnedProductionReleaseCandidate,
     loadPublishedProductionRelease,
@@ -69,10 +65,6 @@ import { prepareProtectedProductionStatePath } from "./productionStateFilesystem
 import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import { verifyPreviewTailscaleOperator } from "./provisioning/preview-tailscale/operator.ts";
 import {
-    maximumReleaseArtifactCount,
-    maximumReleaseArtifactDirectoryCount,
-} from "./releaseArtifactInventory.ts";
-import {
     verifyReleaseArtifactIdentity,
     verifyReleaseIdentity,
 } from "./releaseIdentity.ts";
@@ -84,91 +76,6 @@ const executorUsage =
 const productionHostProvisioningCapacityDirectory = path.dirname(
     productionHostProvisioningRoot
 );
-const productionPreparationCapacityReserveBytes = 64n * 1024n * 1024n;
-const productionPreparationCapacityReserveInodes = 64n;
-
-async function admitProductionReleasePreparation(checkoutRoot: string): Promise<void> {
-    try {
-        const demands = [
-            Object.freeze({
-                bytes: BigInt(maximumProductionReleaseArchiveBytes),
-                directory: tmpdir(),
-                inodes: 3n,
-            }),
-            Object.freeze({
-                bytes: BigInt(maximumProductionReleaseArtifactTreeBytes),
-                directory: checkoutRoot,
-                inodes:
-                    BigInt(maximumReleaseArtifactCount) +
-                    BigInt(maximumReleaseArtifactDirectoryCount) +
-                    1n,
-            }),
-        ] as const;
-        const capacities = new Map<
-            bigint,
-            Readonly<{
-                availableBytes: bigint;
-                availableInodes: bigint;
-                blockSize: bigint;
-                requiredBytes: bigint;
-                requiredInodes: bigint;
-            }>
-        >();
-        for (const demand of demands) {
-            const [status, capacity] = await Promise.all([
-                lstat(demand.directory, { bigint: true }),
-                statfs(demand.directory, { bigint: true }),
-            ] as const);
-            if (
-                !status.isDirectory() ||
-                status.isSymbolicLink() ||
-                capacity.bsize <= 0n ||
-                capacity.bavail < 0n ||
-                capacity.ffree < 0n
-            ) {
-                throw failure();
-            }
-            const current = capacities.get(status.dev);
-            if (current !== undefined && current.blockSize !== capacity.bsize) {
-                throw failure();
-            }
-            const measuredAvailableBytes = capacity.bsize * capacity.bavail;
-            const availableBytes =
-                current !== undefined && current.availableBytes < measuredAvailableBytes
-                    ? current.availableBytes
-                    : measuredAvailableBytes;
-            capacities.set(
-                status.dev,
-                Object.freeze({
-                    availableBytes,
-                    availableInodes:
-                        current === undefined || current.availableInodes > capacity.ffree
-                            ? capacity.ffree
-                            : current.availableInodes,
-                    blockSize: capacity.bsize,
-                    requiredBytes: (current?.requiredBytes ?? 0n) + demand.bytes,
-                    requiredInodes: (current?.requiredInodes ?? 0n) + demand.inodes,
-                })
-            );
-        }
-        for (const capacity of capacities.values()) {
-            const metadataBytes = capacity.requiredInodes * capacity.blockSize;
-            if (
-                capacity.availableBytes <
-                    capacity.requiredBytes +
-                        metadataBytes +
-                        productionPreparationCapacityReserveBytes ||
-                capacity.availableInodes <
-                    capacity.requiredInodes + productionPreparationCapacityReserveInodes
-            ) {
-                throw failure();
-            }
-        }
-    } catch {
-        throw failure();
-    }
-}
-
 const admitProductionDeliveryArtifacts: typeof assertProductionArtifactCapacity = (
     lease,
     paths,

@@ -2,6 +2,7 @@
     "files": {
         "src/test/integration/delivery/productionReleaseLifecycle.test.ts": 21623,
         "scripts/delivery/productionReleaseActivation.test.ts": 17893,
+        "scripts/delivery/productionArtifactRetention.test.ts": 15573,
         "scripts/sourceBoundaries/lintConfiguration.test.ts": 12492,
         "scripts/delivery/buildBrowser.test.ts": 11051,
         "src/server/test/system/serverMfaAuthentication.test.ts": 10054,
@@ -11,7 +12,6 @@
         "src/server/test/system/serverWebAuthnAuthentication.test.ts": 4982,
         "scripts/delivery/productionReleasePublication.test.ts": 4836,
         "src/server/domains/chat/service.test.ts": 4381,
-        "scripts/delivery/productionArtifactRetention.test.ts": 4307,
         "src/test/integration/transport/topology/rollingReleaseSse.test.ts": 3626,
         "src/test/integration/transport/trpc/trpcFetchSse.test.ts": 3372,
         "scripts/runStorybookTests.test.ts": 3358,
@@ -125,6 +125,7 @@
         "src/server/domains/security/requestAuthenticationRepository.test.ts": 110,
         "src/server/domains/security/authenticationLifecycle.password.test.ts": 103,
         "src/server/domains/security/securityAuditLifecycle.test.ts": 100,
+        "scripts/delivery/productionReleasePreparationCapacity.test.ts": 100,
         "scripts/delivery/productionReleaseProvisioner.test.ts": 100,
         "scripts/sourceBoundaries/boundaryConfiguration.test.ts": 98,
         "scripts/delivery/buildAdmission.test.ts": 97,

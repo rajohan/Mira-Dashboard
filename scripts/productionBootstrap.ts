@@ -9,6 +9,7 @@ import * as v from "valibot";
 import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
 import {
     maximumProductionReleaseArchiveBytes,
+    maximumProductionReleaseReceiptBytes,
     productionReleaseArtifactReceiptSchema,
     type ProductionReleaseArtifactReceipt,
 } from "../src/shared/productionReleaseArtifactReceipt.ts";
@@ -23,6 +24,7 @@ import {
     assertProductionReleaseArchiveListing,
     maximumProductionReleaseArchiveListingBytes,
 } from "./delivery/productionReleaseArchive.ts";
+import { admitProductionReleasePreparation } from "./delivery/productionReleasePreparationCapacity.ts";
 import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
 import { prepareProtectedProductionStatePath } from "./delivery/productionStateFilesystem.ts";
 import {
@@ -42,7 +44,6 @@ const canonicalRepository = "rajohan/Mira-Dashboard";
 const canonicalRepositoryUrl = "https://github.com/rajohan/Mira-Dashboard.git";
 const provisioningRoot = productionHostProvisioningRoot;
 const maximumOutputBytes = 1024 * 1024;
-const maximumReceiptBytes = 4 * 1024 * 1024;
 const productionProvisioningDeadlineMs = 5 * 60 * 1000;
 const dopplerConfigurationNames = applicationConfigurationRegistry
     .filter(
@@ -136,6 +137,10 @@ export interface ProductionBootstrapDependencies {
         prepare: () => Promise<PreparedPublishedProductionRelease>
     ) => Promise<void>;
     readonly inspectPrerequisites?: () => Promise<Readonly<{ runtimeSha256: string }>>;
+    readonly preparationCapacityAdmission?: (
+        checkoutRoot: string,
+        hostProvisioningDirectory?: string
+    ) => Promise<void>;
     readonly run: (
         command: readonly string[],
         cwd?: string,
@@ -523,7 +528,7 @@ export async function downloadProductionBootstrapRelease(
     );
     const download = dependencies.download ?? defaultDownload;
     for (const [name, maximumBytes] of [
-        ["receipt.json", maximumReceiptBytes],
+        ["receipt.json", maximumProductionReleaseReceiptBytes],
         ["release.tar", maximumProductionReleaseArchiveBytes],
     ] as const) {
         const asset = unverifiedRelease.assets.find(
@@ -746,6 +751,9 @@ export async function stageProductionBootstrapRootAuthority(
             `${provisioningRoot}/releases`,
         ]);
         await requireSuccess(dependencies, [sudo, "/usr/bin/rm", "-f", stagedArchive]);
+        for (const target of [stagedRelease, `${provisioningRoot}/releases`]) {
+            await requireSuccess(dependencies, [sudo, "/usr/bin/sync", "-f", target]);
+        }
         await requireSuccess(dependencies, [
             sudo,
             "/usr/bin/install",
@@ -1210,6 +1218,9 @@ export async function bootstrapProduction(
     if (Bun.version !== selectedVersion) {
         throw new Error(`Production bootstrap requires Bun ${selectedVersion}`);
     }
+    await (
+        dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
+    )(repositoryRoot, path.dirname(provisioningRoot));
     const admitted = await preparePublishedProductionRelease(
         releaseId,
         repositoryRoot,
