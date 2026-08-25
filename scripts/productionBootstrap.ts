@@ -1182,7 +1182,7 @@ export async function preparePublishedProductionRelease(
             repositoryRoot,
             expectedAuthority
         );
-        return discardAdmittedReleaseOnFailure(
+        return await discardAdmittedReleaseOnFailure(
             admitted.releaseRoot,
             releaseId,
             async () => {
