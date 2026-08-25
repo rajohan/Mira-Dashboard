@@ -29,14 +29,15 @@ Create the fixed `mira-dashboard-log-maintenance` group and grant it only to the
 runtime identity before reloading systemd and polkit. The web process must never join this
 group. Deployment must remove the group grant on rollback.
 
-Bootstrap installs `mira-dashboard-managed-container-logs.conf` and invokes
-`systemd-tmpfiles --create` after creating the maintenance group. The fixed Prowlarr,
-Submaker, and Traefik directories and files are created or repaired with their container
-owner and the maintenance group during bootstrap and normal boot. The fixed Submaker data
-root is normalized to its container-independent owner and a non-writable `0755` boundary
-before tmpfiles crosses into the container-owned log directory. The descriptor-bound
-`migrateManagedApplicationLogs.ts` boundary separately reassigns the four fixed Dashboard
-stdout/stderr files from the root launcher to the service user before state admission.
+After creating the maintenance group, bootstrap runs the descriptor-bound
+`provisionManagedLogAccess.ts` boundary. It reads the same managed-log manifest as the
+rotation worker and grants bounded group access to every file target that opts into shared
+maintenance. It preserves each admitted source owner, rejects symlinks and owner drift,
+and applies one source-agnostic directory/file policy. Adding or removing a shared log
+therefore changes the manifest only; bootstrap has no Docker-, application-, or
+container-specific path rules. The separate `migrateManagedApplicationLogs.ts` boundary
+reassigns the four fixed Dashboard stdout/stderr files from the root launcher to the service
+user before state admission.
 
 The broker accepts exactly four identifiers, each mapped to an existing root-owned Ubuntu
 policy under `/etc/logrotate.d/{rsyslog,apport,dpkg,alternatives}`. It rejects extra

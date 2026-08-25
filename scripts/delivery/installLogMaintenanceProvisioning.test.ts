@@ -192,7 +192,6 @@ describe("root log-maintenance provisioning installer", () => {
         const releaseRoot = await releaseFixture();
         const destinationRoot = await destinationFixture({ includeLibexec: false });
         const libexec = path.join(destinationRoot, "usr/local/libexec");
-        const tmpfiles = path.join(destinationRoot, "usr/lib/tmpfiles.d");
 
         expect(
             await runInstallLogMaintenanceProvisioningCli(argumentsFor(releaseRoot), {
@@ -202,11 +201,9 @@ describe("root log-maintenance provisioning installer", () => {
         ).toEqual({ releaseId, status: "INSTALLED" });
 
         const status = await lstat(libexec);
-        const tmpfilesStatus = await lstat(tmpfiles);
         expect(status.isDirectory()).toBeTrue();
         expect(status.isSymbolicLink()).toBeFalse();
         expect(status.mode & 0o7777).toBe(0o755);
-        expect(tmpfilesStatus.mode & 0o7777).toBe(0o755);
         expect(
             await readFile(path.join(libexec, "mira-dashboard-log-maintenance"))
         ).toEqual(

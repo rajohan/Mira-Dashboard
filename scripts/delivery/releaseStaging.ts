@@ -245,7 +245,11 @@ export async function stageReleaseArtifacts(
     if (existingEntries.length > 0) throw invalidReleaseStaging();
 
     const metadataRoot = path.join(stagingRoot, "metadata");
-    await mkdir(metadataRoot, { mode: privateDirectoryMode, recursive: false });
+    const sharedSourceRoot = path.join(stagingRoot, "src/shared");
+    await Promise.all([
+        mkdir(metadataRoot, { mode: privateDirectoryMode, recursive: false }),
+        mkdir(sharedSourceRoot, { mode: privateDirectoryMode, recursive: true }),
+    ]);
     await Promise.all([
         copyArtifactTree(sources.browserRoot, path.join(stagingRoot, "browser")),
         copyArtifactTree(sources.processRoot, path.join(stagingRoot, "server")),
@@ -264,6 +268,16 @@ export async function stageReleaseArtifacts(
         copyArtifactTree(
             path.join(sources.repositoryRoot, "scripts/delivery/provisioning"),
             path.join(stagingRoot, "scripts/delivery/provisioning")
+        ),
+        copyMetadataFile(
+            path.join(sources.repositoryRoot, "src/shared/logRotationEpochProjection.ts"),
+            sources.repositoryRoot,
+            path.join(sharedSourceRoot, "logRotationEpochProjection.ts")
+        ),
+        copyMetadataFile(
+            path.join(sources.repositoryRoot, "src/shared/managedLogManifest.ts"),
+            sources.repositoryRoot,
+            path.join(sharedSourceRoot, "managedLogManifest.ts")
         ),
         copyRuntimeExecutable(
             sources.runtimeExecutable,

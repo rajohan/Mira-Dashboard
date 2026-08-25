@@ -1,11 +1,14 @@
 import path from "node:path";
 
+import type {
+    ManagedLogFileTarget,
+    ManagedLogManifest,
+} from "../../shared/managedLogManifest.ts";
 import type { FixedSystemLogrotateBroker } from "./fixedSystemLogrotateBroker.ts";
 import {
     createLogMaintenanceExecutor,
     type LogMaintenanceExecutor,
 } from "./logMaintenanceExecutor.ts";
-import type { ManagedLogFileTarget, ManagedLogManifest } from "./managedLogManifest.ts";
 import { createManagedLogRotationEngine } from "./managedLogRotation.ts";
 
 const mebibyte = 1024 * 1024;

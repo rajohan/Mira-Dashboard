@@ -15,7 +15,7 @@ import path from "node:path";
 
 import { logReadWindowMaximumBytes } from "../../../contracts/logs.ts";
 import { logRotationEpochProjectionFileName } from "../../../shared/logRotationEpochProjection.ts";
-import type { ManagedLogManifest } from "../../../worker/logs/managedLogManifest.ts";
+import type { ManagedLogManifest } from "../../../shared/managedLogManifest.ts";
 import { createManagedLogRotationEngine } from "../../../worker/logs/managedLogRotation.ts";
 import { createLogRotationEpochProbe } from "./logRotationEpochProbe.ts";
 import * as redaction from "./redaction.ts";

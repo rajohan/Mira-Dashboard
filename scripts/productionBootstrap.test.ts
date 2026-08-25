@@ -662,15 +662,12 @@ describe("production bootstrap admission", () => {
                     ) && command.includes("--user-id=1000")
             )
         ).toBe(true);
-        expect(
-            commands.some(
-                (command) =>
-                    command.includes("/usr/bin/systemd-tmpfiles") &&
-                    command.includes(
-                        "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf"
-                    )
-            )
-        ).toBe(true);
+        const logAccessCommands = commands.filter((command) =>
+            command.some((argument) => argument.endsWith("/provisionManagedLogAccess.ts"))
+        );
+        expect(logAccessCommands).toHaveLength(1);
+        expect(logAccessCommands[0]).toContain("--group-id=986");
+        expect(logAccessCommands[0]).toContain("--runtime-user-id=1000");
         expect(
             commands.some((command) =>
                 command.some((argument) =>
@@ -724,8 +721,8 @@ describe("production bootstrap admission", () => {
         expect(failure).toEqual(new Error("Production bootstrap failed"));
         expect(
             commands.some((command) =>
-                command.includes(
-                    "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf"
+                command.some((argument) =>
+                    argument.endsWith("/provisionManagedLogAccess.ts")
                 )
             )
         ).toBe(false);

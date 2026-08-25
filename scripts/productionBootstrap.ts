@@ -236,13 +236,13 @@ interface ProductionBootstrapPathStatus {
 
 function parseMaintenanceGroup(
     stdout: string,
-    expectedMembers: string
+    expectedMembers: readonly string[]
 ): Readonly<{ groupId: number; line: string }> | undefined {
     const line = stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
     const match = /^mira-dashboard-log-maintenance:[^:\n]*:(\d{1,10}):([^\n]*)$/u.exec(
         line
     );
-    if (!match || match[2] !== expectedMembers) return undefined;
+    if (!match || !expectedMembers.includes(match[2] ?? "")) return undefined;
     const groupId = Number(match[1]);
     return Number.isSafeInteger(groupId) && groupId >= minimumUnprivilegedGroupId
         ? Object.freeze({ groupId, line })
@@ -921,7 +921,9 @@ export async function stageProductionBootstrapRootAuthority(
             ]);
         }
         let admittedGroup =
-            group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
+            group.exitCode === 0
+                ? parseMaintenanceGroup(group.stdout, ["", "ubuntu"])
+                : undefined;
         if (
             !admittedGroup ||
             !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
@@ -943,7 +945,7 @@ export async function stageProductionBootstrapRootAuthority(
         ]);
         admittedGroup =
             group.exitCode === 0
-                ? parseMaintenanceGroup(group.stdout, "ubuntu")
+                ? parseMaintenanceGroup(group.stdout, ["ubuntu"])
                 : undefined;
         if (
             !admittedGroup ||
@@ -959,9 +961,10 @@ export async function stageProductionBootstrapRootAuthority(
         ]);
         await requireSuccess(dependencies, [
             sudo,
-            "/usr/bin/systemd-tmpfiles",
-            "--create",
-            "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts`,
+            `--group-id=${admittedGroup.groupId}`,
+            `--runtime-user-id=${userId}`,
         ]);
         await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
         await requireSuccess(dependencies, [
