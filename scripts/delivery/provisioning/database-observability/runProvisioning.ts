@@ -48,7 +48,7 @@ export const provisioningDockerInspectFormat = [
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.container-number")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.oneoff")}}{{else}}null{{end}}',
     "{{json .State.Status}}",
-    "{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}",
+    '{{with (index .State "Health")}}{{json (index . "Status")}}{{else}}null{{end}}',
 ].join("\t");
 
 export const provisioningDockerContainerMaximum = 256;
@@ -452,7 +452,8 @@ function parseInspectRows(
             typeof id !== "string" ||
             !expectedIds.has(id) ||
             observedIds.has(id) ||
-            typeof state !== "string"
+            typeof state !== "string" ||
+            (health !== null && typeof health !== "string")
         ) {
             fail();
         }

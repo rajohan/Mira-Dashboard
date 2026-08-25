@@ -35,4 +35,11 @@ case "$mode" in
     *[2367][0-7]|*[0-7][2367]) fail ;;
 esac
 
-exec /usr/sbin/logrotate --state /var/lib/logrotate/status "$policy"
+umask 077
+configuration=$(/usr/bin/mktemp /run/mira-dashboard-logrotate.XXXXXX)
+cleanup() {
+    /usr/bin/rm -f -- "$configuration"
+}
+trap cleanup EXIT HUP INT TERM
+/usr/bin/printf 'su root adm\ninclude %s\n' "$policy" > "$configuration"
+/usr/sbin/logrotate --state /var/lib/logrotate/status "$configuration"

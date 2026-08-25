@@ -152,7 +152,7 @@ function validProvisioningDockerRows(): readonly ProvisioningDockerFixtureRow[] 
             service: "pgbouncer",
         }),
         provisioningDockerRow(2, { service: "postgres" }),
-        provisioningDockerRow(3),
+        provisioningDockerRow(3, { health: null }),
     ]);
 }
 
@@ -1056,6 +1056,9 @@ describe("database observability provisioning", () => {
         expect(provisioningDockerInspectFormat).not.toContain(".Config.Env");
         expect(provisioningDockerInspectFormat).not.toContain(".Mounts");
         expect(provisioningDockerInspectFormat).not.toContain("{{json .Config.Labels}}");
+        expect(provisioningDockerInspectFormat).not.toContain("{{json .State}}");
+        expect(provisioningDockerInspectFormat).not.toContain("Health.Log");
+        expect(provisioningDockerInspectFormat).toContain('index .State "Health"');
     });
 
     test("tolerates unrelated dependencies and resolves one psql-capable healthy dependency", async () => {

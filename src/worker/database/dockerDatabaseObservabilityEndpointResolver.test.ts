@@ -74,6 +74,12 @@ function inspectRow(
     };
 }
 
+function inspectRowWithoutHealth(index: number): InspectRow {
+    const row = inspectRow(index, { capability: "not-enabled" });
+    delete (row.State as { Health?: unknown }).Health;
+    return row;
+}
+
 function projectedInspectLine(row: InspectRow): string {
     const config = row.Config as { Labels: Record<string, unknown> };
     const labels = config.Labels;
@@ -165,7 +171,7 @@ describe("Docker database observability endpoint resolver", () => {
                     project: "first-project",
                     service: "first-service",
                 }),
-                inspectRow(2, { capability: "not-enabled" }),
+                inspectRowWithoutHealth(2),
             ],
             [
                 inspectRow(1, {
@@ -174,7 +180,7 @@ describe("Docker database observability endpoint resolver", () => {
                     project: "renamed-project",
                     service: "renamed-service",
                 }),
-                inspectRow(2, { capability: "not-enabled" }),
+                inspectRowWithoutHealth(2),
             ],
         ]);
         const endpointResolver = resolver(process);
@@ -359,6 +365,11 @@ describe("Docker database observability endpoint resolver", () => {
         expect(databaseObservabilityDockerInspectFormat).not.toContain(".Config.Env");
         expect(databaseObservabilityDockerInspectFormat).not.toContain(
             "{{json .Config.Labels}}"
+        );
+        expect(databaseObservabilityDockerInspectFormat).not.toContain("{{json .State}}");
+        expect(databaseObservabilityDockerInspectFormat).not.toContain("Health.Log");
+        expect(databaseObservabilityDockerInspectFormat).toContain(
+            'index .State "Health"'
         );
         const result = await resolver(discoveryProcess([[row]])).resolve();
         expect(JSON.stringify(result)).not.toContain(passwordValue);

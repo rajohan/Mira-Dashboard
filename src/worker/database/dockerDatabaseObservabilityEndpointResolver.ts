@@ -19,7 +19,7 @@ export const databaseObservabilityDockerInspectFormat = [
     "{{json .Id}}",
     "{{json .State.Running}}",
     "{{json .State.Status}}",
-    "{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}",
+    '{{with (index .State "Health")}}{{json (index . "Status")}}{{else}}null{{end}}',
     `{{with .Config.Labels}}{{json (index . "${databaseObservabilityDockerCapabilityLabel}")}}{{else}}null{{end}}`,
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.project")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.service")}}{{else}}null{{end}}',
@@ -220,7 +220,7 @@ function parseInspectRows(
             Id: id,
             NetworkSettings: { Ports: ports },
             State: {
-                Health: { Status: healthStatus },
+                ...(healthStatus === null ? {} : { Health: { Status: healthStatus } }),
                 Running: running,
                 Status: status,
             },
