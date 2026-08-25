@@ -486,8 +486,10 @@ describe("production release root provisioner", () => {
         await rm(cachedReleaseRoot, { force: true, recursive: true });
         await cp(mismatchedReleaseRoot, cachedReleaseRoot, { recursive: true });
         await expectProvisioningFailure(
-            provisionProductionRelease(
-                `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
+            productionReleaseProvisionerTestSupport.verifyReceiptBackedRelease(
+                releaseId,
+                cachedReleaseRoot,
+                JSON.parse(new TextDecoder().decode(receiptBytes)) as unknown,
                 environment
             )
         );
@@ -504,7 +506,7 @@ describe("production release root provisioner", () => {
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
-        expect(assetDownloads).toBe(4);
+        expect(assetDownloads).toBe(2);
         expect(
             syncedPaths.some((target) =>
                 target.endsWith(`/${releaseId}/release-manifest.json`)

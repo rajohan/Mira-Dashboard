@@ -587,6 +587,24 @@ async function verifyStagedRelease(
     return releaseRoot;
 }
 
+async function verifyReceiptBackedRelease(
+    releaseId: string,
+    releaseRoot: string,
+    receipt: v.InferOutput<typeof productionReleaseArtifactReceiptSchema>,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
+    const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
+    if (
+        manifest.source.commitSha !== releaseId ||
+        manifest.runtime.version !== receipt.runtime.version ||
+        manifest.runtime.revision !== receipt.runtime.revision ||
+        sha256(manifestBytes) !== receipt.releaseManifestSha256
+    ) {
+        throw failure();
+    }
+}
+
 /**
  * Hashes one root-controlled file with the fixed host utility.
  * @param target Absolute file path.
@@ -834,18 +852,7 @@ async function downloadAndStageRelease(
             environment
         );
         const stagedRoot = path.join(temporaryRoot, releaseId);
-        const manifest = await environment.verifyReleaseArtifactIdentity(stagedRoot);
-        const manifestBytes = await readFile(
-            path.join(stagedRoot, "release-manifest.json")
-        );
-        if (
-            manifest.source.commitSha !== releaseId ||
-            manifest.runtime.version !== receipt.runtime.version ||
-            manifest.runtime.revision !== receipt.runtime.revision ||
-            sha256(manifestBytes) !== receipt.releaseManifestSha256
-        ) {
-            throw failure();
-        }
+        await verifyReceiptBackedRelease(releaseId, stagedRoot, receipt, environment);
         await syncReleaseTree(stagedRoot, environment);
         await environment.syncPath(temporaryRoot);
         const destination = path.join(environment.releasesRoot, releaseId);
@@ -866,18 +873,12 @@ async function downloadAndStageRelease(
                 throw failure();
             }
             const existingRoot = await verifyStagedRelease(releaseId, environment);
-            const existingManifest =
-                await environment.verifyReleaseArtifactIdentity(existingRoot);
-            const existingManifestBytes = await readFile(
-                path.join(existingRoot, "release-manifest.json")
+            await verifyReceiptBackedRelease(
+                releaseId,
+                existingRoot,
+                receipt,
+                environment
             );
-            if (
-                sha256(existingManifestBytes) !== receipt.releaseManifestSha256 ||
-                existingManifest.runtime.version !== receipt.runtime.version ||
-                existingManifest.runtime.revision !== receipt.runtime.revision
-            ) {
-                throw failure();
-            }
             return existingRoot;
         }
         await environment.rename(stagedRoot, destination);
@@ -1091,6 +1092,18 @@ export const productionReleaseProvisionerTestSupport = Object.freeze({
     readBoundedStream,
     readProductionActivationRecord,
     run,
+    verifyReceiptBackedRelease: (
+        releaseId: string,
+        releaseRoot: string,
+        receipt: unknown,
+        environment: ProductionReleaseProvisionerEnvironment
+    ) =>
+        verifyReceiptBackedRelease(
+            releaseId,
+            releaseRoot,
+            v.parse(productionReleaseArtifactReceiptSchema, receipt),
+            environment
+        ),
 });
 
 export async function provisionProductionRelease(

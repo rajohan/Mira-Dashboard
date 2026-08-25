@@ -302,14 +302,16 @@ export const DashboardJobs: Story = {
                 asyncStoryTimeout
             )
         ).toBeVisible();
-        const [queuedRunsTable, dashboardSchedules] = await Promise.all([
-            canvas.findByRole(
-                "table",
-                { name: "Queued and running jobs" },
-                asyncStoryTimeout
-            ),
-            canvas.findByRole("list", { name: "Dashboard schedules" }, asyncStoryTimeout),
-        ]);
+        const queuedRunsTable = await canvas.findByRole(
+            "table",
+            { name: "Queued and running jobs" },
+            asyncStoryTimeout
+        );
+        const dashboardSchedules = await canvas.findByRole(
+            "list",
+            { name: "Dashboard schedules" },
+            asyncStoryTimeout
+        );
         await expect(queuedRunsTable).toBeVisible();
         await expect(dashboardSchedules).toBeVisible();
     },
