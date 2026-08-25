@@ -200,7 +200,7 @@ describe("production root-systemd service control", () => {
             expect(commands).toEqual([
                 [
                     "start",
-                    `mira-dashboard-production-provisioning@${firstReleaseId}--v1.2.3--${"d".repeat(64)}--${"e".repeat(64)}.service`,
+                    `mira-dashboard-provision@${firstReleaseId}--v1.2.3--${"d".repeat(64)}--${"e".repeat(64)}.service`,
                 ],
                 ["restart", "mira-dashboard-worker.service"],
                 ["restart", "mira-dashboard-web.service"],
@@ -212,7 +212,7 @@ describe("production root-systemd service control", () => {
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
                 [
                     "start",
-                    `mira-dashboard-production-provisioning@${firstReleaseId}--local--settled.service`,
+                    `mira-dashboard-provision@${firstReleaseId}--local--settled.service`,
                 ],
                 ["stop", "mira-dashboard-web.service"],
                 ["stop", "mira-dashboard-worker.service"],
@@ -330,10 +330,7 @@ describe("production root-systemd service control", () => {
             await controller.provision(fixtures.first, fixtures.runtime);
 
             expect(commands).toEqual([
-                [
-                    "start",
-                    `mira-dashboard-production-provisioning@${firstReleaseId}--local.service`,
-                ],
+                ["start", `mira-dashboard-provision@${firstReleaseId}--local.service`],
             ]);
         });
     });

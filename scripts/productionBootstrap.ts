@@ -1314,7 +1314,7 @@ export async function deployProduction(
     await requireSuccess(dependencies, [
         "/usr/bin/systemctl",
         "cat",
-        "mira-dashboard-production-provisioning@.service",
+        "mira-dashboard-provision@.service",
     ]);
     await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(
         async () => {
