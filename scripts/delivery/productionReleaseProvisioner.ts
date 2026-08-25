@@ -6,7 +6,6 @@ import {
     open,
     readFile,
     readdir,
-    readlink,
     rename,
     rm,
 } from "node:fs/promises";
@@ -15,6 +14,10 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { applicationConfigurationLimits } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
+import {
+    parseProductionActivationRecord,
+    type ProductionActivationRecord,
+} from "../../src/shared/productionActivationRecord.ts";
 import {
     maximumProductionReleaseArchiveBytes,
     productionReleaseArtifactReceiptSchema,
@@ -27,12 +30,13 @@ const failureMessage = "Production release provisioning failed";
 const repositoryApi = "https://api.github.com/repos/rajohan/Mira-Dashboard";
 const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
 const releasesRoot = `${provisioningRoot}/releases`;
-const productionReleasePointersRoot =
-    "/home/ubuntu/projects/mira-dashboard/production/releases";
+const productionActivationStatePath =
+    "/home/ubuntu/projects/mira-dashboard/production/state/activation.json";
 const runtimeExecutable = `${provisioningRoot}/runtime/bun`;
 const installedEntrypoint =
     "/usr/local/libexec/mira-dashboard-production-provisioning.js";
 const maximumJsonBytes = 4 * 1024 * 1024;
+const maximumActivationStateBytes = 64 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
 const runtimeProbeExpression =
     "process.stdout.write(JSON.stringify({revision:Bun.revision,version:Bun.version}))";
@@ -98,12 +102,13 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly modulePath: string;
     readonly provisioningRoot: string;
     readonly readDirectory: (target: string) => Promise<string[]>;
-    readonly readLink: (target: string) => Promise<string>;
+    readonly readActivationRecord: (
+        expectedUserId: number
+    ) => Promise<ProductionActivationRecord | undefined>;
     readonly readGithubToken: () => string;
     readonly remove: (target: string) => Promise<void>;
     readonly rename: (source: string, destination: string) => Promise<void>;
     readonly releasesRoot: string;
-    readonly releasePointersRoot: string;
     readonly repositoryApi: string;
     readonly runCommand: (
         executable: string,
@@ -117,6 +122,64 @@ interface ProductionReleaseProvisionerEnvironment {
 
 function failure(): Error {
     return new Error(failureMessage);
+}
+
+function errorCode(error: unknown): string | undefined {
+    return error instanceof Error && "code" in error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
+}
+
+async function readProductionActivationRecord(
+    expectedUserId: number,
+    statePath = productionActivationStatePath
+): Promise<ProductionActivationRecord | undefined> {
+    let handle;
+    try {
+        handle = await open(
+            statePath,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+        );
+    } catch (error) {
+        if (errorCode(error) === "ENOENT") return undefined;
+        throw failure();
+    }
+    try {
+        const before = await handle.stat({ bigint: true });
+        if (
+            !before.isFile() ||
+            before.isSymbolicLink() ||
+            before.nlink !== 1n ||
+            before.uid !== BigInt(expectedUserId) ||
+            (before.mode & 0o7777n) !== 0o600n ||
+            before.size <= 0n ||
+            before.size > BigInt(maximumActivationStateBytes)
+        ) {
+            throw failure();
+        }
+        const bytes = await handle.readFile();
+        const after = await handle.stat({ bigint: true });
+        if (
+            bytes.byteLength !== Number(before.size) ||
+            before.dev !== after.dev ||
+            before.ino !== after.ino ||
+            before.ctimeNs !== after.ctimeNs ||
+            before.mtimeNs !== after.mtimeNs ||
+            before.size !== after.size ||
+            before.uid !== after.uid
+        ) {
+            throw failure();
+        }
+        return parseProductionActivationRecord(
+            JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
+        );
+    } catch {
+        throw failure();
+    } finally {
+        await handle.close().catch(() => {
+            throw failure();
+        });
+    }
 }
 
 /**
@@ -669,32 +732,17 @@ async function retainReleaseRoots(
     const retained = new Set(
         candidateReleaseId === undefined ? [] : [candidateReleaseId]
     );
-    for (const pointerName of ["current", "previous"] as const) {
-        let target: string;
-        try {
-            target = await environment.readLink(
-                path.join(environment.releasePointersRoot, pointerName)
-            );
-        } catch (error) {
-            if (
-                error instanceof Error &&
-                "code" in error &&
-                (error as NodeJS.ErrnoException).code === "ENOENT" &&
-                (!requireSettledCurrent || pointerName === "previous")
-            ) {
-                continue;
-            }
-            throw failure();
-        }
-        if (!/^[a-f\d]{40}$/u.test(target)) throw failure();
-        if (
-            requireSettledCurrent &&
-            pointerName === "current" &&
-            target !== candidateReleaseId
-        ) {
-            throw failure();
-        }
-        retained.add(target);
+    const userIdText = new TextDecoder("utf-8", { fatal: true })
+        .decode(await requireSuccess("/usr/bin/id", ["-u", "ubuntu"], environment))
+        .trim();
+    if (!/^[1-9]\d{0,9}$/u.test(userIdText)) throw failure();
+    const activation = await environment.readActivationRecord(Number(userIdText));
+    if (requireSettledCurrent && activation?.current.releaseId !== candidateReleaseId) {
+        throw failure();
+    }
+    if (activation) {
+        retained.add(activation.current.releaseId);
+        if (activation.previous) retained.add(activation.previous.releaseId);
     }
     const rootNames = await environment.readDirectory(environment.releasesRoot);
     if (candidateReleaseId !== undefined && !rootNames.includes(candidateReleaseId)) {
@@ -792,13 +840,12 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     lstat,
     modulePath: import.meta.path,
     provisioningRoot,
+    readActivationRecord: readProductionActivationRecord,
     readDirectory: readdir,
-    readLink: readlink,
     readGithubToken: () => v.parse(githubTokenSchema, process.env.MIRA_GITHUB_TOKEN),
     remove: (target: string) => rm(target, { force: true, recursive: true }),
     rename,
     releasesRoot,
-    releasePointersRoot: productionReleasePointersRoot,
     repositoryApi,
     runCommand: run,
     runtimeExecutable,
@@ -821,6 +868,7 @@ export const productionReleaseProvisionerTestSupport = Object.freeze({
     ): ProductionReleaseProvisionerEnvironment =>
         Object.freeze({ ...defaultEnvironment, ...overrides }),
     readBoundedStream,
+    readProductionActivationRecord,
     run,
 });
 

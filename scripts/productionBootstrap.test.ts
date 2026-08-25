@@ -756,7 +756,7 @@ describe("production bootstrap admission", () => {
             run: async (command, cwd) => {
                 const invocation = command.join(" ");
                 commands.push(invocation);
-                if (invocation.includes("prepareProductionState.ts")) {
+                if (invocation.includes("prepareProductionState.js")) {
                     prepareStateWorkingDirectories.push(cwd ?? "");
                 }
                 if (command[0] === "/usr/bin/tar") {
@@ -851,7 +851,7 @@ describe("production bootstrap admission", () => {
 
         expect(prerequisitesInspected).toBe(true);
         expect(
-            commands.some((command) => command.includes("prepareProductionState.ts"))
+            commands.some((command) => command.includes("prepareProductionState.js"))
         ).toBe(true);
         const admittedReleaseRoot = path.join(
             targetRepositoryRoot,
@@ -862,7 +862,7 @@ describe("production bootstrap admission", () => {
         expect(
             commands.findIndex((command) =>
                 command.startsWith(
-                    `${admittedReleaseRoot}/runtime/bun ${admittedReleaseRoot}/scripts/delivery/prepareProductionState.ts`
+                    `${admittedReleaseRoot}/runtime/bun ${admittedReleaseRoot}/server/prepareProductionState.js`
                 )
             )
         ).toBeLessThan(

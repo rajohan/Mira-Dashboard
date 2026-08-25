@@ -996,10 +996,7 @@ export async function preparePublishedProductionRelease(
             dependencies,
             [
                 path.join(admitted.releaseRoot, "runtime/bun"),
-                path.join(
-                    admitted.releaseRoot,
-                    "scripts/delivery/prepareProductionState.ts"
-                ),
+                path.join(admitted.releaseRoot, "server/prepareProductionState.js"),
                 `--project-root=${projectHome}`,
             ],
             admitted.releaseRoot

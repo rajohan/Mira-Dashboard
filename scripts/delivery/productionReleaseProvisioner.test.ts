@@ -9,10 +9,15 @@ import {
     readdir,
     rm,
     symlink,
+    writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+    serializeProductionActivationRecord,
+    type ProductionActivationRecord,
+} from "../../src/shared/productionActivationRecord.ts";
 import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
@@ -143,6 +148,48 @@ describe("production release root provisioner", () => {
         ).toBe(false);
     });
 
+    test("reads only one bounded owner-private activation record", async () => {
+        const userId = process.getuid?.();
+        if (userId === undefined) throw new Error("Linux user identity is unavailable");
+        const root = await mkdtemp(path.join(tmpdir(), "mira-activation-record-"));
+        temporaryDirectories.push(root);
+        const statePath = path.join(root, "activation.json");
+        const aliasPath = path.join(root, "activation-alias.json");
+        const record: ProductionActivationRecord = Object.freeze({
+            current: Object.freeze({
+                releaseId: "c".repeat(40),
+                runtimeRevision: "d".repeat(40),
+            }),
+            formatVersion: 1,
+            previous: null,
+            transitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5b",
+        });
+        await writeFile(statePath, serializeProductionActivationRecord(record), {
+            mode: 0o600,
+        });
+        await symlink(statePath, aliasPath);
+
+        expect(
+            await productionReleaseProvisionerTestSupport.readProductionActivationRecord(
+                userId,
+                statePath
+            )
+        ).toEqual(record);
+        await expectProvisioningFailure(
+            productionReleaseProvisionerTestSupport.readProductionActivationRecord(
+                userId,
+                aliasPath
+            )
+        );
+        await chmod(statePath, 0o640);
+        await expectProvisioningFailure(
+            productionReleaseProvisionerTestSupport.readProductionActivationRecord(
+                userId,
+                statePath
+            )
+        );
+    });
+
     test("bounds response and subprocess bytes", async () => {
         expect(
             await productionReleaseProvisionerTestSupport.boundedBytes(
@@ -212,9 +259,7 @@ describe("production release root provisioner", () => {
         );
         temporaryDirectories.push(provisioningRoot);
         const releasesRoot = path.join(provisioningRoot, "releases");
-        const releasePointersRoot = path.join(provisioningRoot, "active-releases");
         await mkdir(releasesRoot);
-        await mkdir(releasePointersRoot);
         await Promise.all([
             cp(sourceReleaseRoot, path.join(releasesRoot, releaseId), {
                 recursive: true,
@@ -223,10 +268,19 @@ describe("production release root provisioner", () => {
             mkdir(path.join(releasesRoot, "b".repeat(40))),
         ]);
         await Promise.all([chmod(provisioningRoot, 0o700), chmod(releasesRoot, 0o700)]);
-        await Promise.all([
-            symlink(releaseId, path.join(releasePointersRoot, "current")),
-            symlink("a".repeat(40), path.join(releasePointersRoot, "previous")),
-        ]);
+        const activationRecord: ProductionActivationRecord = Object.freeze({
+            current: Object.freeze({
+                releaseId,
+                runtimeRevision: runtime.revision,
+            }),
+            formatVersion: 1,
+            previous: Object.freeze({
+                databaseSnapshotTransitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5b",
+                releaseId: "a".repeat(40),
+                runtimeRevision: runtime.revision,
+            }),
+            transitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5c",
+        });
         const manifestBytes = await readFile(
             path.join(sourceReleaseRoot, "release-manifest.json")
         );
@@ -327,6 +381,7 @@ describe("production release root provisioner", () => {
             },
             modulePath: installedEntrypoint,
             provisioningRoot,
+            readActivationRecord: () => Promise.resolve(activationRecord),
             readGithubToken: () => "github-token-sentinel",
             rename: async (source, destination) => {
                 await restoreOwnerWrite(destination);
@@ -338,7 +393,6 @@ describe("production release root provisioner", () => {
                 await rm(target, { force: true, recursive: true });
             },
             releasesRoot,
-            releasePointersRoot,
             runCommand: async (executable, arguments_, stdin) => {
                 commands.push(`${executable} ${arguments_.join(" ")}`);
                 if (executable === "/usr/bin/install") {
