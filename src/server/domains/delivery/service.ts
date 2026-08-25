@@ -443,6 +443,7 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 !checkout.checkout.safeForDeploy ||
                 checkout.checkout.revision !== input.checkoutRevision ||
                 checkout.checkout.remoteHeadSha !== input.expectedMainHeadSha ||
+                input.release.releaseId !== input.expectedMainHeadSha ||
                 releases.releases.candidate === undefined ||
                 releases.releases.current === undefined ||
                 JSON.stringify(releases.releases.candidate) !==

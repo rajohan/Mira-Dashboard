@@ -386,6 +386,36 @@ describe("Delivery service", () => {
         ]);
     });
 
+    test("rejects a cached release candidate from a different remote main head", async () => {
+        const remoteHeadSha = "d".repeat(40);
+        const candidate = publishedReleaseAuthority("e".repeat(40));
+        const value = payload();
+        value.checkout = { ...value.checkout, remoteHeadSha };
+        value.releases = { ...value.releases, candidate };
+        const next = fixture(value);
+
+        try {
+            await next.service.deploy(
+                {
+                    activationRevision: sourceRevision,
+                    checkoutRevision: sourceRevision,
+                    confirmation: "deploy-delivery-main",
+                    expectedMainHeadSha: remoteHeadSha,
+                    idempotencyKey: "A".repeat(43),
+                    operation: "deploy",
+                    release: candidate,
+                    sourceRevision,
+                },
+                context
+            );
+            throw new Error("expected release and remote head conflict");
+        } catch (error) {
+            expect(error).toBeInstanceOf(DeliveryServiceError);
+            expect((error as DeliveryServiceError).reason).toBe("conflict");
+        }
+        expect(next.queued).toHaveLength(0);
+    });
+
     test("binds a one-member merge to authoritative native-stack identity", () => {
         const value = payload();
         value.pullRequestGroups[0]!.kind = "native-stack";
