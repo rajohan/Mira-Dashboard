@@ -32,7 +32,9 @@ group. Deployment must remove the group grant on rollback.
 Bootstrap installs `mira-dashboard-managed-container-logs.conf` and invokes
 `systemd-tmpfiles --create` after creating the maintenance group. The fixed Prowlarr,
 Submaker, and Traefik directories and files are created or repaired with their container
-owner and the maintenance group during bootstrap and normal boot. The descriptor-bound
+owner and the maintenance group during bootstrap and normal boot. The fixed Submaker data
+root is normalized to its container-independent owner and a non-writable `0755` boundary
+before tmpfiles crosses into the container-owned log directory. The descriptor-bound
 `migrateManagedApplicationLogs.ts` boundary separately reassigns the four fixed Dashboard
 stdout/stderr files from the root launcher to the service user before state admission.
 
