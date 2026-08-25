@@ -22,6 +22,7 @@ import {
 } from "../../src/shared/productionActivationRecord.ts";
 import {
     maximumProductionReleaseArchiveBytes,
+    maximumProductionReleaseReceiptBytes,
     productionReleaseArtifactReceiptSchema,
 } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
@@ -823,7 +824,7 @@ async function downloadAndStageRelease(
     }
     const receiptBytes = await githubAsset(
         receiptAsset.id,
-        maximumJsonBytes,
+        maximumProductionReleaseReceiptBytes,
         environment
     );
     if (

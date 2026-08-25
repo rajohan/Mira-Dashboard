@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { DeliveryGitHubActor } from "../../contracts/deliveryGithub.ts";
+import { maximumProductionReleaseReceiptBytes } from "../../shared/productionReleaseArtifactReceipt.ts";
 import {
     DeliveryGitHubError,
     type DeliveryGitHubHttpOperation,
@@ -230,6 +231,45 @@ describe("Delivery GitHub pull-request port", () => {
         expect(port.readLatestPublishedRelease?.()).rejects.toBeInstanceOf(
             DeliveryGitHubError
         );
+    });
+
+    test("rejects an oversized receipt before downloading release bytes", async () => {
+        const operations: string[] = [];
+        const port = createDeliveryGitHubPullRequestPort({
+            transport: transport("mira-2026", (operation) => {
+                operations.push(operation.kind);
+                if (operation.kind !== "latest-release") {
+                    throw new Error("unexpected release read");
+                }
+                return {
+                    assets: [
+                        {
+                            digest: `sha256:${"b".repeat(64)}`,
+                            id: 1,
+                            name: "receipt.json",
+                            size: maximumProductionReleaseReceiptBytes + 1,
+                        },
+                        {
+                            digest: `sha256:${"c".repeat(64)}`,
+                            id: 2,
+                            name: "release.tar",
+                            size: 4096,
+                        },
+                    ],
+                    draft: false,
+                    prerelease: false,
+                    tag_name: "v1.2.3",
+                    target_commitish: head,
+                };
+            }),
+        });
+
+        const failure = await port.readLatestPublishedRelease?.().then(
+            () => null,
+            (error: unknown) => error
+        );
+        expect(failure).toBeInstanceOf(DeliveryGitHubError);
+        expect(operations).toEqual(["latest-release"]);
     });
 
     test("lists a bounded normalized PR projection through Mira", async () => {

@@ -22,7 +22,10 @@ import {
     type DeliveryGitHubStack,
 } from "../../contracts/deliveryGithub.ts";
 import { utf8ByteLength } from "../../shared/encoding.ts";
-import { productionReleaseArtifactReceiptSchema } from "../../shared/productionReleaseArtifactReceipt.ts";
+import {
+    maximumProductionReleaseReceiptBytes,
+    productionReleaseArtifactReceiptSchema,
+} from "../../shared/productionReleaseArtifactReceipt.ts";
 import {
     DeliveryGitHubError,
     type DeliveryGitHubHttpTransport,
@@ -567,7 +570,11 @@ export function createDeliveryGitHubPullRequestPort(
             if (raw.draft || raw.prerelease) fail("conflict");
             const receiptAsset = raw.assets.find(({ name }) => name === "receipt.json");
             const archiveAsset = raw.assets.find(({ name }) => name === "release.tar");
-            if (receiptAsset === undefined || archiveAsset === undefined)
+            if (
+                receiptAsset === undefined ||
+                receiptAsset.size > maximumProductionReleaseReceiptBytes ||
+                archiveAsset === undefined
+            )
                 fail("conflict");
             const releaseCommit = v.parse(
                 rawReleaseCommitSchema,

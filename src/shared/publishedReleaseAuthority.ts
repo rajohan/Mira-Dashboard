@@ -1,6 +1,9 @@
 import * as v from "valibot";
 
-import { maximumProductionReleaseArchiveBytes } from "./productionReleaseArtifactReceipt.ts";
+import {
+    maximumProductionReleaseArchiveBytes,
+    maximumProductionReleaseReceiptBytes,
+} from "./productionReleaseArtifactReceipt.ts";
 import { fullCommitShaSchema } from "./validation.ts";
 
 /** Maximum semantic tag length that keeps the derived systemd unit below 255 bytes. */
@@ -11,7 +14,12 @@ const invalidPublishedReleaseAuthority = "Published release authority is invalid
 const publishedReleaseReceiptAssetSchema = v.strictObject({
     digest: v.pipe(v.string(), v.regex(/^sha256:[a-f\d]{64}$/u)),
     name: v.literal("receipt.json"),
-    size: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+    size: v.pipe(
+        v.number(),
+        v.safeInteger(),
+        v.minValue(1),
+        v.maxValue(maximumProductionReleaseReceiptBytes)
+    ),
 });
 
 const publishedReleaseArchiveAssetSchema = v.strictObject({
