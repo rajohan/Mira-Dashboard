@@ -248,6 +248,35 @@ describe("production release root provisioner", () => {
         expect(new TextDecoder().decode(result.stdout)).toBe("root-owned-input");
     });
 
+    test("retains the candidate when selector publication does not settle", async () => {
+        const releaseId = "c".repeat(40);
+        const retained: Array<Readonly<{ releaseId: string; settled: boolean }>> = [];
+        let selectorPublished = false;
+
+        await expectProvisioningFailure(
+            productionReleaseProvisionerTestSupport.publishProvisioningPairSelection(
+                releaseId,
+                true,
+                () => {
+                    selectorPublished = true;
+                    return Promise.reject(new Error("selector sync failed"));
+                },
+                (candidateReleaseId, requireSettled) => {
+                    retained.push(
+                        Object.freeze({
+                            releaseId: candidateReleaseId,
+                            settled: requireSettled,
+                        })
+                    );
+                    return Promise.resolve();
+                }
+            )
+        );
+
+        expect(selectorPublished).toBe(true);
+        expect(retained).toEqual([{ releaseId, settled: false }]);
+    });
+
     test("downloads, digest-admits, stages, and installs one published release", async () => {
         const releaseId = "c".repeat(40);
         const runtime = { revision: "d".repeat(40), version: Bun.version };
@@ -271,7 +300,7 @@ describe("production release root provisioner", () => {
             mkdir(path.join(releasesRoot, "b".repeat(40))),
         ]);
         await Promise.all([chmod(provisioningRoot, 0o700), chmod(releasesRoot, 0o700)]);
-        let activationRecord: ProductionActivationRecord = Object.freeze({
+        const activationRecord: ProductionActivationRecord = Object.freeze({
             current: Object.freeze({
                 releaseId,
                 runtimeRevision: runtime.revision,
@@ -305,7 +334,6 @@ describe("production release root provisioner", () => {
         const commands: string[] = [];
         const syncedPaths: string[] = [];
         let assetDownloads = 0;
-        let failSelectorSync = false;
         let releaseRootPublications = 0;
         const provisioningPairsRoot = path.join(provisioningRoot, "pairs");
         const previousPair = path.join(provisioningPairsRoot, "a".repeat(40));
@@ -455,10 +483,6 @@ describe("production release root provisioner", () => {
             runtimeExecutable,
             syncPath: (target) => {
                 syncedPaths.push(target);
-                if (failSelectorSync && target === provisioningRoot) {
-                    failSelectorSync = false;
-                    return Promise.reject(new Error("selector sync failed"));
-                }
                 return Promise.resolve();
             },
             verifyReleaseArtifactIdentity,
@@ -499,37 +523,6 @@ describe("production release root provisioner", () => {
         await restoreOwnerWrite(cachedReleaseRoot);
         await rm(cachedReleaseRoot, { force: true, recursive: true });
         await cp(sourceReleaseRoot, cachedReleaseRoot, { recursive: true });
-
-        activationRecord = Object.freeze({
-            current: Object.freeze({
-                releaseId: "b".repeat(40),
-                runtimeRevision: runtime.revision,
-            }),
-            formatVersion: 1,
-            previous: Object.freeze({
-                databaseSnapshotTransitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5b",
-                releaseId: "a".repeat(40),
-                runtimeRevision: runtime.revision,
-            }),
-            transitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5d",
-        });
-        failSelectorSync = true;
-        await expectProvisioningFailure(
-            provisionProductionRelease(`${releaseId}--local`, environment)
-        );
-        expect(await readdir(provisioningPairsRoot)).toContain(releaseId);
-        expect(assetDownloads).toBe(0);
-
-        activationRecord = Object.freeze({
-            current: Object.freeze({ releaseId, runtimeRevision: runtime.revision }),
-            formatVersion: 1,
-            previous: Object.freeze({
-                databaseSnapshotTransitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5b",
-                releaseId: "a".repeat(40),
-                runtimeRevision: runtime.revision,
-            }),
-            transitionId: "0198dbef-13cd-7b5e-a09b-1a7b09cf8e5e",
-        });
 
         await provisionProductionRelease(
             `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,

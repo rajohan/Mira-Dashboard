@@ -777,6 +777,21 @@ async function selectProvisioningPair(
     }
 }
 
+async function publishProvisioningPairSelection(
+    releaseId: string,
+    requireSettledCurrent: boolean,
+    publishSelector: () => Promise<void>,
+    retainRoots: (candidateReleaseId: string, requireSettled: boolean) => Promise<void>
+): Promise<void> {
+    try {
+        await publishSelector();
+        await retainRoots(releaseId, requireSettledCurrent);
+    } catch {
+        await retainRoots(releaseId, false).catch(() => {});
+        throw failure();
+    }
+}
+
 async function downloadAndStageRelease(
     releaseId: string,
     tagName: string,
@@ -1105,6 +1120,7 @@ export const productionReleaseProvisionerTestSupport = Object.freeze({
     readBoundedStream,
     readProductionActivationRecord,
     run,
+    publishProvisioningPairSelection,
     verifyReceiptBackedRelease: (
         releaseId: string,
         releaseRoot: string,
@@ -1126,7 +1142,7 @@ export async function provisionProductionRelease(
     await verifyInstalledBoundary(environment);
     const { archiveSha256, receiptSha256, releaseId, settled, source } =
         parseProductionProvisioningAuthority(authority);
-    let selectedReleaseId: string | undefined;
+    let pair: StagedProvisioningPair;
     try {
         let releaseRoot: string;
         if (source === "local") {
@@ -1142,15 +1158,19 @@ export async function provisionProductionRelease(
                 environment
             );
         }
-        const pair = await stageProvisioningPair(releaseId, releaseRoot, environment);
+        pair = await stageProvisioningPair(releaseId, releaseRoot, environment);
         await installAuthority(releaseId, releaseRoot, pair.runtime, environment);
-        selectedReleaseId = releaseId;
-        await selectProvisioningPair(pair, environment);
-        await retainReleaseRoots(releaseId, settled, environment);
     } catch {
-        await retainReleaseRoots(selectedReleaseId, false, environment).catch(() => {});
+        await retainReleaseRoots(undefined, false, environment).catch(() => {});
         throw failure();
     }
+    await publishProvisioningPairSelection(
+        releaseId,
+        settled,
+        () => selectProvisioningPair(pair, environment),
+        (candidateReleaseId, requireSettled) =>
+            retainReleaseRoots(candidateReleaseId, requireSettled, environment)
+    );
 }
 
 if (import.meta.main) {
