@@ -219,7 +219,7 @@ export function createManagedLogManifest(
     maintenanceGroupId?: number
 ): ManagedLogManifest {
     const rootAndRuntimeOwnerIds = trustedSourceOwnerIds(runtimeOwnerId);
-    const dockerRoot = provisionedDirectory("/opt/docker", 1001, 1001, 0o750);
+    const dockerRoot = provisionedDirectory("/opt/docker", 1001, 1001, 0o755);
     const dockerData = provisionedDirectory("/opt/docker/data", 1001, 1001, 0o775);
     const prowlarrDirectories = Object.freeze([
         dockerRoot,

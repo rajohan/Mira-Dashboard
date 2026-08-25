@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import {
     mkdtemp,
@@ -26,6 +27,8 @@ const directoryFlags =
     constants.O_NOFOLLOW |
     constants.O_NONBLOCK;
 const fileFlags = constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const accessProbeFlags =
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 const groupIdPattern = /^(?:0|[1-9]\d{0,9})$/u;
 
 function failure(): Error {
@@ -48,6 +51,32 @@ function trustedTargetOwner(target: ManagedLogFileTarget, status: BigIntStats): 
 
 function descriptorPath(handle: FileHandle): string {
     return `/proc/${process.pid}/fd/${handle.fd}`;
+}
+
+async function verifyDefaultGroupAccess(
+    directory: FileHandle,
+    groupId: number
+): Promise<void> {
+    const probePath = path.join(
+        descriptorPath(directory),
+        `.mira-dashboard-access-probe-${randomUUID()}`
+    );
+    let probe: FileHandle | undefined;
+    try {
+        probe = await open(probePath, accessProbeFlags, 0o666);
+        const status = await probe.stat({ bigint: true });
+        if (
+            !status.isFile() ||
+            status.nlink !== 1n ||
+            status.gid !== BigInt(groupId) ||
+            (status.mode & 0o060n) !== 0o060n
+        ) {
+            throw failure();
+        }
+    } finally {
+        await close(probe);
+        await rm(probePath, { force: true }).catch(() => {});
+    }
 }
 
 async function openProvisionedDirectory(
@@ -91,7 +120,8 @@ async function openProvisionedDirectory(
 async function provisionDirectoryChain(
     anchorSpecification: ManagedLogProvisioningAnchor,
     directories: readonly ManagedLogProvisionedDirectory[],
-    applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>
+    applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>,
+    verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>
 ): Promise<FileHandle> {
     let parent = await open(anchorSpecification.directoryPath, directoryFlags);
     try {
@@ -113,6 +143,7 @@ async function provisionDirectoryChain(
                     descriptorPath(directory),
                     specification.groupId
                 );
+                await verifyDefaultAccess(directory, specification.groupId);
             }
         }
         return parent;
@@ -144,11 +175,16 @@ async function applyDefaultGroupAccess(
     try {
         await writeFile(
             configurationPath,
-            `a+ ${directoryPath} - - - - d:group:${groupId}:rwx,d:mask::rwx\n`,
+            `a+ / - - - - d:group:${groupId}:rwx,d:mask::rwx\n`,
             { flag: "wx", mode: 0o600 }
         );
         const child = Bun.spawn(
-            ["/usr/bin/systemd-tmpfiles", "--create", configurationPath],
+            [
+                "/usr/bin/systemd-tmpfiles",
+                `--root=${directoryPath}`,
+                "--create",
+                configurationPath,
+            ],
             { stderr: "ignore", stdin: "ignore", stdout: "ignore" }
         );
         if ((await child.exited) !== 0) throw failure();
@@ -160,7 +196,8 @@ async function applyDefaultGroupAccess(
 async function provisionTarget(
     target: ManagedLogFileTarget,
     groupId: number,
-    applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>
+    applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>,
+    verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>
 ): Promise<void> {
     const directoryPath = path.dirname(target.filePath);
     let directory: FileHandle | undefined;
@@ -177,7 +214,8 @@ async function provisionTarget(
             directory = await provisionDirectoryChain(
                 target.provisioningAnchor,
                 target.provisionedDirectories,
-                applyDefaultAccess
+                applyDefaultAccess,
+                verifyDefaultAccess
             );
         }
         if (directory === undefined) return;
@@ -192,6 +230,7 @@ async function provisionTarget(
         await directory.chmod(0o2770);
         if (target.provisionedDirectories === undefined) {
             await applyDefaultAccess(descriptorPath(directory), groupId);
+            await verifyDefaultAccess(directory, groupId);
         }
 
         try {
@@ -251,6 +290,10 @@ export async function provisionManagedLogAccess(
             directoryPath: string,
             groupId: number
         ) => Promise<void>;
+        readonly verifyDefaultAccess?: (
+            directory: FileHandle,
+            groupId: number
+        ) => Promise<void>;
     } = {}
 ): Promise<void> {
     if (
@@ -269,8 +312,15 @@ export async function provisionManagedLogAccess(
             (target) => target.trustedWritableGroupId === groupId
         );
         const applyDefaultAccess = options.applyDefaultAccess ?? applyDefaultGroupAccess;
+        const verifyDefaultAccess =
+            options.verifyDefaultAccess ?? verifyDefaultGroupAccess;
         for (const target of targets) {
-            await provisionTarget(target, groupId, applyDefaultAccess);
+            await provisionTarget(
+                target,
+                groupId,
+                applyDefaultAccess,
+                verifyDefaultAccess
+            );
         }
     } catch {
         throw failure();

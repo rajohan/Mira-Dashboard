@@ -36,7 +36,9 @@ maintenance. It preserves each admitted source owner, rejects symlinks and owner
 creates the complete manifest-declared directory hierarchy beneath its exact trusted
 anchor through held descriptors, and applies one source-agnostic directory/file/default-ACL
 policy. Each directory level carries its own exact owner, group, and mode contract, so a
-source account cannot replace a protected parent boundary. Adding or removing a shared log
+source account cannot replace a protected parent boundary. Default ACL application is accepted
+only after a descriptor-anchored probe proves that a newly created file inherits the maintenance
+group and group-write permission. Adding or removing a shared log
 therefore changes the manifest only; bootstrap has no Docker-, application-, or container-specific
 path rules. The separate `migrateManagedApplicationLogs.ts` boundary
 reassigns the four fixed Dashboard stdout/stderr files from the root launcher to the service

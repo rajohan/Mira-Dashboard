@@ -86,6 +86,7 @@ describe("managed log access provisioning", () => {
             },
             manifest: manifest(file, userId, groupId),
             requireRoot: () => true,
+            verifyDefaultAccess: () => Promise.resolve(),
         });
 
         const [directoryStatus, fileStatus] = await Promise.all([
@@ -139,6 +140,7 @@ describe("managed log access provisioning", () => {
             },
             manifest: manifest(file, userId, groupId, true),
             requireRoot: () => true,
+            verifyDefaultAccess: () => Promise.resolve(),
         });
 
         const directoryStatus = await lstat(directory);
