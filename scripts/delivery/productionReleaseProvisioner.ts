@@ -481,7 +481,9 @@ async function installCandidateRuntime(
         ) {
             throw failure();
         }
+        await environment.syncPath(staged);
         await environment.rename(staged, environment.runtimeExecutable);
+        await environment.syncPath(path.dirname(environment.runtimeExecutable));
         const installedIdentity = await probeRuntime(
             environment.runtimeExecutable,
             environment

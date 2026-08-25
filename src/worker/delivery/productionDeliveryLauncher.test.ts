@@ -187,6 +187,9 @@ describe("production Delivery launcher", () => {
 
         expect(observedCommand).toContain("--property=NoNewPrivileges=yes");
         expect(observedCommand).toContain("--property=ProtectHome=tmpfs");
+        expect(observedCommand).toContain(
+            "--property=BindReadOnlyPaths=/home/ubuntu/.doppler"
+        );
         expect(observedCommand).toContain("--property=RuntimeMaxSec=90min");
         expect(observedCommand).toContain(`--property=BindPaths=${options.projectRoot}`);
         expect(observedCommand).toContain(
@@ -195,6 +198,8 @@ describe("production Delivery launcher", () => {
         expect(observedCommand).toContain("--property=PrivateDevices=yes");
         expect(observedCommand).toContain("/usr/bin/env");
         expect(observedCommand).toContain("-i");
+        expect(observedCommand).toContain("/usr/local/bin/doppler");
+        expect(observedCommand).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
         expect(observedCommand).toContain("NODE_ENV=production");
         expect(observedCommand).toContain(
             `XDG_RUNTIME_DIR=/run/user/${process.getuid?.()}`
@@ -208,7 +213,6 @@ describe("production Delivery launcher", () => {
             "PATH",
             "XDG_RUNTIME_DIR",
         ]);
-        expect(JSON.stringify(observedCommand)).not.toContain("TOKEN");
         expect(JSON.stringify(observedEnvironment)).not.toContain("TOKEN");
     });
 

@@ -15,6 +15,8 @@ const launchDeadlineMs = 15_000;
 const systemdRunExecutable = "/usr/bin/systemd-run";
 const systemctlExecutable = "/usr/bin/systemctl";
 const envExecutable = "/usr/bin/env";
+const dopplerExecutable = "/usr/local/bin/doppler";
+const dopplerConfigurationDirectory = "/home/ubuntu/.doppler";
 const maximumManifestBytes = 4 * 1024 * 1024;
 const maximumExecutorBytes = 64 * 1024 * 1024;
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -366,6 +368,7 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         "--property=NoNewPrivileges=yes",
         "--property=ProtectHome=tmpfs",
         `--property=BindPaths=${options.projectRoot}`,
+        `--property=BindReadOnlyPaths=${dopplerConfigurationDirectory}`,
         "--property=PrivateTmp=yes",
         "--property=PrivateDevices=yes",
         "--property=RestrictSUIDSGID=yes",
@@ -375,8 +378,19 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         envExecutable,
         "-i",
         `DBUS_SESSION_BUS_ADDRESS=unix:path=${runtimeDirectory}/bus`,
+        "HOME=/home/ubuntu",
         "NODE_ENV=production",
+        "PATH=/usr/local/bin:/usr/bin:/bin",
         `XDG_RUNTIME_DIR=${runtimeDirectory}`,
+        dopplerExecutable,
+        "run",
+        "--config=prd",
+        "--project=rajohan",
+        `--config-dir=${dopplerConfigurationDirectory}`,
+        "--no-read-env",
+        "--only-secrets=MIRA_GITHUB_TOKEN",
+        "--preserve-env=DBUS_SESSION_BUS_ADDRESS,HOME,NODE_ENV,PATH,XDG_RUNTIME_DIR",
+        "--",
         runtimeExecutable,
         executor,
         "--operation=cutover",
@@ -388,8 +402,9 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
 
 /**
  * Launches one immutable executor in a transient user-systemd cgroup.
- * `env -i` and a private home mount prevent worker/Doppler/GitHub/Gateway secrets from
- * crossing over; only the exact project root is rebound for release and state mutation.
+ * `env -i` and a private home mount prevent worker/Gateway secrets from crossing over. The
+ * canonical Doppler configuration is mounted read-only and projects only the GitHub release
+ * credential required to admit immutable assets; the exact project root is rebound for state.
  */
 export async function launchProductionDeliveryExecutor(
     untrustedOptions: ProductionDeliveryLaunchOptions,

@@ -617,7 +617,7 @@ describe("production release activation", () => {
                     path.join(paths.stateDirectory, "mira-dashboard.db")
                 )
             ).toBe(firstReleaseId);
-            expect(services.events.slice(-14)).toEqual([
+            expect(services.events.slice(-12)).toEqual([
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
@@ -625,8 +625,6 @@ describe("production release activation", () => {
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
                 `ready:${secondReleaseId}`,
-                `provision:${secondReleaseId}`,
-                `prepare:${secondReleaseId}`,
                 "stop",
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
@@ -673,15 +671,13 @@ describe("production release activation", () => {
                     path.join(paths.stateDirectory, "mira-dashboard.db")
                 )
             ).toBe(firstReleaseId);
-            expect(services.events.slice(-13)).toEqual([
+            expect(services.events.slice(-11)).toEqual([
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `provision:${secondReleaseId}`,
                 `prepare:${secondReleaseId}`,
                 `start:${secondReleaseId}`,
-                `provision:${secondReleaseId}`,
-                `prepare:${secondReleaseId}`,
                 "stop",
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
@@ -728,9 +724,9 @@ describe("production release activation", () => {
             expect(recoveredActivation.record).toEqual(initial);
             expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
             expect(services.events.slice(-8)).toEqual([
-                "stop",
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
+                "stop",
                 "stop",
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,

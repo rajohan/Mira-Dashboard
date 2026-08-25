@@ -502,20 +502,6 @@ async function rollbackTransition(
     const previous = journal.previousActivation
         ? await loadActiveArtifacts(paths, journal.previousActivation, dependencies)
         : undefined;
-    const targetMayOwnProcesses =
-        candidateCommitted ||
-        journal.phase === "database-promoted" ||
-        journal.phase === "rollback-required";
-    const stopOwner =
-        targetMayOwnProcesses || !previous
-            ? await loadExactArtifacts(
-                  paths,
-                  journal.candidate.releaseId,
-                  journal.candidate.runtimeRevision,
-                  dependencies
-              )
-            : previous;
-    await provisionAndPrepareServices(dependencies.services, stopOwner);
     await dependencies.services.stop();
     if (journal.phase === "service-stop-requested") {
         await discardOrphanDatabaseTransitionWorkspace(

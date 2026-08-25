@@ -403,6 +403,10 @@ describe("production release root provisioner", () => {
             )
         ).toBe(true);
         expect(syncedPaths).toContain(releasesRoot);
+        expect(
+            syncedPaths.some((target) => target.startsWith(`${runtimeExecutable}.stage-`))
+        ).toBe(true);
+        expect(syncedPaths).toContain(path.dirname(runtimeExecutable));
         expect(await readdir(releasesRoot)).toHaveLength(3);
         await mkdir(path.join(releasesRoot, "f".repeat(40)));
         await provisionProductionRelease(`${releaseId}--local`, environment);
