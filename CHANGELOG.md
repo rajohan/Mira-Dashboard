@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.3...v0.3.4) (2026-08-25)
+
+
+### Bug Fixes
+
+* **observability:** restore host diagnostics after bootstrap ([#461](https://github.com/rajohan/Mira-Dashboard/issues/461)) ([d21cf84](https://github.com/rajohan/Mira-Dashboard/commit/d21cf84bb91712d7ce87bca877d2af79f3be9da5))
+
 ## [0.3.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.2...v0.3.3) (2026-08-25)
 
 
