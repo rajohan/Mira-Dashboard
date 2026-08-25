@@ -77,16 +77,11 @@ describe("managed log access provisioning", () => {
         await writeFile(file, "log\n", { mode: 0o644 });
         const userId = process.getuid?.() ?? 0;
         const groupId = process.getgid?.() ?? 0;
-        const defaultAccess: Array<readonly [string, number]> = [];
 
         await provisionManagedLogAccess(groupId, userId, {
-            applyDefaultAccess: (directoryPath, selectedGroupId) => {
-                defaultAccess.push([directoryPath, selectedGroupId]);
-                return Promise.resolve();
-            },
             manifest: manifest(file, userId, groupId),
             requireRoot: () => true,
-            verifyDefaultAccess: () => Promise.resolve(),
+            temporaryAccessRootPrefix: path.join(root, "access-config-"),
         });
 
         const [directoryStatus, fileStatus] = await Promise.all([
@@ -99,9 +94,6 @@ describe("managed log access provisioning", () => {
         expect(fileStatus.uid).toBe(userId);
         expect(fileStatus.gid).toBe(groupId);
         expect(fileStatus.mode & 0o7777).toBe(0o660);
-        expect(defaultAccess).toHaveLength(1);
-        expect(defaultAccess[0]?.[0]).toMatch(/^\/proc\/\d+\/fd\/\d+$/u);
-        expect(defaultAccess[0]?.[1]).toBe(groupId);
     });
 
     test("rejects a manifest target reached through a symlink", async () => {

@@ -167,10 +167,11 @@ async function canonicalStatus(
 
 async function applyDefaultGroupAccess(
     directoryPath: string,
-    groupId: number
+    groupId: number,
+    temporaryRootPrefix = "/run/mira-dashboard-log-access-"
 ): Promise<void> {
     if (/\s/u.test(directoryPath)) throw failure();
-    const temporaryRoot = await mkdtemp("/run/mira-dashboard-log-access-");
+    const temporaryRoot = await mkdtemp(temporaryRootPrefix);
     const configurationPath = path.join(temporaryRoot, "access.conf");
     try {
         await writeFile(
@@ -286,6 +287,7 @@ export async function provisionManagedLogAccess(
     options: {
         readonly manifest?: ManagedLogManifest;
         readonly requireRoot?: () => boolean;
+        readonly temporaryAccessRootPrefix?: string;
         readonly applyDefaultAccess?: (
             directoryPath: string,
             groupId: number
@@ -311,7 +313,14 @@ export async function provisionManagedLogAccess(
         const targets = manifest.fileTargets.filter(
             (target) => target.trustedWritableGroupId === groupId
         );
-        const applyDefaultAccess = options.applyDefaultAccess ?? applyDefaultGroupAccess;
+        const applyDefaultAccess =
+            options.applyDefaultAccess ??
+            ((directoryPath, selectedGroupId) =>
+                applyDefaultGroupAccess(
+                    directoryPath,
+                    selectedGroupId,
+                    options.temporaryAccessRootPrefix
+                ));
         const verifyDefaultAccess =
             options.verifyDefaultAccess ?? verifyDefaultGroupAccess;
         for (const target of targets) {
