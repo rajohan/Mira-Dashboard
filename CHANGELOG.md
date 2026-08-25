@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.0...v0.3.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **bootstrap:** retain release assets through provisioning ([#455](https://github.com/rajohan/Mira-Dashboard/issues/455)) ([f6954f0](https://github.com/rajohan/Mira-Dashboard/commit/f6954f00b7bb1ed533bacdaa996bd43369b3ce98))
+
 ## [0.3.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.4...v0.3.0) (2026-08-25)
 
 
