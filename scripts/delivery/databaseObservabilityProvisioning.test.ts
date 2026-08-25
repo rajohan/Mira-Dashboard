@@ -167,10 +167,8 @@ function projectedProvisioningInspectLine(row: ProvisioningDockerFixtureRow): st
         row.configFiles,
         row.containerNumber,
         row.oneOff,
-        {
-            ...(row.health === null ? {} : { Health: { Status: row.health } }),
-            Status: row.state,
-        },
+        row.state,
+        row.health,
     ]
         .map((value) => JSON.stringify(value))
         .join("\t");
@@ -1058,6 +1056,9 @@ describe("database observability provisioning", () => {
         expect(provisioningDockerInspectFormat).not.toContain(".Config.Env");
         expect(provisioningDockerInspectFormat).not.toContain(".Mounts");
         expect(provisioningDockerInspectFormat).not.toContain("{{json .Config.Labels}}");
+        expect(provisioningDockerInspectFormat).not.toContain("{{json .State}}");
+        expect(provisioningDockerInspectFormat).not.toContain("Health.Log");
+        expect(provisioningDockerInspectFormat).toContain('index .State "Health"');
     });
 
     test("tolerates unrelated dependencies and resolves one psql-capable healthy dependency", async () => {

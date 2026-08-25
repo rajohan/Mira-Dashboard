@@ -91,7 +91,9 @@ function projectedInspectLine(row: InspectRow): string {
     const networkSettings = row.NetworkSettings as { Ports?: unknown };
     return [
         row.Id,
-        state,
+        state.Running,
+        state.Status,
+        state.Health?.Status ?? null,
         labels[databaseObservabilityDockerCapabilityLabel] ?? null,
         labels["com.docker.compose.project"] ?? null,
         labels["com.docker.compose.service"] ?? null,
@@ -363,6 +365,11 @@ describe("Docker database observability endpoint resolver", () => {
         expect(databaseObservabilityDockerInspectFormat).not.toContain(".Config.Env");
         expect(databaseObservabilityDockerInspectFormat).not.toContain(
             "{{json .Config.Labels}}"
+        );
+        expect(databaseObservabilityDockerInspectFormat).not.toContain("{{json .State}}");
+        expect(databaseObservabilityDockerInspectFormat).not.toContain("Health.Log");
+        expect(databaseObservabilityDockerInspectFormat).toContain(
+            'index .State "Health"'
         );
         const result = await resolver(discoveryProcess([[row]])).resolve();
         expect(JSON.stringify(result)).not.toContain(passwordValue);
