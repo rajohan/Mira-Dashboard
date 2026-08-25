@@ -662,6 +662,7 @@ describe("production bootstrap admission", () => {
             return artifactRoot;
         };
         const commands: string[] = [];
+        const prepareStateWorkingDirectories: string[] = [];
         let prerequisitesInspected = false;
         let manualDeployDelivered = false;
         let provisioningBoundaryAvailable = false;
@@ -681,6 +682,9 @@ describe("production bootstrap admission", () => {
             run: async (command, cwd) => {
                 const invocation = command.join(" ");
                 commands.push(invocation);
+                if (invocation.includes("delivery prepare-state")) {
+                    prepareStateWorkingDirectories.push(cwd ?? "");
+                }
                 if (command[0] === "/usr/bin/tar") {
                     return realProcessDependencies.run(command, cwd);
                 }
@@ -758,6 +762,7 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) => command.includes("delivery prepare-state"))
         ).toBe(true);
+        expect(prepareStateWorkingDirectories).toEqual([targetRepositoryRoot]);
         expect(
             commands.findIndex((command) => command.includes("delivery prepare-state"))
         ).toBeLessThan(
@@ -789,6 +794,7 @@ describe("production bootstrap admission", () => {
         expect(manualDeployDelivered).toBe(false);
 
         commands.length = 0;
+        prerequisitesInspected = false;
         provisioningBoundaryAvailable = true;
         await deployProduction(dependencies, {
             createTemporaryRoot,
@@ -806,6 +812,11 @@ describe("production bootstrap admission", () => {
             "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
         );
         expect(manualDeployDelivered).toBe(true);
+        expect(prerequisitesInspected).toBe(false);
+        expect(prepareStateWorkingDirectories).toEqual([
+            targetRepositoryRoot,
+            targetRepositoryRoot,
+        ]);
 
         await writeFile(path.join(targetRepositoryRoot, ".bun-version"), "9.9.9\n");
         let runtimeUpgradeDelivered = false;

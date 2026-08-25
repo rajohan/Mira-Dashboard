@@ -1,4 +1,14 @@
-import { chmod, lstat, mkdtemp, readFile, readdir, rename, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+    chmod,
+    lstat,
+    mkdtemp,
+    open,
+    readFile,
+    readdir,
+    rename,
+    rm,
+} from "node:fs/promises";
 import path from "node:path";
 
 import * as v from "valibot";
@@ -94,6 +104,7 @@ interface ProductionReleaseProvisionerEnvironment {
         stdin?: Uint8Array
     ) => Promise<CommandResult>;
     readonly runtimeExecutable: string;
+    readonly syncPath: (target: string) => Promise<void>;
     readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
 }
 
@@ -586,14 +597,35 @@ async function downloadAndStageRelease(
         ) {
             throw failure();
         }
+        await syncReleaseTree(stagedRoot, environment);
+        await environment.syncPath(temporaryRoot);
         const destination = path.join(environment.releasesRoot, releaseId);
         await environment.remove(destination);
         await environment.rename(stagedRoot, destination);
+        await environment.syncPath(temporaryRoot);
+        await environment.syncPath(environment.releasesRoot);
         return await verifyStagedRelease(releaseId, environment);
     } finally {
         await chmod(temporaryRoot, 0o700).catch(() => {});
         await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
     }
+}
+
+async function syncReleaseTree(
+    target: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    const status = await environment.lstat(target);
+    if (status.isSymbolicLink() || (!status.isDirectory() && !status.isFile())) {
+        throw failure();
+    }
+    if (status.isDirectory()) {
+        for (const name of await environment.readDirectory(target)) {
+            if (name === "." || name === ".." || name.includes("/")) throw failure();
+            await syncReleaseTree(path.join(target, name), environment);
+        }
+    }
+    await environment.syncPath(target);
 }
 
 async function validateReleaseRoots(
@@ -710,6 +742,14 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     repositoryApi,
     runCommand: run,
     runtimeExecutable,
+    syncPath: async (target: string) => {
+        const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+            await handle.sync();
+        } finally {
+            await handle.close();
+        }
+    },
     verifyReleaseArtifactIdentity,
 });
 

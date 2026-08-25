@@ -239,6 +239,7 @@ describe("production release root provisioner", () => {
         );
         const tagName = "v1.2.3";
         const commands: string[] = [];
+        const syncedPaths: string[] = [];
         let assetDownloads = 0;
         const runtimeExecutable = path.join(provisioningRoot, "runtime/bun");
         const installedEntrypoint = path.join(provisioningRoot, "entrypoint.js");
@@ -302,12 +303,21 @@ describe("production release root provisioner", () => {
             },
             getUid: () => 0,
             installedEntrypoint,
-            lstat: (target) =>
-                Promise.resolve(
-                    trustedStatus(
-                        target === runtimeExecutable || target === installedEntrypoint
-                    )
-                ),
+            lstat: async (target) => {
+                if (target === runtimeExecutable || target === installedEntrypoint) {
+                    return trustedStatus(true);
+                }
+                if (target.includes("/.release-stage-")) {
+                    const status = await lstat(target);
+                    return {
+                        ...trustedStatus(status.isFile()),
+                        isDirectory: () => status.isDirectory(),
+                        isFile: () => status.isFile(),
+                        isSymbolicLink: () => status.isSymbolicLink(),
+                    };
+                }
+                return trustedStatus(false);
+            },
             modulePath: installedEntrypoint,
             provisioningRoot,
             readGithubToken: () => "github-token-sentinel",
@@ -360,6 +370,10 @@ describe("production release root provisioner", () => {
                 return commandResult();
             },
             runtimeExecutable,
+            syncPath: (target) => {
+                syncedPaths.push(target);
+                return Promise.resolve();
+            },
             verifyReleaseArtifactIdentity,
         });
 
@@ -383,6 +397,12 @@ describe("production release root provisioner", () => {
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
         expect(assetDownloads).toBe(2);
+        expect(
+            syncedPaths.some((target) =>
+                target.endsWith(`/${releaseId}/release-manifest.json`)
+            )
+        ).toBe(true);
+        expect(syncedPaths).toContain(releasesRoot);
         expect(await readdir(releasesRoot)).toHaveLength(3);
         await mkdir(path.join(releasesRoot, "f".repeat(40)));
         await provisionProductionRelease(`${releaseId}--local`, environment);

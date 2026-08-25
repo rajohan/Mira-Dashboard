@@ -775,13 +775,16 @@ export async function preparePublishedProductionRelease(
     expectedAuthority?: PublishedReleaseAuthority,
     options: Readonly<{ readonly stageRootAuthority?: boolean }> = {}
 ): Promise<PreparedPublishedProductionRelease> {
-    const prerequisites = dependencies.inspectPrerequisites
-        ? await dependencies.inspectPrerequisites()
-        : await verifyProductionBootstrapPrerequisites(
-              dependencies,
-              repositoryRoot,
-              userId
-          );
+    let prerequisites: Readonly<{ runtimeSha256: string }> | undefined;
+    if (options.stageRootAuthority !== false) {
+        prerequisites = dependencies.inspectPrerequisites
+            ? await dependencies.inspectPrerequisites()
+            : await verifyProductionBootstrapPrerequisites(
+                  dependencies,
+                  repositoryRoot,
+                  userId
+              );
+    }
     const temporaryRoot = await createTemporaryRoot();
     try {
         const downloaded = await downloadProductionBootstrapRelease(
@@ -816,14 +819,19 @@ export async function preparePublishedProductionRelease(
             runtime: admitted.runtime,
             tagName: downloaded.tagName,
         });
-        await requireSuccess(dependencies, [
-            process.execPath,
-            "run",
-            "delivery",
-            "prepare-state",
-            `--project-root=${projectHome}`,
-        ]);
+        await requireSuccess(
+            dependencies,
+            [
+                process.execPath,
+                "run",
+                "delivery",
+                "prepare-state",
+                `--project-root=${projectHome}`,
+            ],
+            repositoryRoot
+        );
         if (options.stageRootAuthority !== false) {
+            if (!prerequisites) throw new Error(failureMessage);
             await stageProductionBootstrapRootAuthority(
                 downloaded.artifactRoot,
                 releaseId,
