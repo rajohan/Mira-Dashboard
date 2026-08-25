@@ -962,6 +962,9 @@ describe("production bootstrap admission", () => {
             )
         );
         expect(commands.at(-1)).toContain("delivery activate");
+        expect(commands.at(-1)).toContain(
+            `--runtime-source=${admittedReleaseRoot}/runtime/bun`
+        );
         expect(commands.at(-1)).toContain("--activation-mode=greenfield");
         expect(
             commands.findIndex((command) =>

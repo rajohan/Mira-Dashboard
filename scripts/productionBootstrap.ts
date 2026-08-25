@@ -1203,7 +1203,7 @@ export async function bootstrapProduction(
         "activate",
         `--project-root=${projectHome}`,
         `--release-root=${admitted.releaseRoot}`,
-        `--runtime-source=${process.execPath}`,
+        `--runtime-source=${path.join(admitted.releaseRoot, "runtime/bun")}`,
         "--readiness-url=http://127.0.0.1:3100/api/health/ready",
         "--activation-mode=greenfield",
     ]);

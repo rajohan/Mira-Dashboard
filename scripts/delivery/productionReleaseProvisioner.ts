@@ -536,8 +536,7 @@ async function verifyInstalledBoundary(
     if (
         !selectorStatus.isSymbolicLink() ||
         selectorStatus.uid !== 0 ||
-        selectorStatus.gid !== 0 ||
-        (selectorStatus.mode & 0o022) !== 0
+        selectorStatus.gid !== 0
     ) {
         throw failure();
     }
@@ -1145,8 +1144,8 @@ export async function provisionProductionRelease(
         }
         const pair = await stageProvisioningPair(releaseId, releaseRoot, environment);
         await installAuthority(releaseId, releaseRoot, pair.runtime, environment);
-        await selectProvisioningPair(pair, environment);
         selectedReleaseId = releaseId;
+        await selectProvisioningPair(pair, environment);
         await retainReleaseRoots(releaseId, settled, environment);
     } catch {
         await retainReleaseRoots(selectedReleaseId, false, environment).catch(() => {});
