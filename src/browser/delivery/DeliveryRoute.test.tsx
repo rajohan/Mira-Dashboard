@@ -606,7 +606,7 @@ describe("DeliveryRoute", () => {
         }
     });
 
-    test("renders authoritative head-guard limitations as disabled controls", async () => {
+    test("hides actions that GitHub can never bind to the reviewed head", async () => {
         const baseGroup = pullRequestsResult.groups[0];
         const basePullRequest = baseGroup.members[0];
         const harness = createClient({
@@ -635,19 +635,83 @@ describe("DeliveryRoute", () => {
         });
         const view = renderDelivery(harness.client);
         try {
-            const reject = await screen.findByRole("button", { name: "Reject" });
-            expect(reject).toBeDisabled();
-            const pullRequestCard = reject.closest("section");
-            expect(pullRequestCard).not.toBeNull();
-            const status = within(pullRequestCard!).getByRole("status");
-            expect(
-                within(status).getByText(
-                    "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads."
-                )
-            ).toBeVisible();
+            await screen.findByText(basePullRequest.title);
+            expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+            expect(screen.queryByText(/cannot atomically bind/i)).toBeNull();
             expect(harness.mutation).not.toHaveBeenCalled();
         } finally {
             view.unmount();
+        }
+    });
+
+    test("names the blocked action and keeps approval copy person-neutral", async () => {
+        const baseGroup = pullRequestsResult.groups[0];
+        const basePullRequest = baseGroup.members[0];
+        const harness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    {
+                                        action: "merge",
+                                        actor: "mira",
+                                        available: false,
+                                        reason: "checks-blocked",
+                                        scope: "prefix",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(
+                await screen.findByText("Merge requires all latest CI checks to pass.")
+            ).toBeVisible();
+        } finally {
+            view.unmount();
+        }
+
+        const approvalHarness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    {
+                                        action: "merge",
+                                        actor: "mira",
+                                        available: false,
+                                        reason: "review-required",
+                                        scope: "prefix",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const approvalView = renderDelivery(approvalHarness.client);
+        try {
+            expect(
+                await screen.findByText("Approval is required before merge.")
+            ).toBeVisible();
+            expect(screen.queryByText(/Raymond approval/u)).toBeNull();
+        } finally {
+            approvalView.unmount();
         }
     });
 });

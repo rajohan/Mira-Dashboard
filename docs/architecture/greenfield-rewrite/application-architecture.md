@@ -267,13 +267,13 @@ cron state from asserting an unjustified missing task automation.
 Schema v5 is the reviewed replacement contract for the legacy collection. OpenClaw retains exactly
 one scoped `cache.getHeartbeat` collection followed by one
 `monitoring.submitCompleteSnapshot` write; it does not fan out to domain procedures. The immutable
-release ships a fixed two-command `server/openClawHeartbeat.js` wrapper and an immutable Markdown
-prompt source. Its retained `HEARTBEAT.md` artifact filename is release inventory, not a workspace
-target; OpenClaw runtime authority is `agents.entries.ops.heartbeat.prompt`. The wrapper reads only
+release ships a fixed two-command `server/openClawHeartbeat.js` wrapper. The OpenClaw automation
+scratch is the sole operative prompt authority; releases do not carry or install a competing
+Markdown prompt copy. The wrapper reads only
 the descriptor-pinned `0600` Greenfield `openclaw-heartbeat` credential, accepts bounded stdin for
 the complete snapshot, validates both tRPC envelopes with Valibot, and exposes no caller-selected
 procedure, method, path, authority, or retry. Build, publication, and application activation never
-mutate the external OpenClaw prompt or credential.
+mutate the external OpenClaw scratch or credential.
 
 After Greenfield is active and ready, an operator performs the one-time external transition: create
 or qualify the `openclaw-heartbeat` principal with exactly `cache:read` and `monitoring:write`, issue

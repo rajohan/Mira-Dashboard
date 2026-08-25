@@ -10,6 +10,7 @@ import {
 import {
     logMaintenanceProvisioningArtifacts,
     logMaintenanceProvisioningReleaseArtifactPaths,
+    logMaintenanceProvisioningSourceArtifactPaths,
 } from "./policy.ts";
 
 const installationFailureMessage = "Log maintenance provisioning installation failed";
@@ -359,16 +360,19 @@ async function loadProvisioningRelease(
     releaseRoot: string,
     releaseId: string
 ): Promise<LoadedProvisioningRelease> {
-    const provisioningDirectory = provisioningPrefix.slice(0, -1);
-    const directories = await openReleaseDirectories(releaseRoot, [
-        provisioningDirectory,
-    ]);
+    const sourceDirectories = [
+        ...new Set(
+            logMaintenanceProvisioningSourceArtifactPaths.map((artifactPath) =>
+                path.dirname(artifactPath)
+            )
+        ),
+    ].toSorted();
+    const directories = await openReleaseDirectories(releaseRoot, sourceDirectories);
     let loaded: LoadedProvisioningRelease | undefined;
     let failed = false;
     try {
         const root = directories.get("");
-        const source = directories.get(provisioningDirectory);
-        if (!root || !source) throw installationFailure();
+        if (!root) throw installationFailure();
         const manifestBytes = await readHeldFile(
             root,
             "release-manifest.json",
@@ -377,16 +381,18 @@ async function loadProvisioningRelease(
         const artifacts = parseManifestArtifacts(manifestBytes, releaseId);
         const byPath = new Map(artifacts.map((artifact) => [artifact.path, artifact]));
         const sourceBytes = new Map<string, Uint8Array>();
-        for (const artifactPath of logMaintenanceProvisioningReleaseArtifactPaths) {
+        for (const artifactPath of logMaintenanceProvisioningSourceArtifactPaths) {
             const record = byPath.get(artifactPath);
             if (!record || record.bytes > maximumProvisioningArtifactBytes) {
                 throw installationFailure();
             }
+            const source = directories.get(path.dirname(artifactPath));
+            if (!source) throw installationFailure();
             sourceBytes.set(
                 artifactPath,
                 await readHeldFile(
                     source,
-                    artifactPath.slice(provisioningPrefix.length),
+                    path.basename(artifactPath),
                     maximumProvisioningArtifactBytes,
                     record
                 )

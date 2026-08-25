@@ -817,13 +817,11 @@ required process roles, and the exact cross-release Delivery protocol. Every rel
 manifest-bound `productionDelivery.js` executor for `delivery.production.v1`. It contains no
 secrets.
 
-Every release also contains the manifest-bound `openClawHeartbeat.js` executable and the exact
-`scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md` Markdown prompt source. The retained
-artifact filename is release inventory, not the runtime target. The executable has only `collect`
-and `report` modes and reads `openclaw-heartbeat.token` from its fixed private client path. OpenClaw
-owns the live authority at `agents.entries.ops.heartbeat.prompt`; Dashboard build, publication,
-retention, ordinary activation, and service restart never install or reset either that config value
-or the external credential.
+Every release also contains the manifest-bound `openClawHeartbeat.js` executable. It has only
+`collect` and `report` modes and reads `openclaw-heartbeat.token` from its fixed private client
+path. The OpenClaw automation scratch is the sole operative prompt authority; Dashboard build,
+publication, retention, activation, and service restart neither package a competing prompt nor
+install or reset the external credential.
 
 Email verification and password recovery are part of the web trust boundary rather than ancillary
 release executables. Bootstrap requires one syntactically valid canonical account email, creates

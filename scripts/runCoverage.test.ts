@@ -64,7 +64,7 @@ describe("coverage runner", () => {
 
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
-        expect(inventories.bun).toHaveLength(515);
+        expect(inventories.bun).toHaveLength(514);
         expect(inventories.browser).toHaveLength(190);
         expect(inventories.storybook).toHaveLength(87);
 

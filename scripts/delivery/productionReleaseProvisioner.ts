@@ -14,7 +14,10 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { applicationConfigurationLimits } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
-import { productionReleaseArtifactReceiptSchema } from "../../src/shared/productionReleaseArtifactReceipt.ts";
+import {
+    maximumProductionReleaseArchiveBytes,
+    productionReleaseArtifactReceiptSchema,
+} from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
 import { assertProductionReleaseArchiveListing } from "./productionReleaseArchive.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
@@ -27,7 +30,6 @@ const runtimeExecutable = `${provisioningRoot}/runtime/bun`;
 const installedEntrypoint =
     "/usr/local/libexec/mira-dashboard-production-provisioning.js";
 const maximumJsonBytes = 4 * 1024 * 1024;
-const maximumArchiveBytes = 512 * 1024 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
 const runtimeProbeExpression =
     "process.stdout.write(JSON.stringify({revision:Bun.revision,version:Bun.version}))";
@@ -556,7 +558,7 @@ async function downloadAndStageRelease(
     }
     const archiveBytes = await githubAsset(
         archiveAsset.id,
-        maximumArchiveBytes,
+        maximumProductionReleaseArchiveBytes,
         environment
     );
     if (

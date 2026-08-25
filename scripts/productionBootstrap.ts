@@ -1,4 +1,6 @@
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -6,6 +8,7 @@ import * as v from "valibot";
 
 import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
 import {
+    maximumProductionReleaseArchiveBytes,
     productionReleaseArtifactReceiptSchema,
     type ProductionReleaseArtifactReceipt,
 } from "../src/shared/productionReleaseArtifactReceipt.ts";
@@ -43,6 +46,38 @@ const minimumUnprivilegedGroupId = 100;
 interface CommandResult {
     readonly exitCode: number;
     readonly stdout: string;
+}
+
+async function hashBoundedReleaseArchive(target: string): Promise<
+    Readonly<{
+        bytes: number;
+        sha256: string;
+    }>
+> {
+    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+        const status = await handle.stat();
+        if (
+            !status.isFile() ||
+            status.size === 0 ||
+            status.size > maximumProductionReleaseArchiveBytes
+        ) {
+            throw new Error(failureMessage);
+        }
+        const hash = createHash("sha256");
+        const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, status.size));
+        let offset = 0;
+        while (offset < status.size) {
+            const length = Math.min(buffer.byteLength, status.size - offset);
+            const { bytesRead } = await handle.read(buffer, 0, length, offset);
+            if (bytesRead === 0) throw new Error(failureMessage);
+            hash.update(buffer.subarray(0, bytesRead));
+            offset += bytesRead;
+        }
+        return Object.freeze({ bytes: status.size, sha256: hash.digest("hex") });
+    } finally {
+        await handle.close();
+    }
 }
 
 const githubReleaseSchema = v.strictObject({
@@ -368,9 +403,9 @@ export async function admitProductionBootstrapRelease(
         runtime: ProductionReleaseArtifactReceipt["runtime"];
     }>
 > {
-    const [receiptBytes, archiveBytes, selectedVersion] = await Promise.all([
+    const [receiptBytes, archive, selectedVersion] = await Promise.all([
         readFile(path.join(artifactRoot, "receipt.json")),
-        readFile(path.join(artifactRoot, "release.tar")),
+        hashBoundedReleaseArchive(path.join(artifactRoot, "release.tar")),
         readFile(path.join(repositoryRoot, ".bun-version"), "utf8"),
     ]);
     const receipt = v.parse(
@@ -378,7 +413,7 @@ export async function admitProductionBootstrapRelease(
         JSON.parse(receiptBytes.toString("utf8")) as unknown
     );
     const receiptSha256 = sha256(receiptBytes);
-    const archiveSha256 = sha256(archiveBytes);
+    const archiveSha256 = archive.sha256;
     const expectedReceiptAsset = expectedAuthority?.assets.find(
         ({ name }) => name === "receipt.json"
     );
@@ -388,7 +423,7 @@ export async function admitProductionBootstrapRelease(
     if (
         receipt.releaseId !== releaseId ||
         receipt.runtime.version !== selectedVersion.trim() ||
-        receipt.archive.bytes !== archiveBytes.byteLength ||
+        receipt.archive.bytes !== archive.bytes ||
         receipt.archive.sha256 !== archiveSha256 ||
         (expectedAuthority !== undefined &&
             (expectedAuthority.releaseId !== releaseId ||
@@ -398,7 +433,7 @@ export async function admitProductionBootstrapRelease(
                 expectedAuthority.runtime.version !== receipt.runtime.version ||
                 expectedReceiptAsset?.size !== receiptBytes.byteLength ||
                 expectedReceiptAsset.digest !== `sha256:${receiptSha256}` ||
-                expectedArchiveAsset?.size !== archiveBytes.byteLength ||
+                expectedArchiveAsset?.size !== archive.bytes ||
                 expectedArchiveAsset.digest !== `sha256:${archiveSha256}`))
     ) {
         throw new Error(failureMessage);
@@ -413,32 +448,43 @@ export async function admitProductionBootstrapRelease(
     const releaseRoot = path.join(releasesRoot, releaseId);
     await mkdir(releasesRoot, { mode: 0o700, recursive: true });
     await discardOwnedProductionReleaseCandidate(releasesRoot, releaseRoot, releaseId);
-    await requireSuccess(dependencies, [
-        "/usr/bin/tar",
-        "-xf",
-        path.join(artifactRoot, "release.tar"),
-        "-C",
-        releasesRoot,
-    ]);
-    const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
-    const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
-    if (
-        manifest.source.commitSha !== releaseId ||
-        manifest.runtime.version !== receipt.runtime.version ||
-        manifest.runtime.revision !== receipt.runtime.revision ||
-        sha256(manifestBytes) !== receipt.releaseManifestSha256
-    ) {
+    try {
+        await requireSuccess(dependencies, [
+            "/usr/bin/tar",
+            "-xf",
+            path.join(artifactRoot, "release.tar"),
+            "-C",
+            releasesRoot,
+        ]);
+        const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
+        const manifestBytes = await readFile(
+            path.join(releaseRoot, "release-manifest.json")
+        );
+        if (
+            manifest.source.commitSha !== releaseId ||
+            manifest.runtime.version !== receipt.runtime.version ||
+            manifest.runtime.revision !== receipt.runtime.revision ||
+            sha256(manifestBytes) !== receipt.releaseManifestSha256
+        ) {
+            throw new Error(failureMessage);
+        }
+        return Object.freeze({
+            archiveBytes: archive.bytes,
+            archiveSha256: receipt.archive.sha256,
+            manifestSha256: receipt.releaseManifestSha256,
+            receiptBytes: receiptBytes.byteLength,
+            receiptSha256,
+            releaseRoot,
+            runtime: receipt.runtime,
+        });
+    } catch {
+        await discardOwnedProductionReleaseCandidate(
+            releasesRoot,
+            releaseRoot,
+            releaseId
+        );
         throw new Error(failureMessage);
     }
-    return Object.freeze({
-        archiveBytes: archiveBytes.byteLength,
-        archiveSha256: receipt.archive.sha256,
-        manifestSha256: receipt.releaseManifestSha256,
-        receiptBytes: receiptBytes.byteLength,
-        receiptSha256,
-        releaseRoot,
-        runtime: receipt.runtime,
-    });
 }
 
 /**

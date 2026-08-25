@@ -463,7 +463,6 @@
         "src/worker/delivery/previewGatewayProxy.test.ts": 2,
         "src/worker/logs/fixedSystemLogrotateBroker.test.ts": 2,
         "scripts/delivery/logMaintenanceProvisioningPolicy.test.ts": 1,
-        "scripts/delivery/openClawHeartbeatProvisioningPolicy.test.ts": 1,
         "scripts/delivery/packageProductionReleaseArtifact.test.ts": 1,
         "scripts/delivery/prepareProductionState.test.ts": 1,
         "scripts/development/developmentFrontendConfig.test.ts": 1,

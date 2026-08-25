@@ -1,6 +1,10 @@
 import * as v from "valibot";
 
+import { maximumProductionReleaseArchiveBytes } from "./productionReleaseArtifactReceipt.ts";
 import { fullCommitShaSchema } from "./validation.ts";
+
+/** Maximum semantic tag length that keeps the derived systemd unit below 255 bytes. */
+export const maximumPublishedReleaseTagLength = 34;
 
 const invalidPublishedReleaseAuthority = "Published release authority is invalid";
 
@@ -13,7 +17,12 @@ const publishedReleaseReceiptAssetSchema = v.strictObject({
 const publishedReleaseArchiveAssetSchema = v.strictObject({
     digest: v.pipe(v.string(), v.regex(/^sha256:[a-f\d]{64}$/u)),
     name: v.literal("release.tar"),
-    size: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+    size: v.pipe(
+        v.number(),
+        v.safeInteger(),
+        v.minValue(1),
+        v.maxValue(maximumProductionReleaseArchiveBytes)
+    ),
 });
 
 export const publishedReleaseAssetSchema = v.variant("name", [
@@ -35,7 +44,11 @@ export const publishedReleaseAuthoritySchema = v.strictObject({
         revision: fullCommitShaSchema(invalidPublishedReleaseAuthority),
         version: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
     }),
-    tagName: v.pipe(v.string(), v.regex(/^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u)),
+    tagName: v.pipe(
+        v.string(),
+        v.maxLength(maximumPublishedReleaseTagLength),
+        v.regex(/^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u)
+    ),
 });
 
 export type PublishedReleaseAuthority = Readonly<

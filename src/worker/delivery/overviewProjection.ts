@@ -40,6 +40,16 @@ const trustedPreviewAuthors = new Set<string>([
     deliveryGitHubMiraLogin,
     deliveryGitHubReviewerLogin,
 ]);
+const releasePleaseAuthorLogin = "mira-release";
+const releasePleaseHeadPrefix = "release-please--branches--main--components--";
+
+function isReleasePleasePullRequest(pullRequest: DeliveryGitHubPullRequest): boolean {
+    return (
+        pullRequest.authorLogin === releasePleaseAuthorLogin &&
+        pullRequest.baseRefName === deliveryGitHubBaseBranch &&
+        pullRequest.headRefName.startsWith(releasePleaseHeadPrefix)
+    );
+}
 
 export type DeliveryReviewerAuthority =
     | Readonly<{ state: "available" }>
@@ -480,19 +490,21 @@ function actions(input: {
             : unavailable("merge", "mira", mergeReason, "prefix")
     );
 
-    const previewReason = previewBlockReason({
-        actionActive: input.production.actionActive,
-        group: input.group,
-        preview: input.preview,
-        pullRequest,
-        scopeMembers: stackScopeMembers,
-        supportsNativeStacks: input.supportsNativeStacks,
-    });
-    result.push(
-        previewReason === undefined
-            ? available("preview-start", "mira", "prefix")
-            : unavailable("preview-start", "mira", previewReason, "prefix")
-    );
+    if (!isReleasePleasePullRequest(pullRequest)) {
+        const previewReason = previewBlockReason({
+            actionActive: input.production.actionActive,
+            group: input.group,
+            preview: input.preview,
+            pullRequest,
+            scopeMembers: stackScopeMembers,
+            supportsNativeStacks: input.supportsNativeStacks,
+        });
+        result.push(
+            previewReason === undefined
+                ? available("preview-start", "mira", "prefix")
+                : unavailable("preview-start", "mira", previewReason, "prefix")
+        );
+    }
 
     const ordinary =
         input.group.kind === "standalone-external" ||

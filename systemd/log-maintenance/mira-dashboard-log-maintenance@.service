@@ -1,3 +1,4 @@
+# Mira Dashboard managed unit.
 [Unit]
 Description=Mira Dashboard reviewed Ubuntu log maintenance policy %i
 After=local-fs.target

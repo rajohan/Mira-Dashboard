@@ -2,6 +2,7 @@
 export {
     logMaintenanceProvisioningArtifacts,
     logMaintenanceProvisioningReleaseArtifactPaths,
+    logMaintenanceProvisioningSourceArtifactPaths,
     logMaintenanceProvisioningSupportArtifactPaths,
     type LogMaintenanceProvisioningArtifactPolicy,
 } from "./provisioning/log-maintenance/policy.ts";

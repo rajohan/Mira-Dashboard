@@ -1,3 +1,4 @@
+# Mira Dashboard managed unit.
 [Unit]
 Description=Install verified Mira Dashboard production authority for %I
 After=network-online.target

@@ -108,6 +108,9 @@ function actionIsVisible(
         );
     }
     if (action.action === "update-branch" && action.reason === "not-behind") return false;
+    if (action.action === "reject" && action.reason === "head-guard-unavailable") {
+        return false;
+    }
     if (
         group.kind === "native-stack" &&
         (action.action === "update-branch" || action.action === "reject")
@@ -238,7 +241,10 @@ function PullRequestCard({
             const state = actionState(pullRequest, action);
             return {
                 action,
-                reason: state.reason ?? deliveryActionReason(action.reason) ?? undefined,
+                reason:
+                    state.reason ??
+                    deliveryActionReason(action.action, action.reason) ??
+                    undefined,
                 state,
             };
         });

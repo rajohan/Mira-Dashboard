@@ -432,8 +432,13 @@ export const StalePasswordEnrollment: Story = {
             },
             asyncStoryTimeout
         );
+        await waitFor(async () => {
+            await expect(retry).toBeEnabled();
+        }, asyncStoryTimeout);
         stalePasswordEnrollment.allowSessionRefresh();
-        await fireEvent.click(retry);
+        await userEvent.click(
+            page.getByRole("button", { name: "Retry secure session refresh" })
+        );
         await waitFor(async () => {
             await expect(
                 page.queryByRole("button", {

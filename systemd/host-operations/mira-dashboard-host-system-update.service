@@ -1,3 +1,4 @@
+# Mira Dashboard managed unit.
 [Unit]
 Description=Mira Dashboard reviewed host package update
 After=network-online.target

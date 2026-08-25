@@ -5,6 +5,7 @@ import path from "node:path";
 import {
     logMaintenanceProvisioningArtifacts,
     logMaintenanceProvisioningReleaseArtifactPaths,
+    logMaintenanceProvisioningSourceArtifactPaths,
 } from "./logMaintenanceProvisioningPolicy.ts";
 
 const sourceRoot = path.join(import.meta.dir, "provisioning/log-maintenance");
@@ -27,7 +28,7 @@ describe("log-maintenance provisioning artifact policy", () => {
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
+                    "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-log-maintenance@.service",
                 mode: 0o644,
@@ -48,7 +49,6 @@ describe("log-maintenance provisioning artifact policy", () => {
             "logMaintenanceProvisioningFilesystem.ts",
             "migrateManagedApplicationLogs.ts",
             "mira-dashboard-log-maintenance",
-            "mira-dashboard-log-maintenance@.service",
             "mira-dashboard-managed-container-logs.conf",
             "policy.ts",
         ]);
@@ -59,6 +59,12 @@ describe("log-maintenance provisioning artifact policy", () => {
                         `scripts/delivery/provisioning/log-maintenance/${fileName}`
                 )
                 .toSorted()
+        );
+        expect(logMaintenanceProvisioningSourceArtifactPaths).toEqual(
+            [
+                ...logMaintenanceProvisioningReleaseArtifactPaths,
+                "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
+            ].toSorted()
         );
         for (const artifact of logMaintenanceProvisioningArtifacts) {
             const source = path.join(

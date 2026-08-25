@@ -711,7 +711,7 @@ function createDeliveryPort(
                     condition: "ready",
                     expectedBranch: "main",
                     headSha: currentReleaseId,
-                    remoteHeadSha: currentReleaseId,
+                    remoteHeadSha: secondPullRequestHead,
                     revision: sourceRevision,
                     safeForDeploy: true,
                     upstream: "origin/main",
@@ -731,6 +731,27 @@ function createDeliveryPort(
                         releaseId: currentReleaseId,
                         runtimeRevision: currentReleaseId,
                         schemaTarget: 1,
+                    },
+                    candidate: {
+                        assets: [
+                            {
+                                digest: `sha256:${"a".repeat(64)}`,
+                                name: "receipt.json",
+                                size: 512,
+                            },
+                            {
+                                digest: `sha256:${"b".repeat(64)}`,
+                                name: "release.tar",
+                                size: 4096,
+                            },
+                        ],
+                        releaseId: secondPullRequestHead,
+                        releaseManifestSha256: "c".repeat(64),
+                        runtime: {
+                            revision: secondPullRequestHead,
+                            version: "1.4.0",
+                        },
+                        tagName: "v1.2.4",
                     },
                     previous: {
                         builtAtMs: now - 86_400_000,

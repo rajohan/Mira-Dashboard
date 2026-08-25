@@ -7,6 +7,10 @@ const artifacts = path.resolve(
     import.meta.dir,
     "../../../scripts/delivery/provisioning/host-operations"
 );
+const systemdArtifacts = path.resolve(
+    import.meta.dir,
+    "../../../systemd/host-operations"
+);
 
 function readTextFile(filePath: string): Promise<string> {
     return Bun.file(filePath).text();
@@ -70,19 +74,28 @@ describe("fixed host operations provisioning", () => {
         const [restart, update, cleanup, timer, reboot, worker, webRuntime] =
             await Promise.all([
                 readTextFile(
-                    path.join(artifacts, "mira-dashboard-host-system-restart.service")
+                    path.join(
+                        systemdArtifacts,
+                        "mira-dashboard-host-system-restart.service"
+                    )
                 ),
                 readTextFile(
-                    path.join(artifacts, "mira-dashboard-host-system-update.service")
+                    path.join(
+                        systemdArtifacts,
+                        "mira-dashboard-host-system-update.service"
+                    )
                 ),
                 readTextFile(
-                    path.join(artifacts, "mira-dashboard-host-system-cleanup.service")
+                    path.join(
+                        systemdArtifacts,
+                        "mira-dashboard-host-system-cleanup.service"
+                    )
                 ),
                 readTextFile(
-                    path.join(artifacts, "mira-dashboard-deferred-reboot.timer")
+                    path.join(systemdArtifacts, "mira-dashboard-deferred-reboot.timer")
                 ),
                 readTextFile(
-                    path.join(artifacts, "mira-dashboard-deferred-reboot.service")
+                    path.join(systemdArtifacts, "mira-dashboard-deferred-reboot.service")
                 ),
                 readTextFile(
                     path.resolve(

@@ -144,6 +144,7 @@ export interface ProductionDeliveryExecutorDependencies {
         paths: PreparedProductionDeliveryPaths,
         readinessUrl: string
     ) => ProductionReleaseActivationDependencies["services"];
+    readonly discardCandidate?: typeof discardOwnedProductionReleaseCandidate;
     readonly loadActivation?: typeof loadProductionActivationState;
     readonly loadArtifacts?: (
         paths: PreparedProductionDeliveryPaths,
@@ -258,7 +259,8 @@ export async function verifyProductionRunBeforeSnapshot(
         }
         database = new Database(databasePath, { readonly: true, strict: true });
         const run = database
-            .query<ProductionRunRow, [string]>(`
+            .query<ProductionRunRow, [string]>(
+                `
                 SELECT
                     action_key AS actionKey,
                     enqueue_sha256 AS enqueueSha256,
@@ -274,10 +276,12 @@ export async function verifyProductionRunBeforeSnapshot(
                 FROM job_runs
                 WHERE id = ?1
                 LIMIT 2
-            `)
+            `
+            )
             .all(capsule.runId);
         const audit = database
-            .query<EnqueueAuditRow, [string]>(`
+            .query<EnqueueAuditRow, [string]>(
+                `
                 SELECT
                     action,
                     actor_id AS actorId,
@@ -291,7 +295,8 @@ export async function verifyProductionRunBeforeSnapshot(
                 FROM audit_events
                 WHERE id = ?1
                 LIMIT 2
-            `)
+            `
+            )
             .all(capsule.enqueue.audit.eventId);
         const expectedPayload = JSON.stringify(capsule.enqueue.payload);
         if (
@@ -554,77 +559,84 @@ export async function prepareProductionDeliveryTargetUnderLease(
           );
 
     const localReleaseRoot = path.join(checkoutRoot, "dist/releases", target.releaseId);
-    let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
-    if (admittedPublishedRelease !== undefined) {
-        const manifest =
-            dependencies.verifyLocalRelease === undefined
-                ? await verifyReleaseArtifactIdentity(
-                      admittedPublishedRelease.releaseRoot
-                  )
-                : await dependencies.verifyLocalRelease(
-                      admittedPublishedRelease.releaseRoot,
-                      admittedPublishedRelease.authority.runtime
-                  );
-        sourceRelease = Object.freeze({
-            manifest,
-            releaseRoot: admittedPublishedRelease.releaseRoot,
-        });
-    } else if ((await pathState(localReleaseRoot)) === "present") {
-        const manifest = await (dependencies.verifyLocalRelease ?? verifyReleaseIdentity)(
-            localReleaseRoot,
-            current.runtime.identity
+    try {
+        let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
+        if (admittedPublishedRelease !== undefined) {
+            const manifest =
+                dependencies.verifyLocalRelease === undefined
+                    ? await verifyReleaseArtifactIdentity(
+                          admittedPublishedRelease.releaseRoot
+                      )
+                    : await dependencies.verifyLocalRelease(
+                          admittedPublishedRelease.releaseRoot,
+                          admittedPublishedRelease.authority.runtime
+                      );
+            sourceRelease = Object.freeze({
+                manifest,
+                releaseRoot: admittedPublishedRelease.releaseRoot,
+            });
+        } else if ((await pathState(localReleaseRoot)) === "present") {
+            const manifest = await (
+                dependencies.verifyLocalRelease ?? verifyReleaseIdentity
+            )(localReleaseRoot, current.runtime.identity);
+            sourceRelease = Object.freeze({ manifest, releaseRoot: localReleaseRoot });
+        } else {
+            sourceRelease = await (dependencies.buildRelease ?? buildDashboardRelease)(
+                checkoutRoot,
+                { runtimeIdentity: current.runtime.identity }
+            );
+        }
+        if (
+            sourceRelease.manifest.source.commitSha !== target.releaseId ||
+            sourceRelease.manifest.runtime.revision !== target.runtimeRevision
+        ) {
+            throw failure();
+        }
+        requireProtocol(
+            Object.freeze({
+                manifest: sourceRelease.manifest,
+                releaseRoot: sourceRelease.releaseRoot,
+            })
         );
-        sourceRelease = Object.freeze({ manifest, releaseRoot: localReleaseRoot });
-    } else {
-        sourceRelease = await (dependencies.buildRelease ?? buildDashboardRelease)(
-            checkoutRoot,
-            { runtimeIdentity: current.runtime.identity }
+        const candidateRuntimeExecutable = path.join(
+            sourceRelease.releaseRoot,
+            "runtime/bun"
         );
-    }
-    if (
-        sourceRelease.manifest.source.commitSha !== target.releaseId ||
-        sourceRelease.manifest.runtime.revision !== target.runtimeRevision
-    ) {
-        throw failure();
-    }
-    requireProtocol(
-        Object.freeze({
-            manifest: sourceRelease.manifest,
-            releaseRoot: sourceRelease.releaseRoot,
-        })
-    );
-    const candidateRuntimeExecutable = path.join(
-        sourceRelease.releaseRoot,
-        "runtime/bun"
-    );
-    await (dependencies.capacityAdmission ?? assertProductionArtifactCapacity)(
-        lease,
-        paths,
-        sourceRelease.releaseRoot,
-        sourceRelease.manifest,
-        candidateRuntimeExecutable
-    );
-    const runtime = await (dependencies.installRuntime ?? installProductionRuntime)(
-        lease,
-        paths,
-        sourceRelease.manifest.runtime,
-        { sourceExecutable: candidateRuntimeExecutable }
-    );
-    if (stalePublishedRoot) {
-        await discardOwnedProductionReleaseCandidate(
-            paths.releasesDirectory,
-            publishedRoot,
-            target.releaseId
+        await (dependencies.capacityAdmission ?? assertProductionArtifactCapacity)(
+            lease,
+            paths,
+            sourceRelease.releaseRoot,
+            sourceRelease.manifest,
+            candidateRuntimeExecutable
         );
+        const runtime = await (dependencies.installRuntime ?? installProductionRuntime)(
+            lease,
+            paths,
+            sourceRelease.manifest.runtime,
+            { sourceExecutable: candidateRuntimeExecutable }
+        );
+        if (stalePublishedRoot) {
+            await discardOwnedProductionReleaseCandidate(
+                paths.releasesDirectory,
+                publishedRoot,
+                target.releaseId
+            );
+        }
+        const release = await (dependencies.publishRelease ?? publishProductionRelease)(
+            lease,
+            paths,
+            sourceRelease.releaseRoot,
+            sourceRelease.manifest.runtime
+        );
+        requireProtocol(release);
+        return Object.freeze({ release, runtime });
+    } finally {
+        if (admittedPublishedRelease !== undefined) {
+            await (
+                dependencies.discardCandidate ?? discardOwnedProductionReleaseCandidate
+            )(path.dirname(localReleaseRoot), localReleaseRoot, target.releaseId);
+        }
     }
-    const release = await (dependencies.publishRelease ?? publishProductionRelease)(
-        lease,
-        paths,
-        sourceRelease.releaseRoot,
-        sourceRelease.manifest.runtime
-    );
-    requireProtocol(release);
-    return Object.freeze({ release, runtime });
 }
 
 async function advanceTo(
@@ -724,11 +736,10 @@ async function restartNormalRuntime(
         activation.current.runtimeRevision,
         dependencies
     );
-    await services.provision(active.release, active.runtime);
+    await services.settle?.(active.release, active.runtime);
     await services.prepare(active.release, active.runtime);
     await services.start(active.release, active.runtime);
     await services.verifyReady(active.release, active.runtime);
-    await services.settle?.(active.release, active.runtime);
 }
 
 async function completeAfterNormalRuntimeReady(
@@ -911,6 +922,15 @@ export async function runProductionDeliveryExecutorUnderLease(
     } catch {
         const terminal = await inspectDeliveryProductionOperation(lease, paths);
         if (terminal.state === "terminal") throw failure();
+        const recovery = await loadActivation(lease, paths).catch(() => null);
+        if (
+            services !== undefined &&
+            recovery?.record !== undefined &&
+            (activationMatchesCurrent(recovery.record, record) ||
+                activationMatchesTarget(recovery.record, record))
+        ) {
+            await restartNormalRuntime(paths, recovery.record, services, dependencies);
+        }
         const receipt = await terminalFailure(
             lease,
             paths,
@@ -918,14 +938,6 @@ export async function runProductionDeliveryExecutorUnderLease(
             nowMs,
             loadActivation
         );
-        if (services !== undefined && receipt.result.activation !== null) {
-            await restartNormalRuntime(
-                paths,
-                receipt.result.activation,
-                services,
-                dependencies
-            );
-        }
         return receipt;
     }
 }

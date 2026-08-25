@@ -134,6 +134,7 @@ async function releaseFixture(
         "scripts/delivery/provisioning",
         "scripts/delivery",
         "scripts",
+        "systemd/host-operations",
         "server",
         "systemd",
         "",

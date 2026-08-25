@@ -5,6 +5,7 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { createBunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
+import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
@@ -43,6 +44,15 @@ describe("production release artifact receipt", () => {
             v.parse(productionReleaseArtifactReceiptSchema, {
                 ...receipt,
                 unexpected: true,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(productionReleaseArtifactReceiptSchema, {
+                ...receipt,
+                archive: {
+                    ...receipt.archive,
+                    bytes: maximumProductionReleaseArchiveBytes + 1,
+                },
             })
         ).toThrow();
     });

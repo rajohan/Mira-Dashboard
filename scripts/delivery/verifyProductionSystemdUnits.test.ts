@@ -52,6 +52,7 @@ async function createVerificationFixture(): Promise<{
     for (const policy of productionSystemdUnits) {
         const source = path.join(sourceProjectRoot, policy.artifactPath);
         const destination = path.join(releaseRoot, policy.artifactPath);
+        await mkdir(path.dirname(destination), { recursive: true });
         await copyFile(source, destination);
         const bytes = await readFile(destination);
         artifacts.push({

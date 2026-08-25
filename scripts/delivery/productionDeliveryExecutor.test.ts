@@ -413,6 +413,7 @@ describe("production Delivery executor", () => {
                 operationCapsule(),
                 1000
             );
+            let localSettlements = 0;
             const validation = await reconcileDeliveryProductionCutoverBeforeValidation({
                 ensure: () => Promise.resolve("already-running"),
                 projectRoot: options.projectRoot,
@@ -449,7 +450,14 @@ describe("production Delivery executor", () => {
                         }),
                     createServices: () => ({
                         prepare: () => Promise.resolve(),
-                        provision: () => Promise.resolve(),
+                        provision: () =>
+                            Promise.reject(
+                                new Error("Published authority must not be reused")
+                            ),
+                        settle: () => {
+                            localSettlements += 1;
+                            return Promise.resolve();
+                        },
                         start: () => Promise.resolve(),
                         stop: () => Promise.resolve(),
                         verifyReady: async () => {
@@ -488,6 +496,7 @@ describe("production Delivery executor", () => {
                 completedAtMs: 10_000,
                 outcome: "succeeded",
             });
+            expect(localSettlements).toBe(1);
             const replay = await runProductionDeliveryExecutorUnderLease(
                 lease,
                 paths,
@@ -625,7 +634,7 @@ describe("production Delivery executor", () => {
         expect(replayFailure.message).toBe("Production Delivery executor failed");
     });
 
-    test("never records success when the normal runtime restart fails", async () => {
+    test("keeps recovery retryable when the normal runtime restart fails", async () => {
         const { options, paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {
             const initial = await loadProductionActivationState(lease, paths);
@@ -699,10 +708,9 @@ describe("production Delivery executor", () => {
             const terminal = await inspectDeliveryProductionOperation(lease, paths);
             expect(terminal).toMatchObject({
                 record: {
-                    phase: "terminal",
-                    result: { outcome: "failed" },
+                    phase: "normal-runtime-starting",
                 },
-                state: "terminal",
+                state: "in-progress",
             });
             expect(starts).toBe(2);
         });
@@ -787,6 +795,7 @@ describe("production Delivery executor", () => {
             const current = artifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
+            const checkoutRoot = `${options.projectRoot}/production/checkout`;
             await prepareProductionDeliveryTargetUnderLease(
                 lease,
                 paths,
@@ -795,6 +804,15 @@ describe("production Delivery executor", () => {
                 current,
                 {
                     capacityAdmission: () => Promise.resolve(),
+                    discardCandidate: (releasesRoot, releaseRoot, releaseId) => {
+                        expect(releasesRoot).toBe(`${checkoutRoot}/dist/releases`);
+                        expect(releaseRoot).toBe(
+                            `${checkoutRoot}/dist/releases/${targetReleaseId}`
+                        );
+                        expect(releaseId).toBe(targetReleaseId);
+                        calls.push("discard-checkout-candidate");
+                        return Promise.resolve();
+                    },
                     installRuntime: (_lease, _paths, identity, dependencies) => {
                         expect(identity).toEqual(target.runtime.identity);
                         if (dependencies === undefined) {
@@ -829,7 +847,10 @@ describe("production Delivery executor", () => {
                     verifyLocalRelease: () => Promise.resolve(target.release.manifest),
                 }
             );
-            expect(calls).toEqual(["published-assets-and-root-provisioning"]);
+            expect(calls).toEqual([
+                "published-assets-and-root-provisioning",
+                "discard-checkout-candidate",
+            ]);
         });
     });
 

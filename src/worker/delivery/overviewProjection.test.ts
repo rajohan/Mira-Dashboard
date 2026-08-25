@@ -308,6 +308,20 @@ describe("Delivery overview projection", () => {
         expect(merge(ordinary.number)).toMatchObject({ available: true });
     });
 
+    test("omits preview execution from Release Please pull requests", () => {
+        const release = pullRequest(1, {
+            authorLogin: "mira-release",
+            headRefName: "release-please--branches--main--components--mira-dashboard",
+            title: "chore(main): release 0.3.0",
+        });
+        const member = project([release]).pullRequestGroups[0]!.members[0]!;
+
+        expect(member.actions.some(({ action }) => action === "preview-start")).toBe(
+            false
+        );
+        expect(member.actions.some(({ action }) => action === "merge")).toBe(true);
+    });
+
     test("omits bodies deterministically before dropping any pull request inventory", () => {
         const pullRequests = Array.from({ length: 41 }, (_, index) =>
             pullRequest(index + 1, { body: "x".repeat(64 * 1024) })

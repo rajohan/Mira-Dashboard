@@ -9,11 +9,12 @@ import {
 } from "./hostOperationsProvisioningPolicy.ts";
 
 const sourceRoot = path.join(import.meta.dir, "provisioning/host-operations");
+const systemdRoot = path.resolve(import.meta.dir, "../../systemd/host-operations");
 
 describe("host-operations provisioning artifact policy", () => {
     test("injects only the ordinary GitHub credential into release provisioning", async () => {
         const unit = await readFile(
-            path.join(sourceRoot, "mira-dashboard-production-provisioning@.service"),
+            path.join(systemdRoot, "mira-dashboard-production-provisioning@.service"),
             "utf8"
         );
 
@@ -61,70 +62,70 @@ describe("host-operations provisioning artifact policy", () => {
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.service",
+                    "systemd/host-operations/mira-dashboard-deferred-stack-restart.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-stack-restart.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.timer",
+                    "systemd/host-operations/mira-dashboard-deferred-stack-restart.timer",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-stack-restart.timer",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.service",
+                    "systemd/host-operations/mira-dashboard-deferred-worker-restart.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-worker-restart.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.timer",
+                    "systemd/host-operations/mira-dashboard-deferred-worker-restart.timer",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-worker-restart.timer",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.service",
+                    "systemd/host-operations/mira-dashboard-deferred-reboot.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-reboot.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.timer",
+                    "systemd/host-operations/mira-dashboard-deferred-reboot.timer",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-reboot.timer",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-cleanup.service",
+                    "systemd/host-operations/mira-dashboard-host-system-cleanup.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-host-system-cleanup.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
+                    "systemd/host-operations/mira-dashboard-host-system-restart.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-host-system-restart.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
+                    "systemd/host-operations/mira-dashboard-host-system-update.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-host-system-update.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning@.service",
+                    "systemd/host-operations/mira-dashboard-production-provisioning@.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
                 mode: 0o644,
@@ -147,18 +148,8 @@ describe("host-operations provisioning artifact policy", () => {
             "README.md",
             "hostOperationsProvisioningFilesystem.ts",
             "installHostOperationsProvisioning.ts",
-            "mira-dashboard-deferred-reboot.service",
-            "mira-dashboard-deferred-reboot.timer",
-            "mira-dashboard-deferred-stack-restart.service",
-            "mira-dashboard-deferred-stack-restart.timer",
-            "mira-dashboard-deferred-worker-restart.service",
-            "mira-dashboard-deferred-worker-restart.timer",
             "mira-dashboard-host-operation",
-            "mira-dashboard-host-system-cleanup.service",
-            "mira-dashboard-host-system-restart.service",
-            "mira-dashboard-host-system-update.service",
             "mira-dashboard-production-authority.conf",
-            "mira-dashboard-production-provisioning@.service",
             "mira-dashboard-web-runtime",
             "policy.ts",
         ]);
@@ -172,10 +163,12 @@ describe("host-operations provisioning artifact policy", () => {
         );
         expect(hostOperationsProvisioningSourceArtifactPaths).toEqual(
             [
-                ...hostOperationsProvisioningReleaseArtifactPaths,
-                "server/productionProvisioning.js",
-                "systemd/mira-dashboard-web.service",
-                "systemd/mira-dashboard-worker.service",
+                ...new Set([
+                    ...hostOperationsProvisioningReleaseArtifactPaths,
+                    ...hostOperationsProvisioningArtifacts.map(
+                        ({ artifactPath }) => artifactPath
+                    ),
+                ]),
             ].toSorted()
         );
         for (const artifact of hostOperationsProvisioningArtifacts) {

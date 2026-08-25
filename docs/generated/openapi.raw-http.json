@@ -20775,7 +20775,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 9007199254740991
+                                    "maximum": 536870912
                                   }
                                 },
                                 "required": [
@@ -20804,7 +20804,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 9007199254740991
+                                    "maximum": 536870912
                                   }
                                 },
                                 "required": [
@@ -20871,6 +20871,7 @@
                       },
                       "tagName": {
                         "type": "string",
+                        "maxLength": 34,
                         "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
                       }
                     },
@@ -21173,7 +21174,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 9007199254740991
+                                    "maximum": 536870912
                                   }
                                 },
                                 "required": [
@@ -21202,7 +21203,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 9007199254740991
+                                    "maximum": 536870912
                                   }
                                 },
                                 "required": [
@@ -21269,6 +21270,7 @@
                       },
                       "tagName": {
                         "type": "string",
+                        "maxLength": 34,
                         "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
                       }
                     },
@@ -22121,7 +22123,7 @@
                           "size": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 9007199254740991
+                            "maximum": 536870912
                           }
                         },
                         "required": [
@@ -22150,7 +22152,7 @@
                           "size": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 9007199254740991
+                            "maximum": 536870912
                           }
                         },
                         "required": [
@@ -22217,6 +22219,7 @@
               },
               "tagName": {
                 "type": "string",
+                "maxLength": 34,
                 "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
               }
             },

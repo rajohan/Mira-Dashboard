@@ -1,9 +1,17 @@
 import * as v from "valibot";
 
+/** Maximum accepted byte length for one published production release archive. */
+export const maximumProductionReleaseArchiveBytes = 512 * 1024 * 1024;
+
 /** Digest-bound receipt published beside one immutable production release archive. */
 export const productionReleaseArtifactReceiptSchema = v.strictObject({
     archive: v.strictObject({
-        bytes: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+        bytes: v.pipe(
+            v.number(),
+            v.safeInteger(),
+            v.minValue(1),
+            v.maxValue(maximumProductionReleaseArchiveBytes)
+        ),
         name: v.literal("release.tar"),
         sha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     }),

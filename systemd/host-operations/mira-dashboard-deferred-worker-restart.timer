@@ -1,3 +1,4 @@
+# Mira Dashboard managed unit.
 [Unit]
 Description=Mira Dashboard deferred worker restart timer
 

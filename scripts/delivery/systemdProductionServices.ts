@@ -25,6 +25,7 @@ const webUnit = "mira-dashboard-web.service";
 const workerUnit = "mira-dashboard-worker.service";
 const provisioningUnitPrefix = "mira-dashboard-production-provisioning@";
 const provisioningDeadlineMs = secondsToMilliseconds(5 * 60 + 30);
+const maximumSystemdUnitNameBytes = 255;
 const systemctlExecutableDefault = "/usr/bin/systemctl";
 const loopbackReadinessUrlSchema = v.pipe(
     v.string(),
@@ -196,10 +197,14 @@ export function createSystemdProductionServiceController(
             ) {
                 throw serviceFailure();
             }
+            const unit = `${provisioningUnitPrefix}${instance}.service`;
+            if (Buffer.byteLength(unit) > maximumSystemdUnitNameBytes) {
+                throw serviceFailure();
+            }
             await requireSystemctlSuccess(
                 execute,
                 executable,
-                ["start", `${provisioningUnitPrefix}${instance}.service`],
+                ["start", unit],
                 provisioningDeadlineMs
             );
         },

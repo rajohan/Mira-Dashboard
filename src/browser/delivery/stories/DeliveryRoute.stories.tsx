@@ -40,7 +40,7 @@ const checkoutRevision = "f".repeat(64);
 const activationRevision = "1".repeat(64);
 const jobRunId = "019fdf70-0000-7000-8000-000000000040";
 const headGuardUnavailableReason =
-    "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads.";
+    "Merge is unavailable because GitHub cannot atomically bind it to the reviewed pull request head or stack heads.";
 
 function publishedReleaseAuthority(
     releaseId: string,
@@ -466,14 +466,9 @@ export const PullRequests: Story = {
             pullRequestRegion.queryByRole("button", { name: /Merge.*Deploy/u })
         ).not.toBeInTheDocument();
 
-        const rejectButtons = pullRequestRegion.getAllByRole("button", {
-            name: "Reject",
-        });
-        await expect(rejectButtons).toHaveLength(1);
-        for (const button of rejectButtons) {
-            await expect(button).toBeDisabled();
-            await expect(button).toHaveAccessibleDescription(headGuardUnavailableReason);
-        }
+        await expect(
+            pullRequestRegion.queryByRole("button", { name: "Reject" })
+        ).not.toBeInTheDocument();
 
         for (const action of ["Approve PR", "Update branch"]) {
             const buttons = pullRequestRegion.getAllByRole("button", {

@@ -120,6 +120,27 @@ function inactiveProcessResult(): SystemctlProcessResult {
 }
 
 describe("production root-systemd service control", () => {
+    test("rejects published authority that would exceed the systemd unit-name limit", async () => {
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await createRuntimePointerFixture(paths);
+            const authority = {
+                ...publishedAuthority(firstReleaseId),
+                tagName: `v1.2.3-${"a".repeat(64)}`,
+            } as PublishedReleaseAuthority;
+            const controller = createSystemdProductionServiceController(lease, paths, {
+                execute: () => Promise.resolve(successfulProcessResult()),
+                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                releaseAuthority: authority,
+            });
+            expect(
+                controller.provision(fixtures.first, fixtures.runtime)
+            ).rejects.toThrow("Production service control failed");
+        });
+    });
+
     test("points at exact artifacts and controls worker/web in safe order", async () => {
         const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
