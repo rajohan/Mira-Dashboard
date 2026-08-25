@@ -47,8 +47,7 @@ export const provisioningDockerInspectFormat = [
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.project.config_files")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.container-number")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.oneoff")}}{{else}}null{{end}}',
-    "{{json .State.Status}}",
-    "{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}",
+    "{{json .State}}",
 ].join("\t");
 
 export const provisioningDockerContainerMaximum = 256;
@@ -415,6 +414,11 @@ function nullableString(value: unknown): string | null {
     fail();
 }
 
+function record(value: unknown): Record<string, unknown> {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) fail();
+    return value as Record<string, unknown>;
+}
+
 function parseInspectRows(
     output: string,
     containerIds: readonly string[]
@@ -428,7 +432,7 @@ function parseInspectRows(
     const observedIds = new Set<string>();
     const rows = lines.map((line) => {
         const fields = line.split("\t");
-        if (fields.length !== 11) fail();
+        if (fields.length !== 10) fail();
         let values: unknown[];
         try {
             values = fields.map((field) => JSON.parse(field) as unknown);
@@ -445,14 +449,18 @@ function parseInspectRows(
             configFiles,
             containerNumber,
             oneOff,
-            state,
-            health,
+            rawState,
         ] = values;
+        const containerState = record(rawState);
+        const state = containerState.Status;
+        const rawHealth = containerState.Health;
+        const health = rawHealth === undefined ? null : record(rawHealth).Status;
         if (
             typeof id !== "string" ||
             !expectedIds.has(id) ||
             observedIds.has(id) ||
-            typeof state !== "string"
+            typeof state !== "string" ||
+            (health !== null && typeof health !== "string")
         ) {
             fail();
         }

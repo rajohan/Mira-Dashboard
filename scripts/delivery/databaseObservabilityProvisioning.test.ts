@@ -152,7 +152,7 @@ function validProvisioningDockerRows(): readonly ProvisioningDockerFixtureRow[] 
             service: "pgbouncer",
         }),
         provisioningDockerRow(2, { service: "postgres" }),
-        provisioningDockerRow(3),
+        provisioningDockerRow(3, { health: null }),
     ]);
 }
 
@@ -167,8 +167,10 @@ function projectedProvisioningInspectLine(row: ProvisioningDockerFixtureRow): st
         row.configFiles,
         row.containerNumber,
         row.oneOff,
-        row.state,
-        row.health,
+        {
+            ...(row.health === null ? {} : { Health: { Status: row.health } }),
+            Status: row.state,
+        },
     ]
         .map((value) => JSON.stringify(value))
         .join("\t");

@@ -13,7 +13,10 @@ describe("fixed Ubuntu logrotate provisioning", () => {
         ).text();
         expect(broker).toContain("stat -c '%h'");
         expect(broker).toContain("stat -c '%u'");
-        expect(broker).toContain("/usr/sbin/logrotate --state /var/lib/logrotate/status");
+        expect(broker).toContain("su root adm");
+        expect(broker).toContain(
+            '/usr/sbin/logrotate --state /var/lib/logrotate/status "$configuration"'
+        );
         expect(broker).toContain("host-rsyslog)");
         expect(broker).toContain("host-apport)");
         expect(broker).toContain("host-dpkg)");

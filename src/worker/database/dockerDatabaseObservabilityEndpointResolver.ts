@@ -17,9 +17,7 @@ export const databaseObservabilityDockerCapabilityLabel =
 export const databaseObservabilityDockerCapabilityValue = "pgbouncer-v1" as const;
 export const databaseObservabilityDockerInspectFormat = [
     "{{json .Id}}",
-    "{{json .State.Running}}",
-    "{{json .State.Status}}",
-    "{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}",
+    "{{json .State}}",
     `{{with .Config.Labels}}{{json (index . "${databaseObservabilityDockerCapabilityLabel}")}}{{else}}null{{end}}`,
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.project")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.service")}}{{else}}null{{end}}',
@@ -184,24 +182,20 @@ function parseInspectRows(
     const observedIds = new Set<string>();
     const rows = lines.map((line) => {
         const fields = line.split("\t");
-        if (fields.length !== 8) throw discoveryFailure();
+        if (fields.length !== 6) throw discoveryFailure();
         let projected: unknown[];
         try {
             projected = fields.map((field) => JSON.parse(field) as unknown);
         } catch {
             throw discoveryFailure();
         }
-        const [
-            id,
-            running,
-            status,
-            healthStatus,
-            capability,
-            composeProject,
-            composeService,
-            ports,
-        ] = projected;
-        if (typeof id !== "string" || !expectedIds.has(id) || observedIds.has(id)) {
+        const [id, state, capability, composeProject, composeService, ports] = projected;
+        if (
+            typeof id !== "string" ||
+            !expectedIds.has(id) ||
+            observedIds.has(id) ||
+            !isRecord(state)
+        ) {
             throw discoveryFailure();
         }
         observedIds.add(id);
@@ -219,11 +213,7 @@ function parseInspectRows(
             Config: { Labels: labels },
             Id: id,
             NetworkSettings: { Ports: ports },
-            State: {
-                Health: { Status: healthStatus },
-                Running: running,
-                Status: status,
-            },
+            State: state,
         };
     });
     if (observedIds.size !== expectedIds.size) throw discoveryFailure();

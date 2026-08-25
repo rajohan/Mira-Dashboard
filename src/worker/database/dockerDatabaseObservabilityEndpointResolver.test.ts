@@ -74,6 +74,12 @@ function inspectRow(
     };
 }
 
+function inspectRowWithoutHealth(index: number): InspectRow {
+    const row = inspectRow(index, { capability: "not-enabled" });
+    delete (row.State as { Health?: unknown }).Health;
+    return row;
+}
+
 function projectedInspectLine(row: InspectRow): string {
     const config = row.Config as { Labels: Record<string, unknown> };
     const labels = config.Labels;
@@ -85,9 +91,7 @@ function projectedInspectLine(row: InspectRow): string {
     const networkSettings = row.NetworkSettings as { Ports?: unknown };
     return [
         row.Id,
-        state.Running,
-        state.Status,
-        state.Health?.Status ?? null,
+        state,
         labels[databaseObservabilityDockerCapabilityLabel] ?? null,
         labels["com.docker.compose.project"] ?? null,
         labels["com.docker.compose.service"] ?? null,
@@ -165,7 +169,7 @@ describe("Docker database observability endpoint resolver", () => {
                     project: "first-project",
                     service: "first-service",
                 }),
-                inspectRow(2, { capability: "not-enabled" }),
+                inspectRowWithoutHealth(2),
             ],
             [
                 inspectRow(1, {
@@ -174,7 +178,7 @@ describe("Docker database observability endpoint resolver", () => {
                     project: "renamed-project",
                     service: "renamed-service",
                 }),
-                inspectRow(2, { capability: "not-enabled" }),
+                inspectRowWithoutHealth(2),
             ],
         ]);
         const endpointResolver = resolver(process);
