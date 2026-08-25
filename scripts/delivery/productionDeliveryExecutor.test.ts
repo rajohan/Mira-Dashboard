@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -780,6 +780,37 @@ describe("production Delivery executor", () => {
 
             expect(prepared).toEqual(target);
             expect(calls).toEqual(["build", "capacity", "runtime", "publish"]);
+        });
+    });
+
+    test("preserves mismatched cached release bytes instead of opening a rollback gap", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const publishedRoot = path.join(paths.releasesDirectory, targetReleaseId);
+            await mkdir(publishedRoot, { recursive: true });
+            await writeFile(
+                path.join(publishedRoot, "release-manifest.json"),
+                JSON.stringify({ source: { commitSha: targetReleaseId } })
+            );
+
+            expect(
+                prepareProductionDeliveryTargetUnderLease(
+                    lease,
+                    paths,
+                    options.projectRoot,
+                    record,
+                    artifact(currentReleaseId, currentRuntimeRevision),
+                    {}
+                )
+            ).rejects.toThrow("Production Delivery executor failed");
+            const retained = await lstat(publishedRoot);
+            expect(retained.isDirectory()).toBe(true);
         });
     });
 

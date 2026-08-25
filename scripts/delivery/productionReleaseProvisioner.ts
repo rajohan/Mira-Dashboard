@@ -263,7 +263,7 @@ async function githubAsset(
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
                 redirect: "follow",
-                signal: AbortSignal.timeout(60_000),
+                signal: AbortSignal.timeout(5 * 60_000),
             }
         ),
         maximum
@@ -584,7 +584,7 @@ async function downloadAndStageRelease(
         );
         await requireSuccess(
             "/usr/bin/tar",
-            ["-xf", "-", "-C", temporaryRoot],
+            ["-xf", "-", "--no-same-owner", "-C", temporaryRoot],
             environment,
             archiveBytes
         );

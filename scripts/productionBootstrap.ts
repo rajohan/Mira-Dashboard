@@ -32,6 +32,8 @@ const canonicalRepository = "rajohan/Mira-Dashboard";
 const canonicalRepositoryUrl = "https://github.com/rajohan/Mira-Dashboard.git";
 const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
 const maximumOutputBytes = 1024 * 1024;
+const maximumReceiptBytes = 4 * 1024 * 1024;
+const productionProvisioningDeadlineMs = 5 * 60 * 1000;
 const dopplerConfigurationNames = applicationConfigurationRegistry
     .filter(
         (entry) =>
@@ -88,12 +90,38 @@ const githubReleaseSchema = v.strictObject({
     ),
 });
 
+const githubReleaseDownloadSchema = v.object({
+    assets: v.pipe(
+        v.array(
+            v.object({
+                apiUrl: v.pipe(
+                    v.string(),
+                    v.regex(
+                        /^https:\/\/api\.github\.com\/repos\/rajohan\/Mira-Dashboard\/releases\/assets\/[1-9]\d*$/u
+                    )
+                ),
+                name: v.picklist(["receipt.json", "release.tar"]),
+                size: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+            })
+        ),
+        v.length(2)
+    ),
+    tagName: githubReleaseSchema.entries.tagName,
+});
+
 const tailscaleStatusSchema = v.object({
     BackendState: v.literal("Running"),
     Self: v.object({ Online: v.literal(true) }),
 });
 
 export interface ProductionBootstrapDependencies {
+    readonly download?: (
+        command: readonly string[],
+        target: string,
+        maximumBytes: number,
+        expectedBytes: number,
+        cwd?: string
+    ) => Promise<void>;
     readonly deliverPublishedRelease?: (
         prepare: () => Promise<PreparedPublishedProductionRelease>
     ) => Promise<void>;
@@ -205,7 +233,7 @@ async function defaultRun(
 ): Promise<CommandResult> {
     const child = Bun.spawn([...command], {
         cwd,
-        env: process.env,
+        env: productionCommandEnvironment(),
         stderr: "inherit",
         stdin: "inherit",
         stdout: "pipe",
@@ -215,6 +243,83 @@ async function defaultRun(
         readBounded(child.stdout),
     ]);
     return Object.freeze({ exitCode, stdout });
+}
+
+function productionCommandEnvironment(): NodeJS.ProcessEnv {
+    const token = process.env.MIRA_GITHUB_TOKEN;
+    if (token === undefined) return process.env;
+    return {
+        ...process.env,
+        GH_TOKEN: token,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(
+            `x-access-token:${token}`
+        ).toString("base64")}`,
+    };
+}
+
+async function defaultDownload(
+    command: readonly string[],
+    target: string,
+    maximumBytes: number,
+    expectedBytes: number,
+    cwd = projectRoot
+): Promise<void> {
+    if (expectedBytes < 1 || expectedBytes > maximumBytes) {
+        throw new Error(failureMessage);
+    }
+    const handle = await open(
+        target,
+        constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_WRONLY,
+        0o600
+    );
+    const child = Bun.spawn([...command], {
+        cwd,
+        env: productionCommandEnvironment(),
+        signal: AbortSignal.timeout(productionProvisioningDeadlineMs),
+        stderr: "ignore",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+    const reader = child.stdout.getReader();
+    let bytes = 0;
+    let admitted = false;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            if (next.value.byteLength > maximumBytes - bytes) {
+                child.kill();
+                throw new Error(failureMessage);
+            }
+            let offset = 0;
+            while (offset < next.value.byteLength) {
+                const written = await handle.write(
+                    next.value,
+                    offset,
+                    next.value.byteLength - offset,
+                    bytes + offset
+                );
+                if (written.bytesWritten < 1) throw new Error(failureMessage);
+                offset += written.bytesWritten;
+            }
+            bytes += next.value.byteLength;
+        }
+        if ((await child.exited) !== 0 || bytes !== expectedBytes) {
+            throw new Error(failureMessage);
+        }
+        await handle.sync();
+        admitted = true;
+    } catch {
+        child.kill();
+        await child.exited.catch(() => null);
+        throw new Error(failureMessage);
+    } finally {
+        reader.releaseLock();
+        await handle.close();
+        if (!admitted) await rm(target, { force: true });
+    }
 }
 
 async function requireSuccess(
@@ -336,10 +441,10 @@ export async function downloadProductionBootstrapRelease(
         "view",
         ...(expectedTagName === undefined ? [] : [expectedTagName]),
         `--repo=${canonicalRepository}`,
-        "--json=tagName",
+        "--json=assets,tagName",
     ]);
     const unverifiedRelease = v.parse(
-        githubReleaseSchema,
+        githubReleaseDownloadSchema,
         JSON.parse(releaseText) as unknown
     );
     await requireSuccess(
@@ -360,22 +465,42 @@ export async function downloadProductionBootstrapRelease(
         repositoryRoot
     );
     const tagName = parseProductionBootstrapRelease(
-        unverifiedRelease,
+        { tagName: unverifiedRelease.tagName },
         tagCommit,
         releaseId
     );
-    await requireSuccess(dependencies, [
-        "/usr/bin/gh",
-        "release",
-        "download",
-        tagName,
-        `--repo=${canonicalRepository}`,
-        "--pattern=release.tar",
-        "--pattern=receipt.json",
-        `--dir=${temporaryRoot}`,
-    ]);
+    const download = dependencies.download ?? defaultDownload;
+    for (const [name, maximumBytes] of [
+        ["receipt.json", maximumReceiptBytes],
+        ["release.tar", maximumProductionReleaseArchiveBytes],
+    ] as const) {
+        const asset = unverifiedRelease.assets.find(
+            (candidate) => candidate.name === name
+        );
+        if (asset === undefined || asset.size > maximumBytes) {
+            throw new Error(failureMessage);
+        }
+        await download(
+            [
+                "/usr/bin/gh",
+                "api",
+                "--header=Accept: application/octet-stream",
+                asset.apiUrl,
+            ],
+            path.join(temporaryRoot, name),
+            maximumBytes,
+            asset.size,
+            repositoryRoot
+        );
+    }
     return Object.freeze({ artifactRoot: temporaryRoot, tagName });
 }
+
+/** Test-only seams for bounded release downloads and credential projection. */
+export const productionBootstrapTestSupport = Object.freeze({
+    download: defaultDownload,
+    environment: productionCommandEnvironment,
+});
 
 /**
  * Verifies and extracts one digest-bound immutable release artifact.
@@ -453,6 +578,7 @@ export async function admitProductionBootstrapRelease(
             "/usr/bin/tar",
             "-xf",
             path.join(artifactRoot, "release.tar"),
+            "--no-same-owner",
             "-C",
             releasesRoot,
         ]);
@@ -573,6 +699,7 @@ export async function stageProductionBootstrapRootAuthority(
         "/usr/bin/tar",
         "-xf",
         stagedArchive,
+        "--no-same-owner",
         "-C",
         `${provisioningRoot}/releases`,
     ]);

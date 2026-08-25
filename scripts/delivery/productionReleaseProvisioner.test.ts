@@ -358,7 +358,8 @@ describe("production release root provisioner", () => {
                 }
                 if (executable === "/usr/bin/tar" && arguments_[0] === "-xf") {
                     expect(stdin).toEqual(archiveBytes);
-                    await cp(sourceReleaseRoot, path.join(arguments_[3]!, releaseId), {
+                    expect(arguments_).toContain("--no-same-owner");
+                    await cp(sourceReleaseRoot, path.join(arguments_[4]!, releaseId), {
                         recursive: true,
                     });
                     return commandResult();

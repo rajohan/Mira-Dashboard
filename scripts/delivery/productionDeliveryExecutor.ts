@@ -507,28 +507,21 @@ export async function prepareProductionDeliveryTargetUnderLease(
 > {
     const target = record.capsule.cas.target;
     const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
-    let stalePublishedRoot = false;
     if ((await pathState(publishedRoot)) === "present") {
-        const cached = await loadExactArtifacts(
-            paths,
-            target.releaseId,
-            target.runtimeRevision
-        );
-        if (record.capsule.enqueue.payload.operation === "rollback-release") {
-            return cached;
+        if (record.capsule.enqueue.payload.operation === "deploy") {
+            const manifestBytes = await readFile(
+                path.join(publishedRoot, "release-manifest.json")
+            );
+            if (
+                !releaseManifestMatchesAuthority(
+                    manifestBytes,
+                    record.capsule.enqueue.payload.release.releaseManifestSha256
+                )
+            ) {
+                throw failure();
+            }
         }
-        const manifestBytes = await readFile(
-            path.join(publishedRoot, "release-manifest.json")
-        );
-        if (
-            releaseManifestMatchesAuthority(
-                manifestBytes,
-                record.capsule.enqueue.payload.release.releaseManifestSha256
-            )
-        ) {
-            return cached;
-        }
-        stalePublishedRoot = true;
+        return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
     }
     const checkoutRoot = path.join(projectRoot, "production/checkout");
     const source = await (
@@ -615,13 +608,6 @@ export async function prepareProductionDeliveryTargetUnderLease(
             sourceRelease.manifest.runtime,
             { sourceExecutable: candidateRuntimeExecutable }
         );
-        if (stalePublishedRoot) {
-            await discardOwnedProductionReleaseCandidate(
-                paths.releasesDirectory,
-                publishedRoot,
-                target.releaseId
-            );
-        }
         const release = await (dependencies.publishRelease ?? publishProductionRelease)(
             lease,
             paths,

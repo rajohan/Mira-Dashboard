@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdtemp, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +11,7 @@ import {
     deployProduction,
     downloadProductionBootstrapRelease,
     parseProductionBootstrapRelease,
+    productionBootstrapTestSupport,
     resolveProductionBootstrapSourceIdentity,
     stageProductionBootstrapRootAuthority,
     verifyProductionBootstrapPrerequisites,
@@ -123,13 +124,36 @@ describe("production bootstrap admission", () => {
 
     test("downloads only release assets whose tag resolves to the checkout", async () => {
         const commands: string[] = [];
+        const downloads: string[] = [];
         const dependencies: ProductionBootstrapDependencies = {
+            download: (command, target, maximumBytes, expectedBytes, cwd) => {
+                downloads.push(
+                    [command.join(" "), target, maximumBytes, expectedBytes, cwd].join(
+                        " | "
+                    )
+                );
+                return Promise.resolve();
+            },
             run: (command) => {
                 commands.push(command.join(" "));
                 const invocation = command.join(" ");
                 let stdout = "";
                 if (invocation.includes(" release view ")) {
-                    stdout = '{"tagName":"v0.2.0"}\n';
+                    stdout = JSON.stringify({
+                        assets: [
+                            {
+                                apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/1",
+                                name: "receipt.json",
+                                size: 433,
+                            },
+                            {
+                                apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/2",
+                                name: "release.tar",
+                                size: 1024,
+                            },
+                        ],
+                        tagName: "v0.2.0",
+                    });
                 }
                 if (invocation.includes(" rev-list ")) stdout = `${releaseId}\n`;
                 return Promise.resolve({ exitCode: 0, stdout });
@@ -148,9 +172,51 @@ describe("production bootstrap admission", () => {
             true
         );
         expect(commands).toContain(
-            "/usr/bin/gh release view v0.2.0 --repo=rajohan/Mira-Dashboard --json=tagName"
+            "/usr/bin/gh release view v0.2.0 --repo=rajohan/Mira-Dashboard --json=assets,tagName"
         );
-        expect(commands.at(-1)).toContain("release download v0.2.0");
+        expect(downloads).toHaveLength(2);
+        expect(downloads[0]).toContain("application/octet-stream");
+        expect(downloads[1]).toContain("release.tar | 536870912 | 1024");
+    });
+
+    test("bounds release bytes while writing and projects private GitHub auth", async () => {
+        const targetRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-production-download-")
+        );
+        temporaryDirectories.push(targetRoot);
+        const admitted = path.join(targetRoot, "admitted");
+        await productionBootstrapTestSupport.download(
+            ["/usr/bin/printf", "1234"],
+            admitted,
+            4,
+            4,
+            sourceProjectRoot
+        );
+        expect(await readFile(admitted, "utf8")).toBe("1234");
+        expect(
+            productionBootstrapTestSupport.download(
+                ["/usr/bin/printf", "12345"],
+                path.join(targetRoot, "oversized"),
+                4,
+                4,
+                sourceProjectRoot
+            )
+        ).rejects.toThrow("Production bootstrap failed");
+
+        const previous = process.env.MIRA_GITHUB_TOKEN;
+        process.env.MIRA_GITHUB_TOKEN = "github-token-sentinel";
+        try {
+            const environment = productionBootstrapTestSupport.environment();
+            expect(environment.GH_TOKEN).toBe("github-token-sentinel");
+            expect(environment.GIT_CONFIG_KEY_0).toBe(
+                "http.https://github.com/.extraheader"
+            );
+            expect(environment.GIT_CONFIG_VALUE_0).toStartWith("AUTHORIZATION: basic ");
+            expect(environment.GIT_CONFIG_VALUE_0).not.toContain("github-token-sentinel");
+        } finally {
+            if (previous === undefined) delete process.env.MIRA_GITHUB_TOKEN;
+            else process.env.MIRA_GITHUB_TOKEN = previous;
+        }
     });
 
     test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
@@ -427,6 +493,13 @@ describe("production bootstrap admission", () => {
                 )
             )
         ).toBe(true);
+        expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/tar") &&
+                    command.includes("--no-same-owner")
+            )
+        ).toBe(true);
         expect(commands.at(-1)).toContain("--mode=apply");
     });
 
@@ -669,6 +742,7 @@ describe("production bootstrap admission", () => {
         let groupLookupCount = 0;
         let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
+            download: () => Promise.resolve(),
             deliverPublishedRelease: async (prepare) => {
                 const admitted = await prepare();
                 expect(admitted.releaseId).toBe(releaseId);
@@ -704,7 +778,24 @@ describe("production bootstrap admission", () => {
                     };
                 }
                 if (invocation.includes(" release view ")) {
-                    return { exitCode: 0, stdout: '{"tagName":"v0.2.0"}\n' };
+                    return {
+                        exitCode: 0,
+                        stdout: JSON.stringify({
+                            assets: [
+                                {
+                                    apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/1",
+                                    name: "receipt.json",
+                                    size: 433,
+                                },
+                                {
+                                    apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/2",
+                                    name: "release.tar",
+                                    size: receipt.archive.bytes,
+                                },
+                            ],
+                            tagName: "v0.2.0",
+                        }),
+                    };
                 }
                 if (invocation.includes(" rev-list ")) {
                     return { exitCode: 0, stdout: `${releaseId}\n` };
@@ -802,9 +893,7 @@ describe("production bootstrap admission", () => {
             repositoryRoot: targetRepositoryRoot,
             userId: 1000,
         });
-        expect(commands.some((command) => command.includes("release download"))).toBe(
-            true
-        );
+        expect(commands.some((command) => command.includes("release view"))).toBe(true);
         expect(
             commands.some((command) => command.includes("systemctl daemon-reload"))
         ).toBe(false);
