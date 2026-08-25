@@ -659,6 +659,7 @@ describe("production bootstrap admission", () => {
         const commands: string[] = [];
         let prerequisitesInspected = false;
         let manualDeployDelivered = false;
+        let provisioningBoundaryAvailable = false;
         let groupLookupCount = 0;
         let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
@@ -698,6 +699,15 @@ describe("production bootstrap admission", () => {
                 }
                 if (invocation.includes(" rev-list ")) {
                     return { exitCode: 0, stdout: `${releaseId}\n` };
+                }
+                if (
+                    invocation ===
+                    "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
+                ) {
+                    return {
+                        exitCode: provisioningBoundaryAvailable ? 0 : 1,
+                        stdout: "",
+                    };
                 }
                 if (invocation.includes("sha256sum")) {
                     return {
@@ -752,8 +762,29 @@ describe("production bootstrap admission", () => {
         );
         expect(commands.at(-1)).toContain("delivery activate");
         expect(commands.at(-1)).toContain("--activation-mode=greenfield");
+        expect(
+            commands.findIndex((command) =>
+                command.includes("installHostOperationsProvisioning.ts")
+            )
+        ).toBeLessThan(
+            commands.findIndex((command) => command.includes("delivery activate"))
+        );
 
         commands.length = 0;
+        expect(
+            await captureFailure(
+                deployProduction(dependencies, {
+                    createTemporaryRoot,
+                    expectedCheckout: targetRepositoryRoot,
+                    repositoryRoot: targetRepositoryRoot,
+                    userId: 1000,
+                })
+            )
+        ).toBeInstanceOf(Error);
+        expect(manualDeployDelivered).toBe(false);
+
+        commands.length = 0;
+        provisioningBoundaryAvailable = true;
         await deployProduction(dependencies, {
             createTemporaryRoot,
             expectedCheckout: targetRepositoryRoot,
@@ -766,6 +797,9 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) => command.includes("systemctl daemon-reload"))
         ).toBe(false);
+        expect(commands).toContain(
+            "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
+        );
         expect(manualDeployDelivered).toBe(true);
     });
 });

@@ -907,6 +907,11 @@ export async function deployProduction(
     if (Bun.version !== selectedVersion) {
         throw new Error(`Production deploy requires Bun ${selectedVersion}`);
     }
+    await requireSuccess(dependencies, [
+        "/usr/bin/systemctl",
+        "cat",
+        "mira-dashboard-production-provisioning@.service",
+    ]);
     await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(() =>
         preparePublishedProductionRelease(
             releaseId,
