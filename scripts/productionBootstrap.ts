@@ -238,9 +238,29 @@ async function readBounded(
     stream: ReadableStream<Uint8Array>,
     maximumBytes = maximumOutputBytes
 ): Promise<string> {
-    const response = new Response(stream);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maximumBytes) throw new Error(failureMessage);
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            if (next.value.byteLength > maximumBytes - length) {
+                throw new Error(failureMessage);
+            }
+            length += next.value.byteLength;
+            chunks.push(next.value);
+        }
+    } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
@@ -256,11 +276,17 @@ async function defaultRun(
         stdin: "inherit",
         stdout: "pipe",
     });
-    const [exitCode, stdout] = await Promise.all([
-        child.exited,
-        readBounded(child.stdout, stdoutMaximumBytes),
-    ]);
-    return Object.freeze({ exitCode, stdout });
+    try {
+        const [exitCode, stdout] = await Promise.all([
+            child.exited,
+            readBounded(child.stdout, stdoutMaximumBytes),
+        ]);
+        return Object.freeze({ exitCode, stdout });
+    } catch {
+        child.kill();
+        await child.exited.catch(() => null);
+        throw new Error(failureMessage);
+    }
 }
 
 function productionCommandEnvironment(): NodeJS.ProcessEnv {
@@ -526,6 +552,7 @@ export async function downloadProductionBootstrapRelease(
 export const productionBootstrapTestSupport = Object.freeze({
     download: defaultDownload,
     environment: productionCommandEnvironment,
+    readBounded,
 });
 
 /**
@@ -646,7 +673,7 @@ export async function admitProductionBootstrapRelease(
  * @param releaseId Exact release commit.
  * @param manifestSha256 Independently verified release-manifest digest.
  * @param archiveSha256 Digest verified before and after the root-owned archive handoff.
- * @param runtimeSha256 Digest of the root-owned runtime source and staged interpreter.
+ * @param runtimeSha256 Digest of the admitted release runtime and staged interpreter.
  * @param userId Canonical non-root production service identity.
  * @param dependencies Fixed process boundary.
  */
@@ -696,26 +723,6 @@ export async function stageProductionBootstrapRootAuthority(
             "-g",
             "root",
             "-m",
-            "0555",
-            process.execPath,
-            candidateRuntime,
-        ]);
-        const installedRuntimeSha256 = await requireSuccess(dependencies, [
-            sudo,
-            "/usr/bin/sha256sum",
-            candidateRuntime,
-        ]);
-        if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
-            throw new Error(failureMessage);
-        }
-        await requireSuccess(dependencies, [
-            sudo,
-            "/usr/bin/install",
-            "-o",
-            "root",
-            "-g",
-            "root",
-            "-m",
             "0400",
             path.join(artifactRoot, "release.tar"),
             stagedArchive,
@@ -746,9 +753,32 @@ export async function stageProductionBootstrapRootAuthority(
             "root",
             "-m",
             "0555",
+            `${stagedRelease}/runtime/bun`,
+            candidateRuntime,
+        ]);
+        const installedRuntimeSha256 = await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sha256sum",
+            candidateRuntime,
+        ]);
+        if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0555",
             `${stagedRelease}/server/productionProvisioning.js`,
             candidateEntrypoint,
         ]);
+        for (const target of [candidateRuntime, candidateEntrypoint, pairCandidate]) {
+            await requireSuccess(dependencies, [sudo, "/usr/bin/sync", "-f", target]);
+        }
         const existingPair = await dependencies.run([
             sudo,
             "/usr/bin/test",
@@ -785,6 +815,13 @@ export async function stageProductionBootstrapRootAuthority(
                 stagedPair,
             ]);
         }
+        await requireSuccess(dependencies, [sudo, "/usr/bin/sync", "-f", stagedPair]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sync",
+            "-f",
+            productionProvisioningPairsRoot,
+        ]);
         const stagedSelector = `${provisioningRoot}/.current-${Bun.randomUUIDv7()}`;
         await requireSuccess(dependencies, [
             sudo,
@@ -799,6 +836,12 @@ export async function stageProductionBootstrapRootAuthority(
             "-Tf",
             stagedSelector,
             productionProvisioningPairSelector,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sync",
+            "-f",
+            provisioningRoot,
         ]);
         await requireSuccess(dependencies, [
             sudo,
@@ -1110,7 +1153,7 @@ export async function preparePublishedProductionRelease(
                 releaseId,
                 admitted.manifestSha256,
                 admitted.archiveSha256,
-                prerequisites.runtimeSha256,
+                sha256(await readFile(path.join(admitted.releaseRoot, "runtime/bun"))),
                 userId,
                 dependencies
             );

@@ -8,6 +8,7 @@ import {
     assertProductionReleaseArchiveListing,
     maximumProductionReleaseArchiveListingBytes,
 } from "./delivery/productionReleaseArchive.ts";
+import { productionHostProvisioningRoot } from "./delivery/provisioning/host-operations/policy.ts";
 import {
     admitProductionBootstrapRelease,
     bootstrapProduction,
@@ -238,6 +239,25 @@ describe("production bootstrap admission", () => {
             if (previous === undefined) delete process.env.MIRA_GITHUB_TOKEN;
             else process.env.MIRA_GITHUB_TOKEN = previous;
         }
+    });
+
+    test("rejects command output while it is still streaming", async () => {
+        let cancelled = false;
+        const stream = new ReadableStream<Uint8Array>({
+            cancel: () => {
+                cancelled = true;
+            },
+            start: (controller) => {
+                controller.enqueue(new Uint8Array([1, 2, 3]));
+                controller.enqueue(new Uint8Array([4, 5, 6]));
+            },
+        });
+
+        const failure = await captureFailure(
+            productionBootstrapTestSupport.readBounded(stream, 5)
+        );
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(cancelled).toBe(true);
     });
 
     test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
@@ -506,6 +526,32 @@ describe("production bootstrap admission", () => {
                     command.every((argument) => !argument.includes("/pairs/.pair-stage-"))
             )
         ).toBe(true);
+        const runtimeInstallIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/install") &&
+                command.some((argument) => argument.endsWith("/runtime/bun")) &&
+                command.at(-1)?.includes("/.pair-stage-") === true
+        );
+        const pairMoveIndex = commands.findIndex(
+            (command) => command.includes("/usr/bin/mv") && command.includes("-T")
+        );
+        const pairSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1)?.endsWith(`/pairs/${releaseId}`) === true
+        );
+        const selectorMoveIndex = commands.findIndex(
+            (command) => command.includes("/usr/bin/mv") && command.includes("-Tf")
+        );
+        const selectorSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1) === productionHostProvisioningRoot
+        );
+        expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
+        expect(pairSyncIndex).toBeGreaterThan(pairMoveIndex);
+        expect(selectorMoveIndex).toBeGreaterThan(pairSyncIndex);
+        expect(selectorSyncIndex).toBeGreaterThan(selectorMoveIndex);
         expect(
             commands.some((command) =>
                 command.some((argument) => argument.endsWith("/usermod"))
@@ -755,6 +801,9 @@ describe("production bootstrap admission", () => {
             projectRoot: sourceRepositoryRoot,
             releaseId,
         });
+        const releaseRuntimeSha256 = new Bun.CryptoHasher("sha256")
+            .update(await readFile(path.join(sourceReleaseRoot, "runtime/bun")))
+            .digest("hex");
         const targetRepositoryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-production-bootstrap-composition-")
         );
@@ -855,7 +904,7 @@ describe("production bootstrap admission", () => {
                     return {
                         exitCode: 0,
                         stdout: command.at(-1)?.endsWith("/bun")
-                            ? `${"e".repeat(64)}  bun\n`
+                            ? `${releaseRuntimeSha256}  bun\n`
                             : `${receipt.archive.sha256}  release.tar\n`,
                     };
                 }
