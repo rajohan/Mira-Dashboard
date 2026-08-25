@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.4...v0.3.0) (2026-08-25)
+
+
+### Features
+
+* **delivery:** deploy published releases ([#453](https://github.com/rajohan/Mira-Dashboard/issues/453)) ([762f904](https://github.com/rajohan/Mira-Dashboard/commit/762f904b702039ece676f3574ddf07cfa7ea74b5))
+* **jobs:** expose dashboard schedule controls ([#451](https://github.com/rajohan/Mira-Dashboard/issues/451)) ([87f3e87](https://github.com/rajohan/Mira-Dashboard/commit/87f3e876d62e52cb3b8584b733da4c739123292c))
+
+
+### Bug Fixes
+
+* **bootstrap:** provision managed log access ([#452](https://github.com/rajohan/Mira-Dashboard/issues/452)) ([604d571](https://github.com/rajohan/Mira-Dashboard/commit/604d57115d1ee7e4dd23a58a328913d0b7ceed63))
+
 ## [0.2.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.2.3...v0.2.4) (2026-08-24)
 
 
