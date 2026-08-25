@@ -176,7 +176,7 @@ describe("production root-systemd service control", () => {
             expect(commands).toEqual([
                 [
                     "start",
-                    `mira-dashboard-production-provisioning@${firstReleaseId}--v1.2.3.service`,
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--v1.2.3--${"d".repeat(64)}--${"e".repeat(64)}.service`,
                 ],
                 ["restart", "mira-dashboard-worker.service"],
                 ["restart", "mira-dashboard-web.service"],

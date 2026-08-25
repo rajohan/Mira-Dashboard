@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, cp, mkdir, mkdtemp, readFile } from "node:fs/promises";
+import {
+    chmod,
+    cp,
+    lstat,
+    mkdir,
+    mkdtemp,
+    readFile,
+    readdir,
+    rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -47,6 +56,7 @@ function trustedStatus(isFile: boolean) {
         isFile: () => isFile,
         isSymbolicLink: () => false,
         mode: isFile ? 33_088 : 16_877,
+        mtimeMs: 0,
         uid: 0,
     };
 }
@@ -61,6 +71,19 @@ async function expectProvisioningFailure(promise: Promise<unknown>): Promise<voi
     }
 }
 
+async function restoreOwnerWrite(target: string): Promise<void> {
+    const status = await lstat(target).catch(() => null);
+    if (!status) return;
+    if (status.isDirectory()) {
+        await chmod(target, 0o700);
+        for (const entry of await readdir(target)) {
+            await restoreOwnerWrite(path.join(target, entry));
+        }
+    } else if (status.isFile()) {
+        await chmod(target, 0o600);
+    }
+}
+
 describe("production release root provisioner", () => {
     test("parses only exact local and semantic release authorities", () => {
         const releaseId = "a".repeat(40);
@@ -68,11 +91,18 @@ describe("production release root provisioner", () => {
             releaseId,
             source: "local",
         });
-        expect(parseProductionProvisioningAuthority(`${releaseId}--v1.2.3`)).toEqual({
+        expect(
+            parseProductionProvisioningAuthority(
+                `${releaseId}--v1.2.3--${"b".repeat(64)}--${"c".repeat(64)}`
+            )
+        ).toEqual({
+            archiveSha256: "c".repeat(64),
+            receiptSha256: "b".repeat(64),
             releaseId,
             source: "v1.2.3",
         });
         for (const authority of [
+            `${releaseId}--v1.2.3`,
             `${releaseId}--v1.2.3/service`,
             `${releaseId}--../local`,
             `-${releaseId}--local`,
@@ -150,6 +180,13 @@ describe("production release root provisioner", () => {
         temporaryDirectories.push(provisioningRoot);
         const releasesRoot = path.join(provisioningRoot, "releases");
         await mkdir(releasesRoot);
+        await Promise.all([
+            cp(sourceReleaseRoot, path.join(releasesRoot, releaseId), {
+                recursive: true,
+            }),
+            mkdir(path.join(releasesRoot, "a".repeat(40))),
+            mkdir(path.join(releasesRoot, "b".repeat(40))),
+        ]);
         await Promise.all([chmod(provisioningRoot, 0o700), chmod(releasesRoot, 0o700)]);
         const manifestBytes = await readFile(
             path.join(sourceReleaseRoot, "release-manifest.json")
@@ -170,6 +207,7 @@ describe("production release root provisioner", () => {
         );
         const tagName = "v1.2.3";
         const commands: string[] = [];
+        let assetDownloads = 0;
         const runtimeExecutable = path.join(provisioningRoot, "runtime/bun");
         const installedEntrypoint = path.join(provisioningRoot, "entrypoint.js");
         const environment = productionReleaseProvisionerTestSupport.createEnvironment({
@@ -214,9 +252,11 @@ describe("production release root provisioner", () => {
                     );
                 }
                 if (url.endsWith("/releases/assets/1")) {
+                    assetDownloads += 1;
                     return Promise.resolve(response(receiptBytes));
                 }
                 if (url.endsWith("/releases/assets/2")) {
+                    assetDownloads += 1;
                     return Promise.resolve(response(archiveBytes));
                 }
                 return Promise.resolve(response(encoder.encode("missing"), 404));
@@ -233,6 +273,10 @@ describe("production release root provisioner", () => {
             provisioningRoot,
             rename: async (source, destination) => {
                 await cp(source, destination, { recursive: true });
+            },
+            remove: async (target) => {
+                await restoreOwnerWrite(target);
+                await rm(target, { force: true, recursive: true });
             },
             releasesRoot,
             runCommand: async (executable, arguments_, stdin) => {
@@ -260,12 +304,29 @@ describe("production release root provisioner", () => {
             verifyReleaseArtifactIdentity,
         });
 
-        await provisionProductionRelease(`${releaseId}--${tagName}`, environment);
+        await expectProvisioningFailure(
+            provisionProductionRelease(
+                `${releaseId}--${tagName}--${"0".repeat(64)}--${sha256(archiveBytes)}`,
+                environment
+            )
+        );
+        expect(
+            await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
+        ).toMatchObject({ source: { commitSha: releaseId } });
+
+        await provisionProductionRelease(
+            `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
+            environment
+        );
 
         expect(
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
+        expect(assetDownloads).toBe(2);
+        const retainedRoots = await readdir(releasesRoot);
+        expect(retainedRoots).toHaveLength(2);
+        expect(retainedRoots).toContain(releaseId);
         expect(
             commands.filter((command) => command.startsWith(runtimeExecutable))
         ).toHaveLength(4);

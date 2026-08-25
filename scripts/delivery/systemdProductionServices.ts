@@ -173,12 +173,20 @@ export function createSystemdProductionServiceController(
         async provision(release: PublishedProductionRelease): Promise<void> {
             const releaseId = release.manifest.source.commitSha;
             const authority = options.releaseAuthority;
+            const receiptDigest = authority?.assets.find(
+                ({ name }) => name === "receipt.json"
+            )?.digest;
+            const archiveDigest = authority?.assets.find(
+                ({ name }) => name === "release.tar"
+            )?.digest;
             const instance =
-                authority?.releaseId === releaseId
-                    ? `${releaseId}--${authority.tagName}`
+                authority?.releaseId === releaseId &&
+                receiptDigest !== undefined &&
+                archiveDigest !== undefined
+                    ? `${releaseId}--${authority.tagName}--${receiptDigest.slice("sha256:".length)}--${archiveDigest.slice("sha256:".length)}`
                     : `${releaseId}--local`;
             if (
-                !/^[a-f\d]{40}--(?:local|v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?)$/u.test(
+                !/^[a-f\d]{40}--(?:local|v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?--[a-f\d]{64}--[a-f\d]{64})$/u.test(
                     instance
                 )
             ) {

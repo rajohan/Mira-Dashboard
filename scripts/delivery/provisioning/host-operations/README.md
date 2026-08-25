@@ -88,13 +88,16 @@ exact authority files and reloading systemd. The deferred timer is never enabled
 restart helper after systemd accepts the reviewed restart unit.
 
 Normal Delivery activation starts only the fixed
-`mira-dashboard-production-provisioning@<commit>--<tag>.service` boundary. The root-owned
+`mira-dashboard-production-provisioning@<commit>--<tag>--<receipt-sha256>--<archive-sha256>.service`
+boundary. The root-owned
 provisioner independently resolves the stable GitHub tag, downloads the permanent
 `receipt.json` and `release.tar` assets, verifies their published digests and immutable
 release identity, then installs candidate authority after the running Dashboard services
-have stopped. Rollback starts the same boundary with `--local` and reinstalls the already
-root-staged previous authority before the previous services restart. A runtime revision
-change remains a bootstrap operation.
+have stopped. Tagged provisioning always revalidates and replaces any cached copy for that commit;
+only `--local` rollback trusts an already root-staged release. After a successful install, root
+staging retains the two most recently installed authorities—the active and rollback pair—and
+removes older roots. Rollback starts the same boundary with `--local` and reinstalls the retained
+previous authority before the previous services restart.
 
 Cleanup removes orphaned packages and stale package cache entries, rotates then vacuums
 journald to fixed 14-day and 1 GiB limits, and prunes only unused Docker content older

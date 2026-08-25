@@ -348,9 +348,14 @@ describe("Delivery service", () => {
             ...value.checkout,
             remoteHeadSha,
         };
+        const candidate = publishedReleaseAuthority(
+            remoteHeadSha,
+            "v1.2.3",
+            "c".repeat(40)
+        );
         value.releases = {
             ...value.releases,
-            candidate: publishedReleaseAuthority(remoteHeadSha),
+            candidate,
         };
         const next = fixture(value);
 
@@ -363,7 +368,7 @@ describe("Delivery service", () => {
                     expectedMainHeadSha: remoteHeadSha,
                     idempotencyKey: "A".repeat(43),
                     operation: "deploy",
-                    release: publishedReleaseAuthority(remoteHeadSha),
+                    release: candidate,
                     sourceRevision,
                 },
                 context
@@ -375,7 +380,7 @@ describe("Delivery service", () => {
                 checkoutRevision: sourceRevision,
                 expectedMainHeadSha: remoteHeadSha,
                 operation: "deploy",
-                release: publishedReleaseAuthority(remoteHeadSha),
+                release: candidate,
                 sourceRevision,
             },
         ]);

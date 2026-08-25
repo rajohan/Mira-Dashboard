@@ -447,8 +447,6 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 releases.releases.current === undefined ||
                 JSON.stringify(releases.releases.candidate) !==
                     JSON.stringify(input.release) ||
-                input.release.runtime.revision !==
-                    releases.releases.current.runtimeRevision ||
                 releases.releases.activationRevision !== input.activationRevision
             ) {
                 throw new DeliveryServiceError("conflict");

@@ -1,4 +1,13 @@
-import { chmod, lstat, mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import {
+    chmod,
+    lstat,
+    mkdtemp,
+    readFile,
+    readdir,
+    rename,
+    rm,
+    utimes,
+} from "node:fs/promises";
 import path from "node:path";
 
 import * as v from "valibot";
@@ -17,8 +26,9 @@ const installedEntrypoint =
 const maximumJsonBytes = 4 * 1024 * 1024;
 const maximumArchiveBytes = 512 * 1024 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
-const authorityPattern =
-    /^([a-f\d]{40})--(local|v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?)$/u;
+const localAuthorityPattern = /^([a-f\d]{40})--local$/u;
+const publishedAuthorityPattern =
+    /^([a-f\d]{40})--(v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?)--([a-f\d]{64})--([a-f\d]{64})$/u;
 
 const githubReleaseSchema = v.strictObject({
     assets: v.pipe(
@@ -56,6 +66,7 @@ interface TrustedFileStatus {
     isFile(): boolean;
     isSymbolicLink(): boolean;
     readonly mode: number;
+    readonly mtimeMs: number;
     readonly uid: number;
 }
 
@@ -67,6 +78,8 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly lstat: (target: string) => Promise<TrustedFileStatus>;
     readonly modulePath: string;
     readonly provisioningRoot: string;
+    readonly readDirectory: (target: string) => Promise<string[]>;
+    readonly remove: (target: string) => Promise<void>;
     readonly rename: (source: string, destination: string) => Promise<void>;
     readonly releasesRoot: string;
     readonly repositoryApi: string;
@@ -76,6 +89,7 @@ interface ProductionReleaseProvisionerEnvironment {
         stdin?: Uint8Array
     ) => Promise<CommandResult>;
     readonly runtimeExecutable: string;
+    readonly touch: (target: string, time: Date) => Promise<void>;
     readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
 }
 
@@ -88,12 +102,22 @@ function failure(): Error {
  * @param authority Public release instance supplied by the root-owned unit.
  * @returns Exact release and source tuple.
  */
-export function parseProductionProvisioningAuthority(
-    authority: string
-): Readonly<{ releaseId: string; source: string }> {
-    const match = authorityPattern.exec(authority);
-    if (!match) throw failure();
-    return Object.freeze({ releaseId: match[1]!, source: match[2]! });
+export function parseProductionProvisioningAuthority(authority: string): Readonly<{
+    archiveSha256?: string;
+    receiptSha256?: string;
+    releaseId: string;
+    source: string;
+}> {
+    const local = localAuthorityPattern.exec(authority);
+    if (local) return Object.freeze({ releaseId: local[1]!, source: "local" });
+    const published = publishedAuthorityPattern.exec(authority);
+    if (!published) throw failure();
+    return Object.freeze({
+        archiveSha256: published[4]!,
+        receiptSha256: published[3]!,
+        releaseId: published[1]!,
+        source: published[2]!,
+    });
 }
 
 /**
@@ -325,6 +349,10 @@ async function verifyStagedRelease(
 async function downloadAndStageRelease(
     releaseId: string,
     tagName: string,
+    expectedDigests: Readonly<{
+        archiveSha256: string;
+        receiptSha256: string;
+    }>,
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<string> {
     const release = v.parse(
@@ -339,7 +367,14 @@ async function downloadAndStageRelease(
     }
     const receiptAsset = release.assets.find(({ name }) => name === "receipt.json");
     const archiveAsset = release.assets.find(({ name }) => name === "release.tar");
-    if (!receiptAsset || !archiveAsset) throw failure();
+    if (
+        !receiptAsset ||
+        !archiveAsset ||
+        receiptAsset.digest !== `sha256:${expectedDigests.receiptSha256}` ||
+        archiveAsset.digest !== `sha256:${expectedDigests.archiveSha256}`
+    ) {
+        throw failure();
+    }
     const receiptBytes = await githubAsset(
         receiptAsset.id,
         maximumJsonBytes,
@@ -410,19 +445,51 @@ async function downloadAndStageRelease(
             throw failure();
         }
         const destination = path.join(environment.releasesRoot, releaseId);
-        await environment.rename(stagedRoot, destination).catch((error: unknown) => {
-            if (
-                !(error instanceof Error) ||
-                !("code" in error) ||
-                (error as NodeJS.ErrnoException).code !== "EEXIST"
-            ) {
-                throw error;
-            }
-        });
+        await environment.remove(destination);
+        await environment.rename(stagedRoot, destination);
         return await verifyStagedRelease(releaseId, environment);
     } finally {
         await chmod(temporaryRoot, 0o700).catch(() => {});
         await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
+    }
+}
+
+async function retainRecentReleaseRoots(
+    installedReleaseId: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    await environment.touch(
+        path.join(environment.releasesRoot, installedReleaseId),
+        new Date()
+    );
+    const rootNames = await environment.readDirectory(environment.releasesRoot);
+    const roots = await Promise.all(
+        rootNames.map(async (name) => {
+            if (!/^[a-f\d]{40}$/u.test(name)) throw failure();
+            const status = await environment.lstat(
+                path.join(environment.releasesRoot, name)
+            );
+            if (
+                !status.isDirectory() ||
+                status.isSymbolicLink() ||
+                status.uid !== 0 ||
+                status.gid !== 0 ||
+                (status.mode & 0o022) !== 0
+            ) {
+                throw failure();
+            }
+            return Object.freeze({ mtimeMs: status.mtimeMs, name });
+        })
+    );
+    roots.sort(
+        (left, right) =>
+            Number(right.name === installedReleaseId) -
+                Number(left.name === installedReleaseId) ||
+            right.mtimeMs - left.mtimeMs ||
+            left.name.localeCompare(right.name)
+    );
+    for (const obsolete of roots.slice(2)) {
+        await environment.remove(path.join(environment.releasesRoot, obsolete.name));
     }
 }
 
@@ -509,11 +576,14 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     lstat,
     modulePath: import.meta.path,
     provisioningRoot,
+    readDirectory: readdir,
+    remove: (target: string) => rm(target, { force: true, recursive: true }),
     rename,
     releasesRoot,
     repositoryApi,
     runCommand: run,
     runtimeExecutable,
+    touch: (target: string, time: Date) => utimes(target, time, time),
     verifyReleaseArtifactIdentity,
 });
 
@@ -533,18 +603,22 @@ export async function provisionProductionRelease(
     environment: ProductionReleaseProvisionerEnvironment = defaultEnvironment
 ): Promise<void> {
     await verifyInstalledBoundary(environment);
-    const { releaseId, source } = parseProductionProvisioningAuthority(authority);
-    const releaseRoot =
-        source === "local"
-            ? await verifyStagedRelease(releaseId, environment)
-            : await verifyStagedRelease(releaseId, environment).catch(async () => {
-                  await rm(path.join(environment.releasesRoot, releaseId), {
-                      force: true,
-                      recursive: true,
-                  });
-                  return downloadAndStageRelease(releaseId, source, environment);
-              });
+    const { archiveSha256, receiptSha256, releaseId, source } =
+        parseProductionProvisioningAuthority(authority);
+    let releaseRoot: string;
+    if (source === "local") {
+        releaseRoot = await verifyStagedRelease(releaseId, environment);
+    } else {
+        if (archiveSha256 === undefined || receiptSha256 === undefined) throw failure();
+        releaseRoot = await downloadAndStageRelease(
+            releaseId,
+            source,
+            { archiveSha256, receiptSha256 },
+            environment
+        );
+    }
     await installAuthority(releaseId, releaseRoot, environment);
+    await retainRecentReleaseRoots(releaseId, environment);
 }
 
 if (import.meta.main) {
