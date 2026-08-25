@@ -1,6 +1,12 @@
 /** Root-owned durable namespace used by the production provisioning service. */
 export const productionHostProvisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
 
+/** Versioned runtime/provisioner pairs selected atomically by the provisioning unit. */
+export const productionProvisioningPairsRoot = `${productionHostProvisioningRoot}/pairs`;
+export const productionProvisioningPairSelector = `${productionHostProvisioningRoot}/current`;
+export const productionProvisioningRuntimeName = "bun";
+export const productionProvisioningEntrypointName = "productionProvisioning.js";
+
 /** Largest raw production provisioning process admitted by both build and installer. */
 export const maximumProductionProvisioningBundleBytes = 4 * 1024 * 1024;
 
@@ -23,11 +29,6 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
         destinationPath: "/usr/local/libexec/mira-dashboard-host-operation",
         mode: 0o755,
-    }),
-    Object.freeze({
-        artifactPath: "server/productionProvisioning.js",
-        destinationPath: "/usr/local/libexec/mira-dashboard-production-provisioning.js",
-        mode: 0o555,
     }),
     Object.freeze({
         artifactPath:

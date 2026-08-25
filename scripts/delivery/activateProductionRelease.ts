@@ -33,6 +33,7 @@ import {
     type InstalledProductionRuntime,
 } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
+import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./systemdProductionServices.ts";
 
@@ -219,7 +220,10 @@ export async function deliverProductionReleaseUnderLease(
         paths,
         options.releaseRoot,
         sourceManifest,
-        runtimeSource
+        runtimeSource,
+        {
+            additionalReleaseCopyDirectory: path.dirname(productionHostProvisioningRoot),
+        }
     );
 
     let runtime: InstalledProductionRuntime;

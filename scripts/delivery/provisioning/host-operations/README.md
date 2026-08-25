@@ -8,7 +8,6 @@ parameter.
 | Artifact                                          | Destination                                                           | Owner/mode       |
 | ------------------------------------------------- | --------------------------------------------------------------------- | ---------------- |
 | `mira-dashboard-host-operation`                   | `/usr/local/libexec/mira-dashboard-host-operation`                    | `root:root 0755` |
-| `server/productionProvisioning.js`                | `/usr/local/libexec/mira-dashboard-production-provisioning.js`        | `root:root 0555` |
 | `mira-dashboard-web-runtime`                      | `/usr/local/libexec/mira-dashboard-web-runtime`                       | `root:root 0755` |
 | `mira-dashboard-host-system-restart.service`      | `/etc/systemd/system/mira-dashboard-host-system-restart.service`      | `root:root 0644` |
 | `mira-dashboard-host-system-update.service`       | `/etc/systemd/system/mira-dashboard-host-system-update.service`       | `root:root 0644` |
@@ -28,14 +27,13 @@ every admitted provisioning artifact must be `root:root 0400`. Preserve the exac
 staged root's basename. The installer rejects an internally consistent manifest when any admitted
 source object is owned by the application user or group.
 
-Provision the exact Bun executable separately at
-`/var/lib/mira-dashboard-host-provisioning/runtime/bun` as `root:root 0555`. Every ancestor of that
-runtime path below the root-owned, non-group/other-writable
-`/var/lib/mira-dashboard-host-provisioning` trust root must also be root-owned and not writable by
-group or others. The root handoff must verify
-the runtime and complete staged module tree before launch: Bun loads the entrypoint and its local
-dependencies before in-process validation can run, so an application-owned interpreter or script
-cannot establish its own authority.
+Provision the exact Bun executable and `server/productionProvisioning.js` together under
+`/var/lib/mira-dashboard-host-provisioning/pairs/<commit>/` as `root:root 0555`. Select the complete
+pair through the atomically replaced `current` symlink. The systemd unit resolves that selector once
+as its working directory before launching `./bun ./productionProvisioning.js`, so a host stop or
+selector change cannot combine files from different releases. Every directory below the root-owned,
+non-group/other-writable provisioning trust root must remain root-owned and not writable by group or
+others.
 
 Before transfer or ownership change, independently verify the candidate against the reviewed Git
 commit/tree or approved release record and obtain the exact `release-manifest.json` SHA-256 through
@@ -47,7 +45,7 @@ parsing any artifact hash.
 Install exact manifest-bound bytes only by invoking the staged script with that absolute runtime:
 
 ```sh
-/var/lib/mira-dashboard-host-provisioning/runtime/bun \
+/var/lib/mira-dashboard-host-provisioning/pairs/<commit>/bun \
   /var/lib/mira-dashboard-host-provisioning/releases/<commit>/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts \
   --release-root=/var/lib/mira-dashboard-host-provisioning/releases/<commit> \
   --release-id=<40-hex-commit> \

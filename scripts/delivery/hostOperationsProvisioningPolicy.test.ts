@@ -22,6 +22,15 @@ describe("host-operations provisioning artifact policy", () => {
         expect(unit).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
         expect(unit).toContain("--config-dir=/home/ubuntu/.doppler");
         expect(unit).toContain("--authority=%i");
+        expect(unit).toContain(
+            "--chdir=/var/lib/mira-dashboard-host-provisioning/current ./bun ./productionProvisioning.js"
+        );
+        expect(unit).not.toContain(
+            "/var/lib/mira-dashboard-host-provisioning/runtime/bun"
+        );
+        expect(unit).not.toContain(
+            "/usr/local/libexec/mira-dashboard-production-provisioning.js"
+        );
         expect(unit).not.toContain("--authority=%I");
         expect(unit).not.toContain("RAJOHAN_GITHUB_TOKEN");
     });
@@ -47,12 +56,6 @@ describe("host-operations provisioning artifact policy", () => {
                     "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
                 destinationPath: "/usr/local/libexec/mira-dashboard-host-operation",
                 mode: 0o755,
-            },
-            {
-                artifactPath: "server/productionProvisioning.js",
-                destinationPath:
-                    "/usr/local/libexec/mira-dashboard-production-provisioning.js",
-                mode: 0o555,
             },
             {
                 artifactPath:
@@ -172,7 +175,6 @@ describe("host-operations provisioning artifact policy", () => {
             ].toSorted()
         );
         for (const artifact of hostOperationsProvisioningArtifacts) {
-            if (artifact.artifactPath === "server/productionProvisioning.js") continue;
             const source = path.join(
                 path.resolve(import.meta.dir, "../.."),
                 artifact.artifactPath

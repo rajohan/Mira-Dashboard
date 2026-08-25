@@ -6,7 +6,9 @@ import {
     mkdir,
     mkdtemp,
     readFile,
+    readlink,
     readdir,
+    rename,
     rm,
     symlink,
     writeFile,
@@ -304,11 +306,24 @@ describe("production release root provisioner", () => {
         let assetDownloads = 0;
         let failAuthorityInstall = false;
         let releaseRootPublications = 0;
-        const runtimeExecutable = path.join(provisioningRoot, "runtime/bun");
-        const installedEntrypoint = path.join(provisioningRoot, "entrypoint.js");
-        await mkdir(path.dirname(runtimeExecutable), { recursive: true });
-        await cp(path.join(sourceReleaseRoot, "runtime/bun"), runtimeExecutable);
-        await writeFile(installedEntrypoint, "installed provisioning entrypoint");
+        const provisioningPairsRoot = path.join(provisioningRoot, "pairs");
+        const previousPair = path.join(provisioningPairsRoot, "a".repeat(40));
+        const provisioningPairSelector = path.join(provisioningRoot, "current");
+        const runtimeExecutable = path.join(provisioningPairSelector, "bun");
+        const installedEntrypoint = path.join(
+            provisioningPairSelector,
+            "productionProvisioning.js"
+        );
+        await mkdir(previousPair, { recursive: true });
+        await cp(
+            path.join(sourceReleaseRoot, "runtime/bun"),
+            path.join(previousPair, "bun")
+        );
+        await writeFile(
+            path.join(previousPair, "productionProvisioning.js"),
+            "installed provisioning entrypoint"
+        );
+        await symlink(previousPair, provisioningPairSelector, "dir");
         const environment = productionReleaseProvisionerTestSupport.createEnvironment({
             executablePath: runtimeExecutable,
             fetch: (url, init) => {
@@ -370,31 +385,25 @@ describe("production release root provisioner", () => {
             getUid: () => 0,
             installedEntrypoint,
             lstat: async (target) => {
-                if (target === runtimeExecutable || target === installedEntrypoint) {
-                    return trustedStatus(true);
-                }
-                if (target.includes("/.release-stage-")) {
-                    const status = await lstat(target);
-                    return {
-                        ...trustedStatus(status.isFile()),
-                        isDirectory: () => status.isDirectory(),
-                        isFile: () => status.isFile(),
-                        isSymbolicLink: () => status.isSymbolicLink(),
-                    };
-                }
-                return trustedStatus(false);
+                const status = await lstat(target);
+                return {
+                    ...trustedStatus(status.isFile()),
+                    isDirectory: () => status.isDirectory(),
+                    isFile: () => status.isFile(),
+                    isSymbolicLink: () => status.isSymbolicLink(),
+                };
             },
             modulePath: installedEntrypoint,
             provisioningRoot,
+            provisioningPairSelector,
+            provisioningPairsRoot,
             readActivationRecord: () => Promise.resolve(activationRecord),
             readGithubToken: () => "github-token-sentinel",
             rename: async (source, destination) => {
                 if (destination === path.join(releasesRoot, releaseId)) {
                     releaseRootPublications += 1;
                 }
-                await restoreOwnerWrite(destination);
-                await rm(destination, { force: true, recursive: true });
-                await cp(source, destination, { recursive: true });
+                await rename(source, destination);
             },
             remove: async (target) => {
                 await restoreOwnerWrite(target);
@@ -407,7 +416,6 @@ describe("production release root provisioner", () => {
                     failAuthorityInstall &&
                     arguments_[0]?.endsWith("installHostOperationsProvisioning.ts")
                 ) {
-                    await writeFile(installedEntrypoint, "failed candidate entrypoint");
                     return commandResult(new Uint8Array(), 1);
                 }
                 if (executable === "/usr/bin/install") {
@@ -420,21 +428,19 @@ describe("production release root provisioner", () => {
                         `${sha256(await readFile(target))}  ${target}\n`
                     );
                 }
-                if (
-                    arguments_[0] === "-e" &&
-                    (executable === runtimeExecutable ||
-                        executable.startsWith(`${runtimeExecutable}.stage-`))
-                ) {
+                if (arguments_[0] === "-e" && executable.endsWith("/bun")) {
                     return commandResult(JSON.stringify(runtime));
                 }
                 if (executable === "/usr/bin/tar" && arguments_[0] === "-tf") {
-                    expect(stdin).toEqual(archiveBytes);
+                    expect(stdin).toBeUndefined();
+                    expect(await readFile(arguments_[1]!)).toEqual(archiveBytes);
                     return commandResult(
                         `${releaseId}/\n${releaseId}/release-manifest.json\n`
                     );
                 }
                 if (executable === "/usr/bin/tar" && arguments_[0] === "-xf") {
-                    expect(stdin).toEqual(archiveBytes);
+                    expect(stdin).toBeUndefined();
+                    expect(await readFile(arguments_[1]!)).toEqual(archiveBytes);
                     expect(arguments_).toContain("--no-same-owner");
                     await cp(sourceReleaseRoot, path.join(arguments_[4]!, releaseId), {
                         recursive: true,
@@ -469,6 +475,26 @@ describe("production release root provisioner", () => {
             ["a".repeat(40), releaseId].toSorted()
         );
 
+        const mismatchedReleaseRoot = await createLocalReleaseFixture(
+            sourceProjectRoot,
+            releaseId,
+            { revision: "e".repeat(40), version: Bun.version },
+            temporaryDirectories
+        );
+        const cachedReleaseRoot = path.join(releasesRoot, releaseId);
+        await restoreOwnerWrite(cachedReleaseRoot);
+        await rm(cachedReleaseRoot, { force: true, recursive: true });
+        await cp(mismatchedReleaseRoot, cachedReleaseRoot, { recursive: true });
+        await expectProvisioningFailure(
+            provisionProductionRelease(
+                `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
+                environment
+            )
+        );
+        await restoreOwnerWrite(cachedReleaseRoot);
+        await rm(cachedReleaseRoot, { force: true, recursive: true });
+        await cp(sourceReleaseRoot, cachedReleaseRoot, { recursive: true });
+
         await provisionProductionRelease(
             `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
             environment
@@ -478,17 +504,15 @@ describe("production release root provisioner", () => {
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
-        expect(assetDownloads).toBe(2);
+        expect(assetDownloads).toBe(4);
         expect(
             syncedPaths.some((target) =>
                 target.endsWith(`/${releaseId}/release-manifest.json`)
             )
         ).toBe(true);
         expect(syncedPaths).toContain(releasesRoot);
-        expect(
-            syncedPaths.some((target) => target.startsWith(`${runtimeExecutable}.stage-`))
-        ).toBe(true);
-        expect(syncedPaths).toContain(path.dirname(runtimeExecutable));
+        expect(syncedPaths.some((target) => target.includes("/.pair-stage-"))).toBe(true);
+        expect(syncedPaths).toContain(provisioningPairsRoot);
         const retainedAfterPublishedInstall = await readdir(releasesRoot);
         expect(retainedAfterPublishedInstall.toSorted()).toEqual(
             ["a".repeat(40), releaseId].toSorted()
@@ -512,17 +536,14 @@ describe("production release root provisioner", () => {
         expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
         expect(authorityInstallIndex).toBeGreaterThan(runtimeInstallIndex);
 
-        await chmod(runtimeExecutable, 0o600);
-        await chmod(installedEntrypoint, 0o600);
-        await writeFile(runtimeExecutable, "trusted previous runtime");
-        await writeFile(installedEntrypoint, "trusted previous entrypoint");
-        const previousRuntime = await readFile(runtimeExecutable);
-        const previousEntrypoint = await readFile(installedEntrypoint);
+        const failedAttemptSelector = `${provisioningRoot}/.failed-selector`;
+        await symlink(previousPair, failedAttemptSelector, "dir");
+        await rename(failedAttemptSelector, provisioningPairSelector);
+        const previousSelector = await readlink(provisioningPairSelector);
         failAuthorityInstall = true;
         await expectProvisioningFailure(
             provisionProductionRelease(`${releaseId}--local`, environment)
         );
-        expect(await readFile(runtimeExecutable)).toEqual(previousRuntime);
-        expect(await readFile(installedEntrypoint)).toEqual(previousEntrypoint);
+        expect(await readlink(provisioningPairSelector)).toBe(previousSelector);
     });
 });

@@ -6,8 +6,10 @@ import {
     open,
     readFile,
     readdir,
+    realpath,
     rename,
     rm,
+    symlink,
 } from "node:fs/promises";
 import path from "node:path";
 
@@ -24,7 +26,13 @@ import {
 } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
 import { assertProductionReleaseArchiveListing } from "./productionReleaseArchive.ts";
-import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
+import {
+    productionHostProvisioningRoot,
+    productionProvisioningEntrypointName,
+    productionProvisioningPairsRoot,
+    productionProvisioningPairSelector,
+    productionProvisioningRuntimeName,
+} from "./provisioning/host-operations/policy.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 
 const failureMessage = "Production release provisioning failed";
@@ -33,9 +41,8 @@ const provisioningRoot = productionHostProvisioningRoot;
 const releasesRoot = `${provisioningRoot}/releases`;
 const productionActivationStatePath =
     "/home/ubuntu/projects/mira-dashboard/production/state/activation.json";
-const runtimeExecutable = `${provisioningRoot}/runtime/bun`;
-const installedEntrypoint =
-    "/usr/local/libexec/mira-dashboard-production-provisioning.js";
+const runtimeExecutable = `${productionProvisioningPairSelector}/${productionProvisioningRuntimeName}`;
+const installedEntrypoint = `${productionProvisioningPairSelector}/${productionProvisioningEntrypointName}`;
 const maximumJsonBytes = 4 * 1024 * 1024;
 const maximumActivationStateBytes = 64 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
@@ -95,6 +102,7 @@ interface TrustedFileStatus {
 }
 
 interface ProductionReleaseProvisionerEnvironment {
+    readonly canonicalPath: (target: string) => Promise<string>;
     readonly executablePath: string;
     readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
     readonly getUid: () => number | undefined;
@@ -102,6 +110,8 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly lstat: (target: string) => Promise<TrustedFileStatus>;
     readonly modulePath: string;
     readonly provisioningRoot: string;
+    readonly provisioningPairSelector: string;
+    readonly provisioningPairsRoot: string;
     readonly readDirectory: (target: string) => Promise<string[]>;
     readonly readActivationRecord: (
         expectedUserId: number
@@ -121,11 +131,10 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
 }
 
-interface InstalledProvisioningPairSnapshot {
-    readonly entrypointBackup: string;
-    readonly entrypointSha256: string;
-    readonly runtimeBackup: string;
-    readonly runtimeSha256: string;
+interface StagedProvisioningPair {
+    readonly entrypoint: string;
+    readonly root: string;
+    readonly runtime: string;
 }
 
 function failure(): Error {
@@ -346,6 +355,79 @@ async function githubAsset(
     );
 }
 
+async function githubAssetToFile(
+    assetId: number,
+    maximum: number,
+    target: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<Readonly<{ bytes: number; sha256: string }>> {
+    const response = await environment.fetch(
+        `${environment.repositoryApi}/releases/assets/${assetId}`,
+        {
+            headers: {
+                Accept: "application/octet-stream",
+                Authorization: `Bearer ${environment.readGithubToken()}`,
+                "User-Agent": "mira-dashboard-production-provisioner",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            redirect: "follow",
+            signal: AbortSignal.timeout(5 * 60_000),
+        }
+    );
+    if (!response.ok) {
+        await cancelResponse(response, failureMessage);
+        throw failure();
+    }
+    const declared = response.headers.get("content-length");
+    if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > maximum)) {
+        await cancelResponse(response, failureMessage);
+        throw failure();
+    }
+    if (response.body === null) throw failure();
+    const handle = await open(
+        target,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o400
+    );
+    const reader = response.body.getReader();
+    const hasher = new Bun.CryptoHasher("sha256");
+    let bytes = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            const chunk = next.value as Uint8Array;
+            if (chunk.byteLength > maximum - bytes) {
+                await reader.cancel(failureMessage).catch(() => {});
+                throw failure();
+            }
+            bytes += chunk.byteLength;
+            hasher.update(chunk);
+            let offset = 0;
+            while (offset < chunk.byteLength) {
+                const written = await handle.write(
+                    chunk,
+                    offset,
+                    chunk.byteLength - offset
+                );
+                if (written.bytesWritten <= 0) throw failure();
+                offset += written.bytesWritten;
+            }
+        }
+        if (bytes === 0 || (declared !== null && Number(declared) !== bytes)) {
+            throw failure();
+        }
+        await handle.sync();
+        return Object.freeze({ bytes, sha256: hasher.digest("hex") });
+    } catch {
+        await rm(target, { force: true }).catch(() => {});
+        throw failure();
+    } finally {
+        reader.releaseLock();
+        await handle.close();
+    }
+}
+
 async function resolveTagCommit(
     tagName: string,
     environment: ProductionReleaseProvisionerEnvironment
@@ -435,10 +517,28 @@ async function requireSuccess(
 async function verifyInstalledBoundary(
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<void> {
+    if (environment.getUid() !== 0) {
+        throw failure();
+    }
+    const selectorStatus = await environment.lstat(environment.provisioningPairSelector);
     if (
-        environment.getUid() !== 0 ||
-        environment.executablePath !== environment.runtimeExecutable ||
-        environment.modulePath !== environment.installedEntrypoint
+        !selectorStatus.isSymbolicLink() ||
+        selectorStatus.uid !== 0 ||
+        selectorStatus.gid !== 0 ||
+        (selectorStatus.mode & 0o022) !== 0
+    ) {
+        throw failure();
+    }
+    const pairRoot = await environment.canonicalPath(
+        environment.provisioningPairSelector
+    );
+    if (
+        path.dirname(pairRoot) !== environment.provisioningPairsRoot ||
+        !/^[a-f\d]{40}$/u.test(path.basename(pairRoot)) ||
+        (await environment.canonicalPath(environment.executablePath)) !==
+            path.join(pairRoot, productionProvisioningRuntimeName) ||
+        (await environment.canonicalPath(environment.modulePath)) !==
+            path.join(pairRoot, productionProvisioningEntrypointName)
     ) {
         throw failure();
     }
@@ -456,7 +556,7 @@ async function verifyInstalledBoundary(
         ) {
             throw failure();
         }
-        let ancestor = path.dirname(target);
+        let ancestor = environment.provisioningRoot;
         while (true) {
             const ancestorStatus = await environment.lstat(ancestor);
             if (
@@ -532,120 +632,119 @@ async function probeRuntime(
     }
 }
 
-async function snapshotInstalledProvisioningPair(
+async function verifyProvisioningPair(
+    pairRoot: string,
+    releaseRoot: string,
     environment: ProductionReleaseProvisionerEnvironment
-): Promise<InstalledProvisioningPairSnapshot> {
-    const suffix = Bun.randomUUIDv7();
-    const runtimeBackup = `${environment.runtimeExecutable}.rollback-${suffix}`;
-    const entrypointBackup = `${environment.installedEntrypoint}.rollback-${suffix}`;
-    const runtimeSha256 = await sha256File(environment.runtimeExecutable, environment);
-    const entrypointSha256 = await sha256File(
-        environment.installedEntrypoint,
-        environment
-    );
-    try {
-        for (const [source, destination] of [
-            [environment.runtimeExecutable, runtimeBackup],
-            [environment.installedEntrypoint, entrypointBackup],
-        ] as const) {
-            await requireSuccess(
-                "/usr/bin/install",
-                ["-o", "root", "-g", "root", "-m", "0555", source, destination],
-                environment
-            );
-            await environment.syncPath(destination);
-        }
-        if (
-            (await sha256File(runtimeBackup, environment)) !== runtimeSha256 ||
-            (await sha256File(entrypointBackup, environment)) !== entrypointSha256
-        ) {
-            throw failure();
-        }
-        await environment.syncPath(path.dirname(environment.runtimeExecutable));
-        await environment.syncPath(path.dirname(environment.installedEntrypoint));
-        return Object.freeze({
-            entrypointBackup,
-            entrypointSha256,
-            runtimeBackup,
-            runtimeSha256,
-        });
-    } catch {
-        await environment.remove(runtimeBackup).catch(() => {});
-        await environment.remove(entrypointBackup).catch(() => {});
-        throw failure();
-    }
-}
-
-async function restoreInstalledProvisioningPair(
-    snapshot: InstalledProvisioningPairSnapshot,
-    environment: ProductionReleaseProvisionerEnvironment
-): Promise<void> {
-    await environment.rename(snapshot.runtimeBackup, environment.runtimeExecutable);
-    await environment.rename(snapshot.entrypointBackup, environment.installedEntrypoint);
-    await environment.syncPath(path.dirname(environment.runtimeExecutable));
-    await environment.syncPath(path.dirname(environment.installedEntrypoint));
+): Promise<StagedProvisioningPair> {
+    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
+    const runtime = path.join(pairRoot, productionProvisioningRuntimeName);
+    const entrypoint = path.join(pairRoot, productionProvisioningEntrypointName);
+    const sourceRuntime = path.join(releaseRoot, "runtime/bun");
+    const sourceEntrypoint = path.join(releaseRoot, "server/productionProvisioning.js");
+    const [entries, pairStatus, runtimeStatus, entrypointStatus] = await Promise.all([
+        environment.readDirectory(pairRoot),
+        environment.lstat(pairRoot),
+        environment.lstat(runtime),
+        environment.lstat(entrypoint),
+    ]);
     if (
-        (await sha256File(environment.runtimeExecutable, environment)) !==
-            snapshot.runtimeSha256 ||
-        (await sha256File(environment.installedEntrypoint, environment)) !==
-            snapshot.entrypointSha256
+        entries.toSorted().join("\n") !==
+            [productionProvisioningEntrypointName, productionProvisioningRuntimeName]
+                .toSorted()
+                .join("\n") ||
+        !pairStatus.isDirectory() ||
+        pairStatus.isSymbolicLink() ||
+        pairStatus.uid !== 0 ||
+        pairStatus.gid !== 0 ||
+        (pairStatus.mode & 0o022) !== 0 ||
+        [runtimeStatus, entrypointStatus].some(
+            (status) =>
+                !status.isFile() ||
+                status.isSymbolicLink() ||
+                status.uid !== 0 ||
+                status.gid !== 0 ||
+                (status.mode & 0o022) !== 0
+        ) ||
+        (await sha256File(runtime, environment)) !==
+            (await sha256File(sourceRuntime, environment)) ||
+        (await sha256File(entrypoint, environment)) !==
+            (await sha256File(sourceEntrypoint, environment))
     ) {
         throw failure();
     }
+    const identity = await probeRuntime(runtime, environment);
+    if (
+        identity.revision !== manifest.runtime.revision ||
+        identity.version !== manifest.runtime.version
+    ) {
+        throw failure();
+    }
+    return Object.freeze({ entrypoint, root: pairRoot, runtime });
 }
 
-async function discardInstalledProvisioningPairSnapshot(
-    snapshot: InstalledProvisioningPairSnapshot,
-    environment: ProductionReleaseProvisionerEnvironment
-): Promise<void> {
-    await environment.remove(snapshot.runtimeBackup).catch(() => {});
-    await environment.remove(snapshot.entrypointBackup).catch(() => {});
-}
-
-/**
- * Atomically promotes the verified release runtime before candidate scripts execute.
- * @param releaseRoot Verified root-owned release directory.
- * @param environment Privileged provisioning boundary.
- */
-async function installCandidateRuntime(
+async function stageProvisioningPair(
+    releaseId: string,
     releaseRoot: string,
     environment: ProductionReleaseProvisionerEnvironment
-): Promise<void> {
-    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
-    const source = path.join(releaseRoot, "runtime/bun");
-    const staged = `${environment.runtimeExecutable}.stage-${Bun.randomUUIDv7()}`;
-    const sourceSha256 = await sha256File(source, environment);
+): Promise<StagedProvisioningPair> {
+    const destination = path.join(environment.provisioningPairsRoot, releaseId);
     try {
-        await requireSuccess(
-            "/usr/bin/install",
-            ["-o", "root", "-g", "root", "-m", "0555", source, staged],
-            environment
-        );
-        if ((await sha256File(staged, environment)) !== sourceSha256) throw failure();
-        const stagedIdentity = await probeRuntime(staged, environment);
-        if (
-            stagedIdentity.revision !== manifest.runtime.revision ||
-            stagedIdentity.version !== manifest.runtime.version
-        ) {
-            throw failure();
+        await environment.lstat(destination);
+        return await verifyProvisioningPair(destination, releaseRoot, environment);
+    } catch (error) {
+        if (errorCode(error) !== "ENOENT") throw failure();
+    }
+    const staged = await mkdtemp(
+        path.join(environment.provisioningPairsRoot, ".pair-stage-")
+    );
+    try {
+        for (const [source, name] of [
+            [path.join(releaseRoot, "runtime/bun"), productionProvisioningRuntimeName],
+            [
+                path.join(releaseRoot, "server/productionProvisioning.js"),
+                productionProvisioningEntrypointName,
+            ],
+        ] as const) {
+            await requireSuccess(
+                "/usr/bin/install",
+                [
+                    "-o",
+                    "root",
+                    "-g",
+                    "root",
+                    "-m",
+                    "0555",
+                    source,
+                    path.join(staged, name),
+                ],
+                environment
+            );
+            await environment.syncPath(path.join(staged, name));
         }
+        await chmod(staged, 0o500);
         await environment.syncPath(staged);
-        await environment.rename(staged, environment.runtimeExecutable);
-        await environment.syncPath(path.dirname(environment.runtimeExecutable));
-        const installedIdentity = await probeRuntime(
-            environment.runtimeExecutable,
-            environment
-        );
-        if (
-            (await sha256File(environment.runtimeExecutable, environment)) !==
-                sourceSha256 ||
-            installedIdentity.revision !== manifest.runtime.revision ||
-            installedIdentity.version !== manifest.runtime.version
-        ) {
-            throw failure();
-        }
+        await verifyProvisioningPair(staged, releaseRoot, environment);
+        await environment.rename(staged, destination);
+        await environment.syncPath(environment.provisioningPairsRoot);
+        return await verifyProvisioningPair(destination, releaseRoot, environment);
     } finally {
-        await environment.remove(staged);
+        await chmod(staged, 0o700).catch(() => {});
+        await environment.remove(staged).catch(() => {});
+    }
+}
+
+async function selectProvisioningPair(
+    pair: StagedProvisioningPair,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    const temporarySelector = `${environment.provisioningRoot}/.current-${Bun.randomUUIDv7()}`;
+    try {
+        await symlink(pair.root, temporarySelector, "dir");
+        await environment.rename(temporarySelector, environment.provisioningPairSelector);
+        await environment.syncPath(environment.provisioningRoot);
+    } finally {
+        await environment.remove(temporarySelector).catch(() => {});
     }
 }
 
@@ -702,27 +801,28 @@ async function downloadAndStageRelease(
     ) {
         throw failure();
     }
-    const archiveBytes = await githubAsset(
-        archiveAsset.id,
-        maximumProductionReleaseArchiveBytes,
-        environment
-    );
-    if (
-        archiveBytes.byteLength !== archiveAsset.size ||
-        archiveBytes.byteLength !== receipt.archive.bytes ||
-        sha256(archiveBytes) !== receipt.archive.sha256
-    ) {
-        throw failure();
-    }
     const temporaryRoot = await mkdtemp(
         path.join(environment.provisioningRoot, ".release-stage-")
     );
     try {
+        const archivePath = path.join(temporaryRoot, "release.tar");
+        const archive = await githubAssetToFile(
+            archiveAsset.id,
+            maximumProductionReleaseArchiveBytes,
+            archivePath,
+            environment
+        );
+        if (
+            archive.bytes !== archiveAsset.size ||
+            archive.bytes !== receipt.archive.bytes ||
+            archive.sha256 !== receipt.archive.sha256
+        ) {
+            throw failure();
+        }
         const listing = await requireSuccess(
             "/usr/bin/tar",
-            ["-tf", "-"],
-            environment,
-            archiveBytes
+            ["-tf", archivePath],
+            environment
         );
         assertProductionReleaseArchiveListing(
             new TextDecoder("utf-8", { fatal: true }).decode(listing),
@@ -730,9 +830,8 @@ async function downloadAndStageRelease(
         );
         await requireSuccess(
             "/usr/bin/tar",
-            ["-xf", "-", "--no-same-owner", "-C", temporaryRoot],
-            environment,
-            archiveBytes
+            ["-xf", archivePath, "--no-same-owner", "-C", temporaryRoot],
+            environment
         );
         const stagedRoot = path.join(temporaryRoot, releaseId);
         const manifest = await environment.verifyReleaseArtifactIdentity(stagedRoot);
@@ -766,7 +865,20 @@ async function downloadAndStageRelease(
             ) {
                 throw failure();
             }
-            return await verifyStagedRelease(releaseId, environment);
+            const existingRoot = await verifyStagedRelease(releaseId, environment);
+            const existingManifest =
+                await environment.verifyReleaseArtifactIdentity(existingRoot);
+            const existingManifestBytes = await readFile(
+                path.join(existingRoot, "release-manifest.json")
+            );
+            if (
+                sha256(existingManifestBytes) !== receipt.releaseManifestSha256 ||
+                existingManifest.runtime.version !== receipt.runtime.version ||
+                existingManifest.runtime.revision !== receipt.runtime.revision
+            ) {
+                throw failure();
+            }
+            return existingRoot;
         }
         await environment.rename(stagedRoot, destination);
         await environment.syncPath(temporaryRoot);
@@ -848,13 +960,24 @@ async function retainReleaseRoots(
             await environment.remove(path.join(environment.releasesRoot, name));
         }
     }
+    const pairNames = await environment.readDirectory(environment.provisioningPairsRoot);
+    if (pairNames.some((name) => !/^[a-f\d]{40}$/u.test(name))) {
+        throw failure();
+    }
+    for (const name of pairNames) {
+        if (!retained.has(name)) {
+            await environment.remove(path.join(environment.provisioningPairsRoot, name));
+        }
+    }
     await environment.syncPath(environment.releasesRoot);
+    await environment.syncPath(environment.provisioningPairsRoot);
     await validateReleaseRoots(environment);
 }
 
 async function installAuthority(
     releaseId: string,
     releaseRoot: string,
+    runtime: string,
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<void> {
     const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
@@ -883,7 +1006,7 @@ async function installAuthority(
         arguments_: readonly string[];
     }>[] = [
         {
-            executable: environment.runtimeExecutable,
+            executable: runtime,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts`,
                 `--release-root=${releaseRoot}`,
@@ -892,7 +1015,7 @@ async function installAuthority(
             ],
         },
         {
-            executable: environment.runtimeExecutable,
+            executable: runtime,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts`,
                 `--release-root=${releaseRoot}`,
@@ -900,7 +1023,7 @@ async function installAuthority(
             ],
         },
         {
-            executable: environment.runtimeExecutable,
+            executable: runtime,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
                 `--user-id=${userIdText}`,
@@ -915,7 +1038,7 @@ async function installAuthority(
         },
         { executable: "/usr/bin/systemctl", arguments_: ["daemon-reload"] },
         {
-            executable: environment.runtimeExecutable,
+            executable: runtime,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
                 "--mode=apply",
@@ -928,6 +1051,7 @@ async function installAuthority(
 }
 
 const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freeze({
+    canonicalPath: realpath,
     executablePath: process.execPath,
     fetch,
     getUid: () => process.getuid?.(),
@@ -935,6 +1059,8 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     lstat,
     modulePath: import.meta.path,
     provisioningRoot,
+    provisioningPairSelector: productionProvisioningPairSelector,
+    provisioningPairsRoot: productionProvisioningPairsRoot,
     readActivationRecord: readProductionActivationRecord,
     readDirectory: readdir,
     readGithubToken: () => v.parse(githubTokenSchema, process.env.MIRA_GITHUB_TOKEN),
@@ -974,7 +1100,7 @@ export async function provisionProductionRelease(
     await verifyInstalledBoundary(environment);
     const { archiveSha256, receiptSha256, releaseId, settled, source } =
         parseProductionProvisioningAuthority(authority);
-    let installedPairSnapshot: InstalledProvisioningPairSnapshot | undefined;
+    let selectedReleaseId: string | undefined;
     try {
         let releaseRoot: string;
         if (source === "local") {
@@ -990,25 +1116,14 @@ export async function provisionProductionRelease(
                 environment
             );
         }
-        installedPairSnapshot = await snapshotInstalledProvisioningPair(environment);
-        await installCandidateRuntime(releaseRoot, environment);
-        await installAuthority(releaseId, releaseRoot, environment);
+        const pair = await stageProvisioningPair(releaseId, releaseRoot, environment);
+        await installAuthority(releaseId, releaseRoot, pair.runtime, environment);
+        await selectProvisioningPair(pair, environment);
+        selectedReleaseId = releaseId;
         await retainReleaseRoots(releaseId, settled, environment);
     } catch {
-        if (installedPairSnapshot !== undefined) {
-            await restoreInstalledProvisioningPair(
-                installedPairSnapshot,
-                environment
-            ).catch(() => {});
-        }
-        await retainReleaseRoots(undefined, false, environment).catch(() => {});
+        await retainReleaseRoots(selectedReleaseId, false, environment).catch(() => {});
         throw failure();
-    }
-    if (installedPairSnapshot !== undefined) {
-        await discardInstalledProvisioningPairSnapshot(
-            installedPairSnapshot,
-            environment
-        );
     }
 }
 

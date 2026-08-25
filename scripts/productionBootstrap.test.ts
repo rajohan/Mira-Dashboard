@@ -124,7 +124,9 @@ describe("production bootstrap admission", () => {
                 1000
             )
         ).toBe(releaseId);
-        expect(commands).toHaveLength(5);
+        expect(commands).toHaveLength(6);
+        expect(commands[0]).toBe("/usr/bin/git remote get-url origin");
+        expect(commands[1]).toBe("/usr/bin/git fetch --quiet --no-tags origin main");
         expect(
             resolveProductionBootstrapSourceIdentity(
                 dependencies,
@@ -431,7 +433,7 @@ describe("production bootstrap admission", () => {
                 commands.push([...command]);
                 let stdout = "";
                 if (command.includes("/usr/bin/sha256sum")) {
-                    stdout = command.at(-1)?.endsWith("/runtime/bun")
+                    stdout = command.at(-1)?.endsWith("/bun")
                         ? `${"e".repeat(64)}  bun\n`
                         : `${"d".repeat(64)}  release.tar\n`;
                 }
@@ -513,7 +515,7 @@ describe("production bootstrap admission", () => {
                     command.includes("--no-same-owner")
             )
         ).toBe(true);
-        expect(commands.at(-1)).toContain("--mode=apply");
+        expect(commands.some((command) => command.includes("--mode=apply"))).toBe(true);
     });
 
     test("rejects unexpected maintenance-group members", async () => {
@@ -532,7 +534,7 @@ describe("production bootstrap admission", () => {
                         if (command.includes("/usr/bin/sha256sum")) {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                stdout: command.at(-1)?.endsWith("/bun")
                                     ? `${"e".repeat(64)}  bun\n`
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
@@ -578,7 +580,7 @@ describe("production bootstrap admission", () => {
                         if (command.includes("/usr/bin/sha256sum")) {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                stdout: command.at(-1)?.endsWith("/bun")
                                     ? `${"e".repeat(64)}  bun\n`
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
@@ -617,7 +619,7 @@ describe("production bootstrap admission", () => {
                         if (command.includes("/usr/bin/sha256sum")) {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                stdout: command.at(-1)?.endsWith("/bun")
                                     ? `${"e".repeat(64)}  bun\n`
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
@@ -692,7 +694,7 @@ describe("production bootstrap admission", () => {
                 {
                     run: (command) => {
                         commands.push([...command]);
-                        const stagedRuntime = command.at(-1)?.endsWith("/runtime/bun");
+                        const stagedRuntime = command.at(-1)?.endsWith("/bun");
                         return Promise.resolve({
                             exitCode: 0,
                             stdout: command.includes("/usr/bin/sha256sum")
@@ -825,7 +827,7 @@ describe("production bootstrap admission", () => {
                 if (invocation.includes("sha256sum")) {
                     return {
                         exitCode: 0,
-                        stdout: command.at(-1)?.endsWith("/runtime/bun")
+                        stdout: command.at(-1)?.endsWith("/bun")
                             ? `${"e".repeat(64)}  bun\n`
                             : `${receipt.archive.sha256}  release.tar\n`,
                     };

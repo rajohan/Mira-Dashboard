@@ -22,6 +22,13 @@ import { prepareProductionDeliveryDirectories } from "./delivery/productionDeliv
 import { assertProductionReleaseArchiveListing } from "./delivery/productionReleaseArchive.ts";
 import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
 import { prepareProtectedProductionStatePath } from "./delivery/productionStateFilesystem.ts";
+import {
+    productionHostProvisioningRoot,
+    productionProvisioningEntrypointName,
+    productionProvisioningPairsRoot,
+    productionProvisioningPairSelector,
+    productionProvisioningRuntimeName,
+} from "./delivery/provisioning/host-operations/policy.ts";
 import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./delivery/systemdProductionServices.ts";
 
@@ -30,7 +37,7 @@ const projectRoot = path.resolve(import.meta.dir, "..");
 const projectHome = "/home/ubuntu/projects/mira-dashboard";
 const canonicalRepository = "rajohan/Mira-Dashboard";
 const canonicalRepositoryUrl = "https://github.com/rajohan/Mira-Dashboard.git";
-const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
+const provisioningRoot = productionHostProvisioningRoot;
 const maximumOutputBytes = 1024 * 1024;
 const maximumReceiptBytes = 4 * 1024 * 1024;
 const productionProvisioningDeadlineMs = 5 * 60 * 1000;
@@ -356,7 +363,20 @@ export async function resolveProductionBootstrapSourceIdentity(
     if ((await realpath(repositoryRoot)) !== expectedCheckout) {
         throw new Error(`Production bootstrap checkout must be ${expectedCheckout}`);
     }
-    const [branch, head, upstream, status, origin] = await Promise.all([
+    const origin = await requireSuccess(
+        dependencies,
+        ["/usr/bin/git", "remote", "get-url", "origin"],
+        repositoryRoot
+    );
+    if (origin !== canonicalRepositoryUrl) {
+        throw new Error("Production bootstrap requires the canonical GitHub origin");
+    }
+    await requireSuccess(
+        dependencies,
+        ["/usr/bin/git", "fetch", "--quiet", "--no-tags", "origin", "main"],
+        repositoryRoot
+    );
+    const [branch, head, upstream, status] = await Promise.all([
         requireSuccess(
             dependencies,
             ["/usr/bin/git", "branch", "--show-current"],
@@ -377,18 +397,12 @@ export async function resolveProductionBootstrapSourceIdentity(
             ["/usr/bin/git", "status", "--porcelain=v1"],
             repositoryRoot
         ),
-        requireSuccess(
-            dependencies,
-            ["/usr/bin/git", "remote", "get-url", "origin"],
-            repositoryRoot
-        ),
     ]);
     if (
         branch !== "main" ||
         !/^[a-f\d]{40}$/u.test(head) ||
         head !== upstream ||
-        status !== "" ||
-        origin !== canonicalRepositoryUrl
+        status !== ""
     ) {
         throw new Error("Production bootstrap requires clean main at exact origin/main");
     }
@@ -634,12 +648,18 @@ export async function stageProductionBootstrapRootAuthority(
 ): Promise<void> {
     const sudo = "/usr/bin/sudo";
     const stagedRelease = `${provisioningRoot}/releases/${releaseId}`;
-    const stagedRuntime = `${provisioningRoot}/runtime/bun`;
+    const stagedPair = `${productionProvisioningPairsRoot}/${releaseId}`;
+    const pairCandidate = `${productionProvisioningPairsRoot}/.pair-${Bun.randomUUIDv7()}`;
+    const candidateRuntime = `${pairCandidate}/${productionProvisioningRuntimeName}`;
+    const candidateEntrypoint = `${pairCandidate}/${productionProvisioningEntrypointName}`;
+    const stagedRuntime = `${stagedPair}/${productionProvisioningRuntimeName}`;
+    const stagedEntrypoint = `${stagedPair}/${productionProvisioningEntrypointName}`;
     const stagedArchive = `${provisioningRoot}/release.tar`;
     for (const directory of [
         provisioningRoot,
         `${provisioningRoot}/releases`,
-        `${provisioningRoot}/runtime`,
+        productionProvisioningPairsRoot,
+        pairCandidate,
     ]) {
         await requireSuccess(dependencies, [
             sudo,
@@ -654,136 +674,205 @@ export async function stageProductionBootstrapRootAuthority(
             directory,
         ]);
     }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/install",
-        "-o",
-        "root",
-        "-g",
-        "root",
-        "-m",
-        "0555",
-        process.execPath,
-        stagedRuntime,
-    ]);
-    const installedRuntimeSha256 = await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/sha256sum",
-        stagedRuntime,
-    ]);
-    if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/install",
-        "-o",
-        "root",
-        "-g",
-        "root",
-        "-m",
-        "0400",
-        path.join(artifactRoot, "release.tar"),
-        stagedArchive,
-    ]);
-    const installedArchiveSha256 = await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/sha256sum",
-        stagedArchive,
-    ]);
-    if (installedArchiveSha256.split(/\s+/u)[0] !== archiveSha256) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/tar",
-        "-xf",
-        stagedArchive,
-        "--no-same-owner",
-        "-C",
-        `${provisioningRoot}/releases`,
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts`,
-        `--release-root=${stagedRelease}`,
-        `--release-id=${releaseId}`,
-        `--release-manifest-sha256=${manifestSha256}`,
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts`,
-        `--release-root=${stagedRelease}`,
-        `--release-id=${releaseId}`,
-    ]);
-    let group = await dependencies.run([
-        "/usr/bin/getent",
-        "group",
-        "mira-dashboard-log-maintenance",
-    ]);
-    if (group.exitCode !== 0) {
+    try {
         await requireSuccess(dependencies, [
             sudo,
-            "/usr/sbin/groupadd",
-            "--system",
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0555",
+            process.execPath,
+            candidateRuntime,
+        ]);
+        const installedRuntimeSha256 = await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sha256sum",
+            candidateRuntime,
+        ]);
+        if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0400",
+            path.join(artifactRoot, "release.tar"),
+            stagedArchive,
+        ]);
+        const installedArchiveSha256 = await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sha256sum",
+            stagedArchive,
+        ]);
+        if (installedArchiveSha256.split(/\s+/u)[0] !== archiveSha256) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/tar",
+            "-xf",
+            stagedArchive,
+            "--no-same-owner",
+            "-C",
+            `${provisioningRoot}/releases`,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0555",
+            `${stagedRelease}/server/productionProvisioning.js`,
+            candidateEntrypoint,
+        ]);
+        const existingPair = await dependencies.run([
+            sudo,
+            "/usr/bin/test",
+            "-e",
+            stagedPair,
+        ]);
+        if (existingPair.exitCode === 0) {
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/cmp",
+                "-s",
+                candidateRuntime,
+                stagedRuntime,
+            ]);
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/cmp",
+                "-s",
+                candidateEntrypoint,
+                stagedEntrypoint,
+            ]);
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/rm",
+                "-rf",
+                pairCandidate,
+            ]);
+        } else {
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/mv",
+                "-T",
+                pairCandidate,
+                stagedPair,
+            ]);
+        }
+        const stagedSelector = `${provisioningRoot}/.current-${Bun.randomUUIDv7()}`;
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/ln",
+            "-s",
+            stagedPair,
+            stagedSelector,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/mv",
+            "-Tf",
+            stagedSelector,
+            productionProvisioningPairSelector,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts`,
+            `--release-root=${stagedRelease}`,
+            `--release-id=${releaseId}`,
+            `--release-manifest-sha256=${manifestSha256}`,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts`,
+            `--release-root=${stagedRelease}`,
+            `--release-id=${releaseId}`,
+        ]);
+        let group = await dependencies.run([
+            "/usr/bin/getent",
+            "group",
             "mira-dashboard-log-maintenance",
+        ]);
+        if (group.exitCode !== 0) {
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/sbin/groupadd",
+                "--system",
+                "mira-dashboard-log-maintenance",
+            ]);
+            group = await dependencies.run([
+                "/usr/bin/getent",
+                "group",
+                "mira-dashboard-log-maintenance",
+            ]);
+        }
+        let admittedGroup =
+            group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
+        if (
+            !admittedGroup ||
+            !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+        ) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/sbin/usermod",
+            "--append",
+            "--groups",
+            "mira-dashboard-log-maintenance",
+            "ubuntu",
         ]);
         group = await dependencies.run([
             "/usr/bin/getent",
             "group",
             "mira-dashboard-log-maintenance",
         ]);
+        admittedGroup =
+            group.exitCode === 0
+                ? parseMaintenanceGroup(group.stdout, "ubuntu")
+                : undefined;
+        if (
+            !admittedGroup ||
+            !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+        ) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
+            `--user-id=${userId}`,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/systemd-tmpfiles",
+            "--create",
+            "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
+        ]);
+        await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
+            "--mode=apply",
+        ]);
+    } finally {
+        await dependencies.run([sudo, "/usr/bin/rm", "-rf", pairCandidate]);
     }
-    let admittedGroup =
-        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
-    if (
-        !admittedGroup ||
-        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
-    ) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/sbin/usermod",
-        "--append",
-        "--groups",
-        "mira-dashboard-log-maintenance",
-        "ubuntu",
-    ]);
-    group = await dependencies.run([
-        "/usr/bin/getent",
-        "group",
-        "mira-dashboard-log-maintenance",
-    ]);
-    admittedGroup =
-        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "ubuntu") : undefined;
-    if (
-        !admittedGroup ||
-        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
-    ) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
-        `--user-id=${userId}`,
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/systemd-tmpfiles",
-        "--create",
-        "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
-    ]);
-    await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
-        "--mode=apply",
-    ]);
 }
 
 export const productionBootstrapDependencies = Object.freeze({ run: defaultRun });

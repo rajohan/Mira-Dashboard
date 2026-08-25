@@ -13,6 +13,8 @@ import {
     hostOperationsProvisioningSourceArtifactPaths,
     maximumProductionProvisioningBundleBytes,
     productionHostProvisioningRoot,
+    productionProvisioningPairsRoot,
+    productionProvisioningRuntimeName,
 } from "./policy.ts";
 
 const installationFailureMessage = "Host operations provisioning installation failed";
@@ -36,7 +38,6 @@ const artifactShaPattern = /^[a-f\d]{64}$/u;
 const artifactSegmentPattern = /^[A-Za-z0-9.@_+-]+$/u;
 const provisioningPrefix = "scripts/delivery/provisioning/host-operations/";
 const productionSourceIdentity = Object.freeze({ groupId: 0n, userId: 0n });
-const productionRuntimeExecutablePath = `${productionHostProvisioningRoot}/runtime/bun`;
 const installerRelativePath =
     "scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts";
 const productionProvisioningBundlePath = "server/productionProvisioning.js";
@@ -78,7 +79,7 @@ const productionRuntimeBoundary = Object.freeze({
     actualExecutablePath: process.execPath,
     actualEntrypointPath: import.meta.path,
     expectedEntrypointPath: "",
-    expectedExecutablePath: productionRuntimeExecutablePath,
+    expectedExecutablePath: "",
     ...productionSourceIdentity,
     trustRoot: productionHostProvisioningRoot,
 });
@@ -784,6 +785,12 @@ export async function runInstallHostOperationsProvisioningCli(
         const runtimeBoundary = testHooks.runtimeBoundary ?? {
             ...productionRuntimeBoundary,
             expectedEntrypointPath: path.join(parsed.releaseRoot, installerRelativePath),
+            expectedExecutablePath: path.join(
+                productionProvisioningPairsRoot,
+                parsed.releaseId,
+                productionProvisioningRuntimeName
+            ),
+            trustRoot: productionProvisioningPairsRoot,
         };
         await validateRuntimeBoundary(runtimeBoundary, parsed.releaseRoot);
         const expectedSourceIdentity =
