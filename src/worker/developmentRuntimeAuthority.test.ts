@@ -233,6 +233,17 @@ describe("source-development runtime authority", () => {
         await authority.databaseObservability.collect();
 
         const refreshed = await delivery.refresh({});
+        expect(refreshed.find(({ section }) => section === "checkout")).toMatchObject({
+            payload: {
+                checkout: {
+                    condition: "ready",
+                    headSha: secondPullRequestHead,
+                    remoteHeadSha: secondPullRequestHead,
+                    safeForDeploy: true,
+                },
+            },
+            state: "succeeded",
+        });
         expect(refreshed.find(({ section }) => section === "preview")).toMatchObject({
             payload: { preview: { number: 42, status: "running" } },
             state: "succeeded",

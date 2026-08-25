@@ -53,6 +53,7 @@ const readinessUrlSchema = v.pipe(
     }, launcherFailureMessage)
 );
 const optionsSchema = v.strictObject({
+    artifactSource: v.picklist(["published-release", "retained"], launcherFailureMessage),
     executorReleaseId: fullCommitShaSchema(launcherFailureMessage),
     projectRoot: absoluteProjectRootSchema,
     readinessUrl: readinessUrlSchema,
@@ -62,6 +63,10 @@ const optionsSchema = v.strictObject({
 
 export type ProductionDeliveryLaunchOptions = Readonly<
     v.InferOutput<typeof optionsSchema>
+>;
+export type ProductionDeliveryExecutorIdentityOptions = Omit<
+    ProductionDeliveryLaunchOptions,
+    "artifactSource"
 >;
 
 export interface ProductionDeliveryLaunchProcessResult {
@@ -353,6 +358,30 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
     const unit = transientUnitName(options.transitionId);
     if (typeof process.getuid !== "function") throw failure();
     const runtimeDirectory = `/run/user/${process.getuid()}`;
+    const executorCommand = [
+        runtimeExecutable,
+        executor,
+        `--artifact-source=${options.artifactSource}`,
+        "--operation=cutover",
+        `--project-root=${options.projectRoot}`,
+        `--readiness-url=${options.readinessUrl}`,
+        `--transition=${options.transitionId}`,
+    ] as const;
+    const credentialCommand =
+        options.artifactSource === "published-release"
+            ? [
+                  dopplerExecutable,
+                  "run",
+                  "--config=prd",
+                  "--project=rajohan",
+                  `--config-dir=${dopplerConfigurationDirectory}`,
+                  "--no-read-env",
+                  "--only-secrets=MIRA_GITHUB_TOKEN",
+                  "--preserve-env=DBUS_SESSION_BUS_ADDRESS,HOME,NODE_ENV,PATH,XDG_RUNTIME_DIR",
+                  "--",
+                  ...executorCommand,
+              ]
+            : executorCommand;
     return Object.freeze([
         systemdRunExecutable,
         "--user",
@@ -368,7 +397,9 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         "--property=NoNewPrivileges=yes",
         "--property=ProtectHome=tmpfs",
         `--property=BindPaths=${options.projectRoot}`,
-        `--property=BindReadOnlyPaths=${dopplerConfigurationDirectory}`,
+        ...(options.artifactSource === "published-release"
+            ? [`--property=BindReadOnlyPaths=${dopplerConfigurationDirectory}`]
+            : []),
         "--property=PrivateTmp=yes",
         "--property=PrivateDevices=yes",
         "--property=RestrictSUIDSGID=yes",
@@ -382,29 +413,16 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         "NODE_ENV=production",
         "PATH=/usr/local/bin:/usr/bin:/bin",
         `XDG_RUNTIME_DIR=${runtimeDirectory}`,
-        dopplerExecutable,
-        "run",
-        "--config=prd",
-        "--project=rajohan",
-        `--config-dir=${dopplerConfigurationDirectory}`,
-        "--no-read-env",
-        "--only-secrets=MIRA_GITHUB_TOKEN",
-        "--preserve-env=DBUS_SESSION_BUS_ADDRESS,HOME,NODE_ENV,PATH,XDG_RUNTIME_DIR",
-        "--",
-        runtimeExecutable,
-        executor,
-        "--operation=cutover",
-        `--project-root=${options.projectRoot}`,
-        `--readiness-url=${options.readinessUrl}`,
-        `--transition=${options.transitionId}`,
+        ...credentialCommand,
     ]);
 }
 
 /**
  * Launches one immutable executor in a transient user-systemd cgroup.
  * `env -i` and a private home mount prevent worker/Gateway secrets from crossing over. The
- * canonical Doppler configuration is mounted read-only and projects only the GitHub release
- * credential required to admit immutable assets; the exact project root is rebound for state.
+ * For a new published deploy only, the canonical Doppler configuration is mounted read-only and
+ * projects the GitHub release credential required to admit immutable assets. Rollback and durable
+ * recovery launch the executor without Doppler because they are restricted to retained artifacts.
  */
 export async function launchProductionDeliveryExecutor(
     untrustedOptions: ProductionDeliveryLaunchOptions,
@@ -443,11 +461,13 @@ export type ProductionDeliveryExecutorEnsureResult = "already-running" | "launch
  * @returns Whether the exact executor was already running or newly launched.
  */
 export async function ensureProductionDeliveryExecutor(
-    untrustedOptions: ProductionDeliveryLaunchOptions,
+    untrustedOptions: ProductionDeliveryExecutorIdentityOptions,
     dependencies: ProductionDeliveryLauncherDependencies = {},
     signal?: AbortSignal
 ): Promise<ProductionDeliveryExecutorEnsureResult> {
-    const options = Object.freeze(v.parse(optionsSchema, untrustedOptions));
+    const options = Object.freeze(
+        v.parse(optionsSchema, { ...untrustedOptions, artifactSource: "retained" })
+    );
     await resolveVerifiedProductionDeliveryExecutor({
         executorReleaseId: options.executorReleaseId,
         projectRoot: options.projectRoot,

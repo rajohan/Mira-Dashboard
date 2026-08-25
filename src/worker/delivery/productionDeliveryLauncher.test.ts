@@ -96,6 +96,7 @@ async function fixture() {
     return {
         executor,
         options: {
+            artifactSource: "published-release" as const,
             executorReleaseId,
             projectRoot,
             readinessUrl: "http://127.0.0.1:3100/api/health/ready",
@@ -206,6 +207,7 @@ describe("production Delivery launcher", () => {
         );
         expect(observedCommand).toContain(runtime);
         expect(observedCommand).toContain(executor);
+        expect(observedCommand).toContain("--artifact-source=published-release");
         expect(observedCommand).toContain(`--transition=${transitionId}`);
         expect(Object.keys(observedEnvironment).toSorted()).toEqual([
             "DBUS_SESSION_BUS_ADDRESS",
@@ -214,6 +216,30 @@ describe("production Delivery launcher", () => {
             "XDG_RUNTIME_DIR",
         ]);
         expect(JSON.stringify(observedEnvironment)).not.toContain("TOKEN");
+    });
+
+    test("starts retained-artifact recovery without Doppler or its configuration", async () => {
+        const fixture_ = await fixture();
+        let observedCommand: readonly string[] = [];
+
+        await launchProductionDeliveryExecutor(
+            { ...fixture_.options, artifactSource: "retained" },
+            {
+                execute: (command) => {
+                    observedCommand = command;
+                    return Promise.resolve(success);
+                },
+            }
+        );
+
+        expect(observedCommand).not.toContain("/usr/local/bin/doppler");
+        expect(observedCommand).not.toContain("--only-secrets=MIRA_GITHUB_TOKEN");
+        expect(observedCommand).not.toContain(
+            "--property=BindReadOnlyPaths=/home/ubuntu/.doppler"
+        );
+        expect(observedCommand).toContain(fixture_.runtime);
+        expect(observedCommand).toContain(fixture_.executor);
+        expect(observedCommand).toContain("--artifact-source=retained");
     });
 
     test("fails closed on mutable artifacts and process diagnostics", async () => {
@@ -295,6 +321,8 @@ describe("production Delivery launcher", () => {
         expect(commands[1]).toContain(runtime);
         expect(commands[1]).toContain(executor);
         expect(commands[1]).toContain("--property=RuntimeMaxSec=90min");
+        expect(commands[1]).toContain("--artifact-source=retained");
+        expect(commands[1]).not.toContain("/usr/local/bin/doppler");
         expect(commands[1]).toContain(`--transition=${transitionId}`);
     });
 

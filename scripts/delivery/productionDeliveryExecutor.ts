@@ -72,10 +72,7 @@ import { createSystemdProductionServiceController } from "./systemdProductionSer
 
 const executorFailureMessage = "Production Delivery executor failed";
 const executorUsage =
-    "Usage: bun productionDelivery.js --operation=prepare|inspect|inspect-active|clear|cutover --project-root=/absolute/project [--readiness-url=http://127.0.0.1:PORT/api/health/ready] [--transition=uuid-v7]";
-const productionHostProvisioningCapacityDirectory = path.dirname(
-    productionHostProvisioningRoot
-);
+    "Usage: bun productionDelivery.js --operation=prepare|inspect|inspect-active|clear|cutover --project-root=/absolute/project [--artifact-source=published-release|retained] [--readiness-url=http://127.0.0.1:PORT/api/health/ready] [--transition=uuid-v7]";
 const admitProductionDeliveryArtifacts: typeof assertProductionArtifactCapacity = (
     lease,
     paths,
@@ -90,7 +87,7 @@ const admitProductionDeliveryArtifacts: typeof assertProductionArtifactCapacity 
         sourceManifest,
         sourceExecutable,
         {
-            additionalReleaseCopyDirectory: productionHostProvisioningCapacityDirectory,
+            additionalReleaseCopyDirectory: productionHostProvisioningRoot,
         }
     );
 const absoluteProjectRootSchema = v.pipe(
@@ -145,6 +142,7 @@ const argumentsSchema = v.variant("operation", [
         transitionId: lowercaseUuidV7Schema(executorUsage),
     }),
     v.strictObject({
+        artifactSource: v.picklist(["published-release", "retained"], executorUsage),
         operation: v.literal("cutover"),
         projectRoot: absoluteProjectRootSchema,
         readinessUrl: readinessUrlSchema,
@@ -390,15 +388,22 @@ export function parseProductionDeliveryExecutorArguments(
     if (
         Object.keys(named).some(
             (name) =>
-                !["operation", "project-root", "readiness-url", "transition"].includes(
-                    name
-                )
+                ![
+                    "artifact-source",
+                    "operation",
+                    "project-root",
+                    "readiness-url",
+                    "transition",
+                ].includes(name)
         )
     ) {
         throw new TypeError(executorUsage);
     }
     return Object.freeze(
         v.parse(argumentsSchema, {
+            ...(named["artifact-source"] === undefined
+                ? {}
+                : { artifactSource: named["artifact-source"] }),
             operation: named.operation,
             projectRoot: named["project-root"],
             ...(named["readiness-url"] === undefined
@@ -512,6 +517,7 @@ async function pathState(candidate: string): Promise<"missing" | "present"> {
  * @param projectRoot Canonical Dashboard project root.
  * @param record Exact in-progress operation record.
  * @param current Verified active release and runtime.
+ * @param artifactSource Whether a missing target may be admitted from its published release.
  * @param dependencies Optional fixed delivery seams.
  * @returns The verified published target release and runtime.
  */
@@ -524,6 +530,7 @@ export async function prepareProductionDeliveryTargetUnderLease(
         release: PublishedProductionRelease;
         runtime: InstalledProductionRuntime;
     }>,
+    artifactSource: "published-release" | "retained",
     dependencies: ProductionDeliveryExecutorDependencies
 ): Promise<
     Readonly<{ release: PublishedProductionRelease; runtime: InstalledProductionRuntime }>
@@ -546,6 +553,7 @@ export async function prepareProductionDeliveryTargetUnderLease(
         }
         return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
     }
+    if (artifactSource === "retained") throw failure();
     const checkoutRoot = path.join(projectRoot, "production/checkout");
     const source = await (
         dependencies.resolveSourceIdentity ?? resolveBuildSourceIdentity
@@ -564,7 +572,7 @@ export async function prepareProductionDeliveryTargetUnderLease(
     if (!usesTestBuildSeams) {
         await (
             dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
-        )(checkoutRoot);
+        )(checkoutRoot, productionHostProvisioningRoot);
         admittedPublishedRelease = await (
             dependencies.preparePublishedRelease ?? preparePublishedProductionRelease
         )(
@@ -893,6 +901,7 @@ export async function runProductionDeliveryExecutorUnderLease(
                 options.projectRoot,
                 record,
                 current,
+                options.artifactSource,
                 dependencies
             );
         }

@@ -184,6 +184,7 @@ async function fixture() {
     const state = await prepareProtectedProductionStatePath(projectRoot);
     const paths = await prepareProductionDeliveryDirectories(state);
     const options = parseProductionDeliveryExecutorArguments([
+        "--artifact-source=published-release",
         "--operation=cutover",
         `--project-root=${projectRoot}`,
         "--readiness-url=http://127.0.0.1:3100/api/health/ready",
@@ -364,6 +365,7 @@ describe("production Delivery executor", () => {
     test("rejects extra, non-loopback, and malformed arguments", () => {
         expect(() =>
             parseProductionDeliveryExecutorArguments([
+                "--artifact-source=published-release",
                 "--operation=cutover",
                 "--project-root=/srv/dashboard",
                 "--readiness-url=https://dashboard.example/api/health/ready",
@@ -372,11 +374,21 @@ describe("production Delivery executor", () => {
         ).toThrow("Usage: bun productionDelivery.js");
         expect(() =>
             parseProductionDeliveryExecutorArguments([
+                "--artifact-source=published-release",
                 "--operation=cutover",
                 "--project-root=/srv/dashboard",
                 "--readiness-url=http://127.0.0.1:3100/api/health/ready",
                 `--transition=${operationTransitionId}`,
                 "--token=secret",
+            ])
+        ).toThrow("Usage: bun productionDelivery.js");
+        expect(() =>
+            parseProductionDeliveryExecutorArguments([
+                "--artifact-source=network-fallback",
+                "--operation=cutover",
+                "--project-root=/srv/dashboard",
+                "--readiness-url=http://127.0.0.1:3100/api/health/ready",
+                `--transition=${operationTransitionId}`,
             ])
         ).toThrow("Usage: bun productionDelivery.js");
     });
@@ -832,6 +844,7 @@ describe("production Delivery executor", () => {
                 options.projectRoot,
                 record,
                 current,
+                "published-release",
                 {
                     buildRelease: (_root, buildOptions) => {
                         expect(buildOptions?.runtimeIdentity).toEqual(
@@ -903,11 +916,50 @@ describe("production Delivery executor", () => {
                     options.projectRoot,
                     record,
                     artifact(currentReleaseId, currentRuntimeRevision),
+                    "published-release",
                     {}
                 )
             ).rejects.toThrow("Production Delivery executor failed");
             const retained = await lstat(publishedRoot);
             expect(retained.isDirectory()).toBe(true);
+        });
+    });
+
+    test("rejects missing retained artifacts without resolving or downloading a release", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            let sourceResolved = false;
+            let downloadStarted = false;
+
+            const retainedFailure = await rejectionError(
+                prepareProductionDeliveryTargetUnderLease(
+                    lease,
+                    paths,
+                    options.projectRoot,
+                    record,
+                    artifact(currentReleaseId, currentRuntimeRevision),
+                    "retained",
+                    {
+                        preparePublishedRelease: () => {
+                            downloadStarted = true;
+                            throw new Error("must not be reached");
+                        },
+                        resolveSourceIdentity: () => {
+                            sourceResolved = true;
+                            throw new Error("must not be reached");
+                        },
+                    }
+                )
+            );
+            expect(retainedFailure.message).toBe("Production Delivery executor failed");
+            expect(sourceResolved).toBeFalse();
+            expect(downloadStarted).toBeFalse();
         });
     });
 
@@ -930,6 +982,7 @@ describe("production Delivery executor", () => {
                 options.projectRoot,
                 record,
                 current,
+                "published-release",
                 {
                     preparationCapacityAdmission: () => {
                         calls.push("preparation-capacity");
@@ -1005,6 +1058,7 @@ describe("production Delivery executor", () => {
                     options.projectRoot,
                     record,
                     artifact(currentReleaseId, currentRuntimeRevision),
+                    "published-release",
                     {
                         preparationCapacityAdmission: () =>
                             Promise.reject(new Error("insufficient capacity")),

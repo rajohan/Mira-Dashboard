@@ -1,5 +1,7 @@
+import type { BigIntStats, BigIntStatsFs } from "node:fs";
 import { lstat, statfs } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import path from "node:path";
 
 import {
     maximumProductionReleaseArchiveBytes,
@@ -27,16 +29,40 @@ export const productionReleasePreparationCapacityPolicy = Object.freeze({
     temporaryPreparationBytes,
 });
 
+export interface ProductionReleasePreparationCapacityDependencies {
+    readonly lstat?: (target: string) => Promise<BigIntStats>;
+    readonly statfs?: (target: string) => Promise<BigIntStatsFs>;
+}
+
 /**
  * Admits all download and extraction staging before any release bytes are written.
  * @param checkoutRoot Canonical checkout filesystem used for unprivileged extraction.
- * @param hostProvisioningDirectory Existing ancestor for clean-host root staging.
+ * @param hostProvisioningRoot Canonical root used for privileged release staging.
+ * @param dependencies Optional fixed filesystem inspection seams.
  */
 export async function admitProductionReleasePreparation(
     checkoutRoot: string,
-    hostProvisioningDirectory?: string
+    hostProvisioningRoot?: string,
+    dependencies: ProductionReleasePreparationCapacityDependencies = {}
 ): Promise<void> {
     try {
+        const inspect =
+            dependencies.lstat ?? ((target) => lstat(target, { bigint: true }));
+        const measure =
+            dependencies.statfs ?? ((target) => statfs(target, { bigint: true }));
+        let hostProvisioningDirectory: string | undefined;
+        if (hostProvisioningRoot !== undefined) {
+            try {
+                const status = await inspect(hostProvisioningRoot);
+                if (!status.isDirectory() || status.isSymbolicLink()) {
+                    throw new Error(failureMessage);
+                }
+                hostProvisioningDirectory = hostProvisioningRoot;
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+                hostProvisioningDirectory = path.dirname(hostProvisioningRoot);
+            }
+        }
         const demands = [
             {
                 bytes: temporaryPreparationBytes,
@@ -76,8 +102,8 @@ export async function admitProductionReleasePreparation(
         >();
         for (const demand of demands) {
             const [status, capacity] = await Promise.all([
-                lstat(demand.directory, { bigint: true }),
-                statfs(demand.directory, { bigint: true }),
+                inspect(demand.directory),
+                measure(demand.directory),
             ]);
             if (
                 !status.isDirectory() ||

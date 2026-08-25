@@ -710,7 +710,7 @@ function createDeliveryPort(
                     branch: "main",
                     condition: "ready",
                     expectedBranch: "main",
-                    headSha: currentReleaseId,
+                    headSha: secondPullRequestHead,
                     remoteHeadSha: secondPullRequestHead,
                     revision: sourceRevision,
                     safeForDeploy: true,

@@ -1220,7 +1220,7 @@ export async function bootstrapProduction(
     }
     await (
         dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
-    )(repositoryRoot, path.dirname(provisioningRoot));
+    )(repositoryRoot, provisioningRoot);
     const admitted = await preparePublishedProductionRelease(
         releaseId,
         repositoryRoot,

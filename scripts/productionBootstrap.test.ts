@@ -885,7 +885,7 @@ describe("production bootstrap admission", () => {
             },
             preparationCapacityAdmission: (checkoutRoot, hostDirectory) => {
                 expect(checkoutRoot).toBe(targetRepositoryRoot);
-                expect(hostDirectory).toBe("/var/lib");
+                expect(hostDirectory).toBe(productionHostProvisioningRoot);
                 preparationCapacityAdmitted = true;
                 return Promise.resolve();
             },

@@ -6,8 +6,8 @@ import {
 } from "../../shared/deliveryProductionOperation.ts";
 import {
     ensureProductionDeliveryExecutor,
+    type ProductionDeliveryExecutorIdentityOptions,
     type ProductionDeliveryExecutorEnsureResult,
-    type ProductionDeliveryLaunchOptions,
 } from "./productionDeliveryLauncher.ts";
 
 const recoveryFailureMessage = "Delivery production recovery failed";
@@ -18,7 +18,7 @@ export class DeliveryProductionRecoveryError extends Error {
 
 export interface DeliveryProductionCutoverResumeOptions {
     readonly ensure?: (
-        options: ProductionDeliveryLaunchOptions,
+        options: ProductionDeliveryExecutorIdentityOptions,
         signal?: AbortSignal
     ) => Promise<ProductionDeliveryExecutorEnsureResult>;
     readonly projectRoot: string;
