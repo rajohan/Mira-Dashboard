@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.1...v0.3.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* **bootstrap:** secure Submaker log boundary ([#457](https://github.com/rajohan/Mira-Dashboard/issues/457)) ([17fc7b1](https://github.com/rajohan/Mira-Dashboard/commit/17fc7b1dd9064b735d7ce22d34dfa53b54b50224))
+
 ## [0.3.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.0...v0.3.1) (2026-08-25)
 
 
