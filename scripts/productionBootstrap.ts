@@ -995,13 +995,14 @@ export async function preparePublishedProductionRelease(
         await requireSuccess(
             dependencies,
             [
-                process.execPath,
-                "run",
-                "delivery",
-                "prepare-state",
+                path.join(admitted.releaseRoot, "runtime/bun"),
+                path.join(
+                    admitted.releaseRoot,
+                    "scripts/delivery/prepareProductionState.ts"
+                ),
                 `--project-root=${projectHome}`,
             ],
-            repositoryRoot
+            admitted.releaseRoot
         );
         if (options.stageRootAuthority !== false) {
             if (!prerequisites) throw new Error(failureMessage);

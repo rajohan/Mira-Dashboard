@@ -756,7 +756,7 @@ describe("production bootstrap admission", () => {
             run: async (command, cwd) => {
                 const invocation = command.join(" ");
                 commands.push(invocation);
-                if (invocation.includes("delivery prepare-state")) {
+                if (invocation.includes("prepareProductionState.ts")) {
                     prepareStateWorkingDirectories.push(cwd ?? "");
                 }
                 if (command[0] === "/usr/bin/tar") {
@@ -851,11 +851,20 @@ describe("production bootstrap admission", () => {
 
         expect(prerequisitesInspected).toBe(true);
         expect(
-            commands.some((command) => command.includes("delivery prepare-state"))
+            commands.some((command) => command.includes("prepareProductionState.ts"))
         ).toBe(true);
-        expect(prepareStateWorkingDirectories).toEqual([targetRepositoryRoot]);
+        const admittedReleaseRoot = path.join(
+            targetRepositoryRoot,
+            "dist/releases",
+            releaseId
+        );
+        expect(prepareStateWorkingDirectories).toEqual([admittedReleaseRoot]);
         expect(
-            commands.findIndex((command) => command.includes("delivery prepare-state"))
+            commands.findIndex((command) =>
+                command.startsWith(
+                    `${admittedReleaseRoot}/runtime/bun ${admittedReleaseRoot}/scripts/delivery/prepareProductionState.ts`
+                )
+            )
         ).toBeLessThan(
             commands.findIndex((command) =>
                 command.includes("migrateManagedApplicationLogs.ts")
@@ -903,8 +912,8 @@ describe("production bootstrap admission", () => {
         expect(manualDeployDelivered).toBe(true);
         expect(prerequisitesInspected).toBe(false);
         expect(prepareStateWorkingDirectories).toEqual([
-            targetRepositoryRoot,
-            targetRepositoryRoot,
+            admittedReleaseRoot,
+            admittedReleaseRoot,
         ]);
 
         await writeFile(path.join(targetRepositoryRoot, ".bun-version"), "9.9.9\n");

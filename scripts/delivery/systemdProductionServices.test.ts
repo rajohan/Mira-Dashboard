@@ -217,8 +217,8 @@ describe("production root-systemd service control", () => {
                 ["stop", "mira-dashboard-web.service"],
                 ["stop", "mira-dashboard-worker.service"],
             ]);
-            expect(deadlines[0]).toBe(330_000);
-            expect(deadlines[9]).toBe(330_000);
+            expect(deadlines[0]).toBe(930_000);
+            expect(deadlines[9]).toBe(930_000);
             expect(
                 deadlines
                     .filter((_deadline, index) => index !== 0 && index !== 9)

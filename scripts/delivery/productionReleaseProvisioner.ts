@@ -6,6 +6,7 @@ import {
     open,
     readFile,
     readdir,
+    readlink,
     rename,
     rm,
 } from "node:fs/promises";
@@ -26,6 +27,8 @@ const failureMessage = "Production release provisioning failed";
 const repositoryApi = "https://api.github.com/repos/rajohan/Mira-Dashboard";
 const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
 const releasesRoot = `${provisioningRoot}/releases`;
+const productionReleasePointersRoot =
+    "/home/ubuntu/projects/mira-dashboard/production/releases";
 const runtimeExecutable = `${provisioningRoot}/runtime/bun`;
 const installedEntrypoint =
     "/usr/local/libexec/mira-dashboard-production-provisioning.js";
@@ -95,10 +98,12 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly modulePath: string;
     readonly provisioningRoot: string;
     readonly readDirectory: (target: string) => Promise<string[]>;
+    readonly readLink: (target: string) => Promise<string>;
     readonly readGithubToken: () => string;
     readonly remove: (target: string) => Promise<void>;
     readonly rename: (source: string, destination: string) => Promise<void>;
     readonly releasesRoot: string;
+    readonly releasePointersRoot: string;
     readonly repositoryApi: string;
     readonly runCommand: (
         executable: string,
@@ -655,6 +660,55 @@ async function validateReleaseRoots(
     );
 }
 
+async function retainReleaseRoots(
+    candidateReleaseId: string | undefined,
+    requireSettledCurrent: boolean,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    await validateReleaseRoots(environment);
+    const retained = new Set(
+        candidateReleaseId === undefined ? [] : [candidateReleaseId]
+    );
+    for (const pointerName of ["current", "previous"] as const) {
+        let target: string;
+        try {
+            target = await environment.readLink(
+                path.join(environment.releasePointersRoot, pointerName)
+            );
+        } catch (error) {
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                (error as NodeJS.ErrnoException).code === "ENOENT" &&
+                (!requireSettledCurrent || pointerName === "previous")
+            ) {
+                continue;
+            }
+            throw failure();
+        }
+        if (!/^[a-f\d]{40}$/u.test(target)) throw failure();
+        if (
+            requireSettledCurrent &&
+            pointerName === "current" &&
+            target !== candidateReleaseId
+        ) {
+            throw failure();
+        }
+        retained.add(target);
+    }
+    const rootNames = await environment.readDirectory(environment.releasesRoot);
+    if (candidateReleaseId !== undefined && !rootNames.includes(candidateReleaseId)) {
+        throw failure();
+    }
+    for (const name of rootNames) {
+        if (!retained.has(name)) {
+            await environment.remove(path.join(environment.releasesRoot, name));
+        }
+    }
+    await environment.syncPath(environment.releasesRoot);
+    await validateReleaseRoots(environment);
+}
+
 async function installAuthority(
     releaseId: string,
     releaseRoot: string,
@@ -739,10 +793,12 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     modulePath: import.meta.path,
     provisioningRoot,
     readDirectory: readdir,
+    readLink: readlink,
     readGithubToken: () => v.parse(githubTokenSchema, process.env.MIRA_GITHUB_TOKEN),
     remove: (target: string) => rm(target, { force: true, recursive: true }),
     rename,
     releasesRoot,
+    releasePointersRoot: productionReleasePointersRoot,
     repositoryApi,
     runCommand: run,
     runtimeExecutable,
@@ -775,21 +831,28 @@ export async function provisionProductionRelease(
     await verifyInstalledBoundary(environment);
     const { archiveSha256, receiptSha256, releaseId, settled, source } =
         parseProductionProvisioningAuthority(authority);
-    let releaseRoot: string;
-    if (source === "local") {
-        releaseRoot = await verifyStagedRelease(releaseId, environment);
-    } else {
-        if (archiveSha256 === undefined || receiptSha256 === undefined) throw failure();
-        releaseRoot = await downloadAndStageRelease(
-            releaseId,
-            source,
-            { archiveSha256, receiptSha256 },
-            environment
-        );
+    try {
+        let releaseRoot: string;
+        if (source === "local") {
+            releaseRoot = await verifyStagedRelease(releaseId, environment);
+        } else {
+            if (archiveSha256 === undefined || receiptSha256 === undefined) {
+                throw failure();
+            }
+            releaseRoot = await downloadAndStageRelease(
+                releaseId,
+                source,
+                { archiveSha256, receiptSha256 },
+                environment
+            );
+        }
+        await installCandidateRuntime(releaseRoot, environment);
+        await installAuthority(releaseId, releaseRoot, environment);
+        await retainReleaseRoots(releaseId, settled, environment);
+    } catch {
+        await retainReleaseRoots(undefined, false, environment).catch(() => {});
+        throw failure();
     }
-    await installCandidateRuntime(releaseRoot, environment);
-    await installAuthority(releaseId, releaseRoot, environment);
-    if (settled) await validateReleaseRoots(environment);
 }
 
 if (import.meta.main) {

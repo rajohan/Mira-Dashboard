@@ -21,4 +21,4 @@ ProtectKernelTunables=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
 RestrictRealtime=yes
 SystemCallArchitectures=native
-TimeoutStartSec=5min
+TimeoutStartSec=15min

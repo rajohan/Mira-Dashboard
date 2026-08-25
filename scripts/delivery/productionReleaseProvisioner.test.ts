@@ -8,6 +8,7 @@ import {
     readFile,
     readdir,
     rm,
+    symlink,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -211,7 +212,9 @@ describe("production release root provisioner", () => {
         );
         temporaryDirectories.push(provisioningRoot);
         const releasesRoot = path.join(provisioningRoot, "releases");
+        const releasePointersRoot = path.join(provisioningRoot, "active-releases");
         await mkdir(releasesRoot);
+        await mkdir(releasePointersRoot);
         await Promise.all([
             cp(sourceReleaseRoot, path.join(releasesRoot, releaseId), {
                 recursive: true,
@@ -220,6 +223,10 @@ describe("production release root provisioner", () => {
             mkdir(path.join(releasesRoot, "b".repeat(40))),
         ]);
         await Promise.all([chmod(provisioningRoot, 0o700), chmod(releasesRoot, 0o700)]);
+        await Promise.all([
+            symlink(releaseId, path.join(releasePointersRoot, "current")),
+            symlink("a".repeat(40), path.join(releasePointersRoot, "previous")),
+        ]);
         const manifestBytes = await readFile(
             path.join(sourceReleaseRoot, "release-manifest.json")
         );
@@ -331,6 +338,7 @@ describe("production release root provisioner", () => {
                 await rm(target, { force: true, recursive: true });
             },
             releasesRoot,
+            releasePointersRoot,
             runCommand: async (executable, arguments_, stdin) => {
                 commands.push(`${executable} ${arguments_.join(" ")}`);
                 if (executable === "/usr/bin/install") {
@@ -387,6 +395,10 @@ describe("production release root provisioner", () => {
         expect(
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
         ).toMatchObject({ source: { commitSha: releaseId } });
+        const retainedAfterRejectedDownload = await readdir(releasesRoot);
+        expect(retainedAfterRejectedDownload.toSorted()).toEqual(
+            ["a".repeat(40), releaseId].toSorted()
+        );
 
         await provisionProductionRelease(
             `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
@@ -408,14 +420,19 @@ describe("production release root provisioner", () => {
             syncedPaths.some((target) => target.startsWith(`${runtimeExecutable}.stage-`))
         ).toBe(true);
         expect(syncedPaths).toContain(path.dirname(runtimeExecutable));
-        expect(await readdir(releasesRoot)).toHaveLength(3);
+        const retainedAfterPublishedInstall = await readdir(releasesRoot);
+        expect(retainedAfterPublishedInstall.toSorted()).toEqual(
+            ["a".repeat(40), releaseId].toSorted()
+        );
         await mkdir(path.join(releasesRoot, "f".repeat(40)));
         await provisionProductionRelease(`${releaseId}--local`, environment);
-        expect(await readdir(releasesRoot)).toHaveLength(4);
+        const retainedAfterLocalInstall = await readdir(releasesRoot);
+        expect(retainedAfterLocalInstall.toSorted()).toEqual(
+            ["a".repeat(40), releaseId].toSorted()
+        );
         await provisionProductionRelease(`${releaseId}--local--settled`, environment);
         const retainedRoots = await readdir(releasesRoot);
-        expect(retainedRoots).toHaveLength(4);
-        expect(retainedRoots).toContain(releaseId);
+        expect(retainedRoots.toSorted()).toEqual(["a".repeat(40), releaseId].toSorted());
         const runtimeInstallIndex = commands.findIndex((command) =>
             command.startsWith("/usr/bin/install -o root -g root -m 0555")
         );
