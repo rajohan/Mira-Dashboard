@@ -221,9 +221,13 @@ export async function deliverProductionReleaseUnderLease(
         options.releaseRoot,
         sourceManifest,
         runtimeSource,
-        {
-            additionalReleaseCopyDirectory: path.dirname(productionHostProvisioningRoot),
-        }
+        options.releaseAuthority === undefined
+            ? {}
+            : {
+                  additionalReleaseCopyDirectory: path.dirname(
+                      productionHostProvisioningRoot
+                  ),
+              }
     );
 
     let runtime: InstalledProductionRuntime;

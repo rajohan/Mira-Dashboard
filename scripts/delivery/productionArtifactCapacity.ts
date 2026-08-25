@@ -7,13 +7,18 @@ import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import { productionProvisioningEntrypointName } from "./provisioning/host-operations/policy.ts";
-import { inventoryReleaseArtifactTree } from "./releaseArtifactInventory.ts";
+import {
+    inventoryReleaseArtifactTree,
+    maximumReleaseArtifactCount,
+    maximumReleaseArtifactDirectoryCount,
+} from "./releaseArtifactInventory.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 
 const capacityFailureMessage = "Production artifact capacity admission failed";
 const commitShaPattern = /^[a-f\d]{40}$/u;
 const maximumRuntimeBytes = 256n * 1024n * 1024n;
-const maximumCapacityObjects = 8192;
+const maximumCapacityObjects =
+    2 * (maximumReleaseArtifactCount + maximumReleaseArtifactDirectoryCount) + 8;
 const privateDirectoryMode = 0o700n;
 
 /** Free space left untouched when admitting a new immutable release/runtime pair. */

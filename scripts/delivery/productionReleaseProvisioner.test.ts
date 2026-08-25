@@ -353,6 +353,9 @@ describe("production release root provisioner", () => {
             "installed provisioning entrypoint"
         );
         await symlink(previousPair, provisioningPairSelector, "dir");
+        const interruptedStage = path.join(provisioningRoot, ".release-stage-Ab12Cd");
+        await mkdir(interruptedStage, { mode: 0o700 });
+        await writeFile(path.join(interruptedStage, "release.tar"), archiveBytes);
         const environment = productionReleaseProvisionerTestSupport.createEnvironment({
             executablePath: runtimeExecutable,
             fetch: (url, init) => {
@@ -416,14 +419,21 @@ describe("production release root provisioner", () => {
             lstat: async (target) => {
                 const status = await lstat(target);
                 const trusted = trustedStatus(status.isFile());
+                let mode = trusted.mode;
+                if (
+                    target === interruptedStage ||
+                    target.startsWith(`${interruptedStage}/`)
+                ) {
+                    mode = status.mode;
+                } else if (status.isSymbolicLink()) {
+                    mode = constants.S_IFLNK | 0o777;
+                }
                 return {
                     ...trusted,
                     isDirectory: () => status.isDirectory(),
                     isFile: () => status.isFile(),
                     isSymbolicLink: () => status.isSymbolicLink(),
-                    mode: status.isSymbolicLink()
-                        ? constants.S_IFLNK | 0o777
-                        : trusted.mode,
+                    mode,
                 };
             },
             modulePath: installedEntrypoint,
@@ -534,6 +544,7 @@ describe("production release root provisioner", () => {
             `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
             environment
         );
+        expect(await lstat(interruptedStage).catch(() => null)).toBeNull();
 
         expect(
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))

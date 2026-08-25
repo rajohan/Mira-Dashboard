@@ -142,6 +142,7 @@ describe("production artifact pre-admission lifecycle", () => {
             const paths = await prepareProductionDeliveryDirectories(fixture.state);
             const candidateManifest = manifest(releaseA, runtimeA);
             const events: string[] = [];
+            let additionalReleaseCopyDirectory: string | undefined;
             const transitionId = "019fd974-54a2-74dd-a64b-d4186f8d8828";
             const activation = {
                 current: { releaseId: releaseA, runtimeRevision: runtimeA },
@@ -165,8 +166,17 @@ describe("production artifact pre-admission lifecycle", () => {
                         events.push("retain");
                         return Promise.resolve();
                     },
-                    capacityAdmission: () => {
+                    capacityAdmission: (
+                        _lease,
+                        _paths,
+                        _releaseRoot,
+                        _manifest,
+                        _runtime,
+                        capacityDependencies
+                    ) => {
                         events.push("capacity");
+                        additionalReleaseCopyDirectory =
+                            capacityDependencies?.additionalReleaseCopyDirectory;
                         return Promise.resolve();
                     },
                     installRuntime: () => {
@@ -192,6 +202,7 @@ describe("production artifact pre-admission lifecycle", () => {
             );
 
             expect(result).toEqual(activation);
+            expect(additionalReleaseCopyDirectory).toBeUndefined();
             expect(events).toEqual([
                 "retain",
                 "capacity",
@@ -557,6 +568,22 @@ describe("production artifact pre-admission lifecycle", () => {
         );
 
         expect(failure.message).toBe("Production artifact capacity admission failed");
+    });
+
+    test("accepts the maximum combined same-device object inventory", async () => {
+        const fixture = await createFixture();
+        const paths = await prepareProductionDeliveryDirectories(fixture.state);
+        await assertProductionArtifactCopyCapacity(
+            paths.productionDirectory,
+            Object.freeze({
+                fileBytes: Object.freeze(Array.from({ length: 8202 }, () => 1n)),
+                newDirectoryCount: 0n,
+            }),
+            {
+                availableCapacity: () =>
+                    Promise.resolve(filesystemCapacity(1024n * 1024n * 1024n)),
+            }
+        );
     });
 
     test("preserves a fixed free-inode reserve", async () => {

@@ -959,6 +959,28 @@ async function validateReleaseRoots(
     );
 }
 
+async function reconcileInterruptedStages(
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    const stagePattern = /^\.(?:pair|release)-stage-[A-Za-z\d]{6}$/u;
+    for (const name of await environment.readDirectory(environment.provisioningRoot)) {
+        if (!stagePattern.test(name)) continue;
+        const target = path.join(environment.provisioningRoot, name);
+        const status = await environment.lstat(target);
+        if (
+            !status.isDirectory() ||
+            status.isSymbolicLink() ||
+            status.uid !== 0 ||
+            status.gid !== 0 ||
+            (status.mode & 0o077) !== 0
+        ) {
+            throw failure();
+        }
+        await environment.remove(target);
+    }
+    await environment.syncPath(environment.provisioningRoot);
+}
+
 async function retainReleaseRoots(
     candidateReleaseId: string | undefined,
     requireSettledCurrent: boolean,
@@ -1150,6 +1172,7 @@ export async function provisionProductionRelease(
     environment: ProductionReleaseProvisionerEnvironment = defaultEnvironment
 ): Promise<void> {
     await verifyInstalledBoundary(environment);
+    await reconcileInterruptedStages(environment);
     const { archiveSha256, receiptSha256, releaseId, settled, source } =
         parseProductionProvisioningAuthority(authority);
     let pair: StagedProvisioningPair;
