@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -918,11 +918,13 @@ describe("production bootstrap admission", () => {
             path.join(targetRepositoryRoot, ".bun-version")
         );
         let artifactSequence = 0;
+        let activeArtifactRoot = "";
         const createTemporaryRoot = async () => {
             const artifactRoot = path.join(
                 targetRepositoryRoot,
                 `download-${String((artifactSequence += 1))}`
             );
+            activeArtifactRoot = artifactRoot;
             await cp(
                 path.join(sourceRepositoryRoot, "dist/production-release-artifact"),
                 artifactRoot,
@@ -966,6 +968,12 @@ describe("production bootstrap admission", () => {
                 commands.push(invocation);
                 if (invocation.includes("prepareProductionState.js")) {
                     prepareStateWorkingDirectories.push(cwd ?? "");
+                    // Expose a caller that runs temporary-root cleanup before preparation settles.
+                    await Bun.sleep(10);
+                    const archiveStatus = await stat(
+                        path.join(activeArtifactRoot, "release.tar")
+                    );
+                    expect(archiveStatus.size).toBe(receipt.archive.bytes);
                 }
                 if (command[0] === "/usr/bin/tar") {
                     return realProcessDependencies.run(command, cwd);
