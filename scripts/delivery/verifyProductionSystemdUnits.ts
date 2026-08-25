@@ -224,7 +224,7 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
                 readSystemctlProperty(
                     executeSystemctl,
                     "/usr/bin/systemctl",
-                    fileName,
+                    fileName.replace("@.", "@mira-dashboard-verification."),
                     "DropInPaths"
                 )
             )

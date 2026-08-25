@@ -23,7 +23,7 @@ import type {
     ManagedArchiveTarget,
     ManagedLogFileTarget,
     ManagedLogManifest,
-} from "./managedLogManifest.ts";
+} from "../../shared/managedLogManifest.ts";
 import { managedLogManifest, validateManagedLogManifest } from "./managedLogManifest.ts";
 import { createManagedLogRotationEngine } from "./managedLogRotation.ts";
 

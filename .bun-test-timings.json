@@ -355,6 +355,7 @@
         "src/shared/validation.test.ts": 6,
         "src/worker/delivery/dashboardMainGitSync.test.ts": 6,
         "scripts/delivery/previewTailscaleProvisioning.test.ts": 5,
+        "scripts/delivery/provisionManagedLogAccess.test.ts": 5,
         "src/server/database/validation/authRateLimitBuckets.test.ts": 5,
         "src/server/database/validation/automationPrincipals.test.ts": 5,
         "src/server/domains/chat/subscriptionManager.test.ts": 5,

@@ -17,12 +17,6 @@ export const logMaintenanceProvisioningArtifacts = Object.freeze([
         destinationPath: "/etc/systemd/system/mira-dashboard-log-maintenance@.service",
         mode: 0o644,
     }),
-    Object.freeze({
-        artifactPath:
-            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-container-logs.conf",
-        destinationPath: "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
-        mode: 0o644,
-    }),
 ] as const);
 
 export type LogMaintenanceProvisioningArtifactPolicy =
@@ -31,7 +25,6 @@ export type LogMaintenanceProvisioningArtifactPolicy =
 /** Exact host directory the installer may create when absent on a fresh host. */
 export const logMaintenanceProvisioningCreatedDirectories = Object.freeze([
     Object.freeze({ destinationPath: "/usr/local/libexec", mode: 0o755 }),
-    Object.freeze({ destinationPath: "/usr/lib/tmpfiles.d", mode: 0o755 }),
 ] as const);
 
 /** Reviewed non-installed support files shipped with the root installer. */
@@ -41,6 +34,7 @@ export const logMaintenanceProvisioningSupportArtifactPaths = Object.freeze([
     "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
     "scripts/delivery/provisioning/log-maintenance/policy.ts",
     "scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts",
+    "scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts",
 ] as const);
 
 /** Complete exact provisioning subtree admitted into an immutable release. */

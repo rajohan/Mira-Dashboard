@@ -99,15 +99,18 @@ describe("root-installed production systemd unit verification", () => {
             }
         );
         let staleWebDropIn = false;
+        const inspectedUnits: string[] = [];
         const identity = {
-            executeSystemctl: (_executable: string, arguments_: readonly string[]) =>
-                Promise.resolve(
+            executeSystemctl: (_executable: string, arguments_: readonly string[]) => {
+                inspectedUnits.push(arguments_[3] ?? "");
+                return Promise.resolve(
                     systemctlOutput(
                         arguments_[3] === "mira-dashboard-web.service" && staleWebDropIn
                             ? "/etc/systemd/system/mira-dashboard-web.service.d/stale.conf"
                             : ""
                     )
-                ),
+                );
+            },
             expectedGroupId: process.getgid?.() ?? -1,
             expectedUserId: process.getuid?.() ?? -1,
             loadPublishedRelease,
@@ -118,6 +121,12 @@ describe("root-installed production systemd unit verification", () => {
             paths,
             release,
             identity
+        );
+        expect(inspectedUnits).toContain(
+            "mira-dashboard-production-provisioning@mira-dashboard-verification.service"
+        );
+        expect(inspectedUnits).not.toContain(
+            "mira-dashboard-production-provisioning@.service"
         );
 
         staleWebDropIn = true;

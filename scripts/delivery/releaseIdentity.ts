@@ -51,6 +51,7 @@ const allowedArtifactRoots = new Set([
     "runtime",
     "scripts",
     "server",
+    "src",
     "systemd",
 ]);
 const exactMetadataPaths = Object.freeze([
@@ -69,6 +70,7 @@ const exactScriptPaths = Object.freeze(
         ...previewTailscaleProvisioningReleaseArtifactPaths,
     ].toSorted()
 );
+const exactSourcePaths = Object.freeze(["src/shared/managedLogManifest.ts"] as const);
 
 /** Bun identity observed by release creation and activation verification. */
 export interface ReleaseRuntimeIdentity {
@@ -241,6 +243,7 @@ function assertArtifactShape(
     }
     for (const requiredPath of [
         ...exactMetadataPaths,
+        ...exactSourcePaths,
         ...exactSystemdPaths,
         "browser/index.html",
         "server/databaseMaintenance.js",
@@ -268,6 +271,15 @@ function assertArtifactShape(
     if (
         systemdPaths.length !== exactSystemdPaths.length ||
         exactSystemdPaths.some((expected, index) => systemdPaths[index] !== expected)
+    ) {
+        throw invalidReleaseIdentity();
+    }
+    const sourcePaths = artifacts
+        .filter(({ path: artifactPath }) => artifactPath.startsWith("src/"))
+        .map(({ path: artifactPath }) => artifactPath);
+    if (
+        sourcePaths.length !== exactSourcePaths.length ||
+        exactSourcePaths.some((expected, index) => sourcePaths[index] !== expected)
     ) {
         throw invalidReleaseIdentity();
     }

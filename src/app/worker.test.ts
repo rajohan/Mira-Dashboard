@@ -12,6 +12,7 @@ import type { PersistentGatewayTaskNotificationTransport } from "../server/platf
 import type { ProjectFileLogDestination } from "../server/platform/observability/projectFileLogSink.ts";
 import type { RuntimeRelease } from "../server/platform/release/runtimeRelease.ts";
 import type { ProcessTerminationController } from "../server/platform/runtime/processSignals.ts";
+import type { ManagedLogManifest } from "../shared/managedLogManifest.ts";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
@@ -22,7 +23,6 @@ import type {
     DeliveryPreviewExecutionPort,
     DeliveryProductionExecutionPort,
 } from "../worker/delivery/runtime.ts";
-import type { ManagedLogManifest } from "../worker/logs/managedLogManifest.ts";
 import type { DashboardWorkerRuntime } from "../worker/runtime.ts";
 import {
     createDefaultDashboardWorkerProcessDependencies,

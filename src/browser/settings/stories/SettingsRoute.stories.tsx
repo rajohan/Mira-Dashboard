@@ -207,7 +207,7 @@ export const DashboardTab: Story = {
 export const OpenClawFresh: Story = {
     args: { fixtures: openClawFixtures(), route: "/settings" },
     play: async ({ canvasElement }) => {
-        await openOpenClawSettings(canvasElement);
+        await openModelSettings(canvasElement);
     },
 };
 

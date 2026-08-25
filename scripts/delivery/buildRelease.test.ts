@@ -53,7 +53,10 @@ afterEach(async () => {
 async function repositoryFixture(): Promise<string> {
     const repositoryRoot = await mkdtemp(path.join(tmpdir(), "mira-release-build-"));
     temporaryDirectories.push(repositoryRoot);
-    await mkdir(path.join(repositoryRoot, "docs/generated"), { recursive: true });
+    await Promise.all([
+        mkdir(path.join(repositoryRoot, "docs/generated"), { recursive: true }),
+        mkdir(path.join(repositoryRoot, "src/shared"), { recursive: true }),
+    ]);
     await Promise.all([
         writeFile(
             path.join(repositoryRoot, "docs/generated/README.md"),
@@ -73,6 +76,10 @@ async function repositoryFixture(): Promise<string> {
             path.join(sourceProjectRoot, "scripts/delivery/provisioning"),
             path.join(repositoryRoot, "scripts/delivery/provisioning"),
             { recursive: true }
+        ),
+        cp(
+            path.join(sourceProjectRoot, "src/shared/managedLogManifest.ts"),
+            path.join(repositoryRoot, "src/shared/managedLogManifest.ts")
         ),
         cp(
             path.join(sourceProjectRoot, ".bun-version"),

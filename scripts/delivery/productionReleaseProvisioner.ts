@@ -1063,6 +1063,8 @@ async function installAuthority(
     if (!productionMaintenanceGroupIsTrusted(maintenanceGroup, groupInventory)) {
         throw failure();
     }
+    const maintenanceGroupId = maintenanceGroup.split(":")[2];
+    if (!/^[1-9]\d{0,9}$/u.test(maintenanceGroupId ?? "")) throw failure();
     const commands: readonly Readonly<{
         executable: string;
         arguments_: readonly string[];
@@ -1092,10 +1094,11 @@ async function installAuthority(
             ],
         },
         {
-            executable: "/usr/bin/systemd-tmpfiles",
+            executable: runtime,
             arguments_: [
-                "--create",
-                "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
+                `${releaseRoot}/scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts`,
+                `--group-id=${maintenanceGroupId}`,
+                `--runtime-user-id=${userIdText}`,
             ],
         },
         { executable: "/usr/bin/systemctl", arguments_: ["daemon-reload"] },

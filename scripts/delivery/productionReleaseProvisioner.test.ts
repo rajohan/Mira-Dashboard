@@ -550,6 +550,13 @@ describe("production release root provisioner", () => {
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
+        expect(
+            commands.filter((command) =>
+                command.includes("/provisionManagedLogAccess.ts ")
+            )
+        ).toEqual([
+            `${path.join(provisioningRoot, "pairs", releaseId, "bun")} ${path.join(releasesRoot, releaseId)}/scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts --group-id=986 --runtime-user-id=1000`,
+        ]);
         expect(assetDownloads).toBe(2);
         expect(
             syncedPaths.some((target) =>

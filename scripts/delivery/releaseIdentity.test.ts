@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { constants } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -63,6 +63,7 @@ async function releaseFixture(): Promise<{
             recursive: true,
         }),
         mkdir(path.join(releaseRoot, "server"), { recursive: true }),
+        mkdir(path.join(releaseRoot, "src/shared"), { recursive: true }),
     ]);
 
     const packageJson = `${JSON.stringify(
@@ -150,6 +151,10 @@ async function releaseFixture(): Promise<{
                 "scripts/delivery/provisioning/database-observability"
             ),
             path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
+        ),
+        copyFile(
+            path.join(sourceProjectRoot, "src/shared/managedLogManifest.ts"),
+            path.join(releaseRoot, "src/shared/managedLogManifest.ts")
         ),
     ]);
     return { releaseRoot, repositoryRoot };
@@ -267,8 +272,8 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
             "scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
-            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-container-logs.conf",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
+            "scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts",
             "scripts/delivery/provisioning/preview-tailscale/README.md",
             "scripts/delivery/provisioning/preview-tailscale/operator.ts",
             "scripts/delivery/provisioning/preview-tailscale/policy.ts",

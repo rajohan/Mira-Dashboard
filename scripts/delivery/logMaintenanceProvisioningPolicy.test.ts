@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -33,13 +33,6 @@ describe("log-maintenance provisioning artifact policy", () => {
                     "/etc/systemd/system/mira-dashboard-log-maintenance@.service",
                 mode: 0o644,
             },
-            {
-                artifactPath:
-                    "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-container-logs.conf",
-                destinationPath:
-                    "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
-                mode: 0o644,
-            },
         ]);
         const sourceEntries = await readdir(sourceRoot);
         expect(sourceEntries.toSorted()).toEqual([
@@ -49,8 +42,8 @@ describe("log-maintenance provisioning artifact policy", () => {
             "logMaintenanceProvisioningFilesystem.ts",
             "migrateManagedApplicationLogs.ts",
             "mira-dashboard-log-maintenance",
-            "mira-dashboard-managed-container-logs.conf",
             "policy.ts",
+            "provisionManagedLogAccess.ts",
         ]);
         expect(logMaintenanceProvisioningReleaseArtifactPaths).toEqual(
             sourceEntries
@@ -77,32 +70,5 @@ describe("log-maintenance provisioning artifact policy", () => {
             expect(status.nlink).toBe(1n);
             expect(status.size).toBeGreaterThan(0n);
         }
-    });
-
-    test("declares exact container owners and maintenance-group access", async () => {
-        const configuration = await readFile(
-            path.join(sourceRoot, "mira-dashboard-managed-container-logs.conf"),
-            "utf8"
-        );
-        expect(configuration.trim().split("\n")).toEqual([
-            "# Type Path Mode User Group Age Argument",
-            "d /opt/docker/data/prowlarr/logs 2770 1001 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/prowlarr/logs - - - - d:group:mira-dashboard-log-maintenance:rwx,d:mask::rwx",
-            "f /opt/docker/data/prowlarr/logs/prowlarr.debug.txt 0660 1001 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/prowlarr/logs/prowlarr.debug.txt - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
-            "f /opt/docker/data/prowlarr/logs/prowlarr.trace.txt 0660 1001 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/prowlarr/logs/prowlarr.trace.txt - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
-            "f /opt/docker/data/prowlarr/logs/prowlarr.txt 0660 1001 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/prowlarr/logs/prowlarr.txt - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
-            "d /opt/docker/data/submaker 0755 1001 1001 - -",
-            "d /opt/docker/data/submaker/logs 2770 1000 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/submaker/logs - - - - d:group:mira-dashboard-log-maintenance:rwx,d:mask::rwx",
-            "f /opt/docker/data/submaker/logs/app.log 0660 1000 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/submaker/logs/app.log - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
-            "d /opt/docker/data/traefik 2770 1001 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/traefik - - - - d:group:mira-dashboard-log-maintenance:rwx,d:mask::rwx",
-            "f /opt/docker/data/traefik/access.log 0660 1001 mira-dashboard-log-maintenance - -",
-            "a /opt/docker/data/traefik/access.log - - - - group:mira-dashboard-log-maintenance:rw,mask::rw",
-        ]);
     });
 });
