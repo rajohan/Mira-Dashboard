@@ -903,14 +903,6 @@ export async function deployProduction(
         options.expectedCheckout ?? `${projectHome}/production/checkout`,
         userId
     );
-    const selectedVersionFile = await readFile(
-        path.join(repositoryRoot, ".bun-version"),
-        "utf8"
-    );
-    const selectedVersion = selectedVersionFile.trim();
-    if (Bun.version !== selectedVersion) {
-        throw new Error(`Production deploy requires Bun ${selectedVersion}`);
-    }
     await requireSuccess(dependencies, [
         "/usr/bin/systemctl",
         "cat",

@@ -728,6 +728,7 @@ async function restartNormalRuntime(
     await services.prepare(active.release, active.runtime);
     await services.start(active.release, active.runtime);
     await services.verifyReady(active.release, active.runtime);
+    await services.settle?.(active.release, active.runtime);
 }
 
 async function completeAfterNormalRuntimeReady(

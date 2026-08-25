@@ -196,6 +196,7 @@ function initialActivationFixture() {
 
 class TestServiceController implements ProductionServiceController {
     readonly events: string[] = [];
+    readonly settledReleaseIds: string[] = [];
     onStart:
         | ((
               release: PublishedProductionRelease,
@@ -203,11 +204,20 @@ class TestServiceController implements ProductionServiceController {
           ) => Promise<void> | void)
         | undefined;
     rejectReadyReleaseId: string | undefined;
+    rejectSettleReleaseId: string | undefined;
     rejectStartReleaseId: string | undefined;
 
     provision(release: PublishedProductionRelease): Promise<void> {
         this.events.push(`provision:${release.manifest.source.commitSha}`);
         return Promise.resolve();
+    }
+
+    settle(release: PublishedProductionRelease): Promise<void> {
+        const releaseId = release.manifest.source.commitSha;
+        this.settledReleaseIds.push(releaseId);
+        return releaseId === this.rejectSettleReleaseId
+            ? Promise.reject(new Error("root retention failed"))
+            : Promise.resolve();
     }
 
     prepare(release: PublishedProductionRelease): Promise<void> {
@@ -363,6 +373,7 @@ describe("production release activation", () => {
                 releaseId: firstReleaseId,
                 runtimeRevision: runtimeIdentity.revision,
             });
+            expect(services.settledReleaseIds).toEqual([firstReleaseId, secondReleaseId]);
             expect(
                 readMigrationReleaseId(
                     path.join(paths.stateDirectory, "mira-dashboard.db")
@@ -798,6 +809,51 @@ describe("production release activation", () => {
             }
         });
     }, 15_000);
+
+    test("retries root settlement without rolling back a committed candidate", async () => {
+        const projectRoot = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = clonedPublishedFixtures(paths);
+            const services = new TestServiceController();
+            const dependencies = activationDependencies(services, fixtures.probeRuntime);
+            services.rejectSettleReleaseId = secondReleaseId;
+            const failure = await rejectionError(
+                Effect.runPromise(
+                    activatePublishedProductionRelease(
+                        lease,
+                        paths,
+                        fixtures.second,
+                        fixtures.runtime,
+                        dependencies
+                    )
+                )
+            );
+            expect(failure.message).toBe("Production release activation failed");
+            const failedActivation = await loadProductionActivationState(lease, paths);
+            const failedJournal = await loadProductionActivationJournal(lease, paths);
+            expect(failedActivation.record?.current.releaseId).toBe(secondReleaseId);
+            expect(failedJournal?.phase).toBe("database-promoted");
+
+            services.rejectSettleReleaseId = undefined;
+            const recovered = await Effect.runPromise(
+                activatePublishedProductionRelease(
+                    lease,
+                    paths,
+                    fixtures.second,
+                    fixtures.runtime,
+                    dependencies
+                )
+            );
+            expect(recovered.current.releaseId).toBe(secondReleaseId);
+            expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
+            expect(services.settledReleaseIds).toEqual([
+                secondReleaseId,
+                secondReleaseId,
+            ]);
+        });
+    });
 
     test("reports committed retention failure and retries it on the same candidate", async () => {
         const projectRoot = await createProjectFixture();

@@ -1,13 +1,4 @@
-import {
-    chmod,
-    lstat,
-    mkdtemp,
-    readFile,
-    readdir,
-    rename,
-    rm,
-    utimes,
-} from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 import * as v from "valibot";
@@ -30,7 +21,7 @@ const maximumArchiveBytes = 512 * 1024 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
 const runtimeProbeExpression =
     "process.stdout.write(JSON.stringify({revision:Bun.revision,version:Bun.version}))";
-const localAuthorityPattern = /^([a-f\d]{40})--local$/u;
+const localAuthorityPattern = /^([a-f\d]{40})--local(--settled)?$/u;
 const publishedAuthorityPattern =
     /^([a-f\d]{40})--(v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?)--([a-f\d]{64})--([a-f\d]{64})$/u;
 
@@ -103,7 +94,6 @@ interface ProductionReleaseProvisionerEnvironment {
         stdin?: Uint8Array
     ) => Promise<CommandResult>;
     readonly runtimeExecutable: string;
-    readonly touch: (target: string, time: Date) => Promise<void>;
     readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
 }
 
@@ -120,16 +110,24 @@ export function parseProductionProvisioningAuthority(authority: string): Readonl
     archiveSha256?: string;
     receiptSha256?: string;
     releaseId: string;
+    settled: boolean;
     source: string;
 }> {
     const local = localAuthorityPattern.exec(authority);
-    if (local) return Object.freeze({ releaseId: local[1]!, source: "local" });
+    if (local) {
+        return Object.freeze({
+            releaseId: local[1]!,
+            settled: local[2] !== undefined,
+            source: "local",
+        });
+    }
     const published = publishedAuthorityPattern.exec(authority);
     if (!published) throw failure();
     return Object.freeze({
         archiveSha256: published[4]!,
         receiptSha256: published[3]!,
         releaseId: published[1]!,
+        settled: false,
         source: published[2]!,
     });
 }
@@ -598,16 +596,11 @@ async function downloadAndStageRelease(
     }
 }
 
-async function retainRecentReleaseRoots(
-    installedReleaseId: string,
+async function validateReleaseRoots(
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<void> {
-    await environment.touch(
-        path.join(environment.releasesRoot, installedReleaseId),
-        new Date()
-    );
     const rootNames = await environment.readDirectory(environment.releasesRoot);
-    const roots = await Promise.all(
+    await Promise.all(
         rootNames.map(async (name) => {
             if (!/^[a-f\d]{40}$/u.test(name)) throw failure();
             const status = await environment.lstat(
@@ -622,19 +615,8 @@ async function retainRecentReleaseRoots(
             ) {
                 throw failure();
             }
-            return Object.freeze({ mtimeMs: status.mtimeMs, name });
         })
     );
-    roots.sort(
-        (left, right) =>
-            Number(right.name === installedReleaseId) -
-                Number(left.name === installedReleaseId) ||
-            right.mtimeMs - left.mtimeMs ||
-            left.name.localeCompare(right.name)
-    );
-    for (const obsolete of roots.slice(3)) {
-        await environment.remove(path.join(environment.releasesRoot, obsolete.name));
-    }
 }
 
 async function installAuthority(
@@ -728,7 +710,6 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     repositoryApi,
     runCommand: run,
     runtimeExecutable,
-    touch: (target: string, time: Date) => utimes(target, time, time),
     verifyReleaseArtifactIdentity,
 });
 
@@ -748,7 +729,7 @@ export async function provisionProductionRelease(
     environment: ProductionReleaseProvisionerEnvironment = defaultEnvironment
 ): Promise<void> {
     await verifyInstalledBoundary(environment);
-    const { archiveSha256, receiptSha256, releaseId, source } =
+    const { archiveSha256, receiptSha256, releaseId, settled, source } =
         parseProductionProvisioningAuthority(authority);
     let releaseRoot: string;
     if (source === "local") {
@@ -764,7 +745,7 @@ export async function provisionProductionRelease(
     }
     await installCandidateRuntime(releaseRoot, environment);
     await installAuthority(releaseId, releaseRoot, environment);
-    await retainRecentReleaseRoots(releaseId, environment);
+    if (settled) await validateReleaseRoots(environment);
 }
 
 if (import.meta.main) {

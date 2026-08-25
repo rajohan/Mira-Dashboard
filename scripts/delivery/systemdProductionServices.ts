@@ -203,6 +203,18 @@ export function createSystemdProductionServiceController(
                 provisioningDeadlineMs
             );
         },
+        async settle(release: PublishedProductionRelease): Promise<void> {
+            const releaseId = release.manifest.source.commitSha;
+            await requireSystemctlSuccess(
+                execute,
+                executable,
+                [
+                    "start",
+                    `${provisioningUnitPrefix}${releaseId}--local--settled.service`,
+                ],
+                provisioningDeadlineMs
+            );
+        },
         prepare(release: PublishedProductionRelease): Promise<void> {
             return verifyUnits(lease, paths, release);
         },

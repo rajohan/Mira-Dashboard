@@ -168,6 +168,7 @@ describe("production root-systemd service control", () => {
                 fixtures.runtime,
                 smokeTransitionId
             );
+            await controller.settle?.(fixtures.first, fixtures.runtime);
             await controller.stop();
             expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
                 firstReleaseId
@@ -188,13 +189,20 @@ describe("production root-systemd service control", () => {
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
                 ["is-active", "--quiet", "mira-dashboard-worker.service"],
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
+                [
+                    "start",
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--local--settled.service`,
+                ],
                 ["stop", "mira-dashboard-web.service"],
                 ["stop", "mira-dashboard-worker.service"],
             ]);
             expect(deadlines[0]).toBe(330_000);
-            expect(deadlines.slice(1).every((deadline) => deadline === undefined)).toBe(
-                true
-            );
+            expect(deadlines[9]).toBe(330_000);
+            expect(
+                deadlines
+                    .filter((_deadline, index) => index !== 0 && index !== 9)
+                    .every((deadline) => deadline === undefined)
+            ).toBe(true);
             expect(requests).toHaveLength(1);
             expect(requests[0]?.method).toBe("HEAD");
             expect(requests[0]?.url).toBe("http://127.0.0.1:3100/api/health/ready");

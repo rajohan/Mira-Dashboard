@@ -96,9 +96,11 @@ release identity, then installs candidate authority after the running Dashboard 
 have stopped. The root boundary obtains only `MIRA_GITHUB_TOKEN` through the host's canonical
 Doppler configuration; the credential is neither persisted in the release tree nor inherited by
 child installers. Tagged provisioning always revalidates and replaces any cached copy for that commit;
-only `--local` rollback trusts an already root-staged release. After a successful install, root
-staging retains the three most recently installed authorities—the candidate, active, and rollback
-transition set—and removes older roots. Rollback starts the same boundary with `--local` and reinstalls the retained
+only `--local` rollback trusts an already root-staged release. Provisioning never removes a root
+while activation outcome is unknown. After activation commits and readiness passes, the controller
+starts the same boundary with `--local--settled` to validate the complete immutable root inventory.
+Release roots are not deleted until a future garbage collector can prove they are unreferenced by
+activation or rollback state. Rollback starts the boundary with `--local` and reinstalls the retained
 previous authority before the previous services restart.
 
 Cleanup removes orphaned packages and stale package cache entries, rotates then vacuums

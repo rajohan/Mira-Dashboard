@@ -89,8 +89,12 @@ describe("production release root provisioner", () => {
         const releaseId = "a".repeat(40);
         expect(parseProductionProvisioningAuthority(`${releaseId}--local`)).toEqual({
             releaseId,
+            settled: false,
             source: "local",
         });
+        expect(
+            parseProductionProvisioningAuthority(`${releaseId}--local--settled`)
+        ).toEqual({ releaseId, settled: true, source: "local" });
         expect(
             parseProductionProvisioningAuthority(
                 `${releaseId}--v1.2.3--${"b".repeat(64)}--${"c".repeat(64)}`
@@ -99,6 +103,7 @@ describe("production release root provisioner", () => {
             archiveSha256: "c".repeat(64),
             receiptSha256: "b".repeat(64),
             releaseId,
+            settled: false,
             source: "v1.2.3",
         });
         for (const authority of [
@@ -106,6 +111,7 @@ describe("production release root provisioner", () => {
             `${releaseId}--v1.2.3/service`,
             `${releaseId}--../local`,
             `-${releaseId}--local`,
+            `${releaseId}--v1.2.3--${"b".repeat(64)}--${"c".repeat(64)}--settled`,
         ]) {
             expect(() => parseProductionProvisioningAuthority(authority)).toThrow(
                 "Production release provisioning failed"
@@ -306,6 +312,8 @@ describe("production release root provisioner", () => {
             provisioningRoot,
             readGithubToken: () => "github-token-sentinel",
             rename: async (source, destination) => {
+                await restoreOwnerWrite(destination);
+                await rm(destination, { force: true, recursive: true });
                 await cp(source, destination, { recursive: true });
             },
             remove: async (target) => {
@@ -375,8 +383,13 @@ describe("production release root provisioner", () => {
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
         expect(assetDownloads).toBe(2);
+        expect(await readdir(releasesRoot)).toHaveLength(3);
+        await mkdir(path.join(releasesRoot, "f".repeat(40)));
+        await provisionProductionRelease(`${releaseId}--local`, environment);
+        expect(await readdir(releasesRoot)).toHaveLength(4);
+        await provisionProductionRelease(`${releaseId}--local--settled`, environment);
         const retainedRoots = await readdir(releasesRoot);
-        expect(retainedRoots).toHaveLength(3);
+        expect(retainedRoots).toHaveLength(4);
         expect(retainedRoots).toContain(releaseId);
         const runtimeInstallIndex = commands.findIndex((command) =>
             command.startsWith("/usr/bin/install -o root -g root -m 0555")

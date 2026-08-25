@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdtemp } from "node:fs/promises";
+import { cp, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -806,5 +806,24 @@ describe("production bootstrap admission", () => {
             "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
         );
         expect(manualDeployDelivered).toBe(true);
+
+        await writeFile(path.join(targetRepositoryRoot, ".bun-version"), "9.9.9\n");
+        let runtimeUpgradeDelivered = false;
+        await deployProduction(
+            {
+                ...dependencies,
+                deliverPublishedRelease: () => {
+                    runtimeUpgradeDelivered = true;
+                    return Promise.resolve();
+                },
+            },
+            {
+                createTemporaryRoot,
+                expectedCheckout: targetRepositoryRoot,
+                repositoryRoot: targetRepositoryRoot,
+                userId: 1000,
+            }
+        );
+        expect(runtimeUpgradeDelivered).toBe(true);
     });
 });
