@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.4...v0.3.5) (2026-08-25)
+
+
+### Bug Fixes
+
+* **delivery:** bound provisioning unit name ([#463](https://github.com/rajohan/Mira-Dashboard/issues/463)) ([861a1e3](https://github.com/rajohan/Mira-Dashboard/commit/861a1e386439f9e90ac44acc9158982e41051fe6))
+
 ## [0.3.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.3...v0.3.4) (2026-08-25)
 
 
