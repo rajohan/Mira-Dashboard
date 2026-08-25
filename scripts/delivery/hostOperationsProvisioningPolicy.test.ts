@@ -11,6 +11,18 @@ import {
 const sourceRoot = path.join(import.meta.dir, "provisioning/host-operations");
 
 describe("host-operations provisioning artifact policy", () => {
+    test("injects only the ordinary GitHub credential into release provisioning", async () => {
+        const unit = await readFile(
+            path.join(sourceRoot, "mira-dashboard-production-provisioning@.service"),
+            "utf8"
+        );
+
+        expect(unit).toContain("--no-read-env");
+        expect(unit).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
+        expect(unit).toContain("--config-dir=/home/ubuntu/.doppler");
+        expect(unit).not.toContain("RAJOHAN_GITHUB_TOKEN");
+    });
+
     test("inventories the exact root-owned authority artifacts and installer support", async () => {
         expect(hostOperationsProvisioningArtifacts).toEqual([
             {

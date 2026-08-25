@@ -12,7 +12,9 @@ import path from "node:path";
 
 import * as v from "valibot";
 
+import { applicationConfigurationLimits } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
 import { productionReleaseArtifactReceiptSchema } from "../../src/shared/productionReleaseArtifactReceipt.ts";
+import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
 import { assertProductionReleaseArchiveListing } from "./productionReleaseArchive.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 
@@ -30,10 +32,10 @@ const localAuthorityPattern = /^([a-f\d]{40})--local$/u;
 const publishedAuthorityPattern =
     /^([a-f\d]{40})--(v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?)--([a-f\d]{64})--([a-f\d]{64})$/u;
 
-const githubReleaseSchema = v.strictObject({
+const githubReleaseSchema = v.object({
     assets: v.pipe(
         v.array(
-            v.strictObject({
+            v.object({
                 digest: v.pipe(v.string(), v.regex(/^sha256:[a-f\d]{64}$/u)),
                 id: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
                 name: v.picklist(["receipt.json", "release.tar"]),
@@ -46,6 +48,10 @@ const githubReleaseSchema = v.strictObject({
     prerelease: v.literal(false),
     tag_name: v.pipe(v.string(), v.regex(/^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/u)),
 });
+
+const githubTokenSchema = boundedControlSafeTextSchema(
+    applicationConfigurationLimits.githubTokenMaximumLength
+);
 
 const githubRefSchema = v.object({
     object: v.object({
@@ -79,6 +85,7 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly modulePath: string;
     readonly provisioningRoot: string;
     readonly readDirectory: (target: string) => Promise<string[]>;
+    readonly readGithubToken: () => string;
     readonly remove: (target: string) => Promise<void>;
     readonly rename: (source: string, destination: string) => Promise<void>;
     readonly releasesRoot: string;
@@ -172,6 +179,7 @@ async function githubJson(
         await environment.fetch(`${environment.repositoryApi}${endpoint}`, {
             headers: {
                 Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${environment.readGithubToken()}`,
                 "User-Agent": "mira-dashboard-production-provisioner",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
@@ -194,6 +202,7 @@ async function githubAsset(
             {
                 headers: {
                     Accept: "application/octet-stream",
+                    Authorization: `Bearer ${environment.readGithubToken()}`,
                     "User-Agent": "mira-dashboard-production-provisioner",
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
@@ -488,7 +497,7 @@ async function retainRecentReleaseRoots(
             right.mtimeMs - left.mtimeMs ||
             left.name.localeCompare(right.name)
     );
-    for (const obsolete of roots.slice(2)) {
+    for (const obsolete of roots.slice(3)) {
         await environment.remove(path.join(environment.releasesRoot, obsolete.name));
     }
 }
@@ -577,6 +586,7 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
     modulePath: import.meta.path,
     provisioningRoot,
     readDirectory: readdir,
+    readGithubToken: () => v.parse(githubTokenSchema, process.env.MIRA_GITHUB_TOKEN),
     remove: (target: string) => rm(target, { force: true, recursive: true }),
     rename,
     releasesRoot,

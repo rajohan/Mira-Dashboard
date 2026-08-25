@@ -212,7 +212,10 @@ describe("production release root provisioner", () => {
         const installedEntrypoint = path.join(provisioningRoot, "entrypoint.js");
         const environment = productionReleaseProvisionerTestSupport.createEnvironment({
             executablePath: runtimeExecutable,
-            fetch: (url) => {
+            fetch: (url, init) => {
+                expect(new Headers(init.headers).get("authorization")).toBe(
+                    "Bearer github-token-sentinel"
+                );
                 if (url.endsWith(`/releases/tags/${tagName}`)) {
                     return Promise.resolve(
                         response(
@@ -224,17 +227,21 @@ describe("production release root provisioner", () => {
                                             id: 1,
                                             name: "receipt.json",
                                             size: receiptBytes.byteLength,
+                                            url: "https://api.github.test/assets/1",
                                         },
                                         {
                                             digest: `sha256:${sha256(archiveBytes)}`,
                                             id: 2,
                                             name: "release.tar",
                                             size: archiveBytes.byteLength,
+                                            url: "https://api.github.test/assets/2",
                                         },
                                     ],
                                     draft: false,
+                                    id: 123,
                                     prerelease: false,
                                     tag_name: tagName,
+                                    url: "https://api.github.test/releases/123",
                                 })
                             )
                         )
@@ -271,6 +278,7 @@ describe("production release root provisioner", () => {
                 ),
             modulePath: installedEntrypoint,
             provisioningRoot,
+            readGithubToken: () => "github-token-sentinel",
             rename: async (source, destination) => {
                 await cp(source, destination, { recursive: true });
             },
@@ -325,7 +333,7 @@ describe("production release root provisioner", () => {
         expect(commands).toContain("/usr/bin/systemctl daemon-reload");
         expect(assetDownloads).toBe(2);
         const retainedRoots = await readdir(releasesRoot);
-        expect(retainedRoots).toHaveLength(2);
+        expect(retainedRoots).toHaveLength(3);
         expect(retainedRoots).toContain(releaseId);
         expect(
             commands.filter((command) => command.startsWith(runtimeExecutable))
