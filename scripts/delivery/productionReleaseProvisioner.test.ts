@@ -495,23 +495,28 @@ describe("production release root provisioner", () => {
             )
         );
         expect(
-            await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
+            JSON.parse(
+                await readFile(
+                    path.join(releasesRoot, releaseId, "release-manifest.json"),
+                    "utf8"
+                )
+            )
         ).toMatchObject({ source: { commitSha: releaseId } });
         const retainedAfterRejectedDownload = await readdir(releasesRoot);
         expect(retainedAfterRejectedDownload.toSorted()).toEqual(
             ["a".repeat(40), "b".repeat(40), releaseId].toSorted()
         );
 
-        const mismatchedReleaseRoot = await createLocalReleaseFixture(
-            sourceProjectRoot,
-            releaseId,
-            { revision: "e".repeat(40), version: Bun.version },
-            temporaryDirectories
-        );
         const cachedReleaseRoot = path.join(releasesRoot, releaseId);
         await restoreOwnerWrite(cachedReleaseRoot);
-        await rm(cachedReleaseRoot, { force: true, recursive: true });
-        await cp(mismatchedReleaseRoot, cachedReleaseRoot, { recursive: true });
+        const mismatchedManifest = JSON.parse(manifestBytes.toString("utf8")) as {
+            runtime: { revision: string };
+        };
+        mismatchedManifest.runtime.revision = "e".repeat(40);
+        await writeFile(
+            path.join(cachedReleaseRoot, "release-manifest.json"),
+            `${JSON.stringify(mismatchedManifest)}\n`
+        );
         await expectProvisioningFailure(
             productionReleaseProvisionerTestSupport.verifyReceiptBackedRelease(
                 releaseId,
@@ -520,9 +525,10 @@ describe("production release root provisioner", () => {
                 environment
             )
         );
-        await restoreOwnerWrite(cachedReleaseRoot);
-        await rm(cachedReleaseRoot, { force: true, recursive: true });
-        await cp(sourceReleaseRoot, cachedReleaseRoot, { recursive: true });
+        await writeFile(
+            path.join(cachedReleaseRoot, "release-manifest.json"),
+            manifestBytes
+        );
 
         await provisionProductionRelease(
             `${releaseId}--${tagName}--${sha256(receiptBytes)}--${sha256(archiveBytes)}`,
