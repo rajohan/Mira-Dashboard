@@ -812,7 +812,7 @@ function createDeliveryPort(
                 if (payload.operation === "rollback-release") {
                     releaseId = payload.target.releaseId;
                 } else if (payload.operation === "deploy") {
-                    releaseId = currentReleaseId;
+                    releaseId = payload.release.releaseId;
                 }
                 return {
                     operation: payload.operation,

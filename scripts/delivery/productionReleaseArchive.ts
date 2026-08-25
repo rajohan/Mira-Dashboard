@@ -6,6 +6,11 @@ import {
 const invalidArchiveMessage = "Production release archive is invalid";
 const maximumProductionReleaseArchiveEntries =
     maximumReleaseArtifactCount + maximumReleaseArtifactDirectoryCount;
+const maximumReleaseArtifactPathCharacters = 4096;
+const releaseDirectoryPrefixCharacters = 41;
+export const maximumProductionReleaseArchiveListingBytes =
+    maximumProductionReleaseArchiveEntries *
+    (releaseDirectoryPrefixCharacters + maximumReleaseArtifactPathCharacters + 1);
 
 /**
  * Rejects archive paths outside the single commit-addressed release directory.

@@ -204,12 +204,16 @@ class TestServiceController implements ProductionServiceController {
           ) => Promise<void> | void)
         | undefined;
     rejectReadyReleaseId: string | undefined;
+    rejectProvisionReleaseId: string | undefined;
     rejectSettleReleaseId: string | undefined;
     rejectStartReleaseId: string | undefined;
 
     provision(release: PublishedProductionRelease): Promise<void> {
-        this.events.push(`provision:${release.manifest.source.commitSha}`);
-        return Promise.resolve();
+        const releaseId = release.manifest.source.commitSha;
+        this.events.push(`provision:${releaseId}`);
+        return releaseId === this.rejectProvisionReleaseId
+            ? Promise.reject(new Error("candidate authority install failed"))
+            : Promise.resolve();
     }
 
     settle(release: PublishedProductionRelease): Promise<void> {
@@ -727,6 +731,42 @@ describe("production release activation", () => {
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
+                "stop",
+                `provision:${firstReleaseId}`,
+                `prepare:${firstReleaseId}`,
+                `start:${firstReleaseId}`,
+                `ready:${firstReleaseId}`,
+            ]);
+        });
+    });
+
+    test("journals candidate authority before provisioning mutates the host", async () => {
+        const projectRoot = await createProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = clonedPublishedFixtures(paths);
+            const services = new TestServiceController();
+            services.rejectProvisionReleaseId = secondReleaseId;
+            const initial = initialActivationFixture();
+
+            expect(
+                Effect.runPromise(
+                    activatePublishedProductionRelease(
+                        lease,
+                        paths,
+                        fixtures.second,
+                        fixtures.runtime,
+                        activationDependencies(services, fixtures.probeRuntime)
+                    )
+                )
+            ).rejects.toThrow("Production release activation failed");
+
+            const recovered = await loadProductionActivationState(lease, paths);
+            expect(recovered.record).toEqual(initial);
+            expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
+            expect(services.events).toContain(`provision:${secondReleaseId}`);
+            expect(services.events.slice(-5)).toEqual([
                 "stop",
                 `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,

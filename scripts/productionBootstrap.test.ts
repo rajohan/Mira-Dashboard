@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
-import { assertProductionReleaseArchiveListing } from "./delivery/productionReleaseArchive.ts";
+import {
+    assertProductionReleaseArchiveListing,
+    maximumProductionReleaseArchiveListingBytes,
+} from "./delivery/productionReleaseArchive.ts";
 import {
     admitProductionBootstrapRelease,
     bootstrapProduction,
@@ -70,6 +73,9 @@ describe("production bootstrap admission", () => {
     });
 
     test("accepts only archive entries below the exact release directory", () => {
+        expect(maximumProductionReleaseArchiveListingBytes).toBe(
+            (4096 + 512) * (41 + 4096 + 1)
+        );
         expect(() =>
             assertProductionReleaseArchiveListing(
                 `${releaseId}/\n${releaseId}/release-manifest.json\n`,

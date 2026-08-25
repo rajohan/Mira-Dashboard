@@ -662,12 +662,12 @@ async function activateRelease(
     let settlementFailed = false;
     try {
         const stopOwner = previous ?? candidate;
-        await provisionAndPrepareServices(dependencies.services, stopOwner);
         journal = await createProductionActivationJournal(
             lease,
             paths,
             journalFor(transitionId, activation, candidate)
         );
+        await provisionAndPrepareServices(dependencies.services, stopOwner);
         await dependencies.services.stop();
         await dependencies.testHooks?.afterServicesStopped?.();
         await options.onProgress?.("services-stopped");

@@ -196,6 +196,40 @@ describe("source-development runtime authority", () => {
                 sourceRevision,
             })
         ).toMatchObject({ operation: "start-preview", outcome: "completed" });
+        expect(
+            await delivery.execute({
+                activationRevision: sourceRevision,
+                checkoutRevision: sourceRevision,
+                expectedMainHeadSha: secondPullRequestHead,
+                operation: "deploy",
+                release: {
+                    assets: [
+                        {
+                            digest: `sha256:${"a".repeat(64)}`,
+                            name: "receipt.json",
+                            size: 512,
+                        },
+                        {
+                            digest: `sha256:${"b".repeat(64)}`,
+                            name: "release.tar",
+                            size: 4096,
+                        },
+                    ],
+                    releaseId: secondPullRequestHead,
+                    releaseManifestSha256: "c".repeat(64),
+                    runtime: {
+                        revision: secondPullRequestHead,
+                        version: "1.4.0",
+                    },
+                    tagName: "v1.2.4",
+                },
+                sourceRevision,
+            })
+        ).toEqual({
+            operation: "deploy",
+            outcome: "completed",
+            releaseId: secondPullRequestHead,
+        });
         await authority.databaseObservability.collect();
 
         const refreshed = await delivery.refresh({});
@@ -215,6 +249,7 @@ describe("source-development runtime authority", () => {
             "docker:container-restart",
             "backup:kopia-run",
             "delivery:start-preview",
+            "delivery:deploy",
             "database:observe",
         ]);
         expect(receipts.every(({ outcome }) => outcome === "simulated")).toBeTrue();

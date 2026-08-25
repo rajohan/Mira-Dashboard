@@ -25,7 +25,10 @@ import {
     productionReleaseArtifactReceiptSchema,
 } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
-import { assertProductionReleaseArchiveListing } from "./productionReleaseArchive.ts";
+import {
+    assertProductionReleaseArchiveListing,
+    maximumProductionReleaseArchiveListingBytes,
+} from "./productionReleaseArchive.ts";
 import {
     productionHostProvisioningRoot,
     productionProvisioningEntrypointName,
@@ -124,7 +127,8 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly runCommand: (
         executable: string,
         arguments_: readonly string[],
-        stdin?: Uint8Array
+        stdin?: Uint8Array,
+        stdoutMaximumBytes?: number
     ) => Promise<CommandResult>;
     readonly runtimeExecutable: string;
     readonly syncPath: (target: string) => Promise<void>;
@@ -447,7 +451,8 @@ async function resolveTagCommit(
 }
 
 async function readBoundedStream(
-    stream: ReadableStream<Uint8Array>
+    stream: ReadableStream<Uint8Array>,
+    maximumBytes = maximumCommandOutputBytes
 ): Promise<Uint8Array> {
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];
@@ -457,7 +462,7 @@ async function readBoundedStream(
             const next = await reader.read();
             if (next.done) break;
             length += next.value.byteLength;
-            if (length > maximumCommandOutputBytes) throw failure();
+            if (length > maximumBytes) throw failure();
             chunks.push(next.value);
         }
     } finally {
@@ -475,7 +480,8 @@ async function readBoundedStream(
 async function run(
     executable: string,
     arguments_: readonly string[],
-    stdin?: Uint8Array
+    stdin?: Uint8Array,
+    stdoutMaximumBytes = maximumCommandOutputBytes
 ): Promise<CommandResult> {
     const child = Bun.spawn([executable, ...arguments_], {
         env: {
@@ -492,7 +498,7 @@ async function run(
     try {
         const [exitCode, stdout, stderr] = await Promise.all([
             child.exited,
-            readBoundedStream(child.stdout),
+            readBoundedStream(child.stdout, stdoutMaximumBytes),
             readBoundedStream(child.stderr),
         ]);
         return Object.freeze({ exitCode, stderr, stdout });
@@ -507,9 +513,15 @@ async function requireSuccess(
     executable: string,
     arguments_: readonly string[],
     environment: ProductionReleaseProvisionerEnvironment,
-    stdin?: Uint8Array
+    stdin?: Uint8Array,
+    stdoutMaximumBytes?: number
 ): Promise<Uint8Array> {
-    const result = await environment.runCommand(executable, arguments_, stdin);
+    const result = await environment.runCommand(
+        executable,
+        arguments_,
+        stdin,
+        stdoutMaximumBytes
+    );
     if (result.exitCode !== 0) throw failure();
     return result.stdout;
 }
@@ -713,9 +725,7 @@ async function stageProvisioningPair(
     } catch (error) {
         if (errorCode(error) !== "ENOENT") throw failure();
     }
-    const staged = await mkdtemp(
-        path.join(environment.provisioningPairsRoot, ".pair-stage-")
-    );
+    const staged = await mkdtemp(path.join(environment.provisioningRoot, ".pair-stage-"));
     try {
         for (const [source, name] of [
             [path.join(releaseRoot, "runtime/bun"), productionProvisioningRuntimeName],
@@ -740,10 +750,12 @@ async function stageProvisioningPair(
             );
             await environment.syncPath(path.join(staged, name));
         }
-        await chmod(staged, 0o500);
+        await chmod(staged, 0o700);
         await environment.syncPath(staged);
         await verifyProvisioningPair(staged, releaseRoot, environment);
         await environment.rename(staged, destination);
+        await chmod(destination, 0o500);
+        await environment.syncPath(destination);
         await environment.syncPath(environment.provisioningPairsRoot);
         return await verifyProvisioningPair(destination, releaseRoot, environment);
     } finally {
@@ -840,7 +852,9 @@ async function downloadAndStageRelease(
         const listing = await requireSuccess(
             "/usr/bin/tar",
             ["-tf", archivePath],
-            environment
+            environment,
+            undefined,
+            maximumProductionReleaseArchiveListingBytes
         );
         assertProductionReleaseArchiveListing(
             new TextDecoder("utf-8", { fatal: true }).decode(listing),
