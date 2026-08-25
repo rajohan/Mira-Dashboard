@@ -193,6 +193,20 @@ async function withDiscardedPreparedPublishedRelease(
     }
 }
 
+async function discardAdmittedReleaseOnFailure<T>(
+    releaseRoot: string,
+    releaseId: string,
+    operation: () => Promise<T>,
+    discard: typeof discardOwnedProductionReleaseCandidate = discardOwnedProductionReleaseCandidate
+): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        await discard(path.dirname(releaseRoot), releaseRoot, releaseId);
+        throw error;
+    }
+}
+
 export interface ProductionBootstrapOptions {
     readonly createTemporaryRoot?: () => Promise<string>;
     readonly expectedCheckout?: string;
@@ -573,6 +587,7 @@ export async function downloadProductionBootstrapRelease(
 
 /** Test-only seams for bounded release downloads and credential projection. */
 export const productionBootstrapTestSupport = Object.freeze({
+    discardAdmittedReleaseOnFailure,
     download: defaultDownload,
     environment: productionCommandEnvironment,
     readBounded,
@@ -1167,46 +1182,61 @@ export async function preparePublishedProductionRelease(
             repositoryRoot,
             expectedAuthority
         );
-        const authority = v.parse(publishedReleaseAuthoritySchema, {
-            assets: [
-                {
-                    digest: `sha256:${admitted.receiptSha256}`,
-                    name: "receipt.json",
-                    size: admitted.receiptBytes,
-                },
-                {
-                    digest: `sha256:${admitted.archiveSha256}`,
-                    name: "release.tar",
-                    size: admitted.archiveBytes,
-                },
-            ],
+        return discardAdmittedReleaseOnFailure(
+            admitted.releaseRoot,
             releaseId,
-            releaseManifestSha256: admitted.manifestSha256,
-            runtime: admitted.runtime,
-            tagName: downloaded.tagName,
-        });
-        await requireSuccess(
-            dependencies,
-            [
-                path.join(admitted.releaseRoot, "runtime/bun"),
-                path.join(admitted.releaseRoot, "server/prepareProductionState.js"),
-                `--project-root=${projectHome}`,
-            ],
-            admitted.releaseRoot
+            async () => {
+                const authority = v.parse(publishedReleaseAuthoritySchema, {
+                    assets: [
+                        {
+                            digest: `sha256:${admitted.receiptSha256}`,
+                            name: "receipt.json",
+                            size: admitted.receiptBytes,
+                        },
+                        {
+                            digest: `sha256:${admitted.archiveSha256}`,
+                            name: "release.tar",
+                            size: admitted.archiveBytes,
+                        },
+                    ],
+                    releaseId,
+                    releaseManifestSha256: admitted.manifestSha256,
+                    runtime: admitted.runtime,
+                    tagName: downloaded.tagName,
+                });
+                await requireSuccess(
+                    dependencies,
+                    [
+                        path.join(admitted.releaseRoot, "runtime/bun"),
+                        path.join(
+                            admitted.releaseRoot,
+                            "server/prepareProductionState.js"
+                        ),
+                        `--project-root=${projectHome}`,
+                    ],
+                    admitted.releaseRoot
+                );
+                if (options.stageRootAuthority !== false) {
+                    if (!prerequisites) throw new Error(failureMessage);
+                    await stageProductionBootstrapRootAuthority(
+                        downloaded.artifactRoot,
+                        releaseId,
+                        admitted.manifestSha256,
+                        admitted.archiveSha256,
+                        sha256(
+                            await readFile(path.join(admitted.releaseRoot, "runtime/bun"))
+                        ),
+                        userId,
+                        dependencies
+                    );
+                }
+                return Object.freeze({
+                    authority,
+                    releaseId,
+                    releaseRoot: admitted.releaseRoot,
+                });
+            }
         );
-        if (options.stageRootAuthority !== false) {
-            if (!prerequisites) throw new Error(failureMessage);
-            await stageProductionBootstrapRootAuthority(
-                downloaded.artifactRoot,
-                releaseId,
-                admitted.manifestSha256,
-                admitted.archiveSha256,
-                sha256(await readFile(path.join(admitted.releaseRoot, "runtime/bun"))),
-                userId,
-                dependencies
-            );
-        }
-        return Object.freeze({ authority, releaseId, releaseRoot: admitted.releaseRoot });
     } finally {
         await rm(temporaryRoot, { force: true, recursive: true });
     }
@@ -1283,19 +1313,22 @@ export async function deployProduction(
         "cat",
         "mira-dashboard-production-provisioning@.service",
     ]);
-    await (
-        dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
-    )(repositoryRoot, productionHostProvisioningRoot);
-    await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(() =>
-        preparePublishedProductionRelease(
-            releaseId,
-            repositoryRoot,
-            dependencies,
-            userId,
-            options.createTemporaryRoot,
-            undefined,
-            { stageRootAuthority: false }
-        )
+    await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(
+        async () => {
+            await (
+                dependencies.preparationCapacityAdmission ??
+                admitProductionReleasePreparation
+            )(repositoryRoot, productionHostProvisioningRoot);
+            return preparePublishedProductionRelease(
+                releaseId,
+                repositoryRoot,
+                dependencies,
+                userId,
+                options.createTemporaryRoot,
+                undefined,
+                { stageRootAuthority: false }
+            );
+        }
     );
 }
 

@@ -306,6 +306,33 @@ describe("production bootstrap admission", () => {
         });
     }
 
+    test("discards an admitted candidate when post-admission preparation fails", async () => {
+        const candidateRoot = `/checkout/dist/releases/${releaseId}`;
+        const preparationFailure = new Error("preparation failed");
+        const discarded: unknown[] = [];
+
+        const failure = await captureFailure(
+            productionBootstrapTestSupport.discardAdmittedReleaseOnFailure(
+                candidateRoot,
+                releaseId,
+                () => Promise.reject(preparationFailure),
+                (releasesDirectory, releaseRoot, expectedName) => {
+                    discarded.push({ expectedName, releaseRoot, releasesDirectory });
+                    return Promise.resolve();
+                }
+            )
+        );
+
+        expect(failure).toBe(preparationFailure);
+        expect(discarded).toEqual([
+            {
+                expectedName: releaseId,
+                releaseRoot: candidateRoot,
+                releasesDirectory: "/checkout/dist/releases",
+            },
+        ]);
+    });
+
     test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
         const runtimeBytes = new TextEncoder().encode("qualified-runtime");
         const dependencies: ProductionBootstrapDependencies = {
@@ -917,7 +944,9 @@ describe("production bootstrap admission", () => {
                 return Promise.resolve();
             },
             deliverPublishedRelease: async (prepare) => {
+                expect(preparationCapacityAdmitted).toBeFalse();
                 const admitted = await prepare();
+                expect(preparationCapacityAdmitted).toBeTrue();
                 expect(admitted.releaseId).toBe(releaseId);
                 expect(admitted.authority.runtime).toEqual(runtime);
                 manualDeployDelivered = true;
