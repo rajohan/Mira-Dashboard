@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.2...v0.3.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* **bootstrap:** provision generic managed log access ([#459](https://github.com/rajohan/Mira-Dashboard/issues/459)) ([79afcc3](https://github.com/rajohan/Mira-Dashboard/commit/79afcc34d4832472bca147d7741b621594ab129d))
+
 ## [0.3.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.1...v0.3.2) (2026-08-25)
 
 
