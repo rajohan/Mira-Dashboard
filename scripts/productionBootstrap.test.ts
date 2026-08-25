@@ -86,6 +86,19 @@ describe("production bootstrap admission", () => {
                 assertProductionReleaseArchiveListing(listing, releaseId)
             ).toThrow("Production release archive is invalid");
         }
+        const maximumValidListing = Array.from(
+            { length: 4096 + 512 },
+            (_, index) => `${releaseId}/entry-${index}`
+        ).join("\n");
+        expect(() =>
+            assertProductionReleaseArchiveListing(maximumValidListing, releaseId)
+        ).not.toThrow();
+        expect(() =>
+            assertProductionReleaseArchiveListing(
+                `${maximumValidListing}\n${releaseId}/overflow`,
+                releaseId
+            )
+        ).toThrow("Production release archive is invalid");
     });
 
     test("resolves only clean exact main from the expected checkout", async () => {

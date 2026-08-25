@@ -716,6 +716,103 @@ describe("production Delivery executor", () => {
         });
     });
 
+    test("records success after recovering a committed target", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const initial = await loadProductionActivationState(lease, paths);
+            await commitProductionActivationState(lease, paths, initial, {
+                current: {
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                formatVersion: 1,
+                previous: null,
+                transitionId: currentTransitionId,
+            });
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const targetActivation = {
+                current: {
+                    releaseId: targetReleaseId,
+                    runtimeRevision: targetRuntimeRevision,
+                },
+                formatVersion: 1 as const,
+                previous: {
+                    databaseSnapshotTransitionId: operationTransitionId,
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                transitionId: operationTransitionId,
+            };
+            let settlements = 0;
+            const receipt = await runProductionDeliveryExecutorUnderLease(
+                lease,
+                paths,
+                options,
+                {
+                    activate: (...arguments_) =>
+                        Effect.tryPromise({
+                            catch: () => new Error("activation failed") as never,
+                            try: async () => {
+                                for (const phase of [
+                                    "services-stopped",
+                                    "current-snapshot-created",
+                                    "target-database-ready",
+                                    "target-services-started",
+                                    "target-verified",
+                                    "target-smoke-verified",
+                                ] as const) {
+                                    await arguments_[5]?.onProgress?.(phase);
+                                }
+                                const current = await loadProductionActivationState(
+                                    lease,
+                                    paths
+                                );
+                                await commitProductionActivationState(
+                                    lease,
+                                    paths,
+                                    current,
+                                    targetActivation
+                                );
+                                return targetActivation;
+                            },
+                        }),
+                    createServices: () => ({
+                        prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
+                        settle: () => {
+                            settlements += 1;
+                            return settlements === 1
+                                ? Promise.reject(
+                                      new Error("transient settlement failure")
+                                  )
+                                : Promise.resolve();
+                        },
+                        start: () => Promise.resolve(),
+                        stop: () => Promise.resolve(),
+                        verifyReady: () => Promise.resolve(),
+                        verifySmoke: () => Promise.resolve(),
+                    }),
+                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(artifact(releaseId, runtimeRevision)),
+                    nowMs: () => 10_000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                    verifyRunBeforeSnapshot: () => Promise.resolve(),
+                }
+            );
+            expect(settlements).toBe(2);
+            expect(receipt.result).toEqual({
+                activation: targetActivation,
+                completedAtMs: 10_000,
+                outcome: "succeeded",
+            });
+        });
+    });
+
     test("builds, capacity-admits, installs, and publishes an exact clean target", async () => {
         const { options, paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {

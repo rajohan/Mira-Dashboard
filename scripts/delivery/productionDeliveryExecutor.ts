@@ -938,6 +938,13 @@ export async function runProductionDeliveryExecutorUnderLease(
                 activationMatchesTarget(recovery.record, record))
         ) {
             await restartNormalRuntime(paths, recovery.record, services, dependencies);
+            if (activationMatchesTarget(recovery.record, record)) {
+                return completeDeliveryProductionOperation(lease, paths, record, {
+                    activation: recovery.record,
+                    completedAtMs: Math.max(nowMs(), record.updatedAtMs),
+                    outcome: "succeeded",
+                });
+            }
         }
         const receipt = await terminalFailure(
             lease,

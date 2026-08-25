@@ -1,4 +1,11 @@
+import {
+    maximumReleaseArtifactCount,
+    maximumReleaseArtifactDirectoryCount,
+} from "./releaseArtifactInventory.ts";
+
 const invalidArchiveMessage = "Production release archive is invalid";
+const maximumProductionReleaseArchiveEntries =
+    maximumReleaseArtifactCount + maximumReleaseArtifactDirectoryCount;
 
 /**
  * Rejects archive paths outside the single commit-addressed release directory.
@@ -13,7 +20,7 @@ export function assertProductionReleaseArchiveListing(
     if (
         !/^[a-f\d]{40}$/u.test(releaseId) ||
         entries.length === 0 ||
-        entries.length > 4096 ||
+        entries.length > maximumProductionReleaseArchiveEntries ||
         entries.some(
             (entry) =>
                 !(entry === `${releaseId}/` || entry.startsWith(`${releaseId}/`)) ||

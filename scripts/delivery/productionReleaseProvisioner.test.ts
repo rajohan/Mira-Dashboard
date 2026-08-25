@@ -302,8 +302,13 @@ describe("production release root provisioner", () => {
         const commands: string[] = [];
         const syncedPaths: string[] = [];
         let assetDownloads = 0;
+        let failAuthorityInstall = false;
+        let releaseRootPublications = 0;
         const runtimeExecutable = path.join(provisioningRoot, "runtime/bun");
         const installedEntrypoint = path.join(provisioningRoot, "entrypoint.js");
+        await mkdir(path.dirname(runtimeExecutable), { recursive: true });
+        await cp(path.join(sourceReleaseRoot, "runtime/bun"), runtimeExecutable);
+        await writeFile(installedEntrypoint, "installed provisioning entrypoint");
         const environment = productionReleaseProvisionerTestSupport.createEnvironment({
             executablePath: runtimeExecutable,
             fetch: (url, init) => {
@@ -384,6 +389,9 @@ describe("production release root provisioner", () => {
             readActivationRecord: () => Promise.resolve(activationRecord),
             readGithubToken: () => "github-token-sentinel",
             rename: async (source, destination) => {
+                if (destination === path.join(releasesRoot, releaseId)) {
+                    releaseRootPublications += 1;
+                }
                 await restoreOwnerWrite(destination);
                 await rm(destination, { force: true, recursive: true });
                 await cp(source, destination, { recursive: true });
@@ -395,6 +403,13 @@ describe("production release root provisioner", () => {
             releasesRoot,
             runCommand: async (executable, arguments_, stdin) => {
                 commands.push(`${executable} ${arguments_.join(" ")}`);
+                if (
+                    failAuthorityInstall &&
+                    arguments_[0]?.endsWith("installHostOperationsProvisioning.ts")
+                ) {
+                    await writeFile(installedEntrypoint, "failed candidate entrypoint");
+                    return commandResult(new Uint8Array(), 1);
+                }
                 if (executable === "/usr/bin/install") {
                     await cp(arguments_[6]!, arguments_[7]!);
                     return commandResult();
@@ -487,6 +502,7 @@ describe("production release root provisioner", () => {
         await provisionProductionRelease(`${releaseId}--local--settled`, environment);
         const retainedRoots = await readdir(releasesRoot);
         expect(retainedRoots.toSorted()).toEqual(["a".repeat(40), releaseId].toSorted());
+        expect(releaseRootPublications).toBe(0);
         const runtimeInstallIndex = commands.findIndex((command) =>
             command.startsWith("/usr/bin/install -o root -g root -m 0555")
         );
@@ -495,5 +511,18 @@ describe("production release root provisioner", () => {
         );
         expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
         expect(authorityInstallIndex).toBeGreaterThan(runtimeInstallIndex);
+
+        await chmod(runtimeExecutable, 0o600);
+        await chmod(installedEntrypoint, 0o600);
+        await writeFile(runtimeExecutable, "trusted previous runtime");
+        await writeFile(installedEntrypoint, "trusted previous entrypoint");
+        const previousRuntime = await readFile(runtimeExecutable);
+        const previousEntrypoint = await readFile(installedEntrypoint);
+        failAuthorityInstall = true;
+        await expectProvisioningFailure(
+            provisionProductionRelease(`${releaseId}--local`, environment)
+        );
+        expect(await readFile(runtimeExecutable)).toEqual(previousRuntime);
+        expect(await readFile(installedEntrypoint)).toEqual(previousEntrypoint);
     });
 });

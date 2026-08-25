@@ -121,6 +121,13 @@ interface ProductionReleaseProvisionerEnvironment {
     readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
 }
 
+interface InstalledProvisioningPairSnapshot {
+    readonly entrypointBackup: string;
+    readonly entrypointSha256: string;
+    readonly runtimeBackup: string;
+    readonly runtimeSha256: string;
+}
+
 function failure(): Error {
     return new Error(failureMessage);
 }
@@ -525,6 +532,76 @@ async function probeRuntime(
     }
 }
 
+async function snapshotInstalledProvisioningPair(
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<InstalledProvisioningPairSnapshot> {
+    const suffix = Bun.randomUUIDv7();
+    const runtimeBackup = `${environment.runtimeExecutable}.rollback-${suffix}`;
+    const entrypointBackup = `${environment.installedEntrypoint}.rollback-${suffix}`;
+    const runtimeSha256 = await sha256File(environment.runtimeExecutable, environment);
+    const entrypointSha256 = await sha256File(
+        environment.installedEntrypoint,
+        environment
+    );
+    try {
+        for (const [source, destination] of [
+            [environment.runtimeExecutable, runtimeBackup],
+            [environment.installedEntrypoint, entrypointBackup],
+        ] as const) {
+            await requireSuccess(
+                "/usr/bin/install",
+                ["-o", "root", "-g", "root", "-m", "0555", source, destination],
+                environment
+            );
+            await environment.syncPath(destination);
+        }
+        if (
+            (await sha256File(runtimeBackup, environment)) !== runtimeSha256 ||
+            (await sha256File(entrypointBackup, environment)) !== entrypointSha256
+        ) {
+            throw failure();
+        }
+        await environment.syncPath(path.dirname(environment.runtimeExecutable));
+        await environment.syncPath(path.dirname(environment.installedEntrypoint));
+        return Object.freeze({
+            entrypointBackup,
+            entrypointSha256,
+            runtimeBackup,
+            runtimeSha256,
+        });
+    } catch {
+        await environment.remove(runtimeBackup).catch(() => {});
+        await environment.remove(entrypointBackup).catch(() => {});
+        throw failure();
+    }
+}
+
+async function restoreInstalledProvisioningPair(
+    snapshot: InstalledProvisioningPairSnapshot,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    await environment.rename(snapshot.runtimeBackup, environment.runtimeExecutable);
+    await environment.rename(snapshot.entrypointBackup, environment.installedEntrypoint);
+    await environment.syncPath(path.dirname(environment.runtimeExecutable));
+    await environment.syncPath(path.dirname(environment.installedEntrypoint));
+    if (
+        (await sha256File(environment.runtimeExecutable, environment)) !==
+            snapshot.runtimeSha256 ||
+        (await sha256File(environment.installedEntrypoint, environment)) !==
+            snapshot.entrypointSha256
+    ) {
+        throw failure();
+    }
+}
+
+async function discardInstalledProvisioningPairSnapshot(
+    snapshot: InstalledProvisioningPairSnapshot,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    await environment.remove(snapshot.runtimeBackup).catch(() => {});
+    await environment.remove(snapshot.entrypointBackup).catch(() => {});
+}
+
 /**
  * Atomically promotes the verified release runtime before candidate scripts execute.
  * @param releaseRoot Verified root-owned release directory.
@@ -673,7 +750,24 @@ async function downloadAndStageRelease(
         await syncReleaseTree(stagedRoot, environment);
         await environment.syncPath(temporaryRoot);
         const destination = path.join(environment.releasesRoot, releaseId);
-        await environment.remove(destination);
+        let destinationStatus: TrustedFileStatus | undefined;
+        try {
+            destinationStatus = await environment.lstat(destination);
+        } catch (error) {
+            if (errorCode(error) !== "ENOENT") throw failure();
+        }
+        if (destinationStatus !== undefined) {
+            if (
+                !destinationStatus.isDirectory() ||
+                destinationStatus.isSymbolicLink() ||
+                destinationStatus.uid !== 0 ||
+                destinationStatus.gid !== 0 ||
+                (destinationStatus.mode & 0o022) !== 0
+            ) {
+                throw failure();
+            }
+            return await verifyStagedRelease(releaseId, environment);
+        }
         await environment.rename(stagedRoot, destination);
         await environment.syncPath(temporaryRoot);
         await environment.syncPath(environment.releasesRoot);
@@ -880,6 +974,7 @@ export async function provisionProductionRelease(
     await verifyInstalledBoundary(environment);
     const { archiveSha256, receiptSha256, releaseId, settled, source } =
         parseProductionProvisioningAuthority(authority);
+    let installedPairSnapshot: InstalledProvisioningPairSnapshot | undefined;
     try {
         let releaseRoot: string;
         if (source === "local") {
@@ -895,12 +990,25 @@ export async function provisionProductionRelease(
                 environment
             );
         }
+        installedPairSnapshot = await snapshotInstalledProvisioningPair(environment);
         await installCandidateRuntime(releaseRoot, environment);
         await installAuthority(releaseId, releaseRoot, environment);
         await retainReleaseRoots(releaseId, settled, environment);
     } catch {
+        if (installedPairSnapshot !== undefined) {
+            await restoreInstalledProvisioningPair(
+                installedPairSnapshot,
+                environment
+            ).catch(() => {});
+        }
         await retainReleaseRoots(undefined, false, environment).catch(() => {});
         throw failure();
+    }
+    if (installedPairSnapshot !== undefined) {
+        await discardInstalledProvisioningPairSnapshot(
+            installedPairSnapshot,
+            environment
+        );
     }
 }
 
