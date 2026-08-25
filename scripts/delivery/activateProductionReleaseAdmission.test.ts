@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { Effect } from "effect";
 
+import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
@@ -80,8 +81,15 @@ async function createFixture() {
     temporaryDirectories.push(projectRoot, sourceRoot, runtimeRoot);
     const releaseRoot = path.join(sourceRoot, "release");
     const runtimeSource = path.join(runtimeRoot, "bun");
-    await mkdir(releaseRoot, { mode: 0o700 });
+    await mkdir(path.join(releaseRoot, "runtime"), { mode: 0o700, recursive: true });
+    await mkdir(path.join(releaseRoot, "server"), { mode: 0o700 });
     await writeFile(path.join(releaseRoot, "artifact"), "release", { mode: 0o600 });
+    await writeFile(path.join(releaseRoot, "runtime/bun"), "runtime", { mode: 0o500 });
+    await writeFile(
+        path.join(releaseRoot, "server/productionProvisioning.js"),
+        "provisioning",
+        { mode: 0o500 }
+    );
     await writeFile(runtimeSource, "runtime", { mode: 0o500 });
     await chmod(runtimeSource, 0o500);
     const state = await prepareProtectedProductionStatePath(projectRoot);
@@ -459,6 +467,36 @@ describe("production artifact pre-admission lifecycle", () => {
                             Promise.resolve(
                                 filesystemCapacity(
                                     productionArtifactCapacityReserveBytes + 32n * 1024n
+                                )
+                            ),
+                        verifySourceRelease: () =>
+                            Promise.resolve(manifest(releaseA, runtimeA)),
+                    }
+                )
+            );
+
+            expect(failure.message).toBe("Production artifact capacity admission failed");
+        });
+    });
+
+    test("charges the transient host archive and provisioning pair", async () => {
+        const fixture = await createFixture();
+        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(fixture.state);
+            const failure = await rejectionError(
+                assertProductionArtifactCapacity(
+                    lease,
+                    paths,
+                    fixture.releaseRoot,
+                    manifest(releaseA, runtimeA),
+                    fixture.runtimeSource,
+                    {
+                        additionalReleaseCopyDirectory: paths.productionDirectory,
+                        availableCapacity: () =>
+                            Promise.resolve(
+                                filesystemCapacity(
+                                    productionArtifactCapacityReserveBytes +
+                                        BigInt(maximumProductionReleaseArchiveBytes)
                                 )
                             ),
                         verifySourceRelease: () =>

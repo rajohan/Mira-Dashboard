@@ -2,9 +2,11 @@ import type { BigIntStats } from "node:fs";
 import { lstat, realpath, statfs } from "node:fs/promises";
 import path from "node:path";
 
+import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
+import { productionProvisioningEntrypointName } from "./provisioning/host-operations/policy.ts";
 import { inventoryReleaseArtifactTree } from "./releaseArtifactInventory.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 
@@ -142,6 +144,15 @@ function assertFitsCapacity(
 
 function inventoryHasObjects(inventory: ProductionArtifactCopyInventory): boolean {
     return inventory.fileBytes.length > 0 || inventory.newDirectoryCount > 0n;
+}
+
+function requiredReleaseFileBytes(
+    records: Awaited<ReturnType<typeof inventoryReleaseArtifactTree>>,
+    relativePath: string
+): bigint {
+    const record = records.find((candidate) => candidate.path === relativePath);
+    if (record === undefined) throw failure();
+    return BigInt(record.bytes);
 }
 
 /**
@@ -391,10 +402,16 @@ export async function assertProductionArtifactCapacity(
                 runtimeDirectoryCount,
         });
         const releaseInventory: ProductionArtifactCopyInventory = Object.freeze({
-            fileBytes: Object.freeze(
-                releaseRecords.map((record) => BigInt(record.bytes))
-            ),
-            newDirectoryCount: directoryCountForRelease(releaseRecords),
+            fileBytes: Object.freeze([
+                ...releaseRecords.map((record) => BigInt(record.bytes)),
+                BigInt(maximumProductionReleaseArchiveBytes),
+                requiredReleaseFileBytes(releaseRecords, "runtime/bun"),
+                requiredReleaseFileBytes(
+                    releaseRecords,
+                    `server/${productionProvisioningEntrypointName}`
+                ),
+            ]),
+            newDirectoryCount: directoryCountForRelease(releaseRecords) + 2n,
         });
         const availableCapacity =
             dependencies.availableCapacity ?? defaultAvailableCapacity;

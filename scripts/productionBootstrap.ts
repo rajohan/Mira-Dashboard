@@ -714,6 +714,7 @@ export async function stageProductionBootstrapRootAuthority(
             directory,
         ]);
     }
+    let provisioningError: unknown;
     try {
         await requireSuccess(dependencies, [
             sudo,
@@ -744,6 +745,7 @@ export async function stageProductionBootstrapRootAuthority(
             "-C",
             `${provisioningRoot}/releases`,
         ]);
+        await requireSuccess(dependencies, [sudo, "/usr/bin/rm", "-f", stagedArchive]);
         await requireSuccess(dependencies, [
             sudo,
             "/usr/bin/install",
@@ -926,8 +928,27 @@ export async function stageProductionBootstrapRootAuthority(
             `${stagedRelease}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
             "--mode=apply",
         ]);
-    } finally {
-        await dependencies.run([sudo, "/usr/bin/rm", "-rf", pairCandidate]);
+    } catch (error) {
+        provisioningError = error;
+    }
+    const archiveCleanup = await dependencies.run([
+        sudo,
+        "/usr/bin/rm",
+        "-f",
+        stagedArchive,
+    ]);
+    const pairCleanup = await dependencies.run([
+        sudo,
+        "/usr/bin/rm",
+        "-rf",
+        pairCandidate,
+    ]);
+    if (
+        provisioningError !== undefined ||
+        archiveCleanup.exitCode !== 0 ||
+        pairCleanup.exitCode !== 0
+    ) {
+        throw new Error(failureMessage);
     }
 }
 

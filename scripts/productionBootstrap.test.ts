@@ -555,6 +555,17 @@ describe("production bootstrap admission", () => {
         expect(pairSyncIndex).toBeGreaterThan(pairMoveIndex);
         expect(selectorMoveIndex).toBeGreaterThan(pairSyncIndex);
         expect(selectorSyncIndex).toBeGreaterThan(selectorMoveIndex);
+        const archiveRemovalIndexes = commands
+            .map((command, index) =>
+                command.includes("/usr/bin/rm") &&
+                command.includes("-f") &&
+                command.at(-1)?.endsWith("/release.tar") === true
+                    ? index
+                    : -1
+            )
+            .filter((index) => index >= 0);
+        expect(archiveRemovalIndexes).toHaveLength(2);
+        expect(archiveRemovalIndexes[0]).toBeLessThan(runtimeInstallIndex);
         expect(
             commands.some((command) =>
                 command.some((argument) => argument.endsWith("/usermod"))
@@ -755,6 +766,14 @@ describe("production bootstrap admission", () => {
                 )
             )
         ).toBe(false);
+        expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/rm") &&
+                    command.includes("-f") &&
+                    command.at(-1)?.endsWith("/release.tar") === true
+            )
+        ).toBe(true);
     });
 
     test("rejects a changed archive after the runtime handoff succeeds", async () => {
