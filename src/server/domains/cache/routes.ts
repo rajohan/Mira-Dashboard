@@ -12,6 +12,7 @@ import { jobRunSummarySchema } from "../../../contracts/jobModel.ts";
 import { emptyInputSchema } from "../../../contracts/system.ts";
 import { capabilityProcedure } from "../../trpc/trpc.ts";
 import { CacheConflictError, CacheNotFoundError } from "./errors.ts";
+import { cacheProviderReadCapability } from "./providerRegistry.ts";
 
 async function runCacheEffect<T, E>(effect: Effect.Effect<T, E>): Promise<T> {
     try {
@@ -43,7 +44,19 @@ export const cacheRoutes = {
     getEntry: cacheReadProcedure
         .input(getCacheEntryInputSchema)
         .output(cacheEntrySchema)
-        .query(({ ctx, input }) => runCacheEffect(ctx.cacheService.getEntry(input))),
+        .query(({ ctx, input }) => {
+            const domainCapability = cacheProviderReadCapability(input.key);
+            if (
+                domainCapability !== undefined &&
+                !ctx.principal.capabilities.includes(domainCapability)
+            ) {
+                throw new TRPCError({
+                    code: "FORBIDDEN",
+                    message: "Required application capability is not granted",
+                });
+            }
+            return runCacheEffect(ctx.cacheService.getEntry(input));
+        }),
     getHeartbeat: cacheReadProcedure
         .input(emptyInputSchema)
         .output(cacheHeartbeatResultSchema)

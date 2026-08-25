@@ -560,7 +560,7 @@
                           ],
                           "additionalProperties": false
                         },
-                        "maxItems": 16
+                        "maxItems": 64
                       },
                       "snapshotCount": {
                         "type": "integer",
@@ -571,6 +571,7 @@
                     "required": [
                       "health",
                       "id",
+                      "snapshots",
                       "snapshotCount"
                     ],
                     "additionalProperties": false
@@ -926,7 +927,7 @@
                           ],
                           "additionalProperties": false
                         },
-                        "maxItems": 16
+                        "maxItems": 64
                       },
                       "snapshotCount": {
                         "type": "integer",
@@ -937,6 +938,7 @@
                     "required": [
                       "health",
                       "id",
+                      "snapshots",
                       "snapshotCount"
                     ],
                     "additionalProperties": false

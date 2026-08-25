@@ -423,7 +423,7 @@ export function createCacheService(
             readEffect(
                 () => {
                     const provider = findCacheProviderDefinition(input.key);
-                    if (provider?.payloadExposure !== "cache-read") {
+                    if (provider === undefined) {
                         throw new CacheNotFoundError({ key: input.key });
                     }
                     const record = dependencies.cacheRepository.findEntry(input.key);

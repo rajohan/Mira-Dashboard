@@ -32,6 +32,7 @@ function inspectRow(
     overrides: {
         readonly bindings?: unknown;
         readonly capability?: string;
+        readonly containerPort?: string;
         readonly containerName?: string;
         readonly health?: string;
         readonly hostPort?: string;
@@ -62,8 +63,8 @@ function inspectRow(
         Name: overrides.containerName ?? "/pool-1",
         NetworkSettings: {
             Ports: {
-                "5432/tcp": bindings,
-                "6432/tcp": null,
+                [`${overrides.containerPort ?? "5432"}/tcp`]: bindings,
+                "15432/tcp": null,
             },
         },
         State: {
@@ -176,6 +177,7 @@ describe("Docker database observability endpoint resolver", () => {
             [
                 inspectRow(1, {
                     containerName: "/renamed-container",
+                    containerPort: "6432",
                     hostPort: "7543",
                     project: "renamed-project",
                     service: "renamed-service",
@@ -197,6 +199,7 @@ describe("Docker database observability endpoint resolver", () => {
             composeProject: "first-project",
             composeService: "first-service",
             containerId: containerId(1),
+            containerPort: 5432,
         });
         expect(second.connection).toMatchObject({
             controlDatabase: databaseObservabilityPgBouncerControlAlias,
@@ -207,6 +210,7 @@ describe("Docker database observability endpoint resolver", () => {
             composeProject: "renamed-project",
             composeService: "renamed-service",
             containerId: containerId(1),
+            containerPort: 6432,
         });
         expect(process.calls.map(({ arguments_ }) => arguments_)).toEqual([
             [

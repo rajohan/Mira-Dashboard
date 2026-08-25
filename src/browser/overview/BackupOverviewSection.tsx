@@ -428,128 +428,125 @@ export function BackupOverviewSectionView({
                                         {activityBadge(kopia)}
                                     </div>
                                 )}
-                                <ul className="max-h-112 min-h-88 space-y-4 overflow-y-auto pr-2">
-                                    {kopia.payload.sources.map((source) => (
-                                        <li
-                                            className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
-                                            key={source.id}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div>
-                                                    <Text className="font-medium capitalize">
-                                                        {source.id}
-                                                    </Text>
-                                                    <Text
-                                                        className="mt-1"
-                                                        size="sm"
-                                                        tone="muted"
-                                                    >
-                                                        {source.snapshotCount} snapshot
-                                                        {source.snapshotCount === 1
-                                                            ? ""
-                                                            : "s"}
-                                                    </Text>
-                                                </div>
-                                                <div className="flex flex-wrap justify-end gap-2">
-                                                    <Badge
-                                                        variant={
-                                                            source.health === "current"
-                                                                ? "success"
-                                                                : "warning"
-                                                        }
-                                                    >
-                                                        {sourceHealthLabel(source.health)}
-                                                    </Badge>
-                                                    {source.health === "current" && (
-                                                        <Badge variant="success">
-                                                            Succeeded
+                                <section
+                                    aria-label="Kopia snapshot inventory"
+                                    className="max-h-112 min-h-88 space-y-4 overflow-y-auto pr-2"
+                                    tabIndex={0}
+                                >
+                                    <ul className="space-y-4">
+                                        {kopia.payload.sources.map((source) => (
+                                            <li
+                                                className="border-primary-700 bg-primary-900/35 rounded-lg border p-3"
+                                                key={source.id}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <Text className="font-medium capitalize">
+                                                            {source.id}
+                                                        </Text>
+                                                        <Text
+                                                            className="mt-1"
+                                                            size="sm"
+                                                            tone="muted"
+                                                        >
+                                                            {source.snapshotCount}{" "}
+                                                            snapshot
+                                                            {source.snapshotCount === 1
+                                                                ? ""
+                                                                : "s"}
+                                                        </Text>
+                                                    </div>
+                                                    <div className="flex flex-wrap justify-end gap-2">
+                                                        <Badge
+                                                            variant={
+                                                                source.health ===
+                                                                "current"
+                                                                    ? "success"
+                                                                    : "warning"
+                                                            }
+                                                        >
+                                                            {sourceHealthLabel(
+                                                                source.health
+                                                            )}
                                                         </Badge>
-                                                    )}
+                                                        {source.health === "current" && (
+                                                            <Badge variant="success">
+                                                                Succeeded
+                                                            </Badge>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className="mt-3 space-y-2">
-                                                {(
-                                                    source.snapshots ??
-                                                    (source.latestCompletedAtMs ===
-                                                    undefined
-                                                        ? []
-                                                        : [
-                                                              {
-                                                                  completedAtMs:
-                                                                      source.latestCompletedAtMs,
-                                                                  fileCount:
-                                                                      source.latestFileCount,
-                                                                  retentionReasons: [],
-                                                                  sizeBytes:
-                                                                      source.latestSizeBytes,
-                                                              },
-                                                          ])
-                                                ).map((snapshot) => (
-                                                    <div
-                                                        className="border-primary-700 bg-primary-900/35 rounded-md border p-2"
-                                                        key={`${source.id}-${snapshot.completedAtMs}`}
-                                                    >
-                                                        <div className="flex flex-wrap items-start justify-between gap-3 text-sm">
-                                                            <div className="min-w-0 flex-1">
-                                                                <Text className="truncate">
-                                                                    {snapshot.description ??
-                                                                        "Unnamed snapshot"}
-                                                                </Text>
-                                                                <Text
-                                                                    className="mt-1"
-                                                                    size="sm"
-                                                                    tone="muted"
-                                                                >
-                                                                    Finished:{" "}
-                                                                    {formatDashboardDateTime(
-                                                                        snapshot.completedAtMs
-                                                                    )}
-                                                                </Text>
-                                                                {snapshot.retentionReasons
-                                                                    .length > 0 && (
-                                                                    <div className="mt-2 flex flex-wrap gap-1">
-                                                                        {snapshot.retentionReasons.map(
-                                                                            (reason) => (
-                                                                                <Badge
-                                                                                    key={
-                                                                                        reason
-                                                                                    }
-                                                                                >
-                                                                                    {
-                                                                                        reason
-                                                                                    }
-                                                                                </Badge>
-                                                                            )
+                                                <div className="mt-3 space-y-2">
+                                                    {source.snapshots.map((snapshot) => (
+                                                        <div
+                                                            className="border-primary-700 bg-primary-900/35 rounded-md border p-2"
+                                                            key={`${source.id}-${snapshot.completedAtMs}`}
+                                                        >
+                                                            <div className="flex flex-wrap items-start justify-between gap-3 text-sm">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <Text className="truncate">
+                                                                        {snapshot.description ??
+                                                                            "Unnamed snapshot"}
+                                                                    </Text>
+                                                                    <Text
+                                                                        className="mt-1"
+                                                                        size="sm"
+                                                                        tone="muted"
+                                                                    >
+                                                                        Finished:{" "}
+                                                                        {formatDashboardDateTime(
+                                                                            snapshot.completedAtMs
                                                                         )}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <Text>
-                                                                    {snapshot.sizeBytes ===
-                                                                    undefined
-                                                                        ? "Unknown"
-                                                                        : formatByteCount(
-                                                                              snapshot.sizeBytes
-                                                                          )}
-                                                                </Text>
-                                                                <Text
-                                                                    className="mt-1"
-                                                                    size="sm"
-                                                                    tone="muted"
-                                                                >
-                                                                    {snapshot.fileCount ??
-                                                                        "Unknown"}{" "}
-                                                                    files
-                                                                </Text>
+                                                                    </Text>
+                                                                    {snapshot
+                                                                        .retentionReasons
+                                                                        .length > 0 && (
+                                                                        <div className="mt-2 flex flex-wrap gap-1">
+                                                                            {snapshot.retentionReasons.map(
+                                                                                (
+                                                                                    reason
+                                                                                ) => (
+                                                                                    <Badge
+                                                                                        key={
+                                                                                            reason
+                                                                                        }
+                                                                                    >
+                                                                                        {
+                                                                                            reason
+                                                                                        }
+                                                                                    </Badge>
+                                                                                )
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <Text>
+                                                                        {snapshot.sizeBytes ===
+                                                                        undefined
+                                                                            ? "Unknown"
+                                                                            : formatByteCount(
+                                                                                  snapshot.sizeBytes
+                                                                              )}
+                                                                    </Text>
+                                                                    <Text
+                                                                        className="mt-1"
+                                                                        size="sm"
+                                                                        tone="muted"
+                                                                    >
+                                                                        {snapshot.fileCount ??
+                                                                            "Unknown"}{" "}
+                                                                        files
+                                                                    </Text>
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
+                                                    ))}
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </section>
                                 {(kopia.activity.state === "needs-attention" ||
                                     kopia.activity.state !== "idle") && (
                                     <div className="mt-4 flex flex-wrap gap-2">

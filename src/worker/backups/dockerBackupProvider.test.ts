@@ -224,11 +224,26 @@ function providerProcess() {
                               latestCompletedAtMs: 1_900_000,
                               latestFileCount: 12,
                               latestSizeBytes: 42,
+                              snapshots: [
+                                  {
+                                      completedAtMs: 1_900_000,
+                                      fileCount: 12,
+                                      retentionReasons: ["daily-1"],
+                                      sizeBytes: 42,
+                                  },
+                                  {
+                                      completedAtMs: 1_800_000,
+                                      retentionReasons: ["daily-2"],
+                                  },
+                              ],
                               snapshotCount: 2,
                           },
                           {
                               id: "projects",
                               latestCompletedAtMs: 1_800_000,
+                              snapshots: [
+                                  { completedAtMs: 1_800_000, retentionReasons: [] },
+                              ],
                               snapshotCount: 1,
                           },
                       ],
@@ -565,8 +580,8 @@ describe("Docker backup execution port", () => {
                                   idle: false,
                                   protocol: backupWrapperProtocol,
                                   sources: [
-                                      { id: "openclaw", snapshotCount: 0 },
-                                      { id: "projects", snapshotCount: 0 },
+                                      { id: "openclaw", snapshots: [], snapshotCount: 0 },
+                                      { id: "projects", snapshots: [], snapshotCount: 0 },
                                   ],
                                   type: "kopia",
                               }
@@ -591,7 +606,7 @@ describe("Docker backup execution port", () => {
                     result({
                         idle: true,
                         protocol: backupWrapperProtocol,
-                        sources: [{ id: "unexpected", snapshotCount: 0 }],
+                        sources: [{ id: "unexpected", snapshots: [], snapshotCount: 0 }],
                         type: "kopia",
                     })
                 ),

@@ -37,7 +37,7 @@ const wrapperDisplayTextSchema = v.pipe(
     v.check((value) => !value.includes("\0"), "Backup wrapper display text is invalid")
 );
 
-export const backupWrapperProtocol = "mira-dashboard-backup.v1" as const;
+export const backupWrapperProtocol = "mira-dashboard-backup.v2" as const;
 const backupWrapperBaseEntries = {
     idle: v.boolean("Backup wrapper idle state is invalid"),
     protocol: v.literal(backupWrapperProtocol),
@@ -60,13 +60,11 @@ const backupWrapperKopiaSourceSchema = v.strictObject({
     latestCompletedAtMs: v.optional(wrapperTimestampSchema),
     latestFileCount: v.optional(wrapperCountSchema),
     latestSizeBytes: v.optional(wrapperByteCountSchema),
-    snapshots: v.optional(
-        v.pipe(
-            v.array(backupWrapperKopiaSnapshotSchema),
-            v.maxLength(
-                backupKopiaSnapshotMaximum,
-                "Backup wrapper snapshots are outside their budget"
-            )
+    snapshots: v.pipe(
+        v.array(backupWrapperKopiaSnapshotSchema),
+        v.maxLength(
+            backupKopiaSnapshotMaximum,
+            "Backup wrapper snapshots are outside their budget"
         )
     ),
     snapshotCount: wrapperCountSchema,
@@ -280,7 +278,7 @@ export function backupKopiaSourceSummaryFromWrapper(
         ...(source.latestSizeBytes === undefined
             ? {}
             : { latestSizeBytes: source.latestSizeBytes }),
-        ...(source.snapshots === undefined ? {} : { snapshots: source.snapshots }),
+        snapshots: source.snapshots,
         snapshotCount: source.snapshotCount,
     });
 }

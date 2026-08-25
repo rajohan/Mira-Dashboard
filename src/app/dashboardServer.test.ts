@@ -1671,6 +1671,11 @@ describe("Dashboard security composition", () => {
                         principalId: authenticationTestPrincipalId,
                     }),
                     v.parse(automationPrincipalCapabilityInsertSchema, {
+                        capability: "database:read",
+                        grantedAt: authenticationTestNow,
+                        principalId: authenticationTestPrincipalId,
+                    }),
+                    v.parse(automationPrincipalCapabilityInsertSchema, {
                         capability: "monitoring:write",
                         grantedAt: authenticationTestNow,
                         principalId: authenticationTestPrincipalId,
@@ -1737,8 +1742,21 @@ describe("Dashboard security composition", () => {
                     },
                 }
             );
-            expect(genericCacheResponse.status).toBe(404);
-            expect(await genericCacheResponse.text()).not.toContain("comet");
+            const genericCacheBody = (await genericCacheResponse.json()) as {
+                readonly result?: {
+                    readonly data?: {
+                        readonly json?: {
+                            readonly key?: unknown;
+                            readonly payload?: unknown;
+                        };
+                    };
+                };
+            };
+            expect(genericCacheResponse.status).toBe(200);
+            expect(genericCacheBody.result?.data?.json).toMatchObject({
+                key: "database.observability",
+                payload: dashboardServerTestPostgresqlSnapshot,
+            });
             const input = encodeURIComponent(JSON.stringify({ json: {} }));
             const response = await fetch(
                 new URL(
@@ -1767,7 +1785,12 @@ describe("Dashboard security composition", () => {
                 result.principals.find(({ id }) => id === authenticationTestPrincipalId)
             ).toMatchObject({
                 activeCredentialCount: 1,
-                capabilities: ["cache:read", "monitoring:write", "reports:read"],
+                capabilities: [
+                    "cache:read",
+                    "database:read",
+                    "monitoring:write",
+                    "reports:read",
+                ],
                 disabled: false,
                 id: authenticationTestPrincipalId,
             });

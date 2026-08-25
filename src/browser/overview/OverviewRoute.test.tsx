@@ -384,6 +384,10 @@ const freshKopiaBackupStatus = Object.freeze({
                 health: "current",
                 id: "primary",
                 latestCompletedAtMs: timestampMs,
+                snapshots: Array.from({ length: 8 }, (_, index) => ({
+                    completedAtMs: timestampMs - index,
+                    retentionReasons: [],
+                })),
                 snapshotCount: 8,
             },
         ],

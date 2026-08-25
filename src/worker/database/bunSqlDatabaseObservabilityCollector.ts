@@ -18,18 +18,20 @@ import {
 } from "../../contracts/database.ts";
 import type { DatabaseObservabilityCollector } from "../../contracts/databaseObservabilityCollector.ts";
 import {
-    databaseObservabilityCapabilityOwnerRole,
-    databaseObservabilityCapabilitySchema,
     databaseObservabilityHostnameIsLoopback,
     databaseObservabilityObserverConnectionLimit,
     databaseObservabilityObserverRole,
+    databaseObservabilityPgBouncerControlAlias,
     databaseObservabilityPgBouncerVirtualDatabase,
     databaseObservabilityTorrentCountDatabases,
-    databaseObservabilityViewOwnerRole,
     type DatabaseObservabilityTorrentCountDatabase,
 } from "../../shared/databaseObservabilityPolicy.ts";
 import { utf8ByteLength } from "../../shared/encoding.ts";
 import { compareStrings, hasNoUnicodeControlOrFormat } from "../../shared/validation.ts";
+import {
+    createDockerPgBouncerAdminCollector,
+    type PgBouncerAdminCollector,
+} from "./dockerPgBouncerAdminCollector.ts";
 
 /** Maximum raw PgBouncer rows admitted before aggregate projection. */
 export const databaseObservabilityPgBouncerInputMaximum = 512;
@@ -176,9 +178,7 @@ function validatedConnection(
         !Number.isSafeInteger(connection.port) ||
         connection.port < 1 ||
         connection.port > 65_535 ||
-        connection.controlDatabase.length === 0 ||
-        utf8ByteLength(connection.controlDatabase) > 63 ||
-        /[\p{Cc}\p{Cf}]/u.test(connection.controlDatabase) ||
+        connection.controlDatabase !== databaseObservabilityPgBouncerControlAlias ||
         password.length === 0 ||
         password.length > 4096 ||
         password !== password.trim() ||
@@ -392,7 +392,13 @@ async function withReadOnlySnapshot<T>(
     );
     try {
         await executeQuery(client<never[]>`SET LOCAL statement_timeout = '5s'`, signal);
-        await executeQuery(client<never[]>`SET LOCAL search_path = pg_catalog`, signal);
+        await executeQuery(
+            // Function-body hashes are provisioned in this exact deparser context.
+            // The policy query fully qualifies every catalog object and resets the
+            // path to pg_catalog before invoking any admitted capability.
+            client<never[]>`SET LOCAL search_path = pg_catalog, public`,
+            signal
+        );
         const result = await operation();
         await executeQuery(client<never[]>`COMMIT`, signal);
         return result;
@@ -436,10 +442,7 @@ function connectionRowsQuery(client: DatabaseObservabilitySqlClient) {
     `;
 }
 
-function observerPolicyRowsQuery(
-    client: DatabaseObservabilitySqlClient,
-    controlDatabase: string
-) {
+function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
     return client<ObserverPolicyRow[]>`
         WITH role_oids AS (
           SELECT observer.oid AS observer_oid,
@@ -449,12 +452,12 @@ function observerPolicyRowsQuery(
           FROM pg_catalog.pg_roles AS observer
           JOIN pg_catalog.pg_roles AS capability_owner
             ON capability_owner.rolname =
-              ${databaseObservabilityCapabilityOwnerRole}
+              'mira_dashboard_observability_capability_owner'
           JOIN pg_catalog.pg_roles AS view_owner
-            ON view_owner.rolname = ${databaseObservabilityViewOwnerRole}
+            ON view_owner.rolname = 'mira_dashboard_observability_owner'
           JOIN pg_catalog.pg_roles AS read_all_stats
             ON read_all_stats.rolname = 'pg_read_all_stats'
-          WHERE observer.rolname = ${databaseObservabilityObserverRole}
+          WHERE observer.rolname = 'mira_dashboard_observer'
         ), expected_capability_routines AS (
           SELECT expected.*
           FROM (
@@ -576,7 +579,7 @@ function observerPolicyRowsQuery(
             source_hash
           )
           WHERE expected.routine_name IN ('table_health', 'maintenance_metrics')
-             OR pg_catalog.current_database() = ${controlDatabase}
+             OR pg_catalog.current_database() = 'mira_dashboard_observability'
         ), capability_routines AS (
           SELECT routines.*,
                  languages.lanname,
@@ -591,7 +594,7 @@ function observerPolicyRowsQuery(
                  expected.source_hash
           FROM expected_capability_routines AS expected
           LEFT JOIN pg_catalog.pg_namespace AS namespaces
-            ON namespaces.nspname = ${databaseObservabilityCapabilitySchema}
+            ON namespaces.nspname = 'mira_dashboard_observability_capabilities'
           LEFT JOIN pg_catalog.pg_proc AS routines
             ON routines.pronamespace = namespaces.oid
            AND routines.proname = expected.routine_name
@@ -665,7 +668,7 @@ function observerPolicyRowsQuery(
               SELECT 1
               FROM pg_catalog.pg_namespace AS namespaces
               CROSS JOIN role_oids
-              WHERE namespaces.nspname = ${databaseObservabilityCapabilitySchema}
+              WHERE namespaces.nspname = 'mira_dashboard_observability_capabilities'
                 AND namespaces.nspowner = role_oids.view_owner_oid
                 AND pg_catalog.has_schema_privilege(
                   role_oids.observer_oid,
@@ -767,7 +770,7 @@ function observerPolicyRowsQuery(
                  )
             )
             AND CASE
-              WHEN pg_catalog.current_database() <> ${controlDatabase}
+              WHEN pg_catalog.current_database() <> 'mira_dashboard_observability'
               THEN NOT EXISTS (
                 SELECT 1
                 FROM pg_catalog.pg_extension AS extensions
@@ -1122,12 +1125,12 @@ function observerPolicyRowsQuery(
                ) AS "isPgReadAllStats",
                pg_catalog.pg_has_role(
                  current_user,
-                 ${databaseObservabilityCapabilityOwnerRole},
+                 'mira_dashboard_observability_capability_owner',
                  'member'
                ) AS "isCapabilityOwner",
                pg_catalog.pg_has_role(
                  current_user,
-                 ${databaseObservabilityViewOwnerRole},
+                 'mira_dashboard_observability_owner',
                  'member'
                ) AS "isViewOwner",
                COALESCE(
@@ -1191,16 +1194,16 @@ function assertObserverPolicy(
 async function assertClientObserverPolicy(
     client: DatabaseObservabilitySqlClient,
     expectedDatabase: string,
-    controlDatabase: string,
     signal: AbortSignal
 ): Promise<void> {
     assertObserverPolicy(
         assertRows<ObserverPolicyRow>(
-            await executeQuery(observerPolicyRowsQuery(client, controlDatabase), signal),
+            await executeQuery(observerPolicyRowsQuery(client), signal),
             1
         ),
         expectedDatabase
     );
+    await executeQuery(client<never[]>`SET LOCAL search_path = pg_catalog`, signal);
 }
 
 function tableHealthRowsQuery(client: DatabaseObservabilitySqlClient) {
@@ -1272,6 +1275,27 @@ function pgBouncerPoolsQuery(client: DatabaseObservabilitySqlClient) {
 
 function pgBouncerStatsQuery(client: DatabaseObservabilitySqlClient) {
     return client<PgBouncerStatsRow[]>`SHOW STATS`.simple();
+}
+
+function createSqlPgBouncerAdminCollector(
+    sqlClientFactory: DatabaseObservabilitySqlClientFactory
+): PgBouncerAdminCollector {
+    return Object.freeze({
+        collect: (
+            resolved: DatabaseObservabilityResolvedConnection,
+            signal: AbortSignal
+        ) =>
+            withClient(
+                sqlClientFactory,
+                resolved.connection,
+                databaseObservabilityPgBouncerVirtualDatabase,
+                signal,
+                async (client) => ({
+                    pools: await executeQuery(pgBouncerPoolsQuery(client), signal),
+                    stats: await executeQuery(pgBouncerStatsQuery(client), signal),
+                })
+            ),
+    });
 }
 
 function unavailableCollector(): DatabaseObservabilityCollector {
@@ -1348,18 +1372,12 @@ async function collectTorrentCount(
     factory: DatabaseObservabilitySqlClientFactory,
     connection: DatabaseObservabilityConnection,
     database: DatabaseObservabilityTorrentCountDatabase,
-    controlDatabase: string,
     signal: AbortSignal
 ): Promise<DatabaseObservabilityCachePayload["torrentCounts"][typeof database]> {
     try {
         return await withClient(factory, connection, database, signal, async (client) => {
             const rows = await withReadOnlySnapshot(client, signal, async () => {
-                await assertClientObserverPolicy(
-                    client,
-                    database,
-                    controlDatabase,
-                    signal
-                );
+                await assertClientObserverPolicy(client, database, signal);
                 return assertRows<TorrentCountRow>(
                     await executeQuery(torrentCountRowsQuery(client), signal),
                     1
@@ -1384,12 +1402,14 @@ async function collectTorrentCount(
 export interface BunSqlDatabaseObservabilityCollectorOptions {
     readonly connectionResolver?: DatabaseObservabilityConnectionResolver | undefined;
     readonly deadlineMs?: number;
+    readonly pgBouncerAdminCollector?: PgBouncerAdminCollector;
     readonly sqlClientFactory?: DatabaseObservabilitySqlClientFactory;
 }
 
 /** Worker-private source identity retained only for diagnostics and reconciliation. */
 export interface DatabaseObservabilityConnectionSource {
     readonly containerId: string;
+    readonly containerPort: number;
     readonly composeProject?: string;
     readonly composeService?: string;
 }
@@ -1432,6 +1452,11 @@ export function createBunSqlDatabaseObservabilityCollector(
         throw new RangeError("Database observability deadline is invalid");
     }
     const sqlClientFactory = options.sqlClientFactory ?? defaultSqlClientFactory();
+    const pgBouncerAdminCollector =
+        options.pgBouncerAdminCollector ??
+        (options.sqlClientFactory === undefined
+            ? createDockerPgBouncerAdminCollector()
+            : createSqlPgBouncerAdminCollector(sqlClientFactory));
     return Object.freeze({
         async collect(parentSignal?: AbortSignal) {
             const controller = new AbortController();
@@ -1457,7 +1482,6 @@ export function createBunSqlDatabaseObservabilityCollector(
                             async () => {
                                 await assertClientObserverPolicy(
                                     client,
-                                    controlDatabase,
                                     controlDatabase,
                                     controller.signal
                                 );
@@ -1606,7 +1630,6 @@ export function createBunSqlDatabaseObservabilityCollector(
                                             await assertClientObserverPolicy(
                                                 client,
                                                 database.name,
-                                                controlDatabase,
                                                 controller.signal
                                             );
                                             return {
@@ -1762,7 +1785,6 @@ export function createBunSqlDatabaseObservabilityCollector(
                               sqlClientFactory,
                               connection,
                               databaseObservabilityTorrentCountDatabases[0],
-                              controlDatabase,
                               controller.signal
                           )
                         : { state: "unavailable" as const },
@@ -1773,244 +1795,225 @@ export function createBunSqlDatabaseObservabilityCollector(
                               sqlClientFactory,
                               connection,
                               databaseObservabilityTorrentCountDatabases[1],
-                              controlDatabase,
                               controller.signal
                           )
                         : { state: "unavailable" as const },
                 };
 
-                const pgBouncer = await withClient(
-                    sqlClientFactory,
-                    connection,
-                    databaseObservabilityPgBouncerVirtualDatabase,
-                    controller.signal,
-                    async (client) => {
-                        const poolRows = assertRows<PgBouncerPoolRow>(
-                            await executeQuery(
-                                pgBouncerPoolsQuery(client),
-                                controller.signal
-                            ),
-                            databaseObservabilityPgBouncerInputMaximum
-                        );
-                        const statsRows = assertRows<PgBouncerStatsRow>(
-                            await executeQuery(
-                                pgBouncerStatsQuery(client),
-                                controller.signal
-                            ),
-                            databaseObservabilityPgBouncerInputMaximum - poolRows.length
-                        );
-                        const observedPoolRows = poolRows.filter((row) =>
-                            discoveredDatabaseNames.has(name(row.database))
-                        );
-                        const observedStatsRows = statsRows.filter((row) =>
-                            discoveredDatabaseNames.has(name(row.database))
-                        );
-                        const poolsByDatabase = new Map<
-                            string,
-                            {
-                                activeClients: number;
-                                activeServers: number;
-                                idleServers: number;
-                                usedServers: number;
-                                waitingClients: number;
-                            }
-                        >();
-                        for (const row of observedPoolRows) {
-                            const database = name(row.database);
-                            const aggregate = poolsByDatabase.get(database) ?? {
-                                activeClients: 0,
-                                activeServers: 0,
-                                idleServers: 0,
-                                usedServers: 0,
-                                waitingClients: 0,
-                            };
-                            aggregate.activeClients = addCounts(
-                                addCounts(aggregate.activeClients, row.cl_active),
-                                row.cl_active_cancel_req
-                            );
-                            aggregate.activeServers = addCounts(
-                                addCounts(
-                                    addCounts(aggregate.activeServers, row.sv_active),
-                                    row.sv_active_cancel
-                                ),
-                                row.sv_being_canceled
-                            );
-                            aggregate.idleServers = addCounts(
-                                aggregate.idleServers,
-                                row.sv_idle
-                            );
-                            aggregate.usedServers = addCounts(
-                                aggregate.usedServers,
-                                row.sv_used
-                            );
-                            aggregate.waitingClients = addCounts(
-                                addCounts(aggregate.waitingClients, row.cl_waiting),
-                                row.cl_waiting_cancel_req
-                            );
-                            poolsByDatabase.set(database, aggregate);
+                const pgBouncerRows = await pgBouncerAdminCollector.collect(
+                    resolvedConnection,
+                    controller.signal
+                );
+                const pgBouncer = (() => {
+                    const poolRows = assertRows<PgBouncerPoolRow>(
+                        pgBouncerRows.pools,
+                        databaseObservabilityPgBouncerInputMaximum
+                    );
+                    const statsRows = assertRows<PgBouncerStatsRow>(
+                        pgBouncerRows.stats,
+                        databaseObservabilityPgBouncerInputMaximum - poolRows.length
+                    );
+                    const observedPoolRows = poolRows.filter((row) =>
+                        discoveredDatabaseNames.has(name(row.database))
+                    );
+                    const observedStatsRows = statsRows.filter((row) =>
+                        discoveredDatabaseNames.has(name(row.database))
+                    );
+                    const poolsByDatabase = new Map<
+                        string,
+                        {
+                            activeClients: number;
+                            activeServers: number;
+                            idleServers: number;
+                            usedServers: number;
+                            waitingClients: number;
                         }
-                        const statsByDatabase = new Map<
-                            string,
-                            {
-                                averageQueryCount: number;
-                                averageTransactionCount: number;
-                                totalQueries: number;
-                                weightedQueryTimeMicroseconds: number;
-                                weightedTransactionTimeMicroseconds: number;
-                            }
-                        >();
-                        for (const row of observedStatsRows) {
-                            const database = name(row.database);
-                            const aggregate = statsByDatabase.get(database) ?? {
-                                averageQueryCount: 0,
-                                averageTransactionCount: 0,
-                                totalQueries: 0,
-                                weightedQueryTimeMicroseconds: 0,
-                                weightedTransactionTimeMicroseconds: 0,
-                            };
-                            aggregate.averageQueryCount = addCounts(
-                                aggregate.averageQueryCount,
-                                row.avg_query_count
-                            );
-                            aggregate.averageTransactionCount = addCounts(
-                                aggregate.averageTransactionCount,
+                    >();
+                    for (const row of observedPoolRows) {
+                        const database = name(row.database);
+                        const aggregate = poolsByDatabase.get(database) ?? {
+                            activeClients: 0,
+                            activeServers: 0,
+                            idleServers: 0,
+                            usedServers: 0,
+                            waitingClients: 0,
+                        };
+                        aggregate.activeClients = addCounts(
+                            addCounts(aggregate.activeClients, row.cl_active),
+                            row.cl_active_cancel_req
+                        );
+                        aggregate.activeServers = addCounts(
+                            addCounts(
+                                addCounts(aggregate.activeServers, row.sv_active),
+                                row.sv_active_cancel
+                            ),
+                            row.sv_being_canceled
+                        );
+                        aggregate.idleServers = addCounts(
+                            aggregate.idleServers,
+                            row.sv_idle
+                        );
+                        aggregate.usedServers = addCounts(
+                            aggregate.usedServers,
+                            row.sv_used
+                        );
+                        aggregate.waitingClients = addCounts(
+                            addCounts(aggregate.waitingClients, row.cl_waiting),
+                            row.cl_waiting_cancel_req
+                        );
+                        poolsByDatabase.set(database, aggregate);
+                    }
+                    const statsByDatabase = new Map<
+                        string,
+                        {
+                            averageQueryCount: number;
+                            averageTransactionCount: number;
+                            totalQueries: number;
+                            weightedQueryTimeMicroseconds: number;
+                            weightedTransactionTimeMicroseconds: number;
+                        }
+                    >();
+                    for (const row of observedStatsRows) {
+                        const database = name(row.database);
+                        const aggregate = statsByDatabase.get(database) ?? {
+                            averageQueryCount: 0,
+                            averageTransactionCount: 0,
+                            totalQueries: 0,
+                            weightedQueryTimeMicroseconds: 0,
+                            weightedTransactionTimeMicroseconds: 0,
+                        };
+                        aggregate.averageQueryCount = addCounts(
+                            aggregate.averageQueryCount,
+                            row.avg_query_count
+                        );
+                        aggregate.averageTransactionCount = addCounts(
+                            aggregate.averageTransactionCount,
+                            row.avg_xact_count
+                        );
+                        aggregate.totalQueries = addCounts(
+                            aggregate.totalQueries,
+                            row.total_query_count
+                        );
+                        aggregate.weightedQueryTimeMicroseconds = addWeightedDuration(
+                            aggregate.weightedQueryTimeMicroseconds,
+                            row.avg_query_time,
+                            row.avg_query_count
+                        );
+                        aggregate.weightedTransactionTimeMicroseconds =
+                            addWeightedDuration(
+                                aggregate.weightedTransactionTimeMicroseconds,
+                                row.avg_xact_time,
                                 row.avg_xact_count
                             );
-                            aggregate.totalQueries = addCounts(
-                                aggregate.totalQueries,
-                                row.total_query_count
-                            );
-                            aggregate.weightedQueryTimeMicroseconds = addWeightedDuration(
-                                aggregate.weightedQueryTimeMicroseconds,
-                                row.avg_query_time,
-                                row.avg_query_count
-                            );
-                            aggregate.weightedTransactionTimeMicroseconds =
-                                addWeightedDuration(
-                                    aggregate.weightedTransactionTimeMicroseconds,
-                                    row.avg_xact_time,
-                                    row.avg_xact_count
-                                );
-                            statsByDatabase.set(database, aggregate);
-                        }
-                        let averageQueryCount = 0;
-                        let averageTransactionCount = 0;
-                        let weightedQueryTimeMicroseconds = 0;
-                        let weightedTransactionTimeMicroseconds = 0;
-                        for (const aggregate of statsByDatabase.values()) {
-                            averageQueryCount = addCounts(
-                                averageQueryCount,
-                                aggregate.averageQueryCount
-                            );
-                            averageTransactionCount = addCounts(
-                                averageTransactionCount,
-                                aggregate.averageTransactionCount
-                            );
-                            weightedQueryTimeMicroseconds = addNonnegativeNumbers(
-                                weightedQueryTimeMicroseconds,
-                                aggregate.weightedQueryTimeMicroseconds
-                            );
-                            weightedTransactionTimeMicroseconds = addNonnegativeNumbers(
-                                weightedTransactionTimeMicroseconds,
-                                aggregate.weightedTransactionTimeMicroseconds
-                            );
-                        }
-                        let maxWaitSeconds = 0;
-                        let clientConnections = 0;
-                        let serverConnections = 0;
-                        let waitingClients = 0;
-                        for (const row of observedPoolRows) {
-                            maxWaitSeconds = Math.max(
-                                maxWaitSeconds,
-                                nonnegativeNumber(row.maxwait)
-                            );
-                            const activeClients = addCounts(
-                                addCounts(0, row.cl_active),
-                                row.cl_active_cancel_req
-                            );
-                            const waitingClientsForRow = addCounts(
-                                addCounts(0, row.cl_waiting),
-                                row.cl_waiting_cancel_req
-                            );
-                            clientConnections = addCounts(
-                                clientConnections,
-                                activeClients
-                            );
-                            clientConnections = addCounts(
-                                clientConnections,
-                                waitingClientsForRow
-                            );
-                            waitingClients = addCounts(
-                                waitingClients,
-                                waitingClientsForRow
-                            );
-                            for (const serverState of [
-                                row.sv_active,
-                                row.sv_active_cancel,
-                                row.sv_being_canceled,
-                                row.sv_idle,
-                                row.sv_used,
-                                row.sv_tested,
-                                row.sv_login,
-                            ]) {
-                                serverConnections = addCounts(
-                                    serverConnections,
-                                    serverState
-                                );
-                            }
-                        }
-                        return {
-                            averageQueryMs: averageDurationMs(
-                                weightedQueryTimeMicroseconds,
-                                averageQueryCount
-                            ),
-                            averageTransactionMs: averageDurationMs(
-                                weightedTransactionTimeMicroseconds,
-                                averageTransactionCount
-                            ),
-                            clientConnections,
-                            maxWaitSeconds,
-                            serverConnections,
-                            waitingClients,
-                            perDatabase: new Map(
-                                [
-                                    ...new Set([
-                                        ...poolsByDatabase.keys(),
-                                        ...statsByDatabase.keys(),
-                                    ]),
-                                ]
-                                    .toSorted((left, right) => left.localeCompare(right))
-                                    .map((database) => {
-                                        const pool = poolsByDatabase.get(database) ?? {
-                                            activeClients: 0,
-                                            activeServers: 0,
-                                            idleServers: 0,
-                                            usedServers: 0,
-                                            waitingClients: 0,
-                                        };
-                                        const stats = statsByDatabase.get(database);
-                                        return [
-                                            database,
-                                            {
-                                                ...pool,
-                                                averageQueryMs: averageDurationMs(
-                                                    stats?.weightedQueryTimeMicroseconds ??
-                                                        0,
-                                                    stats?.averageQueryCount ?? 0
-                                                ),
-                                                averageTransactionMs: averageDurationMs(
-                                                    stats?.weightedTransactionTimeMicroseconds ??
-                                                        0,
-                                                    stats?.averageTransactionCount ?? 0
-                                                ),
-                                                totalQueries: stats?.totalQueries ?? 0,
-                                            },
-                                        ] as const;
-                                    })
-                            ),
-                        };
+                        statsByDatabase.set(database, aggregate);
                     }
-                );
+                    let averageQueryCount = 0;
+                    let averageTransactionCount = 0;
+                    let weightedQueryTimeMicroseconds = 0;
+                    let weightedTransactionTimeMicroseconds = 0;
+                    for (const aggregate of statsByDatabase.values()) {
+                        averageQueryCount = addCounts(
+                            averageQueryCount,
+                            aggregate.averageQueryCount
+                        );
+                        averageTransactionCount = addCounts(
+                            averageTransactionCount,
+                            aggregate.averageTransactionCount
+                        );
+                        weightedQueryTimeMicroseconds = addNonnegativeNumbers(
+                            weightedQueryTimeMicroseconds,
+                            aggregate.weightedQueryTimeMicroseconds
+                        );
+                        weightedTransactionTimeMicroseconds = addNonnegativeNumbers(
+                            weightedTransactionTimeMicroseconds,
+                            aggregate.weightedTransactionTimeMicroseconds
+                        );
+                    }
+                    let maxWaitSeconds = 0;
+                    let clientConnections = 0;
+                    let serverConnections = 0;
+                    let waitingClients = 0;
+                    for (const row of observedPoolRows) {
+                        maxWaitSeconds = Math.max(
+                            maxWaitSeconds,
+                            nonnegativeNumber(row.maxwait)
+                        );
+                        const activeClients = addCounts(
+                            addCounts(0, row.cl_active),
+                            row.cl_active_cancel_req
+                        );
+                        const waitingClientsForRow = addCounts(
+                            addCounts(0, row.cl_waiting),
+                            row.cl_waiting_cancel_req
+                        );
+                        clientConnections = addCounts(clientConnections, activeClients);
+                        clientConnections = addCounts(
+                            clientConnections,
+                            waitingClientsForRow
+                        );
+                        waitingClients = addCounts(waitingClients, waitingClientsForRow);
+                        for (const serverState of [
+                            row.sv_active,
+                            row.sv_active_cancel,
+                            row.sv_being_canceled,
+                            row.sv_idle,
+                            row.sv_used,
+                            row.sv_tested,
+                            row.sv_login,
+                        ]) {
+                            serverConnections = addCounts(serverConnections, serverState);
+                        }
+                    }
+                    return {
+                        averageQueryMs: averageDurationMs(
+                            weightedQueryTimeMicroseconds,
+                            averageQueryCount
+                        ),
+                        averageTransactionMs: averageDurationMs(
+                            weightedTransactionTimeMicroseconds,
+                            averageTransactionCount
+                        ),
+                        clientConnections,
+                        maxWaitSeconds,
+                        serverConnections,
+                        waitingClients,
+                        perDatabase: new Map(
+                            [
+                                ...new Set([
+                                    ...poolsByDatabase.keys(),
+                                    ...statsByDatabase.keys(),
+                                ]),
+                            ]
+                                .toSorted((left, right) => left.localeCompare(right))
+                                .map((database) => {
+                                    const pool = poolsByDatabase.get(database) ?? {
+                                        activeClients: 0,
+                                        activeServers: 0,
+                                        idleServers: 0,
+                                        usedServers: 0,
+                                        waitingClients: 0,
+                                    };
+                                    const stats = statsByDatabase.get(database);
+                                    return [
+                                        database,
+                                        {
+                                            ...pool,
+                                            averageQueryMs: averageDurationMs(
+                                                stats?.weightedQueryTimeMicroseconds ?? 0,
+                                                stats?.averageQueryCount ?? 0
+                                            ),
+                                            averageTransactionMs: averageDurationMs(
+                                                stats?.weightedTransactionTimeMicroseconds ??
+                                                    0,
+                                                stats?.averageTransactionCount ?? 0
+                                            ),
+                                            totalQueries: stats?.totalQueries ?? 0,
+                                        },
+                                    ] as const;
+                                })
+                        ),
+                    };
+                })();
                 const databasesWithPools = databases.map((database) => ({
                     ...database,
                     detailsState: availableDatabaseNames.has(database.name)

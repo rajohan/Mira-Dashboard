@@ -572,8 +572,12 @@ describe("database observability provisioning", () => {
         expect(applyCapability.indexOf("$approval_and_preflight$")).toBeLessThan(
             applyCapability.indexOf("CREATE DATABASE mira_dashboard_observability")
         );
-        expect(applyCapability).toContain("catalog_database_count > 80");
-        expect(applyCapability).toContain("observed_database_count > 64");
+        expect(applyCapability).toContain(
+            "catalog_database_count + (CASE WHEN capability_exists THEN 0 ELSE 1 END) > 80"
+        );
+        expect(applyCapability).toContain(
+            "observed_database_count + (CASE WHEN capability_exists THEN 0 ELSE 1 END) > 64"
+        );
         expect(applyControl.match(/CREATE EXTENSION/gu)).toHaveLength(1);
         expect(applyControl).toContain(
             "CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;"

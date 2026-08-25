@@ -592,6 +592,16 @@ describe("durable chat repository", () => {
                     updatedAtMs: snapshot.updatedAtMs,
                 },
             ]);
+            expect(afterRestart.readMetrics()).toMatchObject({
+                activeRuns: 1,
+                failedOrUnknownRuns: 0,
+                retainedEventBytes: 0,
+                retainedEvents: 0,
+                retainedRuns: 1,
+                retainedSnapshotBytes: expect.any(Number),
+                retainedSnapshots: 1,
+            });
+            expect(afterRestart.readMetrics().retainedSnapshotBytes).toBeGreaterThan(0);
         } finally {
             database.sqlite.close(true);
         }

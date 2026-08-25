@@ -266,6 +266,7 @@ function validHostPort(value: unknown): value is string {
 }
 
 function resolvePublishedBinding(row: Record<string, unknown>): {
+    readonly containerPort: number;
     readonly hostname: string;
     readonly port: string;
 } {
@@ -273,12 +274,19 @@ function resolvePublishedBinding(row: Record<string, unknown>): {
     if (!isRecord(networkSettings)) throw discoveryFailure();
     const ports = ownRecordProperty(networkSettings, "Ports");
     if (!isRecord(ports)) throw discoveryFailure();
-    const bindings: Array<{ readonly hostname: string; readonly port: string }> = [];
+    const bindings: Array<{
+        readonly containerPort: number;
+        readonly hostname: string;
+        readonly port: string;
+    }> = [];
     for (const [containerEndpoint, rawBindings] of Object.entries(ports)) {
         if (rawBindings === null) continue;
-        if (!containerEndpoint.endsWith("/tcp") || !Array.isArray(rawBindings)) {
+        const endpoint = /^(?<port>[1-9][0-9]{0,4})\/tcp$/u.exec(containerEndpoint);
+        if (endpoint?.groups === undefined || !Array.isArray(rawBindings)) {
             continue;
         }
+        const containerPort = endpoint.groups.port;
+        if (!validHostPort(containerPort)) throw discoveryFailure();
         for (const rawBinding of rawBindings) {
             if (!isRecord(rawBinding)) throw discoveryFailure();
             const hostname = ownRecordProperty(rawBinding, "HostIp");
@@ -290,7 +298,7 @@ function resolvePublishedBinding(row: Record<string, unknown>): {
             ) {
                 throw discoveryFailure();
             }
-            bindings.push({ hostname, port });
+            bindings.push({ containerPort: Number(containerPort), hostname, port });
         }
     }
     if (bindings.length !== 1) throw discoveryFailure();
@@ -349,6 +357,7 @@ function resolvedConnection(
     const composeService = observedComposeIdentity(labels, "com.docker.compose.service");
     const source: DatabaseObservabilityConnectionSource = Object.freeze({
         containerId,
+        containerPort: binding.containerPort,
         ...(composeProject === undefined ? {} : { composeProject }),
         ...(composeService === undefined ? {} : { composeService }),
     });

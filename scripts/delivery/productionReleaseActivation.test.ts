@@ -392,7 +392,6 @@ describe("production release activation", () => {
                 `start:${firstReleaseId}`,
                 `ready:${firstReleaseId}`,
                 `smoke:${firstReleaseId}`,
-                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `provision:${secondReleaseId}`,
@@ -622,7 +621,6 @@ describe("production release activation", () => {
                 )
             ).toBe(firstReleaseId);
             expect(services.events.slice(-12)).toEqual([
-                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `provision:${secondReleaseId}`,
@@ -676,7 +674,6 @@ describe("production release activation", () => {
                 )
             ).toBe(firstReleaseId);
             expect(services.events.slice(-11)).toEqual([
-                `provision:${firstReleaseId}`,
                 `prepare:${firstReleaseId}`,
                 "stop",
                 `provision:${secondReleaseId}`,
@@ -727,8 +724,7 @@ describe("production release activation", () => {
             const recoveredActivation = await loadProductionActivationState(lease, paths);
             expect(recoveredActivation.record).toEqual(initial);
             expect(await loadProductionActivationJournal(lease, paths)).toBeUndefined();
-            expect(services.events.slice(-8)).toEqual([
-                `provision:${firstReleaseId}`,
+            expect(services.events.slice(-7)).toEqual([
                 `prepare:${firstReleaseId}`,
                 "stop",
                 "stop",

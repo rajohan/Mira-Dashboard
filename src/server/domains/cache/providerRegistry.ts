@@ -54,6 +54,7 @@ import {
     quotaCacheSource,
     quotaCacheTtlMs,
 } from "../../../contracts/quota.ts";
+import type { ApplicationCapability } from "../../../contracts/security.ts";
 import {
     weatherCacheKey,
     weatherCachePayloadSchema,
@@ -70,6 +71,8 @@ import {
     deliveryOverviewCacheJobScheduleId,
     dockerOverviewCacheJobActionKey,
     dockerOverviewCacheJobScheduleId,
+    dockerOperationJobActionKey,
+    dockerUpdaterJobActionKey,
     findJobActionDefinition,
     gitWorkspaceCacheJobActionKey,
     gitWorkspaceCacheJobScheduleId,
@@ -84,13 +87,14 @@ import {
 } from "../jobs/actionRegistry.ts";
 
 export interface CacheProviderDefinition {
+    readonly additionalWriterActionKeys?: readonly string[];
     readonly actionPayloadKey?: string;
     readonly actionKey: string;
     readonly key: string;
     readonly manualRefresh: boolean;
     readonly payloadSchema: v.GenericSchema;
-    readonly payloadExposure: "cache-read" | "domain-only";
     readonly payloadMaximumBytes: number;
+    readonly readCapability?: ApplicationCapability;
     readonly scheduleId: string;
     readonly schemaId: string;
     readonly source: string;
@@ -114,6 +118,9 @@ function validateCacheProviderDefinition(
         throw new RangeError("Cache provider payload budget is invalid");
     }
     const action = findJobActionDefinition(definition.actionKey);
+    const additionalWriterActionKeys = Object.freeze([
+        ...(definition.additionalWriterActionKeys ?? []),
+    ]);
     if (
         action === undefined ||
         action.scheduleId !== definition.scheduleId ||
@@ -123,7 +130,13 @@ function validateCacheProviderDefinition(
     ) {
         throw new Error("Cache provider does not match its exact job action definition");
     }
-    return Object.freeze({ ...definition });
+    if (
+        new Set(additionalWriterActionKeys).size !== additionalWriterActionKeys.length ||
+        additionalWriterActionKeys.includes(definition.actionKey)
+    ) {
+        throw new Error("Cache provider additional writer authority is invalid");
+    }
+    return Object.freeze({ ...definition, additionalWriterActionKeys });
 }
 
 const systemHostProvider = validateCacheProviderDefinition({
@@ -131,7 +144,6 @@ const systemHostProvider = validateCacheProviderDefinition({
     key: "system.host",
     manualRefresh: true,
     payloadSchema: systemHostCachePayloadSchema,
-    payloadExposure: "cache-read",
     payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
     scheduleId: "cache.system-host",
     schemaId: "system.host.v1",
@@ -144,7 +156,6 @@ const moltbookDashboardProvider = validateCacheProviderDefinition({
     key: "moltbook.dashboard",
     manualRefresh: true,
     payloadSchema: moltbookDashboardCachePayloadSchema,
-    payloadExposure: "cache-read",
     payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
     scheduleId: moltbookDashboardCacheJobScheduleId,
     schemaId: "moltbook.dashboard.v1",
@@ -184,7 +195,6 @@ const overviewProviders = [
     validateCacheProviderDefinition({
         ...provider,
         manualRefresh: true,
-        payloadExposure: "cache-read",
         payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
     })
 );
@@ -194,8 +204,8 @@ const databaseObservabilityProvider = validateCacheProviderDefinition({
     key: databaseObservabilityCacheKey,
     manualRefresh: false,
     payloadSchema: databaseObservabilityCachePayloadSchema,
-    payloadExposure: "domain-only",
     payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
+    readCapability: "database:read",
     scheduleId: databaseObservabilityCacheJobScheduleId,
     schemaId: databaseObservabilityCacheSchemaId,
     source: databaseObservabilityCacheSource,
@@ -203,12 +213,16 @@ const databaseObservabilityProvider = validateCacheProviderDefinition({
 });
 
 const dockerOverviewProvider = validateCacheProviderDefinition({
+    additionalWriterActionKeys: Object.freeze([
+        dockerOperationJobActionKey,
+        dockerUpdaterJobActionKey,
+    ]),
     actionKey: dockerOverviewCacheJobActionKey,
     key: dockerOverviewCacheKey,
     manualRefresh: true,
     payloadSchema: dockerOverviewCachePayloadSchema,
-    payloadExposure: "domain-only",
     payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
+    readCapability: "docker:read",
     scheduleId: dockerOverviewCacheJobScheduleId,
     schemaId: dockerOverviewCacheSchemaId,
     source: dockerOverviewCacheSource,
@@ -233,8 +247,8 @@ const backupStatusProviders = [
         key,
         manualRefresh: false,
         payloadSchema,
-        payloadExposure: "domain-only",
         payloadMaximumBytes: backupStatusPayloadMaximumBytes,
+        readCapability: "backups:read",
         scheduleId: backupStatusJobScheduleId,
         schemaId,
         source: backupStatusCacheSource,
@@ -249,11 +263,11 @@ const deliveryOverviewProviders = deliveryOverviewSectionIds.map((section) =>
         key: deliveryOverviewSectionKeys[section],
         manualRefresh: false,
         payloadSchema: deliveryOverviewSectionPayloadSchemas[section],
-        payloadExposure: "domain-only",
         payloadMaximumBytes:
             section === "pull-requests"
                 ? deliveryPullRequestsPayloadMaximumBytes
                 : cacheEntryPayloadMaximumBytes,
+        readCapability: "delivery:read",
         scheduleId: deliveryOverviewCacheJobScheduleId,
         schemaId: deliveryOverviewSectionSchemaIds[section],
         source: deliveryOverviewSectionSources[section],
@@ -288,6 +302,39 @@ export function findCacheProviderDefinition(
     key: string
 ): CacheProviderDefinition | undefined {
     return providerByKey.get(key);
+}
+
+/**
+ * Resolves the additional domain grant required to read one provider through the generic cache API.
+ * Providers without a domain boundary remain covered by the route's mandatory cache:read grant.
+ * @param key Canonical cache entry key.
+ * @returns The owning domain's read capability when the payload has an additional boundary.
+ */
+export function cacheProviderReadCapability(
+    key: string
+): ApplicationCapability | undefined {
+    return findCacheProviderDefinition(key)?.readCapability;
+}
+
+/**
+ * @param key Canonical cache entry key.
+ * @param actionKey Claimed job action key.
+ * @param payloadJson Immutable claimed job payload.
+ * @returns Whether one claimed job snapshot may commit this provider's cache key.
+ */
+export function cacheProviderAcceptsWriter(
+    key: string,
+    actionKey: string,
+    payloadJson: string
+): boolean {
+    const provider = findCacheProviderDefinition(key);
+    if (provider === undefined) return false;
+    if (provider.additionalWriterActionKeys?.includes(actionKey)) return true;
+    const action = findJobActionDefinition(provider.actionKey);
+    return (
+        action?.actionKey === actionKey &&
+        JSON.stringify(action.actionPayload) === payloadJson
+    );
 }
 
 /**
