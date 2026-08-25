@@ -720,6 +720,7 @@ describe("production Delivery executor", () => {
             const current = artifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
+            const candidateRuntimeExecutable = `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`;
             const prepared = await prepareProductionDeliveryTargetUnderLease(
                 lease,
                 paths,
@@ -737,11 +738,22 @@ describe("production Delivery executor", () => {
                             releaseRoot: `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}`,
                         });
                     },
-                    capacityAdmission: () => {
+                    capacityAdmission: (
+                        _lease,
+                        _paths,
+                        _sourceReleaseRoot,
+                        _sourceManifest,
+                        sourceExecutable
+                    ) => {
+                        expect(sourceExecutable).toBe(candidateRuntimeExecutable);
+                        expect(sourceExecutable).not.toBe(current.runtime.executable);
                         calls.push("capacity");
                         return Promise.resolve();
                     },
-                    installRuntime: () => {
+                    installRuntime: (_lease, _paths, _identity, dependencies) => {
+                        expect(dependencies?.sourceExecutable).toBe(
+                            candidateRuntimeExecutable
+                        );
                         calls.push("runtime");
                         return Promise.resolve(target.runtime);
                     },

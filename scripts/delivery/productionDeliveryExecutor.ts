@@ -593,18 +593,22 @@ export async function prepareProductionDeliveryTargetUnderLease(
             releaseRoot: sourceRelease.releaseRoot,
         })
     );
+    const candidateRuntimeExecutable = path.join(
+        sourceRelease.releaseRoot,
+        "runtime/bun"
+    );
     await (dependencies.capacityAdmission ?? assertProductionArtifactCapacity)(
         lease,
         paths,
         sourceRelease.releaseRoot,
         sourceRelease.manifest,
-        current.runtime.executable
+        candidateRuntimeExecutable
     );
     const runtime = await (dependencies.installRuntime ?? installProductionRuntime)(
         lease,
         paths,
         sourceRelease.manifest.runtime,
-        { sourceExecutable: path.join(sourceRelease.releaseRoot, "runtime/bun") }
+        { sourceExecutable: candidateRuntimeExecutable }
     );
     if (stalePublishedRoot) {
         await discardOwnedProductionReleaseCandidate(
