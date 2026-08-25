@@ -1,21 +1,50 @@
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import * as v from "valibot";
 
 import { applicationConfigurationRegistry } from "../src/shared/configuration/applicationConfigurationRegistry.ts";
-import { productionReleaseArtifactReceiptSchema } from "./delivery/packageProductionReleaseArtifact.ts";
+import {
+    maximumProductionReleaseArchiveBytes,
+    maximumProductionReleaseReceiptBytes,
+    productionReleaseArtifactReceiptSchema,
+    type ProductionReleaseArtifactReceipt,
+} from "../src/shared/productionReleaseArtifactReceipt.ts";
+import {
+    publishedReleaseAuthoritySchema,
+    type PublishedReleaseAuthority,
+} from "../src/shared/publishedReleaseAuthority.ts";
+import { deliverProductionReleaseUnderLease } from "./delivery/activateProductionRelease.ts";
+import { withDeploymentLease } from "./delivery/deploymentLease.ts";
+import { prepareProductionDeliveryDirectories } from "./delivery/productionDeliveryFilesystem.ts";
+import {
+    assertProductionReleaseArchiveListing,
+    maximumProductionReleaseArchiveListingBytes,
+} from "./delivery/productionReleaseArchive.ts";
+import { admitProductionReleasePreparation } from "./delivery/productionReleasePreparationCapacity.ts";
 import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
+import { prepareProtectedProductionStatePath } from "./delivery/productionStateFilesystem.ts";
+import {
+    productionHostProvisioningRoot,
+    productionProvisioningEntrypointName,
+    productionProvisioningPairsRoot,
+    productionProvisioningPairSelector,
+    productionProvisioningRuntimeName,
+} from "./delivery/provisioning/host-operations/policy.ts";
 import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
+import { createSystemdProductionServiceController } from "./delivery/systemdProductionServices.ts";
 
 const failureMessage = "Production bootstrap failed";
 const projectRoot = path.resolve(import.meta.dir, "..");
 const projectHome = "/home/ubuntu/projects/mira-dashboard";
 const canonicalRepository = "rajohan/Mira-Dashboard";
 const canonicalRepositoryUrl = "https://github.com/rajohan/Mira-Dashboard.git";
-const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
+const provisioningRoot = productionHostProvisioningRoot;
 const maximumOutputBytes = 1024 * 1024;
+const productionProvisioningDeadlineMs = 5 * 60 * 1000;
 const dopplerConfigurationNames = applicationConfigurationRegistry
     .filter(
         (entry) =>
@@ -32,6 +61,38 @@ interface CommandResult {
     readonly stdout: string;
 }
 
+async function hashBoundedReleaseArchive(target: string): Promise<
+    Readonly<{
+        bytes: number;
+        sha256: string;
+    }>
+> {
+    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+        const status = await handle.stat();
+        if (
+            !status.isFile() ||
+            status.size === 0 ||
+            status.size > maximumProductionReleaseArchiveBytes
+        ) {
+            throw new Error(failureMessage);
+        }
+        const hash = createHash("sha256");
+        const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, status.size));
+        let offset = 0;
+        while (offset < status.size) {
+            const length = Math.min(buffer.byteLength, status.size - offset);
+            const { bytesRead } = await handle.read(buffer, 0, length, offset);
+            if (bytesRead === 0) throw new Error(failureMessage);
+            hash.update(buffer.subarray(0, bytesRead));
+            offset += bytesRead;
+        }
+        return Object.freeze({ bytes: status.size, sha256: hash.digest("hex") });
+    } finally {
+        await handle.close();
+    }
+}
+
 const githubReleaseSchema = v.strictObject({
     tagName: v.pipe(
         v.string(),
@@ -40,14 +101,110 @@ const githubReleaseSchema = v.strictObject({
     ),
 });
 
+const githubReleaseDownloadSchema = v.object({
+    assets: v.pipe(
+        v.array(
+            v.object({
+                apiUrl: v.pipe(
+                    v.string(),
+                    v.regex(
+                        /^https:\/\/api\.github\.com\/repos\/rajohan\/Mira-Dashboard\/releases\/assets\/[1-9]\d*$/u
+                    )
+                ),
+                name: v.picklist(["receipt.json", "release.tar"]),
+                size: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+            })
+        ),
+        v.length(2)
+    ),
+    tagName: githubReleaseSchema.entries.tagName,
+});
+
 const tailscaleStatusSchema = v.object({
     BackendState: v.literal("Running"),
     Self: v.object({ Online: v.literal(true) }),
 });
 
 export interface ProductionBootstrapDependencies {
+    readonly download?: (
+        command: readonly string[],
+        target: string,
+        maximumBytes: number,
+        expectedBytes: number,
+        cwd?: string
+    ) => Promise<void>;
+    readonly deliverPublishedRelease?: (
+        prepare: () => Promise<PreparedPublishedProductionRelease>
+    ) => Promise<void>;
     readonly inspectPrerequisites?: () => Promise<Readonly<{ runtimeSha256: string }>>;
-    readonly run: (command: readonly string[], cwd?: string) => Promise<CommandResult>;
+    readonly preparationCapacityAdmission?: (
+        checkoutRoot: string,
+        hostProvisioningDirectory?: string
+    ) => Promise<void>;
+    readonly run: (
+        command: readonly string[],
+        cwd?: string,
+        stdoutMaximumBytes?: number
+    ) => Promise<CommandResult>;
+}
+
+async function deliverPreparedPublishedRelease(
+    prepare: () => Promise<PreparedPublishedProductionRelease>
+): Promise<void> {
+    const state = await prepareProtectedProductionStatePath(projectHome);
+    await withDeploymentLease(state.stateDirectory, async (lease) => {
+        await withDiscardedPreparedPublishedRelease(prepare, async (admitted) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const services = createSystemdProductionServiceController(lease, paths, {
+                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                releaseAuthority: admitted.authority,
+            });
+            await deliverProductionReleaseUnderLease(
+                lease,
+                paths,
+                {
+                    projectRoot: projectHome,
+                    readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                    releaseAuthority: admitted.authority,
+                    releaseRoot: admitted.releaseRoot,
+                    runtimeSource: path.join(admitted.releaseRoot, "runtime/bun"),
+                },
+                await verifyReleaseArtifactIdentity(admitted.releaseRoot),
+                services
+            );
+        });
+    });
+}
+
+async function withDiscardedPreparedPublishedRelease(
+    prepare: () => Promise<PreparedPublishedProductionRelease>,
+    deliver: (admitted: PreparedPublishedProductionRelease) => Promise<void>,
+    discard: typeof discardOwnedProductionReleaseCandidate = discardOwnedProductionReleaseCandidate
+): Promise<void> {
+    const admitted = await prepare();
+    try {
+        await deliver(admitted);
+    } finally {
+        await discard(
+            path.dirname(admitted.releaseRoot),
+            admitted.releaseRoot,
+            admitted.releaseId
+        );
+    }
+}
+
+async function discardAdmittedReleaseOnFailure<T>(
+    releaseRoot: string,
+    releaseId: string,
+    operation: () => Promise<T>,
+    discard: typeof discardOwnedProductionReleaseCandidate = discardOwnedProductionReleaseCandidate
+): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        await discard(path.dirname(releaseRoot), releaseRoot, releaseId);
+        throw error;
+    }
 }
 
 export interface ProductionBootstrapOptions {
@@ -55,6 +212,17 @@ export interface ProductionBootstrapOptions {
     readonly expectedCheckout?: string;
     readonly repositoryRoot?: string;
     readonly userId?: number;
+}
+
+export interface PreparedPublishedProductionRelease {
+    readonly authority: PublishedReleaseAuthority;
+    readonly releaseId: string;
+    readonly releaseRoot: string;
+}
+
+interface DownloadedProductionBootstrapRelease {
+    readonly artifactRoot: string;
+    readonly tagName: string;
 }
 
 interface ProductionBootstrapPathStatus {
@@ -103,37 +271,145 @@ export interface ProductionBootstrapPrerequisiteFilesystem {
     readonly status: (target: string) => Promise<ProductionBootstrapPathStatus>;
 }
 
-async function readBounded(stream: ReadableStream<Uint8Array>): Promise<string> {
-    const response = new Response(stream);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maximumOutputBytes) throw new Error(failureMessage);
+async function readBounded(
+    stream: ReadableStream<Uint8Array>,
+    maximumBytes = maximumOutputBytes
+): Promise<string> {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            if (next.value.byteLength > maximumBytes - length) {
+                throw new Error(failureMessage);
+            }
+            length += next.value.byteLength;
+            chunks.push(next.value);
+        }
+    } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 async function defaultRun(
     command: readonly string[],
-    cwd = projectRoot
+    cwd = projectRoot,
+    stdoutMaximumBytes = maximumOutputBytes
 ): Promise<CommandResult> {
     const child = Bun.spawn([...command], {
         cwd,
-        env: process.env,
+        env: productionCommandEnvironment(),
         stderr: "inherit",
         stdin: "inherit",
         stdout: "pipe",
     });
-    const [exitCode, stdout] = await Promise.all([
-        child.exited,
-        readBounded(child.stdout),
-    ]);
-    return Object.freeze({ exitCode, stdout });
+    try {
+        const [exitCode, stdout] = await Promise.all([
+            child.exited,
+            readBounded(child.stdout, stdoutMaximumBytes),
+        ]);
+        return Object.freeze({ exitCode, stdout });
+    } catch {
+        child.kill();
+        await child.exited.catch(() => null);
+        throw new Error(failureMessage);
+    }
+}
+
+function productionCommandEnvironment(): NodeJS.ProcessEnv {
+    const token = process.env.MIRA_GITHUB_TOKEN;
+    if (token === undefined) return process.env;
+    return {
+        ...process.env,
+        GH_TOKEN: token,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(
+            `x-access-token:${token}`
+        ).toString("base64")}`,
+    };
+}
+
+async function defaultDownload(
+    command: readonly string[],
+    target: string,
+    maximumBytes: number,
+    expectedBytes: number,
+    cwd = projectRoot
+): Promise<void> {
+    if (expectedBytes < 1 || expectedBytes > maximumBytes) {
+        throw new Error(failureMessage);
+    }
+    const handle = await open(
+        target,
+        constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_WRONLY,
+        0o600
+    );
+    const child = Bun.spawn([...command], {
+        cwd,
+        env: productionCommandEnvironment(),
+        signal: AbortSignal.timeout(productionProvisioningDeadlineMs),
+        stderr: "ignore",
+        stdin: "ignore",
+        stdout: "pipe",
+    });
+    const reader = child.stdout.getReader();
+    let bytes = 0;
+    let admitted = false;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            if (next.value.byteLength > maximumBytes - bytes) {
+                child.kill();
+                throw new Error(failureMessage);
+            }
+            let offset = 0;
+            while (offset < next.value.byteLength) {
+                const written = await handle.write(
+                    next.value,
+                    offset,
+                    next.value.byteLength - offset,
+                    bytes + offset
+                );
+                if (written.bytesWritten < 1) throw new Error(failureMessage);
+                offset += written.bytesWritten;
+            }
+            bytes += next.value.byteLength;
+        }
+        if ((await child.exited) !== 0 || bytes !== expectedBytes) {
+            throw new Error(failureMessage);
+        }
+        await handle.sync();
+        admitted = true;
+    } catch {
+        child.kill();
+        await child.exited.catch(() => null);
+        throw new Error(failureMessage);
+    } finally {
+        reader.releaseLock();
+        await handle.close();
+        if (!admitted) await rm(target, { force: true });
+    }
 }
 
 async function requireSuccess(
     dependencies: ProductionBootstrapDependencies,
     command: readonly string[],
-    cwd = projectRoot
+    cwd = projectRoot,
+    stdoutMaximumBytes?: number
 ): Promise<string> {
-    const result = await dependencies.run(command, cwd);
+    const result = await dependencies.run(command, cwd, stdoutMaximumBytes);
     if (result.exitCode !== 0) throw new Error(failureMessage);
     return result.stdout.trim();
 }
@@ -162,7 +438,20 @@ export async function resolveProductionBootstrapSourceIdentity(
     if ((await realpath(repositoryRoot)) !== expectedCheckout) {
         throw new Error(`Production bootstrap checkout must be ${expectedCheckout}`);
     }
-    const [branch, head, upstream, status, origin] = await Promise.all([
+    const origin = await requireSuccess(
+        dependencies,
+        ["/usr/bin/git", "remote", "get-url", "origin"],
+        repositoryRoot
+    );
+    if (origin !== canonicalRepositoryUrl) {
+        throw new Error("Production bootstrap requires the canonical GitHub origin");
+    }
+    await requireSuccess(
+        dependencies,
+        ["/usr/bin/git", "fetch", "--quiet", "--no-tags", "origin", "main"],
+        repositoryRoot
+    );
+    const [branch, head, upstream, status] = await Promise.all([
         requireSuccess(
             dependencies,
             ["/usr/bin/git", "branch", "--show-current"],
@@ -183,18 +472,12 @@ export async function resolveProductionBootstrapSourceIdentity(
             ["/usr/bin/git", "status", "--porcelain=v1"],
             repositoryRoot
         ),
-        requireSuccess(
-            dependencies,
-            ["/usr/bin/git", "remote", "get-url", "origin"],
-            repositoryRoot
-        ),
     ]);
     if (
         branch !== "main" ||
         !/^[a-f\d]{40}$/u.test(head) ||
         head !== upstream ||
-        status !== "" ||
-        origin !== canonicalRepositoryUrl
+        status !== ""
     ) {
         throw new Error("Production bootstrap requires clean main at exact origin/main");
     }
@@ -225,79 +508,91 @@ export function parseProductionBootstrapRelease(
  * @param listing Newline-delimited `tar -tf` output.
  * @param releaseId Exact clean checkout commit.
  */
-export function assertProductionReleaseArchiveListing(
-    listing: string,
-    releaseId: string
-): void {
-    const entries = listing.split("\n").filter(Boolean);
-    if (
-        entries.length === 0 ||
-        entries.length > 4096 ||
-        entries.some(
-            (entry) =>
-                !(entry === `${releaseId}/` || entry.startsWith(`${releaseId}/`)) ||
-                entry.split("/").includes("..")
-        )
-    ) {
-        throw new Error(failureMessage);
-    }
-}
-
 /**
  * Downloads the permanent release assets whose Git tag resolves to the checkout commit.
  * @param releaseId Exact clean checkout commit.
  * @param temporaryRoot Private destination directory.
  * @param dependencies Fixed process boundary.
+ * @param repositoryRoot Checkout used to resolve the release tag.
+ * @param expectedTagName Optional payload-bound release tag for normal Delivery.
  * @returns The supplied artifact directory after a successful download.
  */
 export async function downloadProductionBootstrapRelease(
     releaseId: string,
     temporaryRoot: string,
-    dependencies: ProductionBootstrapDependencies
-): Promise<string> {
+    dependencies: ProductionBootstrapDependencies,
+    repositoryRoot = projectRoot,
+    expectedTagName?: string
+): Promise<DownloadedProductionBootstrapRelease> {
     const releaseText = await requireSuccess(dependencies, [
         "/usr/bin/gh",
         "release",
         "view",
+        ...(expectedTagName === undefined ? [] : [expectedTagName]),
         `--repo=${canonicalRepository}`,
-        "--json=tagName",
+        "--json=assets,tagName",
     ]);
     const unverifiedRelease = v.parse(
-        githubReleaseSchema,
+        githubReleaseDownloadSchema,
         JSON.parse(releaseText) as unknown
     );
-    await requireSuccess(dependencies, [
-        "/usr/bin/git",
-        "fetch",
-        "--force",
-        "--no-tags",
-        "origin",
-        `refs/tags/${unverifiedRelease.tagName}:refs/tags/${unverifiedRelease.tagName}`,
-    ]);
-    const tagCommit = await requireSuccess(dependencies, [
-        "/usr/bin/git",
-        "rev-list",
-        "-n",
-        "1",
-        `${unverifiedRelease.tagName}^{commit}`,
-    ]);
+    await requireSuccess(
+        dependencies,
+        [
+            "/usr/bin/git",
+            "fetch",
+            "--force",
+            "--no-tags",
+            "origin",
+            `refs/tags/${unverifiedRelease.tagName}:refs/tags/${unverifiedRelease.tagName}`,
+        ],
+        repositoryRoot
+    );
+    const tagCommit = await requireSuccess(
+        dependencies,
+        ["/usr/bin/git", "rev-list", "-n", "1", `${unverifiedRelease.tagName}^{commit}`],
+        repositoryRoot
+    );
     const tagName = parseProductionBootstrapRelease(
-        unverifiedRelease,
+        { tagName: unverifiedRelease.tagName },
         tagCommit,
         releaseId
     );
-    await requireSuccess(dependencies, [
-        "/usr/bin/gh",
-        "release",
-        "download",
-        tagName,
-        `--repo=${canonicalRepository}`,
-        "--pattern=release.tar",
-        "--pattern=receipt.json",
-        `--dir=${temporaryRoot}`,
-    ]);
-    return temporaryRoot;
+    const download = dependencies.download ?? defaultDownload;
+    for (const [name, maximumBytes] of [
+        ["receipt.json", maximumProductionReleaseReceiptBytes],
+        ["release.tar", maximumProductionReleaseArchiveBytes],
+    ] as const) {
+        const asset = unverifiedRelease.assets.find(
+            (candidate) => candidate.name === name
+        );
+        if (asset === undefined || asset.size > maximumBytes) {
+            throw new Error(failureMessage);
+        }
+        await download(
+            [
+                "/usr/bin/gh",
+                "api",
+                "--header=Accept: application/octet-stream",
+                asset.apiUrl,
+            ],
+            path.join(temporaryRoot, name),
+            maximumBytes,
+            asset.size,
+            repositoryRoot
+        );
+    }
+    return Object.freeze({ artifactRoot: temporaryRoot, tagName });
 }
+
+/** Test-only seams for bounded release downloads and credential projection. */
+export const productionBootstrapTestSupport = Object.freeze({
+    discardAdmittedReleaseOnFailure,
+    download: defaultDownload,
+    environment: productionCommandEnvironment,
+    readBounded,
+    withDiscardedPreparedPublishedRelease,
+});
 
 /**
  * Verifies and extracts one digest-bound immutable release artifact.
@@ -305,65 +600,110 @@ export async function downloadProductionBootstrapRelease(
  * @param releaseId Exact release commit.
  * @param dependencies Fixed process boundary.
  * @param repositoryRoot Checkout root owning the private extraction directory.
+ * @param expectedAuthority Optional exact public GitHub release authority.
  * @returns Verified extracted release root and manifest digest.
  */
 export async function admitProductionBootstrapRelease(
     artifactRoot: string,
     releaseId: string,
     dependencies: ProductionBootstrapDependencies,
-    repositoryRoot = projectRoot
+    repositoryRoot = projectRoot,
+    expectedAuthority?: PublishedReleaseAuthority
 ): Promise<
-    Readonly<{ archiveSha256: string; manifestSha256: string; releaseRoot: string }>
+    Readonly<{
+        archiveBytes: number;
+        archiveSha256: string;
+        manifestSha256: string;
+        receiptBytes: number;
+        receiptSha256: string;
+        releaseRoot: string;
+        runtime: ProductionReleaseArtifactReceipt["runtime"];
+    }>
 > {
-    const [receiptBytes, archiveBytes, selectedVersion] = await Promise.all([
+    const [receiptBytes, archive, selectedVersion] = await Promise.all([
         readFile(path.join(artifactRoot, "receipt.json")),
-        readFile(path.join(artifactRoot, "release.tar")),
+        hashBoundedReleaseArchive(path.join(artifactRoot, "release.tar")),
         readFile(path.join(repositoryRoot, ".bun-version"), "utf8"),
     ]);
     const receipt = v.parse(
         productionReleaseArtifactReceiptSchema,
         JSON.parse(receiptBytes.toString("utf8")) as unknown
     );
+    const receiptSha256 = sha256(receiptBytes);
+    const archiveSha256 = archive.sha256;
+    const expectedReceiptAsset = expectedAuthority?.assets.find(
+        ({ name }) => name === "receipt.json"
+    );
+    const expectedArchiveAsset = expectedAuthority?.assets.find(
+        ({ name }) => name === "release.tar"
+    );
     if (
         receipt.releaseId !== releaseId ||
         receipt.runtime.version !== selectedVersion.trim() ||
-        receipt.archive.bytes !== archiveBytes.byteLength ||
-        receipt.archive.sha256 !== sha256(archiveBytes)
+        receipt.archive.bytes !== archive.bytes ||
+        receipt.archive.sha256 !== archiveSha256 ||
+        (expectedAuthority !== undefined &&
+            (expectedAuthority.releaseId !== releaseId ||
+                expectedAuthority.releaseManifestSha256 !==
+                    receipt.releaseManifestSha256 ||
+                expectedAuthority.runtime.revision !== receipt.runtime.revision ||
+                expectedAuthority.runtime.version !== receipt.runtime.version ||
+                expectedReceiptAsset?.size !== receiptBytes.byteLength ||
+                expectedReceiptAsset.digest !== `sha256:${receiptSha256}` ||
+                expectedArchiveAsset?.size !== archive.bytes ||
+                expectedArchiveAsset.digest !== `sha256:${archiveSha256}`))
     ) {
         throw new Error(failureMessage);
     }
-    const listing = await requireSuccess(dependencies, [
-        "/usr/bin/tar",
-        "-tf",
-        path.join(artifactRoot, "release.tar"),
-    ]);
+    const listing = await requireSuccess(
+        dependencies,
+        ["/usr/bin/tar", "-tf", path.join(artifactRoot, "release.tar")],
+        projectRoot,
+        maximumProductionReleaseArchiveListingBytes
+    );
     assertProductionReleaseArchiveListing(listing, releaseId);
     const releasesRoot = path.join(repositoryRoot, "dist/releases");
     const releaseRoot = path.join(releasesRoot, releaseId);
     await mkdir(releasesRoot, { mode: 0o700, recursive: true });
     await discardOwnedProductionReleaseCandidate(releasesRoot, releaseRoot, releaseId);
-    await requireSuccess(dependencies, [
-        "/usr/bin/tar",
-        "-xf",
-        path.join(artifactRoot, "release.tar"),
-        "-C",
-        releasesRoot,
-    ]);
-    const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
-    const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
-    if (
-        manifest.source.commitSha !== releaseId ||
-        manifest.runtime.version !== receipt.runtime.version ||
-        manifest.runtime.revision !== receipt.runtime.revision ||
-        sha256(manifestBytes) !== receipt.releaseManifestSha256
-    ) {
+    try {
+        await requireSuccess(dependencies, [
+            "/usr/bin/tar",
+            "-xf",
+            path.join(artifactRoot, "release.tar"),
+            "--no-same-owner",
+            "-C",
+            releasesRoot,
+        ]);
+        const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
+        const manifestBytes = await readFile(
+            path.join(releaseRoot, "release-manifest.json")
+        );
+        if (
+            manifest.source.commitSha !== releaseId ||
+            manifest.runtime.version !== receipt.runtime.version ||
+            manifest.runtime.revision !== receipt.runtime.revision ||
+            sha256(manifestBytes) !== receipt.releaseManifestSha256
+        ) {
+            throw new Error(failureMessage);
+        }
+        return Object.freeze({
+            archiveBytes: archive.bytes,
+            archiveSha256: receipt.archive.sha256,
+            manifestSha256: receipt.releaseManifestSha256,
+            receiptBytes: receiptBytes.byteLength,
+            receiptSha256,
+            releaseRoot,
+            runtime: receipt.runtime,
+        });
+    } catch {
+        await discardOwnedProductionReleaseCandidate(
+            releasesRoot,
+            releaseRoot,
+            releaseId
+        );
         throw new Error(failureMessage);
     }
-    return Object.freeze({
-        archiveSha256: receipt.archive.sha256,
-        manifestSha256: receipt.releaseManifestSha256,
-        releaseRoot,
-    });
 }
 
 /**
@@ -372,7 +712,7 @@ export async function admitProductionBootstrapRelease(
  * @param releaseId Exact release commit.
  * @param manifestSha256 Independently verified release-manifest digest.
  * @param archiveSha256 Digest verified before and after the root-owned archive handoff.
- * @param runtimeSha256 Digest of the root-owned runtime source and staged interpreter.
+ * @param runtimeSha256 Digest of the admitted release runtime and staged interpreter.
  * @param userId Canonical non-root production service identity.
  * @param dependencies Fixed process boundary.
  */
@@ -387,12 +727,18 @@ export async function stageProductionBootstrapRootAuthority(
 ): Promise<void> {
     const sudo = "/usr/bin/sudo";
     const stagedRelease = `${provisioningRoot}/releases/${releaseId}`;
-    const stagedRuntime = `${provisioningRoot}/runtime/bun`;
+    const stagedPair = `${productionProvisioningPairsRoot}/${releaseId}`;
+    const pairCandidate = `${provisioningRoot}/.pair-stage-${Bun.randomUUIDv7()}`;
+    const candidateRuntime = `${pairCandidate}/${productionProvisioningRuntimeName}`;
+    const candidateEntrypoint = `${pairCandidate}/${productionProvisioningEntrypointName}`;
+    const stagedRuntime = `${stagedPair}/${productionProvisioningRuntimeName}`;
+    const stagedEntrypoint = `${stagedPair}/${productionProvisioningEntrypointName}`;
     const stagedArchive = `${provisioningRoot}/release.tar`;
     for (const directory of [
         provisioningRoot,
         `${provisioningRoot}/releases`,
-        `${provisioningRoot}/runtime`,
+        productionProvisioningPairsRoot,
+        pairCandidate,
     ]) {
         await requireSuccess(dependencies, [
             sudo,
@@ -407,138 +753,248 @@ export async function stageProductionBootstrapRootAuthority(
             directory,
         ]);
     }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/install",
-        "-o",
-        "root",
-        "-g",
-        "root",
-        "-m",
-        "0555",
-        process.execPath,
-        stagedRuntime,
-    ]);
-    const installedRuntimeSha256 = await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/sha256sum",
-        stagedRuntime,
-    ]);
-    if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/install",
-        "-o",
-        "root",
-        "-g",
-        "root",
-        "-m",
-        "0400",
-        path.join(artifactRoot, "release.tar"),
-        stagedArchive,
-    ]);
-    const installedArchiveSha256 = await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/sha256sum",
-        stagedArchive,
-    ]);
-    if (installedArchiveSha256.split(/\s+/u)[0] !== archiveSha256) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/tar",
-        "-xf",
-        stagedArchive,
-        "-C",
-        `${provisioningRoot}/releases`,
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts`,
-        `--release-root=${stagedRelease}`,
-        `--release-id=${releaseId}`,
-        `--release-manifest-sha256=${manifestSha256}`,
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts`,
-        `--release-root=${stagedRelease}`,
-        `--release-id=${releaseId}`,
-    ]);
-    let group = await dependencies.run([
-        "/usr/bin/getent",
-        "group",
-        "mira-dashboard-log-maintenance",
-    ]);
-    if (group.exitCode !== 0) {
+    let provisioningError: unknown;
+    try {
         await requireSuccess(dependencies, [
             sudo,
-            "/usr/sbin/groupadd",
-            "--system",
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0400",
+            path.join(artifactRoot, "release.tar"),
+            stagedArchive,
+        ]);
+        const installedArchiveSha256 = await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sha256sum",
+            stagedArchive,
+        ]);
+        if (installedArchiveSha256.split(/\s+/u)[0] !== archiveSha256) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/tar",
+            "-xf",
+            stagedArchive,
+            "--no-same-owner",
+            "-C",
+            `${provisioningRoot}/releases`,
+        ]);
+        await requireSuccess(dependencies, [sudo, "/usr/bin/rm", "-f", stagedArchive]);
+        for (const target of [stagedRelease, `${provisioningRoot}/releases`]) {
+            await requireSuccess(dependencies, [sudo, "/usr/bin/sync", "-f", target]);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0555",
+            `${stagedRelease}/runtime/bun`,
+            candidateRuntime,
+        ]);
+        const installedRuntimeSha256 = await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sha256sum",
+            candidateRuntime,
+        ]);
+        if (installedRuntimeSha256.split(/\s+/u)[0] !== runtimeSha256) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/install",
+            "-o",
+            "root",
+            "-g",
+            "root",
+            "-m",
+            "0555",
+            `${stagedRelease}/server/productionProvisioning.js`,
+            candidateEntrypoint,
+        ]);
+        for (const target of [candidateRuntime, candidateEntrypoint, pairCandidate]) {
+            await requireSuccess(dependencies, [sudo, "/usr/bin/sync", "-f", target]);
+        }
+        const existingPair = await dependencies.run([
+            sudo,
+            "/usr/bin/test",
+            "-e",
+            stagedPair,
+        ]);
+        if (existingPair.exitCode === 0) {
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/cmp",
+                "-s",
+                candidateRuntime,
+                stagedRuntime,
+            ]);
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/cmp",
+                "-s",
+                candidateEntrypoint,
+                stagedEntrypoint,
+            ]);
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/rm",
+                "-rf",
+                pairCandidate,
+            ]);
+        } else {
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/bin/mv",
+                "-T",
+                pairCandidate,
+                stagedPair,
+            ]);
+        }
+        await requireSuccess(dependencies, [sudo, "/usr/bin/sync", "-f", stagedPair]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sync",
+            "-f",
+            productionProvisioningPairsRoot,
+        ]);
+        const stagedSelector = `${provisioningRoot}/.current-${Bun.randomUUIDv7()}`;
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/ln",
+            "-s",
+            stagedPair,
+            stagedSelector,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/mv",
+            "-Tf",
+            stagedSelector,
+            productionProvisioningPairSelector,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/sync",
+            "-f",
+            provisioningRoot,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts`,
+            `--release-root=${stagedRelease}`,
+            `--release-id=${releaseId}`,
+            `--release-manifest-sha256=${manifestSha256}`,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts`,
+            `--release-root=${stagedRelease}`,
+            `--release-id=${releaseId}`,
+        ]);
+        let group = await dependencies.run([
+            "/usr/bin/getent",
+            "group",
             "mira-dashboard-log-maintenance",
+        ]);
+        if (group.exitCode !== 0) {
+            await requireSuccess(dependencies, [
+                sudo,
+                "/usr/sbin/groupadd",
+                "--system",
+                "mira-dashboard-log-maintenance",
+            ]);
+            group = await dependencies.run([
+                "/usr/bin/getent",
+                "group",
+                "mira-dashboard-log-maintenance",
+            ]);
+        }
+        let admittedGroup =
+            group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
+        if (
+            !admittedGroup ||
+            !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+        ) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/sbin/usermod",
+            "--append",
+            "--groups",
+            "mira-dashboard-log-maintenance",
+            "ubuntu",
         ]);
         group = await dependencies.run([
             "/usr/bin/getent",
             "group",
             "mira-dashboard-log-maintenance",
         ]);
+        admittedGroup =
+            group.exitCode === 0
+                ? parseMaintenanceGroup(group.stdout, "ubuntu")
+                : undefined;
+        if (
+            !admittedGroup ||
+            !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+        ) {
+            throw new Error(failureMessage);
+        }
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
+            `--user-id=${userId}`,
+        ]);
+        await requireSuccess(dependencies, [
+            sudo,
+            "/usr/bin/systemd-tmpfiles",
+            "--create",
+            "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
+        ]);
+        await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
+        await requireSuccess(dependencies, [
+            sudo,
+            stagedRuntime,
+            `${stagedRelease}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
+            "--mode=apply",
+        ]);
+    } catch (error) {
+        provisioningError = error;
     }
-    let admittedGroup =
-        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "") : undefined;
+    const archiveCleanup = await dependencies.run([
+        sudo,
+        "/usr/bin/rm",
+        "-f",
+        stagedArchive,
+    ]);
+    const pairCleanup = await dependencies.run([
+        sudo,
+        "/usr/bin/rm",
+        "-rf",
+        pairCandidate,
+    ]);
     if (
-        !admittedGroup ||
-        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
+        provisioningError !== undefined ||
+        archiveCleanup.exitCode !== 0 ||
+        pairCleanup.exitCode !== 0
     ) {
         throw new Error(failureMessage);
     }
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/sbin/usermod",
-        "--append",
-        "--groups",
-        "mira-dashboard-log-maintenance",
-        "ubuntu",
-    ]);
-    group = await dependencies.run([
-        "/usr/bin/getent",
-        "group",
-        "mira-dashboard-log-maintenance",
-    ]);
-    admittedGroup =
-        group.exitCode === 0 ? parseMaintenanceGroup(group.stdout, "ubuntu") : undefined;
-    if (
-        !admittedGroup ||
-        !(await maintenanceGroupIsUnique(dependencies, admittedGroup))
-    ) {
-        throw new Error(failureMessage);
-    }
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
-        `--user-id=${userId}`,
-    ]);
-    await requireSuccess(dependencies, [
-        sudo,
-        "/usr/bin/systemd-tmpfiles",
-        "--create",
-        "/usr/lib/tmpfiles.d/mira-dashboard-managed-container-logs.conf",
-    ]);
-    await requireSuccess(dependencies, [sudo, "/usr/bin/systemctl", "daemon-reload"]);
-    await requireSuccess(dependencies, [
-        sudo,
-        stagedRuntime,
-        `${stagedRelease}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
-        "--mode=apply",
-    ]);
 }
 
-const productionBootstrapDependencies = Object.freeze({ run: defaultRun });
+export const productionBootstrapDependencies = Object.freeze({ run: defaultRun });
 const productionBootstrapPrerequisiteFilesystem = Object.freeze({
     canonical: realpath,
     read: (target: string) => readFile(target),
@@ -680,6 +1136,113 @@ export async function verifyProductionBootstrapPrerequisites(
 }
 
 /**
+ * Downloads, admits, and root-provisions one exact published production release.
+ * @param releaseId Exact clean main commit published by Release Please.
+ * @param repositoryRoot Canonical production checkout.
+ * @param dependencies Fixed process boundary.
+ * @param userId Effective managed-user identity.
+ * @param createTemporaryRoot Optional private temporary-root factory.
+ * @param expectedAuthority Optional authority supplied by Delivery.
+ * @param options Root-staging policy for bootstrap versus normal deploy.
+ * @returns Exact admitted release root.
+ */
+export async function preparePublishedProductionRelease(
+    releaseId: string,
+    repositoryRoot: string,
+    dependencies: ProductionBootstrapDependencies = productionBootstrapDependencies,
+    userId = typeof process.getuid === "function" ? process.getuid() : 0,
+    createTemporaryRoot: () => Promise<string> = () =>
+        mkdtemp(path.join(os.tmpdir(), "mira-dashboard-release-")),
+    expectedAuthority?: PublishedReleaseAuthority,
+    options: Readonly<{ readonly stageRootAuthority?: boolean }> = {}
+): Promise<PreparedPublishedProductionRelease> {
+    let prerequisites: Readonly<{ runtimeSha256: string }> | undefined;
+    if (options.stageRootAuthority !== false) {
+        prerequisites = dependencies.inspectPrerequisites
+            ? await dependencies.inspectPrerequisites()
+            : await verifyProductionBootstrapPrerequisites(
+                  dependencies,
+                  repositoryRoot,
+                  userId
+              );
+    }
+    const temporaryRoot = await createTemporaryRoot();
+    try {
+        const downloaded = await downloadProductionBootstrapRelease(
+            releaseId,
+            temporaryRoot,
+            dependencies,
+            repositoryRoot,
+            expectedAuthority?.tagName
+        );
+        const admitted = await admitProductionBootstrapRelease(
+            downloaded.artifactRoot,
+            releaseId,
+            dependencies,
+            repositoryRoot,
+            expectedAuthority
+        );
+        return discardAdmittedReleaseOnFailure(
+            admitted.releaseRoot,
+            releaseId,
+            async () => {
+                const authority = v.parse(publishedReleaseAuthoritySchema, {
+                    assets: [
+                        {
+                            digest: `sha256:${admitted.receiptSha256}`,
+                            name: "receipt.json",
+                            size: admitted.receiptBytes,
+                        },
+                        {
+                            digest: `sha256:${admitted.archiveSha256}`,
+                            name: "release.tar",
+                            size: admitted.archiveBytes,
+                        },
+                    ],
+                    releaseId,
+                    releaseManifestSha256: admitted.manifestSha256,
+                    runtime: admitted.runtime,
+                    tagName: downloaded.tagName,
+                });
+                await requireSuccess(
+                    dependencies,
+                    [
+                        path.join(admitted.releaseRoot, "runtime/bun"),
+                        path.join(
+                            admitted.releaseRoot,
+                            "server/prepareProductionState.js"
+                        ),
+                        `--project-root=${projectHome}`,
+                    ],
+                    admitted.releaseRoot
+                );
+                if (options.stageRootAuthority !== false) {
+                    if (!prerequisites) throw new Error(failureMessage);
+                    await stageProductionBootstrapRootAuthority(
+                        downloaded.artifactRoot,
+                        releaseId,
+                        admitted.manifestSha256,
+                        admitted.archiveSha256,
+                        sha256(
+                            await readFile(path.join(admitted.releaseRoot, "runtime/bun"))
+                        ),
+                        userId,
+                        dependencies
+                    );
+                }
+                return Object.freeze({
+                    authority,
+                    releaseId,
+                    releaseRoot: admitted.releaseRoot,
+                });
+            }
+        );
+    } finally {
+        await rm(temporaryRoot, { force: true, recursive: true });
+    }
+}
+
+/**
  * Performs the complete first production installation on one clean host.
  * @param dependencies Fixed process boundary used by focused orchestration tests.
  */
@@ -704,58 +1267,69 @@ export async function bootstrapProduction(
     if (Bun.version !== selectedVersion) {
         throw new Error(`Production bootstrap requires Bun ${selectedVersion}`);
     }
-    const prerequisites = dependencies.inspectPrerequisites
-        ? await dependencies.inspectPrerequisites()
-        : await verifyProductionBootstrapPrerequisites(
-              dependencies,
-              repositoryRoot,
-              userId
-          );
-    const temporaryRoot = options.createTemporaryRoot
-        ? await options.createTemporaryRoot()
-        : await mkdtemp(path.join(os.tmpdir(), "mira-dashboard-bootstrap-"));
-    try {
-        const artifactRoot = await downloadProductionBootstrapRelease(
-            releaseId,
-            temporaryRoot,
-            dependencies
-        );
-        const admitted = await admitProductionBootstrapRelease(
-            artifactRoot,
-            releaseId,
-            dependencies,
-            repositoryRoot
-        );
-        await requireSuccess(dependencies, [
-            process.execPath,
-            "run",
-            "delivery",
-            "prepare-state",
-            `--project-root=${projectHome}`,
-        ]);
-        await stageProductionBootstrapRootAuthority(
-            artifactRoot,
-            releaseId,
-            admitted.manifestSha256,
-            admitted.archiveSha256,
-            prerequisites.runtimeSha256,
-            userId,
-            dependencies
-        );
-        await requireSuccess(dependencies, [
-            process.execPath,
-            "run",
-            "delivery",
-            "activate",
-            `--project-root=${projectHome}`,
-            `--release-root=${admitted.releaseRoot}`,
-            `--runtime-source=${process.execPath}`,
-            "--readiness-url=http://127.0.0.1:3100/api/health/ready",
-            "--activation-mode=greenfield",
-        ]);
-    } finally {
-        await rm(temporaryRoot, { force: true, recursive: true });
-    }
+    await (
+        dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
+    )(repositoryRoot, provisioningRoot);
+    const admitted = await preparePublishedProductionRelease(
+        releaseId,
+        repositoryRoot,
+        dependencies,
+        userId,
+        options.createTemporaryRoot
+    );
+    await requireSuccess(dependencies, [
+        process.execPath,
+        "run",
+        "delivery",
+        "activate",
+        `--project-root=${projectHome}`,
+        `--release-root=${admitted.releaseRoot}`,
+        `--runtime-source=${path.join(admitted.releaseRoot, "runtime/bun")}`,
+        "--readiness-url=http://127.0.0.1:3100/api/health/ready",
+        "--activation-mode=greenfield",
+    ]);
+}
+
+/**
+ * Deploys the exact published Release Please release from a clean production checkout.
+ * @param dependencies Fixed process boundary used by focused orchestration tests.
+ * @param options Canonical checkout and identity overrides.
+ */
+export async function deployProduction(
+    dependencies: ProductionBootstrapDependencies = productionBootstrapDependencies,
+    options: ProductionBootstrapOptions = {}
+): Promise<void> {
+    const repositoryRoot = options.repositoryRoot ?? projectRoot;
+    const userId =
+        options.userId ?? (typeof process.getuid === "function" ? process.getuid() : 0);
+    const releaseId = await resolveProductionBootstrapSourceIdentity(
+        dependencies,
+        repositoryRoot,
+        options.expectedCheckout ?? `${projectHome}/production/checkout`,
+        userId
+    );
+    await requireSuccess(dependencies, [
+        "/usr/bin/systemctl",
+        "cat",
+        "mira-dashboard-production-provisioning@.service",
+    ]);
+    await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(
+        async () => {
+            await (
+                dependencies.preparationCapacityAdmission ??
+                admitProductionReleasePreparation
+            )(repositoryRoot, productionHostProvisioningRoot);
+            return preparePublishedProductionRelease(
+                releaseId,
+                repositoryRoot,
+                dependencies,
+                userId,
+                options.createTemporaryRoot,
+                undefined,
+                { stageRootAuthority: false }
+            );
+        }
+    );
 }
 
 if (import.meta.main) {

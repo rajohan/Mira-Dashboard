@@ -18,6 +18,12 @@ polkit.addRule(function (action, subject) {
     if (verb === "start" && hostOperations.indexOf(unit) !== -1) {
         return polkit.Result.YES;
     }
+    if (
+        verb === "start" &&
+        /^mira-dashboard-production-provisioning@[a-f0-9]{40}--(?:local(?:--settled)?|v[0-9]+\.[0-9]+\.[0-9]+(?:[.-][0-9A-Za-z.-]+)?--[a-f0-9]{64}--[a-f0-9]{64})\.service$/.test(unit)
+    ) {
+        return polkit.Result.YES;
+    }
 
     var applicationUnits = [
         "mira-dashboard-web.service",

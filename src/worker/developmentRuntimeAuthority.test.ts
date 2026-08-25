@@ -99,14 +99,12 @@ describe("source-development runtime authority", () => {
             throw new TypeError("Development pull request groups are missing");
         }
         for (const member of nativeGroup.members) {
-            for (const actionId of ["merge", "merge-and-deploy"] as const) {
-                expect(
-                    member.actions.find(({ action }) => action === actionId)
-                ).toMatchObject({
+            expect(member.actions.find(({ action }) => action === "merge")).toMatchObject(
+                {
                     available: false,
                     reason: "head-guard-unavailable",
-                });
-            }
+                }
+            );
         }
         for (const member of [...nativeGroup.members, ...ordinaryGroup.members]) {
             expect(
@@ -123,7 +121,6 @@ describe("source-development runtime authority", () => {
         for (const actionId of [
             "approve-review",
             "merge",
-            "merge-and-deploy",
             "preview-start",
             "update-branch",
         ] as const) {
@@ -199,9 +196,54 @@ describe("source-development runtime authority", () => {
                 sourceRevision,
             })
         ).toMatchObject({ operation: "start-preview", outcome: "completed" });
+        expect(
+            await delivery.execute({
+                activationRevision: sourceRevision,
+                checkoutRevision: sourceRevision,
+                expectedMainHeadSha: secondPullRequestHead,
+                operation: "deploy",
+                release: {
+                    assets: [
+                        {
+                            digest: `sha256:${"a".repeat(64)}`,
+                            name: "receipt.json",
+                            size: 512,
+                        },
+                        {
+                            digest: `sha256:${"b".repeat(64)}`,
+                            name: "release.tar",
+                            size: 4096,
+                        },
+                    ],
+                    releaseId: secondPullRequestHead,
+                    releaseManifestSha256: "c".repeat(64),
+                    runtime: {
+                        revision: secondPullRequestHead,
+                        version: "1.4.0",
+                    },
+                    tagName: "v1.2.4",
+                },
+                sourceRevision,
+            })
+        ).toEqual({
+            operation: "deploy",
+            outcome: "completed",
+            releaseId: secondPullRequestHead,
+        });
         await authority.databaseObservability.collect();
 
         const refreshed = await delivery.refresh({});
+        expect(refreshed.find(({ section }) => section === "checkout")).toMatchObject({
+            payload: {
+                checkout: {
+                    condition: "ready",
+                    headSha: secondPullRequestHead,
+                    remoteHeadSha: secondPullRequestHead,
+                    safeForDeploy: true,
+                },
+            },
+            state: "succeeded",
+        });
         expect(refreshed.find(({ section }) => section === "preview")).toMatchObject({
             payload: { preview: { number: 42, status: "running" } },
             state: "succeeded",
@@ -218,6 +260,7 @@ describe("source-development runtime authority", () => {
             "docker:container-restart",
             "backup:kopia-run",
             "delivery:start-preview",
+            "delivery:deploy",
             "database:observe",
         ]);
         expect(receipts.every(({ outcome }) => outcome === "simulated")).toBeTrue();

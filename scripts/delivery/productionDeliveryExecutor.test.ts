@@ -1,11 +1,12 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Effect } from "effect";
 
+import { deliveryProductionActionKey } from "../../src/contracts/deliveryWorker.ts";
 import {
     productionCutoverRequiresReconciliation,
     productionCutoverRequiresValidationMode,
@@ -21,6 +22,7 @@ import {
     releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../src/shared/releaseManifest.ts";
+import { publishedReleaseAuthority } from "../../src/testSupport/publishedReleaseAuthority.ts";
 import { reconcileDeliveryProductionCutoverBeforeValidation } from "../../src/worker/delivery/productionRecovery.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
@@ -35,6 +37,8 @@ import {
     parseProductionDeliveryExecutorArguments,
     prepareProductionDeliveryOperation,
     prepareProductionDeliveryTargetUnderLease,
+    releaseManifestMatchesAuthority,
+    releaseSupportsCurrentDeliveryProtocol,
     runProductionDeliveryExecutor,
     runProductionDeliveryExecutorUnderLease,
     verifyProductionRunBeforeSnapshot,
@@ -67,6 +71,11 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
         checkoutRevision: "2".repeat(64),
         expectedMainHeadSha: targetReleaseId,
         operation: "deploy" as const,
+        release: publishedReleaseAuthority(
+            targetReleaseId,
+            "v1.2.3",
+            targetRuntimeRevision
+        ),
         sourceRevision: "f".repeat(64),
     };
     return {
@@ -84,7 +93,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
             },
         },
         enqueue: {
-            actionKey: deliveryProductionProtocol,
+            actionKey: deliveryProductionActionKey,
             actor: {
                 authenticatorId: "1".repeat(32),
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8803",
@@ -112,7 +121,11 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
     };
 }
 
-function artifact(releaseId: string, runtimeRevision: string) {
+function artifact(
+    releaseId: string,
+    runtimeRevision: string,
+    deliveryProtocols: readonly string[] = releaseDeliveryProtocols
+) {
     return Object.freeze({
         release: Object.freeze({
             manifest: parseReleaseManifest({
@@ -124,12 +137,18 @@ function artifact(releaseId: string, runtimeRevision: string) {
                     },
                 ],
                 buildCommands: [...releaseBuildCommands],
-                deliveryProtocols: [...releaseDeliveryProtocols],
-                display: {
-                    builtAtMs: 1_800_000_000_000,
-                    commitTitle: "Test release",
-                    schemaTarget: 1,
-                },
+                ...(deliveryProtocols.length === 0
+                    ? {}
+                    : { deliveryProtocols: [...deliveryProtocols] }),
+                ...(deliveryProtocols.length === 0
+                    ? {}
+                    : {
+                          display: {
+                              builtAtMs: 1_800_000_000_000,
+                              commitTitle: "Test release",
+                              schemaTarget: 1,
+                          },
+                      }),
                 documentationSha256: checksum,
                 formatVersion: 1,
                 lockfileSha256: checksum,
@@ -143,7 +162,10 @@ function artifact(releaseId: string, runtimeRevision: string) {
                 packages: [
                     { name: "effect", scope: "dependency", version: "4.0.0-beta.106" },
                 ],
-                processRoles: [...releaseProcessRoles],
+                processRoles:
+                    deliveryProtocols.length === 0
+                        ? ["web", "worker"]
+                        : [...releaseProcessRoles],
                 runtime: { revision: runtimeRevision, version: "1.4.0" },
                 source: { commitSha: releaseId, treeState: "clean" },
             }),
@@ -162,6 +184,7 @@ async function fixture() {
     const state = await prepareProtectedProductionStatePath(projectRoot);
     const paths = await prepareProductionDeliveryDirectories(state);
     const options = parseProductionDeliveryExecutorArguments([
+        "--artifact-source=published-release",
         "--operation=cutover",
         `--project-root=${projectRoot}`,
         "--readiness-url=http://127.0.0.1:3100/api/health/ready",
@@ -296,6 +319,27 @@ async function createClaimedProductionRunDatabase(
 }
 
 describe("production Delivery executor", () => {
+    test("rejects pre-Delivery releases instead of normalizing legacy state", () => {
+        expect(
+            releaseSupportsCurrentDeliveryProtocol(
+                artifact(currentReleaseId, currentRuntimeRevision).release
+            )
+        ).toBeTrue();
+        expect(
+            releaseSupportsCurrentDeliveryProtocol(
+                artifact(currentReleaseId, currentRuntimeRevision, []).release
+            )
+        ).toBeFalse();
+    });
+
+    test("binds cached release manifests to the published authority digest", () => {
+        const bytes = new TextEncoder().encode("manifest-bytes");
+        const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+
+        expect(releaseManifestMatchesAuthority(bytes, digest)).toBe(true);
+        expect(releaseManifestMatchesAuthority(bytes, "0".repeat(64))).toBe(false);
+    });
+
     test("accepts the exact claimed production run before snapshot", async () => {
         const { paths } = await fixture();
         const capsule = operationCapsule();
@@ -321,6 +365,7 @@ describe("production Delivery executor", () => {
     test("rejects extra, non-loopback, and malformed arguments", () => {
         expect(() =>
             parseProductionDeliveryExecutorArguments([
+                "--artifact-source=published-release",
                 "--operation=cutover",
                 "--project-root=/srv/dashboard",
                 "--readiness-url=https://dashboard.example/api/health/ready",
@@ -329,11 +374,21 @@ describe("production Delivery executor", () => {
         ).toThrow("Usage: bun productionDelivery.js");
         expect(() =>
             parseProductionDeliveryExecutorArguments([
+                "--artifact-source=published-release",
                 "--operation=cutover",
                 "--project-root=/srv/dashboard",
                 "--readiness-url=http://127.0.0.1:3100/api/health/ready",
                 `--transition=${operationTransitionId}`,
                 "--token=secret",
+            ])
+        ).toThrow("Usage: bun productionDelivery.js");
+        expect(() =>
+            parseProductionDeliveryExecutorArguments([
+                "--artifact-source=network-fallback",
+                "--operation=cutover",
+                "--project-root=/srv/dashboard",
+                "--readiness-url=http://127.0.0.1:3100/api/health/ready",
+                `--transition=${operationTransitionId}`,
             ])
         ).toThrow("Usage: bun productionDelivery.js");
     });
@@ -370,6 +425,7 @@ describe("production Delivery executor", () => {
                 operationCapsule(),
                 1000
             );
+            let localSettlements = 0;
             const validation = await reconcileDeliveryProductionCutoverBeforeValidation({
                 ensure: () => Promise.resolve("already-running"),
                 projectRoot: options.projectRoot,
@@ -406,6 +462,14 @@ describe("production Delivery executor", () => {
                         }),
                     createServices: () => ({
                         prepare: () => Promise.resolve(),
+                        provision: () =>
+                            Promise.reject(
+                                new Error("Published authority must not be reused")
+                            ),
+                        settle: () => {
+                            localSettlements += 1;
+                            return Promise.resolve();
+                        },
                         start: () => Promise.resolve(),
                         stop: () => Promise.resolve(),
                         verifyReady: async () => {
@@ -444,6 +508,7 @@ describe("production Delivery executor", () => {
                 completedAtMs: 10_000,
                 outcome: "succeeded",
             });
+            expect(localSettlements).toBe(1);
             const replay = await runProductionDeliveryExecutorUnderLease(
                 lease,
                 paths,
@@ -537,6 +602,7 @@ describe("production Delivery executor", () => {
                 }),
             createServices: () => ({
                 prepare: () => Promise.resolve(),
+                provision: () => Promise.resolve(),
                 start: () => Promise.resolve(),
                 stop: () => Promise.resolve(),
                 verifyReady: () => Promise.resolve(),
@@ -580,7 +646,7 @@ describe("production Delivery executor", () => {
         expect(replayFailure.message).toBe("Production Delivery executor failed");
     });
 
-    test("never records success when the normal runtime restart fails", async () => {
+    test("keeps recovery retryable when the normal runtime restart fails", async () => {
         const { options, paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {
             const initial = await loadProductionActivationState(lease, paths);
@@ -634,6 +700,7 @@ describe("production Delivery executor", () => {
                         }),
                     createServices: () => ({
                         prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
                         start: () => {
                             starts += 1;
                             return Promise.reject(new Error("restart failed"));
@@ -653,12 +720,108 @@ describe("production Delivery executor", () => {
             const terminal = await inspectDeliveryProductionOperation(lease, paths);
             expect(terminal).toMatchObject({
                 record: {
-                    phase: "terminal",
-                    result: { outcome: "failed" },
+                    phase: "normal-runtime-starting",
                 },
-                state: "terminal",
+                state: "in-progress",
             });
             expect(starts).toBe(2);
+        });
+    });
+
+    test("records success after recovering a committed target", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const initial = await loadProductionActivationState(lease, paths);
+            await commitProductionActivationState(lease, paths, initial, {
+                current: {
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                formatVersion: 1,
+                previous: null,
+                transitionId: currentTransitionId,
+            });
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const targetActivation = {
+                current: {
+                    releaseId: targetReleaseId,
+                    runtimeRevision: targetRuntimeRevision,
+                },
+                formatVersion: 1 as const,
+                previous: {
+                    databaseSnapshotTransitionId: operationTransitionId,
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntimeRevision,
+                },
+                transitionId: operationTransitionId,
+            };
+            let settlements = 0;
+            const receipt = await runProductionDeliveryExecutorUnderLease(
+                lease,
+                paths,
+                options,
+                {
+                    activate: (...arguments_) =>
+                        Effect.tryPromise({
+                            catch: () => new Error("activation failed") as never,
+                            try: async () => {
+                                for (const phase of [
+                                    "services-stopped",
+                                    "current-snapshot-created",
+                                    "target-database-ready",
+                                    "target-services-started",
+                                    "target-verified",
+                                    "target-smoke-verified",
+                                ] as const) {
+                                    await arguments_[5]?.onProgress?.(phase);
+                                }
+                                const current = await loadProductionActivationState(
+                                    lease,
+                                    paths
+                                );
+                                await commitProductionActivationState(
+                                    lease,
+                                    paths,
+                                    current,
+                                    targetActivation
+                                );
+                                return targetActivation;
+                            },
+                        }),
+                    createServices: () => ({
+                        prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
+                        settle: () => {
+                            settlements += 1;
+                            return settlements === 1
+                                ? Promise.reject(
+                                      new Error("transient settlement failure")
+                                  )
+                                : Promise.resolve();
+                        },
+                        start: () => Promise.resolve(),
+                        stop: () => Promise.resolve(),
+                        verifyReady: () => Promise.resolve(),
+                        verifySmoke: () => Promise.resolve(),
+                    }),
+                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(artifact(releaseId, runtimeRevision)),
+                    nowMs: () => 10_000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                    verifyRunBeforeSnapshot: () => Promise.resolve(),
+                }
+            );
+            expect(settlements).toBe(2);
+            expect(receipt.result).toEqual({
+                activation: targetActivation,
+                completedAtMs: 10_000,
+                outcome: "succeeded",
+            });
         });
     });
 
@@ -674,12 +837,14 @@ describe("production Delivery executor", () => {
             const current = artifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
+            const candidateRuntimeExecutable = `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`;
             const prepared = await prepareProductionDeliveryTargetUnderLease(
                 lease,
                 paths,
                 options.projectRoot,
                 record,
                 current,
+                "published-release",
                 {
                     buildRelease: (_root, buildOptions) => {
                         expect(buildOptions?.runtimeIdentity).toEqual(
@@ -691,11 +856,22 @@ describe("production Delivery executor", () => {
                             releaseRoot: `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}`,
                         });
                     },
-                    capacityAdmission: () => {
+                    capacityAdmission: (
+                        _lease,
+                        _paths,
+                        _sourceReleaseRoot,
+                        _sourceManifest,
+                        sourceExecutable
+                    ) => {
+                        expect(sourceExecutable).toBe(candidateRuntimeExecutable);
+                        expect(sourceExecutable).not.toBe(current.runtime.executable);
                         calls.push("capacity");
                         return Promise.resolve();
                     },
-                    installRuntime: () => {
+                    installRuntime: (_lease, _paths, _identity, dependencies) => {
+                        expect(dependencies?.sourceExecutable).toBe(
+                            candidateRuntimeExecutable
+                        );
                         calls.push("runtime");
                         return Promise.resolve(target.runtime);
                     },
@@ -714,6 +890,193 @@ describe("production Delivery executor", () => {
 
             expect(prepared).toEqual(target);
             expect(calls).toEqual(["build", "capacity", "runtime", "publish"]);
+        });
+    });
+
+    test("preserves mismatched cached release bytes instead of opening a rollback gap", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const publishedRoot = path.join(paths.releasesDirectory, targetReleaseId);
+            await mkdir(publishedRoot, { recursive: true });
+            await writeFile(
+                path.join(publishedRoot, "release-manifest.json"),
+                JSON.stringify({ source: { commitSha: targetReleaseId } })
+            );
+
+            expect(
+                prepareProductionDeliveryTargetUnderLease(
+                    lease,
+                    paths,
+                    options.projectRoot,
+                    record,
+                    artifact(currentReleaseId, currentRuntimeRevision),
+                    "published-release",
+                    {}
+                )
+            ).rejects.toThrow("Production Delivery executor failed");
+            const retained = await lstat(publishedRoot);
+            expect(retained.isDirectory()).toBe(true);
+        });
+    });
+
+    test("rejects missing retained artifacts without resolving or downloading a release", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            let sourceResolved = false;
+            let downloadStarted = false;
+
+            const retainedFailure = await rejectionError(
+                prepareProductionDeliveryTargetUnderLease(
+                    lease,
+                    paths,
+                    options.projectRoot,
+                    record,
+                    artifact(currentReleaseId, currentRuntimeRevision),
+                    "retained",
+                    {
+                        preparePublishedRelease: () => {
+                            downloadStarted = true;
+                            throw new Error("must not be reached");
+                        },
+                        resolveSourceIdentity: () => {
+                            sourceResolved = true;
+                            throw new Error("must not be reached");
+                        },
+                    }
+                )
+            );
+            expect(retainedFailure.message).toBe("Production Delivery executor failed");
+            expect(sourceResolved).toBeFalse();
+            expect(downloadStarted).toBeFalse();
+        });
+    });
+
+    test("admits published assets and root provisioning instead of building by default", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const current = artifact(currentReleaseId, currentRuntimeRevision);
+            const target = artifact(targetReleaseId, targetRuntimeRevision);
+            const calls: string[] = [];
+            const checkoutRoot = `${options.projectRoot}/production/checkout`;
+            await prepareProductionDeliveryTargetUnderLease(
+                lease,
+                paths,
+                options.projectRoot,
+                record,
+                current,
+                "published-release",
+                {
+                    preparationCapacityAdmission: () => {
+                        calls.push("preparation-capacity");
+                        return Promise.resolve();
+                    },
+                    capacityAdmission: () => Promise.resolve(),
+                    discardCandidate: (releasesRoot, releaseRoot, releaseId) => {
+                        expect(releasesRoot).toBe(`${checkoutRoot}/dist/releases`);
+                        expect(releaseRoot).toBe(
+                            `${checkoutRoot}/dist/releases/${targetReleaseId}`
+                        );
+                        expect(releaseId).toBe(targetReleaseId);
+                        calls.push("discard-checkout-candidate");
+                        return Promise.resolve();
+                    },
+                    installRuntime: (_lease, _paths, identity, dependencies) => {
+                        expect(identity).toEqual(target.runtime.identity);
+                        if (dependencies === undefined) {
+                            throw new Error("Expected published runtime dependency");
+                        }
+                        expect(dependencies.sourceExecutable).toBe(
+                            `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`
+                        );
+                        return Promise.resolve(target.runtime);
+                    },
+                    preparePublishedRelease: (releaseId, checkoutRoot) => {
+                        expect(releaseId).toBe(targetReleaseId);
+                        expect(checkoutRoot).toEndWith("/production/checkout");
+                        calls.push("published-assets-and-root-provisioning");
+                        return Promise.resolve({
+                            authority: publishedReleaseAuthority(
+                                releaseId,
+                                "v1.2.3",
+                                targetRuntimeRevision
+                            ),
+                            releaseId,
+                            releaseRoot: `${checkoutRoot}/dist/releases/${releaseId}`,
+                        });
+                    },
+                    publishRelease: () => Promise.resolve(target.release),
+                    resolveSourceIdentity: () =>
+                        Promise.resolve({
+                            commitSha: targetReleaseId,
+                            commitTitle: "Target release",
+                            state: "clean",
+                        }),
+                    verifyLocalRelease: () => Promise.resolve(target.release.manifest),
+                }
+            );
+            expect(calls).toEqual([
+                "preparation-capacity",
+                "published-assets-and-root-provisioning",
+                "discard-checkout-candidate",
+            ]);
+        });
+    });
+
+    test("rejects insufficient staging capacity before downloading release assets", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            let preparationStarted = false;
+
+            const capacityFailure = await rejectionError(
+                prepareProductionDeliveryTargetUnderLease(
+                    lease,
+                    paths,
+                    options.projectRoot,
+                    record,
+                    artifact(currentReleaseId, currentRuntimeRevision),
+                    "published-release",
+                    {
+                        preparationCapacityAdmission: () =>
+                            Promise.reject(new Error("insufficient capacity")),
+                        preparePublishedRelease: () => {
+                            preparationStarted = true;
+                            throw new Error("must not be reached");
+                        },
+                        resolveSourceIdentity: () =>
+                            Promise.resolve({
+                                commitSha: targetReleaseId,
+                                commitTitle: "Target release",
+                                state: "clean",
+                            }),
+                    }
+                )
+            );
+            expect(capacityFailure.message).toBe("insufficient capacity");
+            expect(preparationStarted).toBeFalse();
         });
     });
 

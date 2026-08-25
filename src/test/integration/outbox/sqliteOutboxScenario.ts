@@ -29,12 +29,15 @@ const statusPollingSchedule = Schedule.spaced("5 millis").pipe(
     Schedule.upTo({ times: 1000 })
 );
 
-type IntegrationChildProcess = Bun.Subprocess<"ignore", "ignore", "ignore">;
+const childDiagnosticMaximumCharacters = 4096;
+
+type IntegrationChildProcess = Bun.Subprocess<"ignore", "ignore", "pipe">;
 
 export class IntegrationChildProcessError extends Data.TaggedError(
     "IntegrationChildProcessError"
 )<{
     readonly exitCode?: number;
+    readonly diagnostic?: string;
     readonly operation: string;
 }> {}
 
@@ -148,7 +151,7 @@ function spawnChild(
                     Bun.spawn([process.execPath, childModulePath, ...arguments_], {
                         killSignal: "SIGTERM",
                         signal,
-                        stderr: "ignore",
+                        stderr: "pipe",
                         stdin: "ignore",
                         stdout: "ignore",
                     }),
@@ -198,10 +201,19 @@ function runOneShotChild(
     return Effect.scoped(
         Effect.gen(function* () {
             const child = yield* spawnChild(operation, arguments_);
+            const diagnostic = new Response(child.stderr).text();
             const exitCode = yield* awaitChildExit(child, operation);
             if (exitCode !== 0) {
+                const boundedDiagnostic = (yield* Effect.promise(() => diagnostic))
+                    .trim()
+                    .slice(0, childDiagnosticMaximumCharacters);
                 return yield* Effect.fail(
-                    new IntegrationChildProcessError({ exitCode, operation })
+                    new IntegrationChildProcessError({
+                        diagnostic:
+                            boundedDiagnostic.length > 0 ? boundedDiagnostic : undefined,
+                        exitCode,
+                        operation,
+                    })
                 );
             }
             return yield* readStatus(statusPath, operation);

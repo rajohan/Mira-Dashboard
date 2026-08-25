@@ -7,6 +7,7 @@ import {
     type DeliveryOperationAuthoritySnapshot,
     type DeliveryOverviewSectionId,
 } from "../../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import { createDeliveryService, DeliveryServiceError } from "./service.ts";
 
 const headSha = "a".repeat(40);
@@ -78,6 +79,14 @@ function payload(
         ],
         releases: {
             activationRevision: sourceRevision,
+            current: {
+                builtAtMs: 1000,
+                commitTitle: "Current",
+                commitUrl: `https://github.com/rajohan/Mira-Dashboard/commit/${headSha}`,
+                releaseId: headSha,
+                runtimeRevision: "b".repeat(40),
+                schemaTarget: 1,
+            },
             rollback: {
                 actor: "mira",
                 available: false,
@@ -234,7 +243,6 @@ describe("Delivery service", () => {
             {
                 checkoutRevision: sourceRevision,
                 confirmation: "merge-delivery-pull-request",
-                deploy: false,
                 expectedHeads: [{ headSha, number: 42 }],
                 idempotencyKey: "A".repeat(43),
                 mergeStack: false,
@@ -258,7 +266,6 @@ describe("Delivery service", () => {
         expect(next.queued).toEqual([
             {
                 checkoutRevision: sourceRevision,
-                deploy: false,
                 expectedHeads: [{ headSha, number: 42 }],
                 mergeStack: false,
                 number: 42,
@@ -341,6 +348,15 @@ describe("Delivery service", () => {
             ...value.checkout,
             remoteHeadSha,
         };
+        const candidate = publishedReleaseAuthority(
+            remoteHeadSha,
+            "v1.2.3",
+            "c".repeat(40)
+        );
+        value.releases = {
+            ...value.releases,
+            candidate,
+        };
         const next = fixture(value);
 
         expect(
@@ -352,6 +368,7 @@ describe("Delivery service", () => {
                     expectedMainHeadSha: remoteHeadSha,
                     idempotencyKey: "A".repeat(43),
                     operation: "deploy",
+                    release: candidate,
                     sourceRevision,
                 },
                 context
@@ -363,9 +380,40 @@ describe("Delivery service", () => {
                 checkoutRevision: sourceRevision,
                 expectedMainHeadSha: remoteHeadSha,
                 operation: "deploy",
+                release: candidate,
                 sourceRevision,
             },
         ]);
+    });
+
+    test("rejects a cached release candidate from a different remote main head", async () => {
+        const remoteHeadSha = "d".repeat(40);
+        const candidate = publishedReleaseAuthority("e".repeat(40));
+        const value = payload();
+        value.checkout = { ...value.checkout, remoteHeadSha };
+        value.releases = { ...value.releases, candidate };
+        const next = fixture(value);
+
+        try {
+            await next.service.deploy(
+                {
+                    activationRevision: sourceRevision,
+                    checkoutRevision: sourceRevision,
+                    confirmation: "deploy-delivery-main",
+                    expectedMainHeadSha: remoteHeadSha,
+                    idempotencyKey: "A".repeat(43),
+                    operation: "deploy",
+                    release: candidate,
+                    sourceRevision,
+                },
+                context
+            );
+            throw new Error("expected release and remote head conflict");
+        } catch (error) {
+            expect(error).toBeInstanceOf(DeliveryServiceError);
+            expect((error as DeliveryServiceError).reason).toBe("conflict");
+        }
+        expect(next.queued).toHaveLength(0);
     });
 
     test("binds a one-member merge to authoritative native-stack identity", () => {
@@ -375,7 +423,6 @@ describe("Delivery service", () => {
         const input = {
             checkoutRevision: sourceRevision,
             confirmation: "merge-delivery-pull-request" as const,
-            deploy: false as const,
             expectedHeads: [{ headSha, number: 42 }],
             idempotencyKey: "A".repeat(43),
             mergeStack: true,

@@ -5,19 +5,20 @@ identity split and three fixed operations: `system-restart`, `system-update`, an
 `system-cleanup`. It does not expose a shell, command, path, unit, environment, or output
 parameter.
 
-| Artifact                                     | Destination                                                      | Owner/mode       |
-| -------------------------------------------- | ---------------------------------------------------------------- | ---------------- |
-| `mira-dashboard-host-operation`              | `/usr/local/libexec/mira-dashboard-host-operation`               | `root:root 0755` |
-| `mira-dashboard-web-runtime`                 | `/usr/local/libexec/mira-dashboard-web-runtime`                  | `root:root 0755` |
-| `mira-dashboard-host-system-restart.service` | `/etc/systemd/system/mira-dashboard-host-system-restart.service` | `root:root 0644` |
-| `mira-dashboard-host-system-update.service`  | `/etc/systemd/system/mira-dashboard-host-system-update.service`  | `root:root 0644` |
-| `mira-dashboard-host-system-cleanup.service` | `/etc/systemd/system/mira-dashboard-host-system-cleanup.service` | `root:root 0644` |
-| `mira-dashboard-deferred-reboot.service`     | `/etc/systemd/system/mira-dashboard-deferred-reboot.service`     | `root:root 0644` |
-| `mira-dashboard-deferred-reboot.timer`       | `/etc/systemd/system/mira-dashboard-deferred-reboot.timer`       | `root:root 0644` |
-| `60-mira-dashboard-host-operations.rules`    | `/etc/polkit-1/rules.d/60-mira-dashboard-host-operations.rules`  | `root:root 0644` |
-| `mira-dashboard-production-authority.conf`   | `/etc/sysusers.d/mira-dashboard-production-authority.conf`       | `root:root 0644` |
-| `systemd/mira-dashboard-web.service`         | `/etc/systemd/system/mira-dashboard-web.service`                 | `root:root 0644` |
-| `systemd/mira-dashboard-worker.service`      | `/etc/systemd/system/mira-dashboard-worker.service`              | `root:root 0644` |
+| Artifact                                          | Destination                                                           | Owner/mode       |
+| ------------------------------------------------- | --------------------------------------------------------------------- | ---------------- |
+| `mira-dashboard-host-operation`                   | `/usr/local/libexec/mira-dashboard-host-operation`                    | `root:root 0755` |
+| `mira-dashboard-web-runtime`                      | `/usr/local/libexec/mira-dashboard-web-runtime`                       | `root:root 0755` |
+| `mira-dashboard-host-system-restart.service`      | `/etc/systemd/system/mira-dashboard-host-system-restart.service`      | `root:root 0644` |
+| `mira-dashboard-host-system-update.service`       | `/etc/systemd/system/mira-dashboard-host-system-update.service`       | `root:root 0644` |
+| `mira-dashboard-host-system-cleanup.service`      | `/etc/systemd/system/mira-dashboard-host-system-cleanup.service`      | `root:root 0644` |
+| `mira-dashboard-deferred-reboot.service`          | `/etc/systemd/system/mira-dashboard-deferred-reboot.service`          | `root:root 0644` |
+| `mira-dashboard-deferred-reboot.timer`            | `/etc/systemd/system/mira-dashboard-deferred-reboot.timer`            | `root:root 0644` |
+| `60-mira-dashboard-host-operations.rules`         | `/etc/polkit-1/rules.d/60-mira-dashboard-host-operations.rules`       | `root:root 0644` |
+| `mira-dashboard-production-authority.conf`        | `/etc/sysusers.d/mira-dashboard-production-authority.conf`            | `root:root 0644` |
+| `mira-dashboard-production-provisioning@.service` | `/etc/systemd/system/mira-dashboard-production-provisioning@.service` | `root:root 0644` |
+| `systemd/mira-dashboard-web.service`              | `/etc/systemd/system/mira-dashboard-web.service`                      | `root:root 0644` |
+| `systemd/mira-dashboard-worker.service`           | `/etc/systemd/system/mira-dashboard-worker.service`                   | `root:root 0644` |
 
 Do not invoke the root installer against the application-owned production release tree. First
 transfer the exact release into a dedicated root-owned immutable staging tree. The staged release
@@ -26,14 +27,13 @@ every admitted provisioning artifact must be `root:root 0400`. Preserve the exac
 staged root's basename. The installer rejects an internally consistent manifest when any admitted
 source object is owned by the application user or group.
 
-Provision the exact Bun executable separately at
-`/var/lib/mira-dashboard-host-provisioning/runtime/bun` as `root:root 0555`. Every ancestor of that
-runtime path below the root-owned, non-group/other-writable
-`/var/lib/mira-dashboard-host-provisioning` trust root must also be root-owned and not writable by
-group or others. The root handoff must verify
-the runtime and complete staged module tree before launch: Bun loads the entrypoint and its local
-dependencies before in-process validation can run, so an application-owned interpreter or script
-cannot establish its own authority.
+Provision the exact Bun executable and `server/productionProvisioning.js` together under
+`/var/lib/mira-dashboard-host-provisioning/pairs/<commit>/` as `root:root 0555`. Select the complete
+pair through the atomically replaced `current` symlink. The systemd unit resolves that selector once
+as its working directory before launching `./bun ./productionProvisioning.js`, so a host stop or
+selector change cannot combine files from different releases. Every directory below the root-owned,
+non-group/other-writable provisioning trust root must remain root-owned and not writable by group or
+others.
 
 Before transfer or ownership change, independently verify the candidate against the reviewed Git
 commit/tree or approved release record and obtain the exact `release-manifest.json` SHA-256 through
@@ -45,7 +45,7 @@ parsing any artifact hash.
 Install exact manifest-bound bytes only by invoking the staged script with that absolute runtime:
 
 ```sh
-/var/lib/mira-dashboard-host-provisioning/runtime/bun \
+/var/lib/mira-dashboard-host-provisioning/pairs/<commit>/bun \
   /var/lib/mira-dashboard-host-provisioning/releases/<commit>/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts \
   --release-root=/var/lib/mira-dashboard-host-provisioning/releases/<commit> \
   --release-id=<40-hex-commit> \
@@ -84,6 +84,22 @@ after this complete proof does the production worker advertise the fixed host-op
 Rollback invokes this same installer with the previous root-owned immutable release, restoring all
 exact authority files and reloading systemd. The deferred timer is never enabled; it is started only by the root-owned
 restart helper after systemd accepts the reviewed restart unit.
+
+Normal Delivery activation starts only the fixed
+`mira-dashboard-production-provisioning@<commit>--<tag>--<receipt-sha256>--<archive-sha256>.service`
+boundary. The root-owned
+provisioner independently resolves the stable GitHub tag, downloads the permanent
+`receipt.json` and `release.tar` assets, verifies their published digests and immutable
+release identity, then installs candidate authority after the running Dashboard services
+have stopped. The root boundary obtains only `MIRA_GITHUB_TOKEN` through the host's canonical
+Doppler configuration; the credential is neither persisted in the release tree nor inherited by
+child installers. Tagged provisioning always revalidates and replaces any cached copy for that commit;
+only `--local` rollback trusts an already root-staged release. Provisioning never removes a root
+while activation outcome is unknown. After activation commits and readiness passes, the controller
+starts the same boundary with `--local--settled` to validate the complete immutable root inventory.
+Release roots are not deleted until a future garbage collector can prove they are unreferenced by
+activation or rollback state. Rollback starts the boundary with `--local` and reinstalls the retained
+previous authority before the previous services restart.
 
 Cleanup removes orphaned packages and stale package cache entries, rotates then vacuums
 journald to fixed 14-day and 1 GiB limits, and prunes only unused Docker content older

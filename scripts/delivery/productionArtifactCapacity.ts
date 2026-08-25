@@ -2,16 +2,23 @@ import type { BigIntStats } from "node:fs";
 import { lstat, realpath, statfs } from "node:fs/promises";
 import path from "node:path";
 
+import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
-import { inventoryReleaseArtifactTree } from "./releaseArtifactInventory.ts";
+import { productionProvisioningEntrypointName } from "./provisioning/host-operations/policy.ts";
+import {
+    inventoryReleaseArtifactTree,
+    maximumReleaseArtifactCount,
+    maximumReleaseArtifactDirectoryCount,
+} from "./releaseArtifactInventory.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 
 const capacityFailureMessage = "Production artifact capacity admission failed";
 const commitShaPattern = /^[a-f\d]{40}$/u;
 const maximumRuntimeBytes = 256n * 1024n * 1024n;
-const maximumCapacityObjects = 8192;
+const maximumCapacityObjects =
+    2 * (maximumReleaseArtifactCount + maximumReleaseArtifactDirectoryCount) + 8;
 const privateDirectoryMode = 0o700n;
 
 /** Free space left untouched when admitting a new immutable release/runtime pair. */
@@ -35,6 +42,7 @@ export interface ProductionArtifactCopyInventory {
 
 /** Read-only source-verification and capacity boundaries exposed to focused tests. */
 export interface ProductionArtifactCapacityDependencies {
+    readonly additionalReleaseCopyDirectory?: string;
     readonly availableCapacity?: (
         directory: string
     ) => Promise<ProductionArtifactFilesystemCapacity>;
@@ -58,6 +66,17 @@ function validPrivateDirectory(status: BigIntStats): boolean {
         !status.isSymbolicLink() &&
         status.uid === BigInt(process.getuid()) &&
         (status.mode & 0o7777n) === privateDirectoryMode
+    );
+}
+
+function validAdditionalCopyDirectory(status: BigIntStats): boolean {
+    return (
+        status.isDirectory() &&
+        !status.isSymbolicLink() &&
+        ((typeof process.getuid === "function" &&
+            status.uid === BigInt(process.getuid()) &&
+            (status.mode & 0o7777n) === privateDirectoryMode) ||
+            (status.uid === 0n && (status.mode & 0o022n) === 0n))
     );
 }
 
@@ -126,6 +145,19 @@ function assertFitsCapacity(
     ) {
         throw failure();
     }
+}
+
+function inventoryHasObjects(inventory: ProductionArtifactCopyInventory): boolean {
+    return inventory.fileBytes.length > 0 || inventory.newDirectoryCount > 0n;
+}
+
+function requiredReleaseFileBytes(
+    records: Awaited<ReturnType<typeof inventoryReleaseArtifactTree>>,
+    relativePath: string
+): bigint {
+    const record = records.find((candidate) => candidate.path === relativePath);
+    if (record === undefined) throw failure();
+    return BigInt(record.bytes);
 }
 
 /**
@@ -284,6 +316,8 @@ export async function assertProductionArtifactCapacity(
     dependencies: ProductionArtifactCapacityDependencies = {}
 ): Promise<void> {
     try {
+        const additionalReleaseCopyDirectory =
+            dependencies.additionalReleaseCopyDirectory;
         if (
             lease.stateDirectory !== paths.stateDirectory ||
             paths.stateDirectory !== path.join(paths.productionDirectory, "state") ||
@@ -304,6 +338,7 @@ export async function assertProductionArtifactCapacity(
             releaseRecords,
             verifiedManifest,
             runtimeBytes,
+            additionalCopy,
         ] = await Promise.all([
             lstat(paths.productionDirectory, { bigint: true }),
             lstat(paths.releasesDirectory, { bigint: true }),
@@ -313,6 +348,14 @@ export async function assertProductionArtifactCapacity(
                 sourceReleaseRoot
             ),
             runtimeSourceBytes(sourceExecutable),
+            additionalReleaseCopyDirectory === undefined
+                ? Promise.resolve(undefined)
+                : Promise.all([
+                      realpath(additionalReleaseCopyDirectory),
+                      lstat(additionalReleaseCopyDirectory, {
+                          bigint: true,
+                      }),
+                  ] as const),
         ] as const);
         if (
             !validPrivateDirectory(production) ||
@@ -320,6 +363,9 @@ export async function assertProductionArtifactCapacity(
             !validPrivateDirectory(runtimes) ||
             releases.dev !== production.dev ||
             runtimes.dev !== production.dev ||
+            (additionalCopy !== undefined &&
+                (additionalCopy[0] !== additionalReleaseCopyDirectory ||
+                    !validAdditionalCopyDirectory(additionalCopy[1]))) ||
             JSON.stringify(verifiedManifest) !== JSON.stringify(sourceManifest)
         ) {
             throw failure();
@@ -333,7 +379,13 @@ export async function assertProductionArtifactCapacity(
             path.join(paths.runtimesDirectory, "bun", sourceManifest.runtime.revision),
             production.dev
         );
-        if (releaseExists && runtimeExists) return;
+        if (
+            releaseExists &&
+            runtimeExists &&
+            additionalReleaseCopyDirectory === undefined
+        ) {
+            return;
+        }
 
         const bunRootExists = runtimeExists
             ? true
@@ -343,7 +395,7 @@ export async function assertProductionArtifactCapacity(
               );
         let runtimeDirectoryCount = 0n;
         if (!runtimeExists) runtimeDirectoryCount = bunRootExists ? 1n : 2n;
-        const inventory: ProductionArtifactCopyInventory = Object.freeze({
+        const productionInventory: ProductionArtifactCopyInventory = Object.freeze({
             fileBytes: Object.freeze([
                 ...(releaseExists
                     ? []
@@ -354,10 +406,55 @@ export async function assertProductionArtifactCapacity(
                 (releaseExists ? 0n : directoryCountForRelease(releaseRecords)) +
                 runtimeDirectoryCount,
         });
-        const capacity = await (
-            dependencies.availableCapacity ?? defaultAvailableCapacity
-        )(paths.productionDirectory);
-        assertFitsCapacity(capacity, inventory);
+        const releaseInventory: ProductionArtifactCopyInventory = Object.freeze({
+            fileBytes: Object.freeze([
+                ...releaseRecords.map((record) => BigInt(record.bytes)),
+                BigInt(maximumProductionReleaseArchiveBytes),
+                requiredReleaseFileBytes(releaseRecords, "runtime/bun"),
+                requiredReleaseFileBytes(
+                    releaseRecords,
+                    `server/${productionProvisioningEntrypointName}`
+                ),
+            ]),
+            newDirectoryCount: directoryCountForRelease(releaseRecords) + 2n,
+        });
+        const availableCapacity =
+            dependencies.availableCapacity ?? defaultAvailableCapacity;
+        if (additionalCopy === undefined) {
+            if (inventoryHasObjects(productionInventory)) {
+                assertFitsCapacity(
+                    await availableCapacity(paths.productionDirectory),
+                    productionInventory
+                );
+            }
+            return;
+        }
+        if (additionalReleaseCopyDirectory === undefined) throw failure();
+        if (additionalCopy[1].dev === production.dev) {
+            assertFitsCapacity(
+                await availableCapacity(paths.productionDirectory),
+                Object.freeze({
+                    fileBytes: Object.freeze([
+                        ...productionInventory.fileBytes,
+                        ...releaseInventory.fileBytes,
+                    ]),
+                    newDirectoryCount:
+                        productionInventory.newDirectoryCount +
+                        releaseInventory.newDirectoryCount,
+                })
+            );
+            return;
+        }
+        if (inventoryHasObjects(productionInventory)) {
+            assertFitsCapacity(
+                await availableCapacity(paths.productionDirectory),
+                productionInventory
+            );
+        }
+        assertFitsCapacity(
+            await availableCapacity(additionalReleaseCopyDirectory),
+            releaseInventory
+        );
     } catch {
         throw failure();
     }

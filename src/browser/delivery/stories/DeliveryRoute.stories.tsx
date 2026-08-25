@@ -10,6 +10,7 @@ import type {
     DeliveryReleasesResult,
     DeliveryRequestOperationResult,
 } from "../../../contracts/delivery.ts";
+import type { PublishedReleaseAuthority } from "../../../shared/publishedReleaseAuthority.ts";
 import {
     DashboardPageStory,
     type DashboardPageStoryQuerySeed,
@@ -31,6 +32,7 @@ import {
 const observedAtMs = 1_800_000_000_000;
 const headSha = "a".repeat(40);
 const previousSha = "b".repeat(40);
+const candidateSha = "c".repeat(40);
 const sourceRevision = "c".repeat(64);
 const reviewerRevision = "d".repeat(64);
 const previewRevision = "e".repeat(64);
@@ -38,7 +40,33 @@ const checkoutRevision = "f".repeat(64);
 const activationRevision = "1".repeat(64);
 const jobRunId = "019fdf70-0000-7000-8000-000000000040";
 const headGuardUnavailableReason =
-    "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads.";
+    "Merge is unavailable because GitHub cannot atomically bind it to the reviewed pull request head or stack heads.";
+
+function publishedReleaseAuthority(
+    releaseId: string,
+    tagName = "v1.2.3",
+    runtimeRevision = "b".repeat(40)
+): PublishedReleaseAuthority {
+    const assets: PublishedReleaseAuthority["assets"] = [
+        {
+            digest: `sha256:${"c".repeat(64)}`,
+            name: "receipt.json",
+            size: 512,
+        },
+        {
+            digest: `sha256:${"d".repeat(64)}`,
+            name: "release.tar",
+            size: 4096,
+        },
+    ];
+    return Object.freeze({
+        assets,
+        releaseId,
+        releaseManifestSha256: "e".repeat(64),
+        runtime: { revision: runtimeRevision, version: "1.4.0" },
+        tagName,
+    });
+}
 
 const nativeStackActions: DeliveryPullRequest["actions"] = [
     {
@@ -50,13 +78,6 @@ const nativeStackActions: DeliveryPullRequest["actions"] = [
     },
     {
         action: "merge",
-        actor: "mira",
-        available: false,
-        reason: "head-guard-unavailable",
-        scope: "prefix",
-    },
-    {
-        action: "merge-and-deploy",
         actor: "mira",
         available: false,
         reason: "head-guard-unavailable",
@@ -93,12 +114,6 @@ const ordinaryActions: DeliveryPullRequest["actions"] = [
     },
     {
         action: "merge",
-        actor: "mira",
-        available: true,
-        scope: "prefix",
-    },
-    {
-        action: "merge-and-deploy",
         actor: "mira",
         available: true,
         scope: "prefix",
@@ -251,7 +266,7 @@ const checkoutResult = {
         condition: "ready",
         expectedBranch: "main",
         headSha,
-        remoteHeadSha: headSha,
+        remoteHeadSha: candidateSha,
         revision: checkoutRevision,
         safeForDeploy: true,
         upstream: "origin/main",
@@ -267,6 +282,7 @@ const releasesResult = {
     observedAtMs,
     releases: {
         activationRevision,
+        candidate: publishedReleaseAuthority(candidateSha),
         current: {
             builtAtMs: observedAtMs - 1000,
             commitTitle: "Current release",
@@ -437,29 +453,22 @@ export const PullRequests: Story = {
     },
     play: async ({ canvasElement }) => {
         const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
-        for (const action of [
-            /^Merge(?: stack through #\d+| only)$/u,
-            /^Merge(?: through #\d+)? \+ Deploy$/u,
-        ]) {
-            const buttons = pullRequestRegion.getAllByRole("button", { name: action });
-            await expect(buttons).toHaveLength(3);
-            await expect(buttons[0]).toBeEnabled();
-            for (const button of buttons.slice(1)) {
-                await expect(button).toBeDisabled();
-                await expect(button).toHaveAccessibleDescription(
-                    headGuardUnavailableReason
-                );
-            }
-        }
-
-        const rejectButtons = pullRequestRegion.getAllByRole("button", {
-            name: "Reject",
+        const buttons = pullRequestRegion.getAllByRole("button", {
+            name: /^Merge(?: stack through #\d+| only)$/u,
         });
-        await expect(rejectButtons).toHaveLength(1);
-        for (const button of rejectButtons) {
+        await expect(buttons).toHaveLength(3);
+        await expect(buttons[0]).toBeEnabled();
+        for (const button of buttons.slice(1)) {
             await expect(button).toBeDisabled();
             await expect(button).toHaveAccessibleDescription(headGuardUnavailableReason);
         }
+        await expect(
+            pullRequestRegion.queryByRole("button", { name: /Merge.*Deploy/u })
+        ).not.toBeInTheDocument();
+
+        await expect(
+            pullRequestRegion.queryByRole("button", { name: "Reject" })
+        ).not.toBeInTheDocument();
 
         for (const action of ["Approve PR", "Update branch"]) {
             const buttons = pullRequestRegion.getAllByRole("button", {

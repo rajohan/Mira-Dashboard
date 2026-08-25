@@ -4,14 +4,20 @@ import path from "node:path";
 import { withBunBuildAdmission } from "./buildAdmission.ts";
 import { parseBuildOutputArgument } from "./buildCli.ts";
 import { resolveRepositoryBuildPath } from "./buildPaths.ts";
+import { maximumProductionProvisioningBundleBytes } from "./provisioning/host-operations/policy.ts";
 
 const webEntrypoint = "src/app/dashboardServer.ts";
 const workerEntrypoint = "src/app/worker.ts";
 const databaseMaintenanceEntrypoint = "src/app/databaseMaintenance.ts";
 const productionDeliveryEntrypoint = "scripts/delivery/productionDeliveryExecutor.ts";
+const prepareProductionStateEntrypoint = "scripts/delivery/prepareProductionState.ts";
+const productionProvisioningEntrypoint =
+    "scripts/delivery/productionReleaseProvisioner.ts";
 const openClawHeartbeatEntrypoint = "scripts/openClawHeartbeat.ts";
 const maximumDatabaseMaintenanceGzipBytes = 2 * 1024 * 1024;
 const maximumProductionDeliveryGzipBytes = 2 * 1024 * 1024;
+const maximumPrepareProductionStateGzipBytes = 2 * 1024 * 1024;
+const maximumProductionProvisioningGzipBytes = 2 * 1024 * 1024;
 const maximumOpenClawHeartbeatGzipBytes = 2 * 1024 * 1024;
 const maximumWebGzipBytes = 4 * 1024 * 1024;
 const maximumWorkerGzipBytes = 2 * 1024 * 1024;
@@ -31,6 +37,14 @@ export interface ProcessBuildResult {
         gzipBytes: number;
         rawBytes: number;
     }>;
+    readonly prepareProductionState: Readonly<{
+        gzipBytes: number;
+        rawBytes: number;
+    }>;
+    readonly productionProvisioning: Readonly<{
+        gzipBytes: number;
+        rawBytes: number;
+    }>;
     readonly web: Readonly<{ gzipBytes: number; rawBytes: number }>;
     readonly worker: Readonly<{ gzipBytes: number; rawBytes: number }>;
 }
@@ -46,19 +60,34 @@ function validatedOutputDirectory(
     ).output;
 }
 
-async function measurements(
+/**
+ * Measures one bundled process against its compressed and optional raw byte budgets.
+ * @param filePath Exact emitted bundle path.
+ * @param maximumGzipBytes Largest admitted gzip representation.
+ * @param maximumRawBytes Optional raw-byte ceiling shared with a later consumer.
+ * @param role Stable process name used in the bounded failure.
+ * @returns Immutable compressed and raw measurements.
+ */
+export async function measureProcessArtifact(
     filePath: string,
     maximumGzipBytes: number,
+    maximumRawBytes: number | undefined,
     role:
         | "database-maintenance"
         | "openclaw-heartbeat"
         | "production-delivery"
+        | "prepare-production-state"
+        | "production-provisioning"
         | "web"
         | "worker"
 ): Promise<Readonly<{ gzipBytes: number; rawBytes: number }>> {
     const contents = await readFile(filePath);
     const gzipBytes = Bun.gzipSync(contents, { level: 9 }).byteLength;
-    if (contents.byteLength === 0 || gzipBytes > maximumGzipBytes) {
+    if (
+        contents.byteLength === 0 ||
+        gzipBytes > maximumGzipBytes ||
+        (maximumRawBytes !== undefined && contents.byteLength > maximumRawBytes)
+    ) {
         throw new Error(`Dashboard ${role} process bundle exceeds its byte budget`);
     }
     return Object.freeze({ gzipBytes, rawBytes: contents.byteLength });
@@ -85,6 +114,8 @@ export async function buildProcessArtifacts(
             entrypoints: [
                 path.join(repositoryRoot, databaseMaintenanceEntrypoint),
                 path.join(repositoryRoot, productionDeliveryEntrypoint),
+                path.join(repositoryRoot, prepareProductionStateEntrypoint),
+                path.join(repositoryRoot, productionProvisioningEntrypoint),
                 path.join(repositoryRoot, openClawHeartbeatEntrypoint),
                 path.join(repositoryRoot, webEntrypoint),
                 path.join(repositoryRoot, workerEntrypoint),
@@ -107,12 +138,14 @@ export async function buildProcessArtifacts(
             .map(({ path: outputPath }) => path.basename(outputPath))
             .toSorted();
         if (
-            emittedNames.length !== 5 ||
+            emittedNames.length !== 7 ||
             emittedNames[0] !== "dashboardServer.js" ||
             emittedNames[1] !== "databaseMaintenance.js" ||
             emittedNames[2] !== "openClawHeartbeat.js" ||
-            emittedNames[3] !== "productionDeliveryExecutor.js" ||
-            emittedNames[4] !== "worker.js"
+            emittedNames[3] !== "prepareProductionState.js" ||
+            emittedNames[4] !== "productionDeliveryExecutor.js" ||
+            emittedNames[5] !== "productionReleaseProvisioner.js" ||
+            emittedNames[6] !== "worker.js"
         ) {
             throw new Error("Dashboard process build emitted an unexpected artifact set");
         }
@@ -124,35 +157,69 @@ export async function buildProcessArtifacts(
             path.join(output, "productionDeliveryExecutor.js"),
             path.join(output, "productionDelivery.js")
         );
-        const [databaseMaintenance, openClawHeartbeat, productionDelivery, web, worker] =
-            await Promise.all([
-                measurements(
-                    path.join(output, "databaseMaintenance.js"),
-                    maximumDatabaseMaintenanceGzipBytes,
-                    "database-maintenance"
-                ),
-                measurements(
-                    path.join(output, "openClawHeartbeat.js"),
-                    maximumOpenClawHeartbeatGzipBytes,
-                    "openclaw-heartbeat"
-                ),
-                measurements(
-                    path.join(output, "productionDelivery.js"),
-                    maximumProductionDeliveryGzipBytes,
-                    "production-delivery"
-                ),
-                measurements(path.join(output, "web.js"), maximumWebGzipBytes, "web"),
-                measurements(
-                    path.join(output, "worker.js"),
-                    maximumWorkerGzipBytes,
-                    "worker"
-                ),
-            ]);
+        await rename(
+            path.join(output, "productionReleaseProvisioner.js"),
+            path.join(output, "productionProvisioning.js")
+        );
+        const [
+            databaseMaintenance,
+            openClawHeartbeat,
+            prepareProductionState,
+            productionDelivery,
+            productionProvisioning,
+            web,
+            worker,
+        ] = await Promise.all([
+            measureProcessArtifact(
+                path.join(output, "databaseMaintenance.js"),
+                maximumDatabaseMaintenanceGzipBytes,
+                undefined,
+                "database-maintenance"
+            ),
+            measureProcessArtifact(
+                path.join(output, "openClawHeartbeat.js"),
+                maximumOpenClawHeartbeatGzipBytes,
+                undefined,
+                "openclaw-heartbeat"
+            ),
+            measureProcessArtifact(
+                path.join(output, "prepareProductionState.js"),
+                maximumPrepareProductionStateGzipBytes,
+                undefined,
+                "prepare-production-state"
+            ),
+            measureProcessArtifact(
+                path.join(output, "productionDelivery.js"),
+                maximumProductionDeliveryGzipBytes,
+                undefined,
+                "production-delivery"
+            ),
+            measureProcessArtifact(
+                path.join(output, "productionProvisioning.js"),
+                maximumProductionProvisioningGzipBytes,
+                maximumProductionProvisioningBundleBytes,
+                "production-provisioning"
+            ),
+            measureProcessArtifact(
+                path.join(output, "web.js"),
+                maximumWebGzipBytes,
+                undefined,
+                "web"
+            ),
+            measureProcessArtifact(
+                path.join(output, "worker.js"),
+                maximumWorkerGzipBytes,
+                undefined,
+                "worker"
+            ),
+        ]);
         return Object.freeze({
             databaseMaintenance,
             openClawHeartbeat,
             outputDirectory: output,
+            prepareProductionState,
             productionDelivery,
+            productionProvisioning,
             web,
             worker,
         });
@@ -177,8 +244,12 @@ if (import.meta.main) {
                 databaseMaintenanceRawBytes: result.databaseMaintenance.rawBytes,
                 openClawHeartbeatGzipBytes: result.openClawHeartbeat.gzipBytes,
                 openClawHeartbeatRawBytes: result.openClawHeartbeat.rawBytes,
+                prepareProductionStateGzipBytes: result.prepareProductionState.gzipBytes,
+                prepareProductionStateRawBytes: result.prepareProductionState.rawBytes,
                 productionDeliveryGzipBytes: result.productionDelivery.gzipBytes,
                 productionDeliveryRawBytes: result.productionDelivery.rawBytes,
+                productionProvisioningGzipBytes: result.productionProvisioning.gzipBytes,
+                productionProvisioningRawBytes: result.productionProvisioning.rawBytes,
                 webGzipBytes: result.web.gzipBytes,
                 webRawBytes: result.web.rawBytes,
                 workerGzipBytes: result.worker.gzipBytes,

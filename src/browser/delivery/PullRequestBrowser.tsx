@@ -62,7 +62,6 @@ const actionLabels: Readonly<
     "approve-review": "Approve PR",
     "create-stack": "Create stack",
     merge: "Merge only",
-    "merge-and-deploy": "Merge + Deploy",
     reject: "Reject",
     "update-branch": "Update branch",
 };
@@ -73,10 +72,9 @@ const actionOrder: Readonly<
     "preview-start": 0,
     "approve-review": 1,
     "update-branch": 2,
-    "merge-and-deploy": 3,
-    merge: 4,
-    reject: 5,
-    "create-stack": 6,
+    merge: 3,
+    reject: 4,
+    "create-stack": 5,
 };
 
 const groupOrder: Readonly<Record<DeliveryPullRequestGroup["kind"], number>> = {
@@ -110,6 +108,9 @@ function actionIsVisible(
         );
     }
     if (action.action === "update-branch" && action.reason === "not-behind") return false;
+    if (action.action === "reject" && action.reason === "head-guard-unavailable") {
+        return false;
+    }
     if (
         group.kind === "native-stack" &&
         (action.action === "update-branch" || action.action === "reject")
@@ -126,9 +127,6 @@ function actionLabel(
 ): string {
     if (action.action === "merge" && group.kind === "native-stack") {
         return `Merge stack through #${pullRequest.number}`;
-    }
-    if (action.action === "merge-and-deploy" && group.kind === "native-stack") {
-        return `Merge through #${pullRequest.number} + Deploy`;
     }
     if (action.action !== "preview-start") return actionLabels[action.action];
     return pullRequestOwnsActivePreview(pullRequest, preview)
@@ -161,7 +159,6 @@ function actionVariant(
     action: DeliveryPullRequestActionCapability["action"]
 ): "danger" | "primary" | "secondary" {
     if (action === "reject") return "danger";
-    if (action === "merge-and-deploy") return "primary";
     return "secondary";
 }
 
@@ -244,7 +241,10 @@ function PullRequestCard({
             const state = actionState(pullRequest, action);
             return {
                 action,
-                reason: state.reason ?? deliveryActionReason(action.reason) ?? undefined,
+                reason:
+                    state.reason ??
+                    deliveryActionReason(action.action, action.reason) ??
+                    undefined,
                 state,
             };
         });

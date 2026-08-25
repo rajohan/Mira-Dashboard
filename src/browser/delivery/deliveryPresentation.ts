@@ -19,31 +19,51 @@ type DeliveryCheckoutCondition = DeliveryCheckout["condition"];
 type DeliveryPullRequestGroupKind = DeliveryPullRequestGroup["kind"];
 type DeliveryDeploymentOperation = DeliveryDeployment["operation"];
 
-const actionReasonLabels: Readonly<Record<DeliveryActionCapabilityReason, string>> = {
+const actionReasonLabels: Readonly<
+    Partial<Record<DeliveryActionCapabilityReason, string>>
+> = {
     "action-active": "Another Delivery action is active.",
-    "already-approved": "Raymond has already approved this exact pull request head.",
+    "already-approved": "This exact pull request head is already approved.",
     "ambiguous-chain": "The pull request chain is ambiguous or incomplete.",
     "checkout-unsafe": "The production checkout is not ready and clean on main.",
-    "checks-blocked": "All latest CI checks must pass before this action.",
-    "credential-missing": "The dedicated Raymond approval credential is unavailable.",
+    "credential-missing": "The dedicated approval credential is unavailable.",
     draft: "Draft pull requests cannot use this action.",
-    "head-guard-unavailable":
-        "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads.",
     "merge-conflict": "GitHub reports a merge conflict or blocked merge state.",
     "native-stacks-unavailable": "GitHub native stacks are currently unavailable.",
     "not-behind": "GitHub does not report this branch as behind its base.",
     "not-main-rooted": "The complete pull request chain is not rooted in main.",
     "preview-owned-by-other": "Another pull request owns the preview slot.",
-    "review-required": "Raymond approval is required before merge.",
-    "self-review": "Raymond cannot approve his own pull request.",
+    "review-required": "Approval is required before merge.",
+    "self-review": "An author cannot approve their own pull request.",
     "source-unavailable": "Fresh authoritative Delivery state is unavailable.",
-    "untrusted-author": "This author is not permitted to run preview code.",
+};
+
+const actionSubjects: Readonly<
+    Record<DeliveryPullRequestActionCapability["action"], string>
+> = {
+    "approve-review": "Approval",
+    "create-stack": "Stack creation",
+    merge: "Merge",
+    "preview-start": "Preview",
+    reject: "Rejection",
+    "update-branch": "Branch update",
 };
 
 export function deliveryActionReason(
+    action: DeliveryPullRequestActionCapability["action"],
     reason: DeliveryActionCapabilityReason | undefined
 ): string | undefined {
-    return reason === undefined ? undefined : actionReasonLabels[reason];
+    if (reason === undefined) return undefined;
+    if (reason === "checks-blocked") {
+        return `${actionSubjects[action]} requires all latest CI checks to pass.`;
+    }
+    if (reason === "head-guard-unavailable") {
+        return `${actionSubjects[action]} is unavailable because GitHub cannot atomically bind it to the reviewed pull request head or stack heads.`;
+    }
+    if (reason === "untrusted-author") {
+        return `${actionSubjects[action]} is unavailable for this author.`;
+    }
+    return actionReasonLabels[reason];
 }
 
 export function deliveryFailureMessage(error: unknown): string {
@@ -119,6 +139,5 @@ export const deliveryDeploymentOperationLabels: Readonly<
     Record<DeliveryDeploymentOperation, string>
 > = {
     deploy: "Deploy main",
-    "merge-and-deploy": "Merge and deploy",
     "rollback-release": "Rollback release",
 };

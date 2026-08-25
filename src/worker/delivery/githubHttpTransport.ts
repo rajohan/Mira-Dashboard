@@ -56,6 +56,9 @@ export type DeliveryGitHubHttpOperation =
           variables: Readonly<Record<string, boolean | number | string | null>>;
       }>
     | Readonly<{ kind: "main-ref" }>
+    | Readonly<{ kind: "latest-release" }>
+    | Readonly<{ kind: "release-tag-commit"; tagName: string }>
+    | Readonly<{ assetId: number; kind: "release-asset" }>
     | Readonly<{ branch: string; kind: "branch-ref" }>
     | Readonly<{ kind: "native-stack-find"; pullRequestNumber: number }>
     | Readonly<{ kind: "native-stack-create"; pullRequestNumbers: readonly number[] }>
@@ -123,9 +126,11 @@ export interface DeliveryGitHubHttpTransportOptions {
 }
 
 interface PreparedRequest {
+    readonly accept?: "application/octet-stream";
     readonly body?: string;
     readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly mutation: boolean;
+    readonly redirect?: "follow";
     readonly url: string;
 }
 
@@ -192,6 +197,25 @@ function prepareRequest(operation: DeliveryGitHubHttpOperation): PreparedRequest
         case "main-ref": {
             path = repositoryPath("/git/ref/heads/main");
             break;
+        }
+        case "latest-release": {
+            path = repositoryPath("/releases/latest");
+            break;
+        }
+        case "release-tag-commit": {
+            path = repositoryPath(`/commits/${encodePathSegment(operation.tagName)}`);
+            break;
+        }
+        case "release-asset": {
+            if (!validPositiveInteger(operation.assetId)) fail("invalid-input");
+            path = repositoryPath(`/releases/assets/${operation.assetId}`);
+            return Object.freeze({
+                accept: "application/octet-stream",
+                method,
+                mutation,
+                redirect: "follow",
+                url: `${apiOrigin}${path}`,
+            });
         }
         case "branch-ref": {
             path = repositoryPath(
@@ -425,14 +449,14 @@ export function createDeliveryGitHubHttpTransport(
                 response = await fetchGitHub(prepared.url, {
                     ...(prepared.body === undefined ? {} : { body: prepared.body }),
                     headers: {
-                        Accept: "application/vnd.github+json",
+                        Accept: prepared.accept ?? "application/vnd.github+json",
                         Authorization: authorization,
                         "Content-Type": "application/json",
                         "User-Agent": userAgent,
                         "X-GitHub-Api-Version": apiVersion,
                     },
                     method: prepared.method,
-                    redirect: "error",
+                    redirect: prepared.redirect ?? "error",
                     signal,
                 });
             } catch {

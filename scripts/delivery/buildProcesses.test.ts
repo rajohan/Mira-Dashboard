@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { measureProcessArtifact } from "./buildProcesses.ts";
+import { maximumProductionProvisioningBundleBytes } from "./provisioning/host-operations/policy.ts";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
 const scriptPath = path.join(import.meta.dir, "buildProcesses.ts");
@@ -33,6 +36,30 @@ async function runBuild(outputDirectory: string) {
 }
 
 describe("Dashboard process artifacts", () => {
+    test("rejects a compressible provisioning bundle above the raw installer limit", async () => {
+        const outputDirectory = path.join(
+            repositoryRoot,
+            `dist/test-process-budget-${Bun.randomUUIDv7()}`
+        );
+        outputDirectories.push(outputDirectory);
+        await mkdir(path.dirname(outputDirectory), { recursive: true });
+        await writeFile(
+            outputDirectory,
+            new Uint8Array(maximumProductionProvisioningBundleBytes + 1)
+        );
+
+        expect(
+            measureProcessArtifact(
+                outputDirectory,
+                2 * 1024 * 1024,
+                maximumProductionProvisioningBundleBytes,
+                "production-provisioning"
+            )
+        ).rejects.toThrow(
+            "Dashboard production-provisioning process bundle exceeds its byte budget"
+        );
+    });
+
     test("bundles only reviewed executable roots without source maps", async () => {
         const outputDirectory = path.join(
             repositoryRoot,
@@ -47,8 +74,12 @@ describe("Dashboard process artifacts", () => {
             openClawHeartbeatGzipBytes: number;
             openClawHeartbeatRawBytes: number;
             outputDirectory: string;
+            prepareProductionStateGzipBytes: number;
+            prepareProductionStateRawBytes: number;
             productionDeliveryGzipBytes: number;
             productionDeliveryRawBytes: number;
+            productionProvisioningGzipBytes: number;
+            productionProvisioningRawBytes: number;
             status: string;
             webGzipBytes: number;
             webRawBytes: number;
@@ -57,20 +88,31 @@ describe("Dashboard process artifacts", () => {
         };
         const directoryEntries = await readdir(outputDirectory);
         const files = directoryEntries.toSorted();
-        const [databaseMaintenance, openClawHeartbeat, productionDelivery, web, worker] =
-            await Promise.all([
-                readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
-                readFile(path.join(outputDirectory, "openClawHeartbeat.js"), "utf8"),
-                readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
-                readFile(path.join(outputDirectory, "web.js"), "utf8"),
-                readFile(path.join(outputDirectory, "worker.js"), "utf8"),
-            ]);
+        const [
+            databaseMaintenance,
+            openClawHeartbeat,
+            prepareProductionState,
+            productionDelivery,
+            productionProvisioning,
+            web,
+            worker,
+        ] = await Promise.all([
+            readFile(path.join(outputDirectory, "databaseMaintenance.js"), "utf8"),
+            readFile(path.join(outputDirectory, "openClawHeartbeat.js"), "utf8"),
+            readFile(path.join(outputDirectory, "prepareProductionState.js"), "utf8"),
+            readFile(path.join(outputDirectory, "productionDelivery.js"), "utf8"),
+            readFile(path.join(outputDirectory, "productionProvisioning.js"), "utf8"),
+            readFile(path.join(outputDirectory, "web.js"), "utf8"),
+            readFile(path.join(outputDirectory, "worker.js"), "utf8"),
+        ]);
 
         expect(execution).toMatchObject({ exitCode: 0, stderr: "" });
         expect(files).toEqual([
             "databaseMaintenance.js",
             "openClawHeartbeat.js",
+            "prepareProductionState.js",
             "productionDelivery.js",
+            "productionProvisioning.js",
             "web.js",
             "worker.js",
         ]);
@@ -83,9 +125,17 @@ describe("Dashboard process artifacts", () => {
         expect(result.productionDeliveryRawBytes).toBeGreaterThan(
             result.productionDeliveryGzipBytes
         );
+        expect(result.productionProvisioningGzipBytes).toBeGreaterThan(0);
+        expect(result.productionProvisioningRawBytes).toBeGreaterThan(
+            result.productionProvisioningGzipBytes
+        );
         expect(result.openClawHeartbeatGzipBytes).toBeGreaterThan(0);
         expect(result.openClawHeartbeatRawBytes).toBeGreaterThan(
             result.openClawHeartbeatGzipBytes
+        );
+        expect(result.prepareProductionStateGzipBytes).toBeGreaterThan(0);
+        expect(result.prepareProductionStateRawBytes).toBeGreaterThan(
+            result.prepareProductionStateGzipBytes
         );
         expect(result.webGzipBytes).toBeGreaterThan(0);
         expect(result.workerGzipBytes).toBeGreaterThan(0);
@@ -94,12 +144,18 @@ describe("Dashboard process artifacts", () => {
         expect(web).toContain("Mira Dashboard web startup failed");
         expect(databaseMaintenance).toContain("Dashboard database maintenance failed");
         expect(productionDelivery).toContain("Production Delivery executor failed");
+        expect(productionProvisioning).toContain(
+            "Production release provisioning failed"
+        );
         expect(openClawHeartbeat).toContain("OpenClaw heartbeat automation failed");
+        expect(prepareProductionState).toContain("Production state preparation failed");
         expect(worker).toContain("Mira Dashboard worker startup failed");
         expect(web).not.toContain("sourceMappingURL");
         expect(databaseMaintenance).not.toContain("sourceMappingURL");
         expect(openClawHeartbeat).not.toContain("sourceMappingURL");
+        expect(prepareProductionState).not.toContain("sourceMappingURL");
         expect(productionDelivery).not.toContain("sourceMappingURL");
+        expect(productionProvisioning).not.toContain("sourceMappingURL");
         expect(worker).not.toContain("sourceMappingURL");
         expect(worker).not.toContain("openclaw-heartbeat.token");
     }, 60_000);

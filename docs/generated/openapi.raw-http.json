@@ -18829,7 +18829,6 @@
                                     "approve-review",
                                     "create-stack",
                                     "merge",
-                                    "merge-and-deploy",
                                     "preview-start",
                                     "reject",
                                     "update-branch"
@@ -18886,7 +18885,7 @@
                               "additionalProperties": false,
                               "$comment": "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind."
                             },
-                            "maxItems": 7,
+                            "maxItems": 6,
                             "$comment": "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID."
                           },
                           "additions": {
@@ -19214,7 +19213,6 @@
                                     "approve-review",
                                     "create-stack",
                                     "merge",
-                                    "merge-and-deploy",
                                     "preview-start",
                                     "reject",
                                     "update-branch"
@@ -19271,7 +19269,7 @@
                               "additionalProperties": false,
                               "$comment": "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind."
                             },
-                            "maxItems": 7,
+                            "maxItems": 6,
                             "$comment": "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID."
                           },
                           "additions": {
@@ -19675,7 +19673,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -19777,7 +19774,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -19815,14 +19811,13 @@
                               "branch-retained",
                               "comment-failed",
                               "deployment-failed",
-                              "deployment-not-started",
                               "deployment-outcome-unknown",
                               "main-sync-failed",
                               "preview-cleanup-failed"
                             ],
                             "type": "string"
                           },
-                          "maxItems": 8,
+                          "maxItems": 7,
                           "$comment": "Live Valibot validation additionally requires Delivery warning lists to be nonempty, unique, and canonically ordered."
                         }
                       },
@@ -19898,7 +19893,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -20000,7 +19994,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -20102,7 +20095,6 @@
                         "operation": {
                           "enum": [
                             "deploy",
-                            "merge-and-deploy",
                             "rollback-release"
                           ],
                           "type": "string"
@@ -20739,6 +20731,159 @@
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
                   },
+                  "candidate": {
+                    "type": "object",
+                    "properties": {
+                      "assets": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 4194304
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 570425344
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          },
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 570425344
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 4194304
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          }
+                        ]
+                      },
+                      "releaseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{40}$"
+                      },
+                      "releaseManifestSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f\\d]{64}$"
+                      },
+                      "runtime": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "version"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tagName": {
+                        "type": "string",
+                        "maxLength": 34,
+                        "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+                      }
+                    },
+                    "required": [
+                      "assets",
+                      "releaseId",
+                      "releaseManifestSha256",
+                      "runtime",
+                      "tagName"
+                    ],
+                    "additionalProperties": false
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -20985,6 +21130,159 @@
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
                   },
+                  "candidate": {
+                    "type": "object",
+                    "properties": {
+                      "assets": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 4194304
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 570425344
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          },
+                          {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "release.tar"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 570425344
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "digest": {
+                                    "type": "string",
+                                    "pattern": "^sha256:[a-f\\d]{64}$"
+                                  },
+                                  "name": {
+                                    "const": "receipt.json"
+                                  },
+                                  "size": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 4194304
+                                  }
+                                },
+                                "required": [
+                                  "digest",
+                                  "name",
+                                  "size"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ],
+                            "minItems": 2
+                          }
+                        ]
+                      },
+                      "releaseId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{40}$"
+                      },
+                      "releaseManifestSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f\\d]{64}$"
+                      },
+                      "runtime": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{40}$"
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "version"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tagName": {
+                        "type": "string",
+                        "maxLength": 34,
+                        "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+                      }
+                    },
+                    "required": [
+                      "assets",
+                      "releaseId",
+                      "releaseManifestSha256",
+                      "runtime",
+                      "tagName"
+                    ],
+                    "additionalProperties": false
+                  },
                   "current": {
                     "type": "object",
                     "properties": {
@@ -21230,159 +21528,73 @@
       },
       "delivery.approvePullRequest.input": {
         "$id": "urn:mira-dashboard:delivery.approvePullRequest.input",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "checkoutRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "confirmation": {
-                "const": "merge-delivery-pull-request"
-              },
-              "expectedHeads": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "headSha": {
-                      "type": "string",
-                      "pattern": "^[0-9a-f]{40}$"
-                    },
-                    "number": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "headSha",
-                    "number"
-                  ],
-                  "additionalProperties": false
-                },
-                "minItems": 1,
-                "maxItems": 100,
-                "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
-              },
-              "mergeStack": {
-                "type": "boolean"
-              },
-              "operation": {
-                "const": "merge-pull-request"
-              },
-              "idempotencyKey": {
-                "type": "string",
-                "minLength": 32,
-                "maxLength": 128,
-                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
-              },
-              "sourceRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "number": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 9007199254740991
-              },
-              "deploy": {
-                "const": false
-              }
-            },
-            "required": [
-              "checkoutRevision",
-              "confirmation",
-              "expectedHeads",
-              "mergeStack",
-              "operation",
-              "idempotencyKey",
-              "sourceRevision",
-              "number",
-              "deploy"
-            ],
-            "additionalProperties": false
+        "type": "object",
+        "properties": {
+          "checkoutRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           },
-          {
-            "type": "object",
-            "properties": {
-              "checkoutRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "confirmation": {
-                "const": "merge-and-deploy-delivery-pull-request"
-              },
-              "expectedHeads": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "headSha": {
-                      "type": "string",
-                      "pattern": "^[0-9a-f]{40}$"
-                    },
-                    "number": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "headSha",
-                    "number"
-                  ],
-                  "additionalProperties": false
+          "confirmation": {
+            "const": "merge-delivery-pull-request"
+          },
+          "expectedHeads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "headSha": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
                 },
-                "minItems": 1,
-                "maxItems": 100,
-                "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
+                "number": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
               },
-              "mergeStack": {
-                "type": "boolean"
-              },
-              "operation": {
-                "const": "merge-pull-request"
-              },
-              "idempotencyKey": {
-                "type": "string",
-                "minLength": 32,
-                "maxLength": 128,
-                "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
-              },
-              "sourceRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "number": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 9007199254740991
-              },
-              "activationRevision": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "deploy": {
-                "const": true
-              }
+              "required": [
+                "headSha",
+                "number"
+              ],
+              "additionalProperties": false
             },
-            "required": [
-              "checkoutRevision",
-              "confirmation",
-              "expectedHeads",
-              "mergeStack",
-              "operation",
-              "idempotencyKey",
-              "sourceRevision",
-              "number",
-              "activationRevision",
-              "deploy"
-            ],
-            "additionalProperties": false
+            "minItems": 1,
+            "maxItems": 100,
+            "$comment": "Live Valibot validation additionally requires every pull request number in an exact Delivery scope to be unique."
+          },
+          "mergeStack": {
+            "type": "boolean"
+          },
+          "operation": {
+            "const": "merge-pull-request"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128,
+            "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$"
+          },
+          "sourceRevision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
+        },
+        "required": [
+          "checkoutRevision",
+          "confirmation",
+          "expectedHeads",
+          "mergeStack",
+          "operation",
+          "idempotencyKey",
+          "sourceRevision",
+          "number"
         ],
+        "additionalProperties": false,
         "$comment": "Live Valibot validation additionally requires the selected pull request and exact head to be the final member of its submitted scope.",
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
@@ -21867,6 +22079,159 @@
           "operation": {
             "const": "deploy"
           },
+          "release": {
+            "type": "object",
+            "properties": {
+              "assets": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "name": {
+                            "const": "receipt.json"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4194304
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "name",
+                          "size"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "name": {
+                            "const": "release.tar"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 570425344
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "name",
+                          "size"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ],
+                    "minItems": 2
+                  },
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "name": {
+                            "const": "release.tar"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 570425344
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "name",
+                          "size"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f\\d]{64}$"
+                          },
+                          "name": {
+                            "const": "receipt.json"
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 4194304
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "name",
+                          "size"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ],
+                    "minItems": 2
+                  }
+                ]
+              },
+              "releaseId": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "releaseManifestSha256": {
+                "type": "string",
+                "pattern": "^[a-f\\d]{64}$"
+              },
+              "runtime": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "revision",
+                  "version"
+                ],
+                "additionalProperties": false
+              },
+              "tagName": {
+                "type": "string",
+                "maxLength": 34,
+                "pattern": "^v\\d+\\.\\d+\\.\\d+(?:[.-][0-9A-Za-z.-]+)?$"
+              }
+            },
+            "required": [
+              "assets",
+              "releaseId",
+              "releaseManifestSha256",
+              "runtime",
+              "tagName"
+            ],
+            "additionalProperties": false
+          },
           "idempotencyKey": {
             "type": "string",
             "minLength": 32,
@@ -21884,6 +22249,7 @@
           "confirmation",
           "expectedMainHeadSha",
           "operation",
+          "release",
           "idempotencyKey",
           "sourceRevision"
         ],

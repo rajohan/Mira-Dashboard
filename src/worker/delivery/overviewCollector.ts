@@ -17,6 +17,7 @@ import {
 import type {
     DeliveryDashboardMainGitSyncPort,
     DeliveryGitHubPullRequestReadPort,
+    DeliveryGitHubPublishedRelease,
 } from "../../contracts/deliveryGithub.ts";
 import type {
     DeliveryOperationJobPayload,
@@ -136,6 +137,28 @@ function assertProductionSnapshot(
     return Object.freeze({
         actionActive: value.actionActive,
         releases: v.parse(deliveryReleasesSchema, value.releases),
+    });
+}
+
+function withPublishedCandidate(
+    production: DeliveryProductionAuthoritySnapshot,
+    release: DeliveryGitHubPublishedRelease,
+    mainHeadSha: string
+): DeliveryProductionAuthoritySnapshot {
+    if (release.releaseId !== mainHeadSha) return production;
+    const current = production.releases.current?.releaseId;
+    return assertProductionSnapshot({
+        ...production,
+        releases: {
+            ...production.releases,
+            ...(current === release.releaseId
+                ? {}
+                : {
+                      candidate: {
+                          ...release,
+                      },
+                  }),
+        },
     });
 }
 
@@ -266,6 +289,7 @@ export function createDeliveryOverviewCollector(
             pullRequests,
             reviewer,
             stacks,
+            publishedRelease,
         ] = await Promise.all([
             settleCall(() => options.mainGit.inspect(signal)),
             settleCall(() => options.github.readMainRef(signal)),
@@ -280,9 +304,29 @@ export function createDeliveryOverviewCollector(
             settleCall(() => options.github.listOpenPullRequests(signal)),
             settleCall(() => reviewerAuthority(options.reviewer, signal)),
             settleCall(() => options.github.supportsNativeStacks(signal)),
+            settleCall(() => {
+                const read = options.github.readLatestPublishedRelease;
+                return read === undefined
+                    ? Promise.reject(new Error("Published release unavailable"))
+                    : read(signal);
+            }),
         ]);
         signal?.throwIfAborted();
         const fallback = fallbackProjectionInput(observedAtMs);
+        let projectedProduction: DeliveryProductionAuthoritySnapshot | undefined;
+        if (production.state === "succeeded") {
+            projectedProduction = production.value;
+            if (
+                mainHead.state === "succeeded" &&
+                publishedRelease.state === "succeeded"
+            ) {
+                projectedProduction = withPublishedCandidate(
+                    production.value,
+                    publishedRelease.value,
+                    mainHead.value
+                );
+            }
+        }
 
         const checkout =
             inspection.state === "succeeded" && mainHead.state === "succeeded"
@@ -324,16 +368,16 @@ export function createDeliveryOverviewCollector(
                       state: "failed",
                   });
         const releases =
-            production.state === "succeeded"
-                ? settleCall(() =>
+            projectedProduction === undefined
+                ? Promise.resolve<Settled<DeliveryReleasesCachePayload>>({
+                      state: "failed",
+                  })
+                : settleCall(() =>
                       projectDeliveryReleases({
                           observedAtMs,
-                          production: production.value,
+                          production: projectedProduction,
                       })
-                  )
-                : Promise.resolve<Settled<DeliveryReleasesCachePayload>>({
-                      state: "failed",
-                  });
+                  );
 
         let pullRequestResult: Settled<DeliveryPullRequestsCachePayload> = {
             state: "failed",
@@ -354,9 +398,9 @@ export function createDeliveryOverviewCollector(
                           previewStatus: projectedPreviewStatus.value,
                       }
                     : {}),
-                ...(production.state === "succeeded"
-                    ? { production: production.value }
-                    : {}),
+                ...(projectedProduction === undefined
+                    ? {}
+                    : { production: projectedProduction }),
                 pullRequests: pullRequests.value,
                 reviewer:
                     reviewer.state === "succeeded" ? reviewer.value : fallback.reviewer,
@@ -445,17 +489,32 @@ export function createDeliveryOverviewCollector(
                 sourceRevision: unavailableRevision,
             };
             if (payload.operation === "deploy") {
-                const [inspection, mainHead, production] = await Promise.all([
-                    options.mainGit.inspect(signal),
-                    options.github.readMainRef(signal),
-                    productionRead.then(assertProductionSnapshot),
-                ]);
+                const readPublishedRelease = options.github.readLatestPublishedRelease;
+                if (readPublishedRelease === undefined) {
+                    throw new Error(
+                        "Delivery published release authority is unavailable"
+                    );
+                }
+                const [inspection, mainHead, production, publishedRelease] =
+                    await Promise.all([
+                        options.mainGit.inspect(signal),
+                        options.github.readMainRef(signal),
+                        productionRead.then(assertProductionSnapshot),
+                        readPublishedRelease(signal),
+                    ]);
                 const checkout = projectDeliveryCheckout({
                     checkoutInspection: inspection,
                     mainHeadSha: mainHead,
                     observedAtMs,
                 });
-                const releases = projectDeliveryReleases({ observedAtMs, production });
+                const releases = projectDeliveryReleases({
+                    observedAtMs,
+                    production: withPublishedCandidate(
+                        production,
+                        publishedRelease,
+                        mainHead
+                    ),
+                });
                 return completeOperationAuthority({
                     checkout,
                     preview: fallbackPreview,

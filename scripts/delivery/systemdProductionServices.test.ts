@@ -12,6 +12,7 @@ import {
 import path from "node:path";
 
 import { configurationEnvironmentNamesForRole } from "../../src/shared/configuration/applicationConfigurationRegistry.ts";
+import type { PublishedReleaseAuthority } from "../../src/shared/publishedReleaseAuthority.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import {
     createProductionTargetFixture,
@@ -41,6 +42,19 @@ const runtimeIdentity: ReleaseRuntimeIdentity = Object.freeze({
     version: "1.4.0",
 });
 const temporaryDirectories: string[] = [];
+
+function publishedAuthority(releaseId: string): PublishedReleaseAuthority {
+    return {
+        assets: [
+            { digest: `sha256:${"d".repeat(64)}`, name: "receipt.json", size: 1 },
+            { digest: `sha256:${"e".repeat(64)}`, name: "release.tar", size: 1 },
+        ],
+        releaseId,
+        releaseManifestSha256: "f".repeat(64),
+        runtime: runtimeIdentity,
+        tagName: "v1.2.3",
+    };
+}
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
@@ -106,6 +120,27 @@ function inactiveProcessResult(): SystemctlProcessResult {
 }
 
 describe("production root-systemd service control", () => {
+    test("rejects published authority that would exceed the systemd unit-name limit", async () => {
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await createRuntimePointerFixture(paths);
+            const authority = {
+                ...publishedAuthority(firstReleaseId),
+                tagName: `v1.2.3-${"a".repeat(64)}`,
+            } as PublishedReleaseAuthority;
+            const controller = createSystemdProductionServiceController(lease, paths, {
+                execute: () => Promise.resolve(successfulProcessResult()),
+                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                releaseAuthority: authority,
+            });
+            expect(
+                controller.provision(fixtures.first, fixtures.runtime)
+            ).rejects.toThrow("Production service control failed");
+        });
+    });
+
     test("points at exact artifacts and controls worker/web in safe order", async () => {
         const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
@@ -113,11 +148,13 @@ describe("production root-systemd service control", () => {
             const paths = await prepareProductionDeliveryDirectories(state);
             const fixtures = await createRuntimePointerFixture(paths);
             const commands: string[][] = [];
+            const deadlines: (number | undefined)[] = [];
             const requests: Request[] = [];
             const smokes: string[] = [];
             const controller = createSystemdProductionServiceController(lease, paths, {
-                execute: (_executable, arguments_) => {
+                execute: (_executable, arguments_, options_) => {
                     commands.push([...arguments_]);
+                    deadlines.push(options_?.deadlineMs);
                     return Promise.resolve(successfulProcessResult());
                 },
                 fetch: (request) => {
@@ -131,6 +168,7 @@ describe("production root-systemd service control", () => {
                     return Promise.resolve();
                 },
                 readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                releaseAuthority: publishedAuthority(firstReleaseId),
                 smoke: (observedPaths, release, runtime, readinessUrl, transitionId) => {
                     expect(observedPaths).toBe(paths);
                     expect(release).toBe(fixtures.first);
@@ -141,6 +179,7 @@ describe("production root-systemd service control", () => {
                 },
             });
 
+            await controller.provision(fixtures.first, fixtures.runtime);
             await controller.prepare(fixtures.first, fixtures.runtime);
             await controller.start(fixtures.first, fixtures.runtime);
             await controller.verifyReady(fixtures.first, fixtures.runtime);
@@ -150,6 +189,7 @@ describe("production root-systemd service control", () => {
                 fixtures.runtime,
                 smokeTransitionId
             );
+            await controller.settle?.(fixtures.first, fixtures.runtime);
             await controller.stop();
             expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
                 firstReleaseId
@@ -158,6 +198,10 @@ describe("production root-systemd service control", () => {
                 await readlink(path.join(paths.runtimesDirectory, "bun", "current"))
             ).toBe(runtimeIdentity.revision);
             expect(commands).toEqual([
+                [
+                    "start",
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--v1.2.3--${"d".repeat(64)}--${"e".repeat(64)}.service`,
+                ],
                 ["restart", "mira-dashboard-worker.service"],
                 ["restart", "mira-dashboard-web.service"],
                 ["is-active", "--quiet", "mira-dashboard-worker.service"],
@@ -166,9 +210,20 @@ describe("production root-systemd service control", () => {
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
                 ["is-active", "--quiet", "mira-dashboard-worker.service"],
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
+                [
+                    "start",
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--local--settled.service`,
+                ],
                 ["stop", "mira-dashboard-web.service"],
                 ["stop", "mira-dashboard-worker.service"],
             ]);
+            expect(deadlines[0]).toBe(930_000);
+            expect(deadlines[9]).toBe(930_000);
+            expect(
+                deadlines
+                    .filter((_deadline, index) => index !== 0 && index !== 9)
+                    .every((deadline) => deadline === undefined)
+            ).toBe(true);
             expect(requests).toHaveLength(1);
             expect(requests[0]?.method).toBe("HEAD");
             expect(requests[0]?.url).toBe("http://127.0.0.1:3100/api/health/ready");
@@ -254,6 +309,32 @@ describe("production root-systemd service control", () => {
             expect(await readlink(path.join(paths.releasesDirectory, "current"))).toBe(
                 secondReleaseId
             );
+        });
+    });
+
+    test("provisions retained rollback authority from the root-staged release", async () => {
+        const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const fixtures = await createRuntimePointerFixture(paths);
+            const commands: string[][] = [];
+            const controller = createSystemdProductionServiceController(lease, paths, {
+                execute: (_executable, arguments_) => {
+                    commands.push([...arguments_]);
+                    return Promise.resolve(successfulProcessResult());
+                },
+                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+            });
+
+            await controller.provision(fixtures.first, fixtures.runtime);
+
+            expect(commands).toEqual([
+                [
+                    "start",
+                    `mira-dashboard-production-provisioning@${firstReleaseId}--local.service`,
+                ],
+            ]);
         });
     });
 

@@ -200,7 +200,8 @@ export function createProductionDeliveryControlPort(
             );
             if (
                 returned.phase === "terminal" ||
-                JSON.stringify(returned.capsule) !== JSON.stringify(capsule)
+                serializeDeliveryProductionOperationCapsule(returned.capsule) !==
+                    serialized
             ) {
                 throw failure();
             }

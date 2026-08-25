@@ -6,6 +6,10 @@ import * as v from "valibot";
 
 import { createBunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
 import {
+    maximumProductionReleaseArchiveBytes,
+    maximumProductionReleaseArtifactTreeBytes,
+} from "../../src/shared/productionReleaseArtifactReceipt.ts";
+import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
 } from "../testSupport/productionDeliveryFixture.ts";
@@ -30,6 +34,9 @@ afterEach(() => removeProductionDeliveryFixtures(temporaryDirectories));
 describe("production release artifact receipt", () => {
     test("admits the bounded digest-bound handoff format", () => {
         expect(v.parse(productionReleaseArtifactReceiptSchema, receipt)).toEqual(receipt);
+        expect(maximumProductionReleaseArchiveBytes).toBeGreaterThan(
+            maximumProductionReleaseArtifactTreeBytes
+        );
     });
 
     test("rejects malformed archive identity and unknown fields", () => {
@@ -43,6 +50,15 @@ describe("production release artifact receipt", () => {
             v.parse(productionReleaseArtifactReceiptSchema, {
                 ...receipt,
                 unexpected: true,
+            })
+        ).toThrow();
+        expect(() =>
+            v.parse(productionReleaseArtifactReceiptSchema, {
+                ...receipt,
+                archive: {
+                    ...receipt.archive,
+                    bytes: maximumProductionReleaseArchiveBytes + 1,
+                },
             })
         ).toThrow();
     });

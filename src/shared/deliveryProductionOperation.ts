@@ -4,19 +4,19 @@ import { timestampMillisecondsSchema } from "./dateTime.ts";
 import { deliveryOperationWarningsSchema } from "./deliveryOperationWarnings.ts";
 import { utf8ByteLength } from "./encoding.ts";
 import { productionActivationRecordSchema } from "./productionActivationRecord.ts";
+import { publishedReleaseAuthoritySchema } from "./publishedReleaseAuthority.ts";
 import {
     boundedControlSafeTextSchema,
     fullCommitShaSchema,
     lowercaseSha256Schema,
     lowercaseUuidV7Schema,
-    positiveSafeIntegerSchema,
 } from "./validation.ts";
 
 const invalidDeliveryProductionOperation = "Delivery production operation is invalid";
 const deliveryProductionPayloadMaximumBytes = 16 * 1024;
 
 /** Immutable protocol supported by production cutover executors. */
-export const deliveryProductionProtocol = "delivery.production.v1" as const;
+export const deliveryProductionProtocol = "delivery.production.v2" as const;
 /** Maximum canonical bytes accepted for an operation journal or terminal receipt. */
 export const deliveryProductionOperationMaximumBytes = 64 * 1024;
 
@@ -66,37 +66,12 @@ const targetReleaseCasSchema = v.strictObject({
     runtimeRevision: fullCommitShaSchema(invalidDeliveryProductionOperation),
 });
 
-const productionPullRequestNumberSchema = positiveSafeIntegerSchema(
-    invalidDeliveryProductionOperation
-);
-const productionExpectedHeadSchema = v.strictObject({
-    headSha: fullCommitShaSchema(invalidDeliveryProductionOperation),
-    number: productionPullRequestNumberSchema,
-});
-const productionExpectedHeadsSchema = v.pipe(
-    v.array(productionExpectedHeadSchema, invalidDeliveryProductionOperation),
-    v.minLength(1, invalidDeliveryProductionOperation),
-    v.maxLength(100, invalidDeliveryProductionOperation),
-    v.check(
-        (heads) => new Set(heads.map(({ number }) => number)).size === heads.length,
-        invalidDeliveryProductionOperation
-    )
-);
 const deployJobPayloadSchema = v.strictObject({
     activationRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
     checkoutRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
     expectedMainHeadSha: fullCommitShaSchema(invalidDeliveryProductionOperation),
     operation: v.literal("deploy", invalidDeliveryProductionOperation),
-    sourceRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
-});
-const mergeDeployJobPayloadSchema = v.strictObject({
-    activationRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
-    checkoutRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
-    deploy: v.literal(true, invalidDeliveryProductionOperation),
-    expectedHeads: productionExpectedHeadsSchema,
-    mergeStack: v.boolean(invalidDeliveryProductionOperation),
-    number: productionPullRequestNumberSchema,
-    operation: v.literal("merge-pull-request", invalidDeliveryProductionOperation),
+    release: publishedReleaseAuthoritySchema,
     sourceRevision: lowercaseSha256Schema(invalidDeliveryProductionOperation),
 });
 const rollbackJobPayloadSchema = v.strictObject({
@@ -114,11 +89,7 @@ const rollbackJobPayloadSchema = v.strictObject({
 
 /** Exact original Job payload variants eligible for cross-release rehydration. */
 export const deliveryProductionJobPayloadSchema = v.pipe(
-    v.variant("operation", [
-        deployJobPayloadSchema,
-        mergeDeployJobPayloadSchema,
-        rollbackJobPayloadSchema,
-    ]),
+    v.variant("operation", [deployJobPayloadSchema, rollbackJobPayloadSchema]),
     v.check(
         (payload) =>
             utf8ByteLength(JSON.stringify(payload)) <=
@@ -319,7 +290,9 @@ function capsuleIsConsistent(capsule: DeliveryProductionOperationCapsule): boole
     return (
         cas.target.databaseSnapshotTransitionId === null &&
         (payload.operation !== "deploy" ||
-            payload.expectedMainHeadSha === cas.target.releaseId)
+            (payload.expectedMainHeadSha === cas.target.releaseId &&
+                payload.release.releaseId === cas.target.releaseId &&
+                payload.release.runtime.revision === cas.target.runtimeRevision))
     );
 }
 

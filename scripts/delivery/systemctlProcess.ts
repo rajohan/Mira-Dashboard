@@ -2,6 +2,7 @@ import { secondsToMilliseconds } from "date-fns";
 
 const maximumSystemctlOutputBytes = 64 * 1024;
 const systemctlDeadlineMs = secondsToMilliseconds(30);
+const maximumSystemctlDeadlineMs = secondsToMilliseconds(120 * 60);
 
 /** Bounded systemctl result retained only for exit-status validation. */
 export interface SystemctlProcessResult {
@@ -13,7 +14,8 @@ export interface SystemctlProcessResult {
 /** Injectable systemctl process boundary used by delivery tests. */
 export type SystemctlExecutor = (
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    options?: Readonly<{ deadlineMs?: number }>
 ) => Promise<SystemctlProcessResult>;
 
 function systemctlProcessFailure(): Error {
@@ -61,22 +63,28 @@ function systemctlEnvironment(): Record<string, string> {
  * Executes one bounded non-interactive systemctl command.
  * @param executable Absolute systemctl executable.
  * @param arguments_ Exact caller-owned argument vector.
+ * @param options Optional code-owned deadline override for long-running units.
  * @returns Bounded stdout, stderr, and exit code.
  */
 export async function executeSystemctlProcess(
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    options: Readonly<{ deadlineMs?: number }> = {}
 ): Promise<SystemctlProcessResult> {
+    const deadlineMs = options.deadlineMs ?? systemctlDeadlineMs;
     if (
         !executable.startsWith("/") ||
         executable.includes("\0") ||
-        executable.length > 4096
+        executable.length > 4096 ||
+        !Number.isSafeInteger(deadlineMs) ||
+        deadlineMs < 1 ||
+        deadlineMs > maximumSystemctlDeadlineMs
     ) {
         throw systemctlProcessFailure();
     }
     const child = Bun.spawn([executable, ...arguments_], {
         env: systemctlEnvironment(),
-        signal: AbortSignal.timeout(systemctlDeadlineMs),
+        signal: AbortSignal.timeout(deadlineMs),
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe",
@@ -100,14 +108,16 @@ export async function executeSystemctlProcess(
  * @param execute Injectable bounded process executor.
  * @param executable Absolute systemctl executable.
  * @param arguments_ Exact systemctl argument vector.
+ * @param options Optional code-owned deadline override for long-running units.
  */
 export async function requireSuccessfulSystemctlProcess(
     execute: SystemctlExecutor,
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    options: Readonly<{ deadlineMs?: number }> = {}
 ): Promise<void> {
     try {
-        const result = await execute(executable, arguments_);
+        const result = await execute(executable, arguments_, options);
         if (
             result.exitCode !== 0 ||
             result.stdout.byteLength > maximumSystemctlOutputBytes ||

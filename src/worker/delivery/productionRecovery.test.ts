@@ -14,6 +14,7 @@ import {
     serializeDeliveryProductionPayload,
     type DeliveryProductionOperationInspection,
 } from "../../shared/deliveryProductionOperation.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import type { ProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
 import { reconcileDeliveryProductionCutoverBeforeValidation } from "./productionRecovery.ts";
 
@@ -74,7 +75,7 @@ function terminalInspection(): Extract<
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v1",
+        protocol: "delivery.production.v2",
         runId: transitionId,
         transitionId,
     });
@@ -105,11 +106,48 @@ function terminalInspection(): Extract<
 }
 
 function inProgressInspection(
-    phase: "intent-recorded" | "normal-runtime-starting" | "services-stopped"
+    phase: "intent-recorded" | "normal-runtime-starting" | "services-stopped",
+    operation: "deploy" | "rollback-release" = "rollback-release"
 ): Extract<DeliveryProductionOperationInspection, { state: "in-progress" }> {
     const terminal = terminalInspection();
+    const rollbackCapsule = terminal.record.capsule;
+    const payload =
+        operation === "rollback-release"
+            ? rollbackCapsule.enqueue.payload
+            : {
+                  activationRevision: "1".repeat(64),
+                  checkoutRevision: "2".repeat(64),
+                  expectedMainHeadSha: rollbackCapsule.cas.target.releaseId,
+                  operation,
+                  release: publishedReleaseAuthority(
+                      rollbackCapsule.cas.target.releaseId,
+                      "v1.2.3",
+                      rollbackCapsule.cas.target.runtimeRevision
+                  ),
+                  sourceRevision: "f".repeat(64),
+              };
+    const capsule = parseDeliveryProductionOperationCapsule({
+        ...rollbackCapsule,
+        cas:
+            operation === "deploy"
+                ? {
+                      ...rollbackCapsule.cas,
+                      target: {
+                          ...rollbackCapsule.cas.target,
+                          databaseSnapshotTransitionId: null,
+                      },
+                  }
+                : rollbackCapsule.cas,
+        enqueue: {
+            ...rollbackCapsule.enqueue,
+            payload,
+            payloadSha256: new Bun.CryptoHasher("sha256")
+                .update(JSON.stringify(payload))
+                .digest("hex"),
+        },
+    });
     const record = parseDeliveryProductionOperationRecord({
-        capsule: terminal.record.capsule,
+        capsule,
         phase,
         updatedAtMs: 1500,
     });
@@ -293,32 +331,38 @@ async function insertStaleTerminalRun(
 }
 
 describe("Delivery production startup recovery", () => {
-    for (const phase of ["intent-recorded", "services-stopped"] as const) {
-        test(`resumes an orphaned exact executor from ${phase} without clearing the fence`, async () => {
-            const inspection = inProgressInspection(phase);
-            const ensured: unknown[] = [];
+    for (const operation of ["deploy", "rollback-release"] as const) {
+        for (const phase of ["intent-recorded", "services-stopped"] as const) {
+            test(`resumes an orphaned ${operation} executor from ${phase} without clearing the fence`, async () => {
+                const inspection = inProgressInspection(phase, operation);
+                const ensured: unknown[] = [];
 
-            const recovered = await reconcileDeliveryProductionCutoverBeforeValidation({
-                ensure(options) {
-                    ensured.push(options);
-                    return Promise.resolve("launched");
-                },
-                projectRoot: "/srv/mira-dashboard",
-                readActive: () => Promise.resolve(inspection.record),
-                readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                const recovered =
+                    await reconcileDeliveryProductionCutoverBeforeValidation({
+                        ensure(options) {
+                            ensured.push(options);
+                            return Promise.resolve("launched");
+                        },
+                        projectRoot: "/srv/mira-dashboard",
+                        readActive: () => Promise.resolve(inspection.record),
+                        readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                    });
+
+                expect(recovered).toEqual(inspection);
+                expect(ensured).toEqual([
+                    {
+                        artifactSource:
+                            operation === "deploy" ? "published-release" : "retained",
+                        executorReleaseId: inspection.record.capsule.executor.releaseId,
+                        projectRoot: "/srv/mira-dashboard",
+                        readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                        runtimeRevision:
+                            inspection.record.capsule.executor.runtimeRevision,
+                        transitionId,
+                    },
+                ]);
             });
-
-            expect(recovered).toEqual(inspection);
-            expect(ensured).toEqual([
-                {
-                    executorReleaseId: inspection.record.capsule.executor.releaseId,
-                    projectRoot: "/srv/mira-dashboard",
-                    readinessUrl: "http://127.0.0.1:3100/api/health/ready",
-                    runtimeRevision: inspection.record.capsule.executor.runtimeRevision,
-                    transitionId,
-                },
-            ]);
-        });
+        }
     }
 
     test("skips the immutable executor when no cutover record exists", async () => {

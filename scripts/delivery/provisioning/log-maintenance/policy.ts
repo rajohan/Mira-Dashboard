@@ -13,8 +13,7 @@ export const logMaintenanceProvisioningArtifacts = Object.freeze([
         mode: 0o755,
     }),
     Object.freeze({
-        artifactPath:
-            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
+        artifactPath: "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-log-maintenance@.service",
         mode: 0o644,
     }),
@@ -47,7 +46,21 @@ export const logMaintenanceProvisioningSupportArtifactPaths = Object.freeze([
 /** Complete exact provisioning subtree admitted into an immutable release. */
 export const logMaintenanceProvisioningReleaseArtifactPaths = Object.freeze(
     [
-        ...logMaintenanceProvisioningArtifacts.map(({ artifactPath }) => artifactPath),
+        ...logMaintenanceProvisioningArtifacts
+            .map(({ artifactPath }) => artifactPath)
+            .filter((artifactPath) =>
+                artifactPath.startsWith("scripts/delivery/provisioning/log-maintenance/")
+            ),
         ...logMaintenanceProvisioningSupportArtifactPaths,
     ].toSorted()
+);
+
+/** Every immutable-release artifact read and revalidated by the root installer. */
+export const logMaintenanceProvisioningSourceArtifactPaths = Object.freeze(
+    [
+        ...logMaintenanceProvisioningReleaseArtifactPaths,
+        ...logMaintenanceProvisioningArtifacts.map(({ artifactPath }) => artifactPath),
+    ]
+        .toSorted()
+        .filter((artifactPath, index, paths) => paths[index - 1] !== artifactPath)
 );

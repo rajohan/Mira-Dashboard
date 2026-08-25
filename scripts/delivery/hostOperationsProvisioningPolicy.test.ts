@@ -9,8 +9,46 @@ import {
 } from "./hostOperationsProvisioningPolicy.ts";
 
 const sourceRoot = path.join(import.meta.dir, "provisioning/host-operations");
+const systemdRoot = path.resolve(import.meta.dir, "../../systemd/host-operations");
 
 describe("host-operations provisioning artifact policy", () => {
+    test("injects only the ordinary GitHub credential into release provisioning", async () => {
+        const [unit, launcher] = await Promise.all([
+            readFile(
+                path.join(systemdRoot, "mira-dashboard-production-provisioning@.service"),
+                "utf8"
+            ),
+            readFile(
+                path.join(sourceRoot, "mira-dashboard-production-provisioning"),
+                "utf8"
+            ),
+        ]);
+
+        expect(unit).toContain(
+            "ExecStart=/usr/local/libexec/mira-dashboard-production-provisioning %i"
+        );
+        expect(unit).not.toContain("doppler");
+        expect(launcher).toContain("--no-read-env");
+        expect(launcher).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
+        expect(launcher).toContain("--config-dir=/home/ubuntu/.doppler");
+        expect(launcher).toContain('"--authority=$authority"');
+        expect(launcher).toContain("*--local|*--local--settled)");
+        expect(launcher).toContain(
+            "/usr/bin/env --chdir=/var/lib/mira-dashboard-host-provisioning/current"
+        );
+        expect(launcher).toContain("./bun ./productionProvisioning.js");
+        expect(launcher).not.toContain(
+            "/var/lib/mira-dashboard-host-provisioning/runtime/bun"
+        );
+        expect(launcher).not.toContain(
+            "/usr/local/libexec/mira-dashboard-production-provisioning.js"
+        );
+        expect(launcher).not.toContain("RAJOHAN_GITHUB_TOKEN");
+        expect(launcher.indexOf("*--local|*--local--settled)")).toBeLessThan(
+            launcher.indexOf("/usr/local/bin/doppler run")
+        );
+    });
+
     test("inventories the exact root-owned authority artifacts and installer support", async () => {
         expect(hostOperationsProvisioningArtifacts).toEqual([
             {
@@ -35,71 +73,85 @@ describe("host-operations provisioning artifact policy", () => {
             },
             {
                 artifactPath:
+                    "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning",
+                destinationPath:
+                    "/usr/local/libexec/mira-dashboard-production-provisioning",
+                mode: 0o755,
+            },
+            {
+                artifactPath:
                     "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
                 destinationPath: "/usr/local/libexec/mira-dashboard-web-runtime",
                 mode: 0o755,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.service",
+                    "systemd/host-operations/mira-dashboard-deferred-stack-restart.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-stack-restart.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.timer",
+                    "systemd/host-operations/mira-dashboard-deferred-stack-restart.timer",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-stack-restart.timer",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.service",
+                    "systemd/host-operations/mira-dashboard-deferred-worker-restart.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-worker-restart.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.timer",
+                    "systemd/host-operations/mira-dashboard-deferred-worker-restart.timer",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-worker-restart.timer",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.service",
+                    "systemd/host-operations/mira-dashboard-deferred-reboot.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-reboot.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.timer",
+                    "systemd/host-operations/mira-dashboard-deferred-reboot.timer",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-deferred-reboot.timer",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-cleanup.service",
+                    "systemd/host-operations/mira-dashboard-host-system-cleanup.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-host-system-cleanup.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
+                    "systemd/host-operations/mira-dashboard-host-system-restart.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-host-system-restart.service",
                 mode: 0o644,
             },
             {
                 artifactPath:
-                    "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
+                    "systemd/host-operations/mira-dashboard-host-system-update.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-host-system-update.service",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
+                    "systemd/host-operations/mira-dashboard-production-provisioning@.service",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
                 mode: 0o644,
             },
             {
@@ -120,30 +172,28 @@ describe("host-operations provisioning artifact policy", () => {
             "README.md",
             "hostOperationsProvisioningFilesystem.ts",
             "installHostOperationsProvisioning.ts",
-            "mira-dashboard-deferred-reboot.service",
-            "mira-dashboard-deferred-reboot.timer",
-            "mira-dashboard-deferred-stack-restart.service",
-            "mira-dashboard-deferred-stack-restart.timer",
-            "mira-dashboard-deferred-worker-restart.service",
-            "mira-dashboard-deferred-worker-restart.timer",
             "mira-dashboard-host-operation",
-            "mira-dashboard-host-system-cleanup.service",
-            "mira-dashboard-host-system-restart.service",
-            "mira-dashboard-host-system-update.service",
             "mira-dashboard-production-authority.conf",
+            "mira-dashboard-production-provisioning",
             "mira-dashboard-web-runtime",
             "policy.ts",
         ]);
         expect(hostOperationsProvisioningReleaseArtifactPaths).toEqual(
-            sourceEntries.map(
-                (fileName) => `scripts/delivery/provisioning/host-operations/${fileName}`
-            )
+            sourceEntries
+                .map(
+                    (fileName) =>
+                        `scripts/delivery/provisioning/host-operations/${fileName}`
+                )
+                .toSorted()
         );
         expect(hostOperationsProvisioningSourceArtifactPaths).toEqual(
             [
-                ...hostOperationsProvisioningReleaseArtifactPaths,
-                "systemd/mira-dashboard-web.service",
-                "systemd/mira-dashboard-worker.service",
+                ...new Set([
+                    ...hostOperationsProvisioningReleaseArtifactPaths,
+                    ...hostOperationsProvisioningArtifacts.map(
+                        ({ artifactPath }) => artifactPath
+                    ),
+                ]),
             ].toSorted()
         );
         for (const artifact of hostOperationsProvisioningArtifacts) {

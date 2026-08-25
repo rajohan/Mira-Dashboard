@@ -10,6 +10,7 @@ import {
     deliveryGitHubPullRequestMaximum,
     deliveryGitHubPullRequestNumberSchema,
     deliveryGitHubPullRequestSchema,
+    deliveryGitHubPublishedReleaseSchema,
     deliveryGitHubStackSchema,
     type DeliveryGitHubExpectedHead,
     type DeliveryGitHubMergeMutationOutcome,
@@ -17,9 +18,14 @@ import {
     type DeliveryGitHubPullRequest,
     type DeliveryGitHubPullRequestMutationPort,
     type DeliveryGitHubPullRequestReadPort,
+    type DeliveryGitHubPublishedRelease,
     type DeliveryGitHubStack,
 } from "../../contracts/deliveryGithub.ts";
 import { utf8ByteLength } from "../../shared/encoding.ts";
+import {
+    maximumProductionReleaseReceiptBytes,
+    productionReleaseArtifactReceiptSchema,
+} from "../../shared/productionReleaseArtifactReceipt.ts";
 import {
     DeliveryGitHubError,
     type DeliveryGitHubHttpTransport,
@@ -154,6 +160,21 @@ const rawMainRefSchema = v.object({
     object: v.object({ sha: v.string(), type: v.literal("commit") }),
     ref: v.optional(v.string()),
 });
+const rawLatestReleaseSchema = v.object({
+    assets: v.array(
+        v.object({
+            digest: v.string(),
+            id: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+            name: v.string(),
+            size: v.number(),
+        })
+    ),
+    draft: v.boolean(),
+    prerelease: v.boolean(),
+    tag_name: v.string(),
+    target_commitish: v.string(),
+});
+const rawReleaseCommitSchema = v.object({ sha: v.string() });
 const rawMergeSchema = v.object({
     merged: v.boolean(),
     message: v.string(),
@@ -538,6 +559,61 @@ export function createDeliveryGitHubPullRequestPort(
         }
     }
 
+    async function readLatestPublishedRelease(
+        signal?: AbortSignal
+    ): Promise<DeliveryGitHubPublishedRelease> {
+        try {
+            const raw = v.parse(
+                rawLatestReleaseSchema,
+                await options.transport.requestJson({ kind: "latest-release" }, signal)
+            );
+            if (raw.draft || raw.prerelease) fail("conflict");
+            const receiptAsset = raw.assets.find(({ name }) => name === "receipt.json");
+            const archiveAsset = raw.assets.find(({ name }) => name === "release.tar");
+            if (
+                receiptAsset === undefined ||
+                receiptAsset.size > maximumProductionReleaseReceiptBytes ||
+                archiveAsset === undefined
+            )
+                fail("conflict");
+            const releaseCommit = v.parse(
+                rawReleaseCommitSchema,
+                await options.transport.requestJson(
+                    { kind: "release-tag-commit", tagName: raw.tag_name },
+                    signal
+                )
+            );
+            const receipt = v.parse(
+                productionReleaseArtifactReceiptSchema,
+                await options.transport.requestJson(
+                    { assetId: receiptAsset.id, kind: "release-asset" },
+                    signal
+                )
+            );
+            if (
+                receipt.releaseId !== releaseCommit.sha ||
+                receipt.archive.bytes !== archiveAsset.size ||
+                `sha256:${receipt.archive.sha256}` !== archiveAsset.digest
+            ) {
+                fail("conflict");
+            }
+            return v.parse(deliveryGitHubPublishedReleaseSchema, {
+                assets: raw.assets.map(({ digest, name, size }) => ({
+                    digest,
+                    name,
+                    size,
+                })),
+                releaseId: releaseCommit.sha,
+                releaseManifestSha256: receipt.releaseManifestSha256,
+                runtime: receipt.runtime,
+                tagName: raw.tag_name,
+            });
+        } catch (error) {
+            if (error instanceof DeliveryGitHubError) throw error;
+            fail("unavailable");
+        }
+    }
+
     async function findNativeStack(
         number: number,
         signal?: AbortSignal
@@ -727,6 +803,7 @@ export function createDeliveryGitHubPullRequestPort(
         listOpenPullRequests,
         mergeNativeStack,
         mergePullRequest,
+        readLatestPublishedRelease,
         readMainRef,
         rejectPullRequest,
         supportsNativeStacks,

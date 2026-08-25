@@ -1,3 +1,15 @@
+/** Root-owned durable namespace used by the production provisioning service. */
+export const productionHostProvisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
+
+/** Versioned runtime/provisioner pairs selected atomically by the provisioning unit. */
+export const productionProvisioningPairsRoot = `${productionHostProvisioningRoot}/pairs`;
+export const productionProvisioningPairSelector = `${productionHostProvisioningRoot}/current`;
+export const productionProvisioningRuntimeName = "bun";
+export const productionProvisioningEntrypointName = "productionProvisioning.js";
+
+/** Largest raw production provisioning process admitted by both build and installer. */
+export const maximumProductionProvisioningBundleBytes = 4 * 1024 * 1024;
+
 /** Exact release-relative and host destination policy for root host operations. */
 export const hostOperationsProvisioningArtifacts = Object.freeze([
     Object.freeze({
@@ -20,66 +32,76 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
     }),
     Object.freeze({
         artifactPath:
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning",
+        destinationPath: "/usr/local/libexec/mira-dashboard-production-provisioning",
+        mode: 0o755,
+    }),
+    Object.freeze({
+        artifactPath:
             "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
         destinationPath: "/usr/local/libexec/mira-dashboard-web-runtime",
         mode: 0o755,
     }),
     Object.freeze({
         artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.service",
+            "systemd/host-operations/mira-dashboard-deferred-stack-restart.service",
         destinationPath:
             "/etc/systemd/system/mira-dashboard-deferred-stack-restart.service",
         mode: 0o644,
     }),
     Object.freeze({
         artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.timer",
+            "systemd/host-operations/mira-dashboard-deferred-stack-restart.timer",
         destinationPath:
             "/etc/systemd/system/mira-dashboard-deferred-stack-restart.timer",
         mode: 0o644,
     }),
     Object.freeze({
         artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.service",
+            "systemd/host-operations/mira-dashboard-deferred-worker-restart.service",
         destinationPath:
             "/etc/systemd/system/mira-dashboard-deferred-worker-restart.service",
         mode: 0o644,
     }),
     Object.freeze({
         artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.timer",
+            "systemd/host-operations/mira-dashboard-deferred-worker-restart.timer",
         destinationPath:
             "/etc/systemd/system/mira-dashboard-deferred-worker-restart.timer",
         mode: 0o644,
     }),
     Object.freeze({
-        artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.service",
+        artifactPath: "systemd/host-operations/mira-dashboard-deferred-reboot.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-deferred-reboot.service",
         mode: 0o644,
     }),
     Object.freeze({
-        artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.timer",
+        artifactPath: "systemd/host-operations/mira-dashboard-deferred-reboot.timer",
         destinationPath: "/etc/systemd/system/mira-dashboard-deferred-reboot.timer",
         mode: 0o644,
     }),
     Object.freeze({
         artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-cleanup.service",
+            "systemd/host-operations/mira-dashboard-host-system-cleanup.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-host-system-cleanup.service",
         mode: 0o644,
     }),
     Object.freeze({
         artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
+            "systemd/host-operations/mira-dashboard-host-system-restart.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-host-system-restart.service",
         mode: 0o644,
     }),
     Object.freeze({
-        artifactPath:
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
+        artifactPath: "systemd/host-operations/mira-dashboard-host-system-update.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-host-system-update.service",
+        mode: 0o644,
+    }),
+    Object.freeze({
+        artifactPath:
+            "systemd/host-operations/mira-dashboard-production-provisioning@.service",
+        destinationPath:
+            "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
         mode: 0o644,
     }),
     Object.freeze({

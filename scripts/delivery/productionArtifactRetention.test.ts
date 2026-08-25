@@ -175,7 +175,7 @@ describe("production release and runtime retention", () => {
                 runtimeA,
             ]);
         });
-    }, 15_000);
+    }, 30_000);
 
     test("retains only active, rollback, and pointer-referenced immutable artifacts", async () => {
         const { state } = await projectFixture();

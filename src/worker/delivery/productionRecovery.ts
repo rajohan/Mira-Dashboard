@@ -6,8 +6,9 @@ import {
 } from "../../shared/deliveryProductionOperation.ts";
 import {
     ensureProductionDeliveryExecutor,
-    type ProductionDeliveryExecutorEnsureResult,
+    productionDeliveryArtifactSource,
     type ProductionDeliveryLaunchOptions,
+    type ProductionDeliveryExecutorEnsureResult,
 } from "./productionDeliveryLauncher.ts";
 
 const recoveryFailureMessage = "Delivery production recovery failed";
@@ -70,6 +71,9 @@ export async function reconcileDeliveryProductionCutoverBeforeValidation(
     const { capsule } = before.record;
     await (options.ensure ?? ensureProductionDeliveryExecutor)(
         {
+            artifactSource: productionDeliveryArtifactSource(
+                capsule.enqueue.payload.operation
+            ),
             executorReleaseId: capsule.executor.releaseId,
             projectRoot: options.projectRoot,
             readinessUrl: options.readinessUrl,

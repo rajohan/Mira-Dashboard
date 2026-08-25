@@ -2,6 +2,7 @@ import { secondsToMilliseconds } from "date-fns";
 import * as v from "valibot";
 
 import { healthReadinessPath } from "../../src/contracts/system.ts";
+import type { PublishedReleaseAuthority } from "../../src/shared/publishedReleaseAuthority.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import { runProductionDeliveryTargetSmoke } from "./productionDeliverySmoke.ts";
@@ -22,6 +23,9 @@ const readinessDeadlineMs = secondsToMilliseconds(30);
 const readinessRetryMs = 250;
 const webUnit = "mira-dashboard-web.service";
 const workerUnit = "mira-dashboard-worker.service";
+const provisioningUnitPrefix = "mira-dashboard-production-provisioning@";
+const provisioningDeadlineMs = secondsToMilliseconds(15 * 60 + 30);
+const maximumSystemdUnitNameBytes = 255;
 const systemctlExecutableDefault = "/usr/bin/systemctl";
 const loopbackReadinessUrlSchema = v.pipe(
     v.string(),
@@ -53,6 +57,7 @@ export interface SystemdProductionServiceOptions {
     readonly fetch?: (request: Request) => Promise<Response>;
     readonly verifyUnits?: typeof verifyPublishedProductionSystemdUnitsInstalledAtRoot;
     readonly readinessUrl: string;
+    readonly releaseAuthority?: PublishedReleaseAuthority;
     readonly smoke?: typeof runProductionDeliveryTargetSmoke;
     readonly systemctlExecutable?: string;
 }
@@ -74,10 +79,13 @@ function validateExecutable(executable: string): void {
 async function requireSystemctlSuccess(
     execute: SystemctlExecutor,
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    deadlineMs?: number
 ): Promise<void> {
     try {
-        await requireSuccessfulSystemctlProcess(execute, executable, arguments_);
+        const options =
+            deadlineMs === undefined ? Object.freeze({}) : Object.freeze({ deadlineMs });
+        await requireSuccessfulSystemctlProcess(execute, executable, arguments_, options);
     } catch {
         throw serviceFailure();
     }
@@ -167,6 +175,51 @@ export function createSystemdProductionServiceController(
     const smoke = options.smoke ?? runProductionDeliveryTargetSmoke;
 
     return Object.freeze({
+        async provision(release: PublishedProductionRelease): Promise<void> {
+            const releaseId = release.manifest.source.commitSha;
+            const authority = options.releaseAuthority;
+            const receiptDigest = authority?.assets.find(
+                ({ name }) => name === "receipt.json"
+            )?.digest;
+            const archiveDigest = authority?.assets.find(
+                ({ name }) => name === "release.tar"
+            )?.digest;
+            const instance =
+                authority?.releaseId === releaseId &&
+                receiptDigest !== undefined &&
+                archiveDigest !== undefined
+                    ? `${releaseId}--${authority.tagName}--${receiptDigest.slice("sha256:".length)}--${archiveDigest.slice("sha256:".length)}`
+                    : `${releaseId}--local`;
+            if (
+                !/^[a-f\d]{40}--(?:local|v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?--[a-f\d]{64}--[a-f\d]{64})$/u.test(
+                    instance
+                )
+            ) {
+                throw serviceFailure();
+            }
+            const unit = `${provisioningUnitPrefix}${instance}.service`;
+            if (Buffer.byteLength(unit) > maximumSystemdUnitNameBytes) {
+                throw serviceFailure();
+            }
+            await requireSystemctlSuccess(
+                execute,
+                executable,
+                ["start", unit],
+                provisioningDeadlineMs
+            );
+        },
+        async settle(release: PublishedProductionRelease): Promise<void> {
+            const releaseId = release.manifest.source.commitSha;
+            await requireSystemctlSuccess(
+                execute,
+                executable,
+                [
+                    "start",
+                    `${provisioningUnitPrefix}${releaseId}--local--settled.service`,
+                ],
+                provisioningDeadlineMs
+            );
+        },
         prepare(release: PublishedProductionRelease): Promise<void> {
             return verifyUnits(lease, paths, release);
         },

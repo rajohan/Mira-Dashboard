@@ -15,6 +15,8 @@ const launchDeadlineMs = 15_000;
 const systemdRunExecutable = "/usr/bin/systemd-run";
 const systemctlExecutable = "/usr/bin/systemctl";
 const envExecutable = "/usr/bin/env";
+const dopplerExecutable = "/usr/local/bin/doppler";
+const dopplerConfigurationDirectory = "/home/ubuntu/.doppler";
 const maximumManifestBytes = 4 * 1024 * 1024;
 const maximumExecutorBytes = 64 * 1024 * 1024;
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
@@ -51,6 +53,7 @@ const readinessUrlSchema = v.pipe(
     }, launcherFailureMessage)
 );
 const optionsSchema = v.strictObject({
+    artifactSource: v.picklist(["published-release", "retained"], launcherFailureMessage),
     executorReleaseId: fullCommitShaSchema(launcherFailureMessage),
     projectRoot: absoluteProjectRootSchema,
     readinessUrl: readinessUrlSchema,
@@ -61,6 +64,17 @@ const optionsSchema = v.strictObject({
 export type ProductionDeliveryLaunchOptions = Readonly<
     v.InferOutput<typeof optionsSchema>
 >;
+
+/**
+ * Resolves the credential boundary from the durable operation kind.
+ * @param operation Exact operation persisted in the cutover capsule.
+ * @returns Artifact authority required by every initial or recovered executor.
+ */
+export function productionDeliveryArtifactSource(
+    operation: "deploy" | "rollback-release"
+): ProductionDeliveryLaunchOptions["artifactSource"] {
+    return operation === "deploy" ? "published-release" : "retained";
+}
 
 export interface ProductionDeliveryLaunchProcessResult {
     readonly exitCode: number;
@@ -351,6 +365,30 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
     const unit = transientUnitName(options.transitionId);
     if (typeof process.getuid !== "function") throw failure();
     const runtimeDirectory = `/run/user/${process.getuid()}`;
+    const executorCommand = [
+        runtimeExecutable,
+        executor,
+        `--artifact-source=${options.artifactSource}`,
+        "--operation=cutover",
+        `--project-root=${options.projectRoot}`,
+        `--readiness-url=${options.readinessUrl}`,
+        `--transition=${options.transitionId}`,
+    ] as const;
+    const credentialCommand =
+        options.artifactSource === "published-release"
+            ? [
+                  dopplerExecutable,
+                  "run",
+                  "--config=prd",
+                  "--project=rajohan",
+                  `--config-dir=${dopplerConfigurationDirectory}`,
+                  "--no-read-env",
+                  "--only-secrets=MIRA_GITHUB_TOKEN",
+                  "--preserve-env=DBUS_SESSION_BUS_ADDRESS,HOME,NODE_ENV,PATH,XDG_RUNTIME_DIR",
+                  "--",
+                  ...executorCommand,
+              ]
+            : executorCommand;
     return Object.freeze([
         systemdRunExecutable,
         "--user",
@@ -366,6 +404,9 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         "--property=NoNewPrivileges=yes",
         "--property=ProtectHome=tmpfs",
         `--property=BindPaths=${options.projectRoot}`,
+        ...(options.artifactSource === "published-release"
+            ? [`--property=BindReadOnlyPaths=${dopplerConfigurationDirectory}`]
+            : []),
         "--property=PrivateTmp=yes",
         "--property=PrivateDevices=yes",
         "--property=RestrictSUIDSGID=yes",
@@ -375,21 +416,20 @@ function launchCommand(options: ProductionDeliveryLaunchOptions): readonly strin
         envExecutable,
         "-i",
         `DBUS_SESSION_BUS_ADDRESS=unix:path=${runtimeDirectory}/bus`,
+        "HOME=/home/ubuntu",
         "NODE_ENV=production",
+        "PATH=/usr/local/bin:/usr/bin:/bin",
         `XDG_RUNTIME_DIR=${runtimeDirectory}`,
-        runtimeExecutable,
-        executor,
-        "--operation=cutover",
-        `--project-root=${options.projectRoot}`,
-        `--readiness-url=${options.readinessUrl}`,
-        `--transition=${options.transitionId}`,
+        ...credentialCommand,
     ]);
 }
 
 /**
  * Launches one immutable executor in a transient user-systemd cgroup.
- * `env -i` and a private home mount prevent worker/Doppler/GitHub/Gateway secrets from
- * crossing over; only the exact project root is rebound for release and state mutation.
+ * `env -i` and a private home mount prevent worker/Gateway secrets from crossing over. The
+ * For a new published deploy only, the canonical Doppler configuration is mounted read-only and
+ * projects the GitHub release credential required to admit immutable assets. Rollback and durable
+ * recovery launch the executor without Doppler because they are restricted to retained artifacts.
  */
 export async function launchProductionDeliveryExecutor(
     untrustedOptions: ProductionDeliveryLaunchOptions,

@@ -58,11 +58,11 @@ async function releaseFixture(): Promise<{
         mkdir(path.join(releaseRoot, "browser/assets"), { recursive: true }),
         mkdir(path.join(releaseRoot, "docs"), { recursive: true }),
         mkdir(path.join(releaseRoot, "metadata"), { recursive: true }),
+        mkdir(path.join(releaseRoot, "runtime"), { recursive: true }),
         mkdir(path.join(releaseRoot, "scripts/delivery/provisioning"), {
             recursive: true,
         }),
         mkdir(path.join(releaseRoot, "server"), { recursive: true }),
-        mkdir(path.join(releaseRoot, "systemd"), { recursive: true }),
     ]);
 
     const packageJson = `${JSON.stringify(
@@ -90,6 +90,7 @@ async function releaseFixture(): Promise<{
         writeFile(path.join(releaseRoot, "metadata/.bun-version"), "1.4.0\n"),
         writeFile(path.join(releaseRoot, "metadata/package.json"), packageJson),
         writeFile(path.join(releaseRoot, "metadata/bun.lock"), lockfile),
+        writeFile(path.join(releaseRoot, "runtime/bun"), "runtime"),
         writeFile(path.join(releaseRoot, "browser/index.html"), "dashboard"),
         writeFile(path.join(releaseRoot, "browser/assets/app-a1b2c3d4.js"), "app"),
         writeFile(
@@ -100,19 +101,15 @@ async function releaseFixture(): Promise<{
             path.join(releaseRoot, "server/productionDelivery.js"),
             "production-delivery"
         ),
+        writeFile(
+            path.join(releaseRoot, "server/productionProvisioning.js"),
+            "production-provisioning"
+        ),
         writeFile(path.join(releaseRoot, "server/web.js"), "web"),
         writeFile(path.join(releaseRoot, "server/worker.js"), "worker"),
         writeFile(
             path.join(releaseRoot, "server/openClawHeartbeat.js"),
             "openclaw-heartbeat"
-        ),
-        writeFile(
-            path.join(releaseRoot, "systemd/mira-dashboard-web.service"),
-            "[Service]\nExecStart=/web\n"
-        ),
-        writeFile(
-            path.join(releaseRoot, "systemd/mira-dashboard-worker.service"),
-            "[Service]\nExecStart=/worker\n"
         ),
     ]);
     await Promise.all([
@@ -127,6 +124,10 @@ async function releaseFixture(): Promise<{
         copyDirectory(
             path.join(sourceProjectRoot, "migrations"),
             path.join(releaseRoot, "migrations")
+        ),
+        copyDirectory(
+            path.join(sourceProjectRoot, "systemd"),
+            path.join(releaseRoot, "systemd")
         ),
         copyDirectory(
             path.join(sourceProjectRoot, "scripts/delivery/provisioning/host-operations"),
@@ -149,13 +150,6 @@ async function releaseFixture(): Promise<{
                 "scripts/delivery/provisioning/database-observability"
             ),
             path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
-        ),
-        copyDirectory(
-            path.join(
-                sourceProjectRoot,
-                "scripts/delivery/provisioning/openclaw-heartbeat"
-            ),
-            path.join(releaseRoot, "scripts/delivery/provisioning/openclaw-heartbeat")
         ),
     ]);
     return { releaseRoot, repositoryRoot };
@@ -206,10 +200,23 @@ describe("release identity", () => {
             created.artifacts
                 .filter(({ path: artifactPath }) => artifactPath.startsWith("systemd/"))
                 .map(({ path: artifactPath }) => artifactPath)
-        ).toEqual([
-            "systemd/mira-dashboard-web.service",
-            "systemd/mira-dashboard-worker.service",
-        ]);
+        ).toEqual(
+            [
+                "systemd/host-operations/mira-dashboard-deferred-reboot.service",
+                "systemd/host-operations/mira-dashboard-deferred-reboot.timer",
+                "systemd/host-operations/mira-dashboard-deferred-stack-restart.service",
+                "systemd/host-operations/mira-dashboard-deferred-stack-restart.timer",
+                "systemd/host-operations/mira-dashboard-deferred-worker-restart.service",
+                "systemd/host-operations/mira-dashboard-deferred-worker-restart.timer",
+                "systemd/host-operations/mira-dashboard-host-system-cleanup.service",
+                "systemd/host-operations/mira-dashboard-host-system-restart.service",
+                "systemd/host-operations/mira-dashboard-host-system-update.service",
+                "systemd/host-operations/mira-dashboard-production-provisioning@.service",
+                "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
+                "systemd/mira-dashboard-web.service",
+                "systemd/mira-dashboard-worker.service",
+            ].toSorted()
+        );
         expect(
             created.artifacts
                 .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
@@ -249,17 +256,9 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/host-operations/README.md",
             "scripts/delivery/provisioning/host-operations/hostOperationsProvisioningFilesystem.ts",
             "scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.service",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-reboot.timer",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.service",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-stack-restart.timer",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.service",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-deferred-worker-restart.timer",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-host-operation",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-cleanup.service",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-restart.service",
-            "scripts/delivery/provisioning/host-operations/mira-dashboard-host-system-update.service",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-production-authority.conf",
+            "scripts/delivery/provisioning/host-operations/mira-dashboard-production-provisioning",
             "scripts/delivery/provisioning/host-operations/mira-dashboard-web-runtime",
             "scripts/delivery/provisioning/host-operations/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/60-mira-dashboard-log-maintenance.rules",
@@ -268,10 +267,8 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
             "scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
-            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance@.service",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-container-logs.conf",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
-            "scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md",
             "scripts/delivery/provisioning/preview-tailscale/README.md",
             "scripts/delivery/provisioning/preview-tailscale/operator.ts",
             "scripts/delivery/provisioning/preview-tailscale/policy.ts",

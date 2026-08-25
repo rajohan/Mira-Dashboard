@@ -3,7 +3,13 @@ import path from "node:path";
 
 import * as v from "valibot";
 
+import {
+    productionReleaseArtifactReceiptSchema as receiptSchema,
+    type ProductionReleaseArtifactReceipt,
+} from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { releaseManifestSchema } from "../../src/shared/releaseManifest.ts";
+
+export { productionReleaseArtifactReceiptSchema } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 
 const failureMessage = "Production release artifact packaging failed";
 const projectRoot = path.resolve(import.meta.dir, "../..");
@@ -13,26 +19,8 @@ const receiptName = "receipt.json";
 export interface PackageProductionReleaseArtifactOptions {
     readonly projectRoot?: string;
     readonly releaseId?: string;
+    readonly requireProductionArchitecture?: boolean;
 }
-
-export const productionReleaseArtifactReceiptSchema = v.strictObject({
-    archive: v.strictObject({
-        bytes: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
-        name: v.literal(archiveName),
-        sha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
-    }),
-    formatVersion: v.literal(1),
-    releaseId: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
-    releaseManifestSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
-    runtime: v.strictObject({
-        revision: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
-        version: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
-    }),
-});
-
-export type ProductionReleaseArtifactReceipt = Readonly<
-    v.InferOutput<typeof productionReleaseArtifactReceiptSchema>
->;
 
 function sha256(bytes: Uint8Array): string {
     return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
@@ -88,6 +76,12 @@ async function runTar(
 export async function packageProductionReleaseArtifact(
     options: PackageProductionReleaseArtifactOptions = {}
 ): Promise<ProductionReleaseArtifactReceipt> {
+    if (
+        options.requireProductionArchitecture === true &&
+        (process.platform !== "linux" || process.arch !== "arm64")
+    ) {
+        throw new Error(failureMessage);
+    }
     const repositoryRoot = options.projectRoot ?? projectRoot;
     const outputRoot = path.join(repositoryRoot, "dist/production-release-artifact");
     const releaseId = options.releaseId ?? (await resolveReleaseId(repositoryRoot));
@@ -114,7 +108,7 @@ export async function packageProductionReleaseArtifact(
     await runTar(repositoryRoot, outputRoot, releaseId);
     const archiveBytes = await readFile(path.join(outputRoot, archiveName));
     const receipt = Object.freeze(
-        v.parse(productionReleaseArtifactReceiptSchema, {
+        v.parse(receiptSchema, {
             archive: {
                 bytes: archiveBytes.byteLength,
                 name: archiveName,
@@ -139,7 +133,9 @@ export async function packageProductionReleaseArtifact(
 
 if (import.meta.main) {
     try {
-        const receipt = await packageProductionReleaseArtifact();
+        const receipt = await packageProductionReleaseArtifact({
+            requireProductionArchitecture: true,
+        });
         process.stdout.write(`${JSON.stringify(receipt)}\n`);
     } catch {
         process.stderr.write(`${failureMessage}\n`);

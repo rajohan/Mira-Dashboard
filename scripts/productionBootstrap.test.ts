@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdtemp } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { maximumProductionReleaseArchiveBytes } from "../src/shared/productionReleaseArtifactReceipt.ts";
+import { publishedReleaseAuthority } from "../src/testSupport/publishedReleaseAuthority.ts";
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
 import {
-    admitProductionBootstrapRelease,
     assertProductionReleaseArchiveListing,
+    maximumProductionReleaseArchiveListingBytes,
+} from "./delivery/productionReleaseArchive.ts";
+import { productionHostProvisioningRoot } from "./delivery/provisioning/host-operations/policy.ts";
+import {
+    admitProductionBootstrapRelease,
     bootstrapProduction,
+    deployProduction,
     downloadProductionBootstrapRelease,
     parseProductionBootstrapRelease,
+    productionBootstrapTestSupport,
     resolveProductionBootstrapSourceIdentity,
     stageProductionBootstrapRootAuthority,
     verifyProductionBootstrapPrerequisites,
@@ -68,6 +76,9 @@ describe("production bootstrap admission", () => {
     });
 
     test("accepts only archive entries below the exact release directory", () => {
+        expect(maximumProductionReleaseArchiveListingBytes).toBe(
+            (4096 + 512) * (41 + 4096 + 1)
+        );
         expect(() =>
             assertProductionReleaseArchiveListing(
                 `${releaseId}/\n${releaseId}/release-manifest.json\n`,
@@ -82,8 +93,21 @@ describe("production bootstrap admission", () => {
         ]) {
             expect(() =>
                 assertProductionReleaseArchiveListing(listing, releaseId)
-            ).toThrow("Production bootstrap failed");
+            ).toThrow("Production release archive is invalid");
         }
+        const maximumValidListing = Array.from(
+            { length: 4096 + 512 },
+            (_, index) => `${releaseId}/entry-${index}`
+        ).join("\n");
+        expect(() =>
+            assertProductionReleaseArchiveListing(maximumValidListing, releaseId)
+        ).not.toThrow();
+        expect(() =>
+            assertProductionReleaseArchiveListing(
+                `${maximumValidListing}\n${releaseId}/overflow`,
+                releaseId
+            )
+        ).toThrow("Production release archive is invalid");
     });
 
     test("resolves only clean exact main from the expected checkout", async () => {
@@ -109,7 +133,9 @@ describe("production bootstrap admission", () => {
                 1000
             )
         ).toBe(releaseId);
-        expect(commands).toHaveLength(5);
+        expect(commands).toHaveLength(6);
+        expect(commands[0]).toBe("/usr/bin/git remote get-url origin");
+        expect(commands[1]).toBe("/usr/bin/git fetch --quiet --no-tags origin main");
         expect(
             resolveProductionBootstrapSourceIdentity(
                 dependencies,
@@ -122,13 +148,36 @@ describe("production bootstrap admission", () => {
 
     test("downloads only release assets whose tag resolves to the checkout", async () => {
         const commands: string[] = [];
+        const downloads: string[] = [];
         const dependencies: ProductionBootstrapDependencies = {
+            download: (command, target, maximumBytes, expectedBytes, cwd) => {
+                downloads.push(
+                    [command.join(" "), target, maximumBytes, expectedBytes, cwd].join(
+                        " | "
+                    )
+                );
+                return Promise.resolve();
+            },
             run: (command) => {
                 commands.push(command.join(" "));
                 const invocation = command.join(" ");
                 let stdout = "";
                 if (invocation.includes(" release view ")) {
-                    stdout = '{"tagName":"v0.2.0"}\n';
+                    stdout = JSON.stringify({
+                        assets: [
+                            {
+                                apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/1",
+                                name: "receipt.json",
+                                size: 433,
+                            },
+                            {
+                                apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/2",
+                                name: "release.tar",
+                                size: 1024,
+                            },
+                        ],
+                        tagName: "v0.2.0",
+                    });
                 }
                 if (invocation.includes(" rev-list ")) stdout = `${releaseId}\n`;
                 return Promise.resolve({ exitCode: 0, stdout });
@@ -138,13 +187,150 @@ describe("production bootstrap admission", () => {
             await downloadProductionBootstrapRelease(
                 releaseId,
                 "/tmp/artifact",
-                dependencies
+                dependencies,
+                sourceProjectRoot,
+                "v0.2.0"
             )
-        ).toBe("/tmp/artifact");
+        ).toEqual({ artifactRoot: "/tmp/artifact", tagName: "v0.2.0" });
         expect(commands.some((command) => command.includes(" fetch --force "))).toBe(
             true
         );
-        expect(commands.at(-1)).toContain("release download v0.2.0");
+        expect(commands).toContain(
+            "/usr/bin/gh release view v0.2.0 --repo=rajohan/Mira-Dashboard --json=assets,tagName"
+        );
+        expect(downloads).toHaveLength(2);
+        expect(downloads[0]).toContain("application/octet-stream");
+        expect(downloads[1]).toContain(
+            `release.tar | ${maximumProductionReleaseArchiveBytes} | 1024`
+        );
+    });
+
+    test("bounds release bytes while writing and projects private GitHub auth", async () => {
+        const targetRoot = await mkdtemp(
+            path.join(tmpdir(), "mira-production-download-")
+        );
+        temporaryDirectories.push(targetRoot);
+        const admitted = path.join(targetRoot, "admitted");
+        await productionBootstrapTestSupport.download(
+            ["/usr/bin/printf", "1234"],
+            admitted,
+            4,
+            4,
+            sourceProjectRoot
+        );
+        expect(await readFile(admitted, "utf8")).toBe("1234");
+        expect(
+            productionBootstrapTestSupport.download(
+                ["/usr/bin/printf", "12345"],
+                path.join(targetRoot, "oversized"),
+                4,
+                4,
+                sourceProjectRoot
+            )
+        ).rejects.toThrow("Production bootstrap failed");
+
+        const previous = process.env.MIRA_GITHUB_TOKEN;
+        process.env.MIRA_GITHUB_TOKEN = "github-token-sentinel";
+        try {
+            const environment = productionBootstrapTestSupport.environment();
+            expect(environment.GH_TOKEN).toBe("github-token-sentinel");
+            expect(environment.GIT_CONFIG_KEY_0).toBe(
+                "http.https://github.com/.extraheader"
+            );
+            expect(environment.GIT_CONFIG_VALUE_0).toStartWith("AUTHORIZATION: basic ");
+            expect(environment.GIT_CONFIG_VALUE_0).not.toContain("github-token-sentinel");
+        } finally {
+            if (previous === undefined) delete process.env.MIRA_GITHUB_TOKEN;
+            else process.env.MIRA_GITHUB_TOKEN = previous;
+        }
+    });
+
+    test("rejects command output while it is still streaming", async () => {
+        let cancelled = false;
+        const stream = new ReadableStream<Uint8Array>({
+            cancel: () => {
+                cancelled = true;
+            },
+            start: (controller) => {
+                controller.enqueue(new Uint8Array([1, 2, 3]));
+                controller.enqueue(new Uint8Array([4, 5, 6]));
+            },
+        });
+
+        const failure = await captureFailure(
+            productionBootstrapTestSupport.readBounded(stream, 5)
+        );
+        expect(failure).toEqual(new Error("Production bootstrap failed"));
+        expect(cancelled).toBe(true);
+    });
+
+    for (const deliveryOutcome of ["succeeded", "failed"] as const) {
+        test(`discards a direct-deploy candidate after delivery ${deliveryOutcome}`, async () => {
+            const candidateRoot = `/checkout/dist/releases/${releaseId}`;
+            const discarded: unknown[] = [];
+            const deliveryFailure = new Error("delivery failed");
+            const operation =
+                productionBootstrapTestSupport.withDiscardedPreparedPublishedRelease(
+                    () =>
+                        Promise.resolve({
+                            authority: publishedReleaseAuthority(
+                                releaseId,
+                                "v1.2.3",
+                                "b".repeat(40)
+                            ),
+                            releaseId,
+                            releaseRoot: candidateRoot,
+                        }),
+                    () =>
+                        deliveryOutcome === "succeeded"
+                            ? Promise.resolve()
+                            : Promise.reject(deliveryFailure),
+                    (releasesDirectory, releaseRoot, expectedName) => {
+                        discarded.push({ expectedName, releaseRoot, releasesDirectory });
+                        return Promise.resolve();
+                    }
+                );
+
+            if (deliveryOutcome === "failed") {
+                expect(await captureFailure(operation)).toBe(deliveryFailure);
+            } else {
+                await operation;
+            }
+            expect(discarded).toEqual([
+                {
+                    expectedName: releaseId,
+                    releaseRoot: candidateRoot,
+                    releasesDirectory: "/checkout/dist/releases",
+                },
+            ]);
+        });
+    }
+
+    test("discards an admitted candidate when post-admission preparation fails", async () => {
+        const candidateRoot = `/checkout/dist/releases/${releaseId}`;
+        const preparationFailure = new Error("preparation failed");
+        const discarded: unknown[] = [];
+
+        const failure = await captureFailure(
+            productionBootstrapTestSupport.discardAdmittedReleaseOnFailure(
+                candidateRoot,
+                releaseId,
+                () => Promise.reject(preparationFailure),
+                (releasesDirectory, releaseRoot, expectedName) => {
+                    discarded.push({ expectedName, releaseRoot, releasesDirectory });
+                    return Promise.resolve();
+                }
+            )
+        );
+
+        expect(failure).toBe(preparationFailure);
+        expect(discarded).toEqual([
+            {
+                expectedName: releaseId,
+                releaseRoot: candidateRoot,
+                releasesDirectory: "/checkout/dist/releases",
+            },
+        ]);
     });
 
     test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
@@ -316,10 +502,19 @@ describe("production bootstrap admission", () => {
             ),
         ]);
 
+        const listingBudgets: number[] = [];
+        const boundedProcessDependencies: ProductionBootstrapDependencies = {
+            run: (command, cwd, stdoutMaximumBytes) => {
+                if (command[0] === "/usr/bin/tar" && command[1] === "-tf") {
+                    listingBudgets.push(stdoutMaximumBytes ?? 0);
+                }
+                return realProcessDependencies.run(command, cwd, stdoutMaximumBytes);
+            },
+        };
         const admitted = await admitProductionBootstrapRelease(
             targetArtifactRoot,
             releaseId,
-            realProcessDependencies,
+            boundedProcessDependencies,
             targetRepositoryRoot
         );
 
@@ -331,10 +526,14 @@ describe("production bootstrap admission", () => {
         const readmitted = await admitProductionBootstrapRelease(
             targetArtifactRoot,
             releaseId,
-            realProcessDependencies,
+            boundedProcessDependencies,
             targetRepositoryRoot
         );
         expect(readmitted.manifestSha256).toBe(receipt.releaseManifestSha256);
+        expect(listingBudgets).toEqual([
+            maximumProductionReleaseArchiveListingBytes,
+            maximumProductionReleaseArchiveListingBytes,
+        ]);
     });
 
     test("stages every fixed root authority command without shell interpretation", async () => {
@@ -346,7 +545,7 @@ describe("production bootstrap admission", () => {
                 commands.push([...command]);
                 let stdout = "";
                 if (command.includes("/usr/bin/sha256sum")) {
-                    stdout = command.at(-1)?.endsWith("/runtime/bun")
+                    stdout = command.at(-1)?.endsWith("/bun")
                         ? `${"e".repeat(64)}  bun\n`
                         : `${"d".repeat(64)}  release.tar\n`;
                 }
@@ -393,6 +592,64 @@ describe("production bootstrap admission", () => {
             )
         ).toBe(true);
         expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/install") &&
+                    command.some((argument) => argument.includes("/.pair-stage-")) &&
+                    command.every((argument) => !argument.includes("/pairs/.pair-stage-"))
+            )
+        ).toBe(true);
+        const runtimeInstallIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/install") &&
+                command.some((argument) => argument.endsWith("/runtime/bun")) &&
+                command.at(-1)?.includes("/.pair-stage-") === true
+        );
+        const releaseSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1)?.endsWith(`/releases/${releaseId}`) === true
+        );
+        const releasesParentSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1)?.endsWith("/releases") === true
+        );
+        const pairMoveIndex = commands.findIndex(
+            (command) => command.includes("/usr/bin/mv") && command.includes("-T")
+        );
+        const pairSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1)?.endsWith(`/pairs/${releaseId}`) === true
+        );
+        const selectorMoveIndex = commands.findIndex(
+            (command) => command.includes("/usr/bin/mv") && command.includes("-Tf")
+        );
+        const selectorSyncIndex = commands.findIndex(
+            (command) =>
+                command.includes("/usr/bin/sync") &&
+                command.at(-1) === productionHostProvisioningRoot
+        );
+        expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
+        expect(releaseSyncIndex).toBeGreaterThanOrEqual(0);
+        expect(releasesParentSyncIndex).toBeGreaterThan(releaseSyncIndex);
+        expect(runtimeInstallIndex).toBeGreaterThan(releasesParentSyncIndex);
+        expect(pairSyncIndex).toBeGreaterThan(pairMoveIndex);
+        expect(selectorMoveIndex).toBeGreaterThan(pairSyncIndex);
+        expect(selectorSyncIndex).toBeGreaterThan(selectorMoveIndex);
+        const archiveRemovalIndexes = commands
+            .map((command, index) =>
+                command.includes("/usr/bin/rm") &&
+                command.includes("-f") &&
+                command.at(-1)?.endsWith("/release.tar") === true
+                    ? index
+                    : -1
+            )
+            .filter((index) => index >= 0);
+        expect(archiveRemovalIndexes).toHaveLength(2);
+        expect(archiveRemovalIndexes[0]).toBeLessThan(runtimeInstallIndex);
+        expect(
             commands.some((command) =>
                 command.some((argument) => argument.endsWith("/usermod"))
             )
@@ -421,7 +678,14 @@ describe("production bootstrap admission", () => {
                 )
             )
         ).toBe(true);
-        expect(commands.at(-1)).toContain("--mode=apply");
+        expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/tar") &&
+                    command.includes("--no-same-owner")
+            )
+        ).toBe(true);
+        expect(commands.some((command) => command.includes("--mode=apply"))).toBe(true);
     });
 
     test("rejects unexpected maintenance-group members", async () => {
@@ -440,7 +704,7 @@ describe("production bootstrap admission", () => {
                         if (command.includes("/usr/bin/sha256sum")) {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                stdout: command.at(-1)?.endsWith("/bun")
                                     ? `${"e".repeat(64)}  bun\n`
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
@@ -486,7 +750,7 @@ describe("production bootstrap admission", () => {
                         if (command.includes("/usr/bin/sha256sum")) {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                stdout: command.at(-1)?.endsWith("/bun")
                                     ? `${"e".repeat(64)}  bun\n`
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
@@ -525,7 +789,7 @@ describe("production bootstrap admission", () => {
                         if (command.includes("/usr/bin/sha256sum")) {
                             return Promise.resolve({
                                 exitCode: 0,
-                                stdout: command.at(-1)?.endsWith("/runtime/bun")
+                                stdout: command.at(-1)?.endsWith("/bun")
                                     ? `${"e".repeat(64)}  bun\n`
                                     : `${"d".repeat(64)}  release.tar\n`,
                             });
@@ -585,6 +849,14 @@ describe("production bootstrap admission", () => {
                 )
             )
         ).toBe(false);
+        expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/rm") &&
+                    command.includes("-f") &&
+                    command.at(-1)?.endsWith("/release.tar") === true
+            )
+        ).toBe(true);
     });
 
     test("rejects a changed archive after the runtime handoff succeeds", async () => {
@@ -600,7 +872,7 @@ describe("production bootstrap admission", () => {
                 {
                     run: (command) => {
                         commands.push([...command]);
-                        const stagedRuntime = command.at(-1)?.endsWith("/runtime/bun");
+                        const stagedRuntime = command.at(-1)?.endsWith("/bun");
                         return Promise.resolve({
                             exitCode: 0,
                             stdout: command.includes("/usr/bin/sha256sum")
@@ -634,34 +906,67 @@ describe("production bootstrap admission", () => {
             projectRoot: sourceRepositoryRoot,
             releaseId,
         });
+        const releaseRuntimeSha256 = new Bun.CryptoHasher("sha256")
+            .update(await readFile(path.join(sourceReleaseRoot, "runtime/bun")))
+            .digest("hex");
         const targetRepositoryRoot = await mkdtemp(
             path.join(tmpdir(), "mira-production-bootstrap-composition-")
         );
         temporaryDirectories.push(targetRepositoryRoot);
-        const artifactRoot = path.join(targetRepositoryRoot, "download");
-        await Promise.all([
-            cp(
+        await cp(
+            path.join(sourceProjectRoot, ".bun-version"),
+            path.join(targetRepositoryRoot, ".bun-version")
+        );
+        let artifactSequence = 0;
+        const createTemporaryRoot = async () => {
+            const artifactRoot = path.join(
+                targetRepositoryRoot,
+                `download-${String((artifactSequence += 1))}`
+            );
+            await cp(
                 path.join(sourceRepositoryRoot, "dist/production-release-artifact"),
                 artifactRoot,
                 { recursive: true }
-            ),
-            cp(
-                path.join(sourceProjectRoot, ".bun-version"),
-                path.join(targetRepositoryRoot, ".bun-version")
-            ),
-        ]);
+            );
+            return artifactRoot;
+        };
         const commands: string[] = [];
+        const prepareStateWorkingDirectories: string[] = [];
         let prerequisitesInspected = false;
+        let manualDeployDelivered = false;
+        let provisioningBoundaryAvailable = false;
+        let preparationCapacityAdmitted = false;
         let groupLookupCount = 0;
         let maintenanceGroupLine = "";
         const dependencies: ProductionBootstrapDependencies = {
+            download: () => {
+                expect(preparationCapacityAdmitted).toBeTrue();
+                return Promise.resolve();
+            },
+            deliverPublishedRelease: async (prepare) => {
+                expect(preparationCapacityAdmitted).toBeFalse();
+                const admitted = await prepare();
+                expect(preparationCapacityAdmitted).toBeTrue();
+                expect(admitted.releaseId).toBe(releaseId);
+                expect(admitted.authority.runtime).toEqual(runtime);
+                manualDeployDelivered = true;
+            },
             inspectPrerequisites: () => {
                 prerequisitesInspected = true;
                 return Promise.resolve({ runtimeSha256: "e".repeat(64) });
             },
+            preparationCapacityAdmission: (checkoutRoot, hostDirectory) => {
+                expect(checkoutRoot).toBe(targetRepositoryRoot);
+                expect(hostDirectory).toBe(productionHostProvisioningRoot);
+                preparationCapacityAdmitted = true;
+                return Promise.resolve();
+            },
             run: async (command, cwd) => {
                 const invocation = command.join(" ");
                 commands.push(invocation);
+                if (invocation.includes("prepareProductionState.js")) {
+                    prepareStateWorkingDirectories.push(cwd ?? "");
+                }
                 if (command[0] === "/usr/bin/tar") {
                     return realProcessDependencies.run(command, cwd);
                 }
@@ -681,16 +986,42 @@ describe("production bootstrap admission", () => {
                     };
                 }
                 if (invocation.includes(" release view ")) {
-                    return { exitCode: 0, stdout: '{"tagName":"v0.2.0"}\n' };
+                    return {
+                        exitCode: 0,
+                        stdout: JSON.stringify({
+                            assets: [
+                                {
+                                    apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/1",
+                                    name: "receipt.json",
+                                    size: 433,
+                                },
+                                {
+                                    apiUrl: "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/assets/2",
+                                    name: "release.tar",
+                                    size: receipt.archive.bytes,
+                                },
+                            ],
+                            tagName: "v0.2.0",
+                        }),
+                    };
                 }
                 if (invocation.includes(" rev-list ")) {
                     return { exitCode: 0, stdout: `${releaseId}\n` };
                 }
+                if (
+                    invocation ===
+                    "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
+                ) {
+                    return {
+                        exitCode: provisioningBoundaryAvailable ? 0 : 1,
+                        stdout: "",
+                    };
+                }
                 if (invocation.includes("sha256sum")) {
                     return {
                         exitCode: 0,
-                        stdout: command.at(-1)?.endsWith("/runtime/bun")
-                            ? `${"e".repeat(64)}  bun\n`
+                        stdout: command.at(-1)?.endsWith("/bun")
+                            ? `${releaseRuntimeSha256}  bun\n`
                             : `${receipt.archive.sha256}  release.tar\n`,
                     };
                 }
@@ -720,24 +1051,104 @@ describe("production bootstrap admission", () => {
         };
 
         await bootstrapProduction(dependencies, {
-            createTemporaryRoot: () => Promise.resolve(artifactRoot),
+            createTemporaryRoot,
             expectedCheckout: targetRepositoryRoot,
             repositoryRoot: targetRepositoryRoot,
             userId: 1000,
         });
 
         expect(prerequisitesInspected).toBe(true);
+        expect(preparationCapacityAdmitted).toBe(true);
         expect(
-            commands.some((command) => command.includes("delivery prepare-state"))
+            commands.some((command) => command.includes("prepareProductionState.js"))
         ).toBe(true);
+        const admittedReleaseRoot = path.join(
+            targetRepositoryRoot,
+            "dist/releases",
+            releaseId
+        );
+        expect(prepareStateWorkingDirectories).toEqual([admittedReleaseRoot]);
         expect(
-            commands.findIndex((command) => command.includes("delivery prepare-state"))
+            commands.findIndex((command) =>
+                command.startsWith(
+                    `${admittedReleaseRoot}/runtime/bun ${admittedReleaseRoot}/server/prepareProductionState.js`
+                )
+            )
         ).toBeLessThan(
             commands.findIndex((command) =>
                 command.includes("migrateManagedApplicationLogs.ts")
             )
         );
         expect(commands.at(-1)).toContain("delivery activate");
+        expect(commands.at(-1)).toContain(
+            `--runtime-source=${admittedReleaseRoot}/runtime/bun`
+        );
         expect(commands.at(-1)).toContain("--activation-mode=greenfield");
+        expect(
+            commands.findIndex((command) =>
+                command.includes("installHostOperationsProvisioning.ts")
+            )
+        ).toBeLessThan(
+            commands.findIndex((command) => command.includes("delivery activate"))
+        );
+
+        commands.length = 0;
+        preparationCapacityAdmitted = false;
+        expect(
+            await captureFailure(
+                deployProduction(dependencies, {
+                    createTemporaryRoot,
+                    expectedCheckout: targetRepositoryRoot,
+                    repositoryRoot: targetRepositoryRoot,
+                    userId: 1000,
+                })
+            )
+        ).toBeInstanceOf(Error);
+        expect(manualDeployDelivered).toBe(false);
+        expect(preparationCapacityAdmitted).toBe(false);
+
+        commands.length = 0;
+        prerequisitesInspected = false;
+        provisioningBoundaryAvailable = true;
+        preparationCapacityAdmitted = false;
+        await deployProduction(dependencies, {
+            createTemporaryRoot,
+            expectedCheckout: targetRepositoryRoot,
+            repositoryRoot: targetRepositoryRoot,
+            userId: 1000,
+        });
+        expect(commands.some((command) => command.includes("release view"))).toBe(true);
+        expect(
+            commands.some((command) => command.includes("systemctl daemon-reload"))
+        ).toBe(false);
+        expect(commands).toContain(
+            "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
+        );
+        expect(manualDeployDelivered).toBe(true);
+        expect(preparationCapacityAdmitted).toBe(true);
+        expect(prerequisitesInspected).toBe(false);
+        expect(prepareStateWorkingDirectories).toEqual([
+            admittedReleaseRoot,
+            admittedReleaseRoot,
+        ]);
+
+        await writeFile(path.join(targetRepositoryRoot, ".bun-version"), "9.9.9\n");
+        let runtimeUpgradeDelivered = false;
+        await deployProduction(
+            {
+                ...dependencies,
+                deliverPublishedRelease: () => {
+                    runtimeUpgradeDelivered = true;
+                    return Promise.resolve();
+                },
+            },
+            {
+                createTemporaryRoot,
+                expectedCheckout: targetRepositoryRoot,
+                repositoryRoot: targetRepositoryRoot,
+                userId: 1000,
+            }
+        );
+        expect(runtimeUpgradeDelivered).toBe(true);
     });
 });

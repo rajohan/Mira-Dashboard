@@ -234,7 +234,9 @@ function childProgram(command: ChildCommand) {
 try {
     const command = parseCommand(process.argv.slice(2));
     await Effect.runPromise(childProgram(command));
-} catch {
-    process.stderr.write("SQLite outbox integration child failed\n");
+} catch (error) {
+    const diagnostic =
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
+    process.stderr.write(`SQLite outbox integration child failed: ${diagnostic}\n`);
     process.exitCode = 1;
 }

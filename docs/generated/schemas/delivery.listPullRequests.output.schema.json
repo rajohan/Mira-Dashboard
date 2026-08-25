@@ -56,7 +56,6 @@
                               "approve-review",
                               "create-stack",
                               "merge",
-                              "merge-and-deploy",
                               "preview-start",
                               "reject",
                               "update-branch"
@@ -113,7 +112,7 @@
                         "additionalProperties": false,
                         "$comment": "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind."
                       },
-                      "maxItems": 7,
+                      "maxItems": 6,
                       "$comment": "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID."
                     },
                     "additions": {
@@ -441,7 +440,6 @@
                               "approve-review",
                               "create-stack",
                               "merge",
-                              "merge-and-deploy",
                               "preview-start",
                               "reject",
                               "update-branch"
@@ -498,7 +496,7 @@
                         "additionalProperties": false,
                         "$comment": "Live Valibot validation additionally binds Delivery action availability to the absence of a blocking reason, review approval to Raymond, every other action to Mira, and each action to its reviewed scope kind."
                       },
-                      "maxItems": 7,
+                      "maxItems": 6,
                       "$comment": "Live Valibot validation additionally requires Delivery pull request actions to be unique and strictly ordered by action ID."
                     },
                     "additions": {

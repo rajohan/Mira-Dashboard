@@ -2,14 +2,15 @@ import type { BigIntStats, Dirent } from "node:fs";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
+import { maximumProductionReleaseArtifactTreeBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { readBoundedRegularFile } from "../files/boundedFile.ts";
 
 const invalidArtifactTreeMessage = "Release artifact tree is invalid";
 export const maximumReleaseArtifactBytes = 64 * 1024 * 1024;
-const maximumArtifactCount = 4096;
-const maximumArtifactDirectoryCount = 512;
+export const maximumReleaseRuntimeBytes = 256 * 1024 * 1024;
+export const maximumReleaseArtifactCount = 4096;
+export const maximumReleaseArtifactDirectoryCount = 512;
 const maximumArtifactDepth = 16;
-const maximumArtifactTreeBytes = 512 * 1024 * 1024;
 const artifactPathSegmentPattern = /^[A-Za-z0-9.@_+-]+$/u;
 
 function compareCanonicalText(left: string, right: string): number {
@@ -125,7 +126,7 @@ export async function inventoryReleaseArtifactTree(
         const visit = async (relativeDirectory: string, depth: number): Promise<void> => {
             if (depth > maximumArtifactDepth) throw invalidArtifactTree();
             directoryCount += 1;
-            if (directoryCount > maximumArtifactDirectoryCount) {
+            if (directoryCount > maximumReleaseArtifactDirectoryCount) {
                 throw invalidArtifactTree();
             }
             const absoluteDirectory =
@@ -151,25 +152,29 @@ export async function inventoryReleaseArtifactTree(
                     await visit(relativePath, depth + 1);
                     continue;
                 }
-                if (!entry.isFile() || records.length >= maximumArtifactCount) {
+                if (!entry.isFile() || records.length >= maximumReleaseArtifactCount) {
                     throw invalidArtifactTree();
                 }
 
                 const beforeRead = await lstat(absolutePath, { bigint: true });
+                const maximumBytes =
+                    relativePath === "runtime/bun"
+                        ? maximumReleaseRuntimeBytes
+                        : maximumReleaseArtifactBytes;
                 if (
                     !beforeRead.isFile() ||
                     beforeRead.isSymbolicLink() ||
                     beforeRead.nlink !== 1n ||
                     beforeRead.dev !== rootSnapshot.status.dev ||
                     beforeRead.size <= 0n ||
-                    beforeRead.size > BigInt(maximumReleaseArtifactBytes)
+                    beforeRead.size > BigInt(maximumBytes)
                 ) {
                     throw invalidArtifactTree();
                 }
                 const contents = await readBoundedRegularFile(
                     absolutePath,
                     releaseRoot,
-                    maximumReleaseArtifactBytes,
+                    maximumBytes,
                     invalidArtifactTreeMessage
                 );
                 await testHooks.afterFileRead?.(relativePath);
@@ -178,7 +183,9 @@ export async function inventoryReleaseArtifactTree(
                     throw invalidArtifactTree();
                 }
                 totalBytes += contents.byteLength;
-                if (totalBytes > maximumArtifactTreeBytes) throw invalidArtifactTree();
+                if (totalBytes > maximumProductionReleaseArtifactTreeBytes) {
+                    throw invalidArtifactTree();
+                }
                 records.push(
                     Object.freeze({
                         bytes: contents.byteLength,

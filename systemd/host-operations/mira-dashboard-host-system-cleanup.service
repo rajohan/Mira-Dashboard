@@ -1,3 +1,4 @@
+# Mira Dashboard managed unit.
 [Unit]
 Description=Mira Dashboard reviewed host cleanup
 After=network-online.target docker.service systemd-journald.service

@@ -17,6 +17,7 @@ import type {
     DeliveryReleasesResult,
     DeliveryRequestOperationResult,
 } from "../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
@@ -35,6 +36,7 @@ const userEvent = userEventModule.default;
 const observedAtMs = 1_800_000_000_000;
 const headSha = "a".repeat(40);
 const previousSha = "b".repeat(40);
+const candidateSha = "c".repeat(40);
 const sourceRevision = "c".repeat(64);
 const reviewerRevision = "d".repeat(64);
 const previewRevision = "e".repeat(64);
@@ -129,7 +131,7 @@ const checkoutResult = {
         condition: "ready",
         expectedBranch: "main",
         headSha,
-        remoteHeadSha: headSha,
+        remoteHeadSha: candidateSha,
         revision: checkoutRevision,
         safeForDeploy: true,
         upstream: "origin/main",
@@ -145,6 +147,7 @@ const releasesResult = {
     observedAtMs,
     releases: {
         activationRevision,
+        candidate: publishedReleaseAuthority(candidateSha),
         current: {
             builtAtMs: observedAtMs - 1000,
             commitTitle: "Current release",
@@ -370,9 +373,7 @@ describe("DeliveryRoute", () => {
             expect(
                 await screen.findByRole("button", { name: "Stop dev" })
             ).toBeDisabled();
-            expect(
-                screen.getByRole("button", { name: "Deploy latest main" })
-            ).toBeDisabled();
+            expect(screen.getByRole("button", { name: "Deploy v1.2.3" })).toBeDisabled();
             expect(
                 screen.getByRole("button", { name: /^(?:Run|Rebuild) preview$/u })
             ).toBeDisabled();
@@ -380,7 +381,7 @@ describe("DeliveryRoute", () => {
                 name: "Production release slots",
             });
             const deployButton = within(productionPanel).getByRole("button", {
-                name: "Deploy latest main",
+                name: "Deploy v1.2.3",
             });
             const deployAlert = within(productionPanel)
                 .getByText("Another Delivery action is active.")
@@ -605,7 +606,7 @@ describe("DeliveryRoute", () => {
         }
     });
 
-    test("renders authoritative head-guard limitations as disabled controls", async () => {
+    test("hides actions that GitHub can never bind to the reviewed head", async () => {
         const baseGroup = pullRequestsResult.groups[0];
         const basePullRequest = baseGroup.members[0];
         const harness = createClient({
@@ -634,19 +635,83 @@ describe("DeliveryRoute", () => {
         });
         const view = renderDelivery(harness.client);
         try {
-            const reject = await screen.findByRole("button", { name: "Reject" });
-            expect(reject).toBeDisabled();
-            const pullRequestCard = reject.closest("section");
-            expect(pullRequestCard).not.toBeNull();
-            const status = within(pullRequestCard!).getByRole("status");
-            expect(
-                within(status).getByText(
-                    "GitHub cannot atomically bind this action to the reviewed pull request head or stack heads."
-                )
-            ).toBeVisible();
+            await screen.findByText(basePullRequest.title);
+            expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+            expect(screen.queryByText(/cannot atomically bind/i)).toBeNull();
             expect(harness.mutation).not.toHaveBeenCalled();
         } finally {
             view.unmount();
+        }
+    });
+
+    test("names the blocked action and keeps approval copy person-neutral", async () => {
+        const baseGroup = pullRequestsResult.groups[0];
+        const basePullRequest = baseGroup.members[0];
+        const harness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    {
+                                        action: "merge",
+                                        actor: "mira",
+                                        available: false,
+                                        reason: "checks-blocked",
+                                        scope: "prefix",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(
+                await screen.findByText("Merge requires all latest CI checks to pass.")
+            ).toBeVisible();
+        } finally {
+            view.unmount();
+        }
+
+        const approvalHarness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    {
+                                        action: "merge",
+                                        actor: "mira",
+                                        available: false,
+                                        reason: "review-required",
+                                        scope: "prefix",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const approvalView = renderDelivery(approvalHarness.client);
+        try {
+            expect(
+                await screen.findByText("Approval is required before merge.")
+            ).toBeVisible();
+            expect(screen.queryByText(/Raymond approval/u)).toBeNull();
+        } finally {
+            approvalView.unmount();
         }
     });
 });

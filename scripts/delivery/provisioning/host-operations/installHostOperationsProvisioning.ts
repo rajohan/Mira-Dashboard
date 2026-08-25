@@ -11,6 +11,10 @@ import {
     hostOperationsProvisioningArtifacts,
     hostOperationsProvisioningReleaseArtifactPaths,
     hostOperationsProvisioningSourceArtifactPaths,
+    maximumProductionProvisioningBundleBytes,
+    productionHostProvisioningRoot,
+    productionProvisioningPairsRoot,
+    productionProvisioningRuntimeName,
 } from "./policy.ts";
 
 const installationFailureMessage = "Host operations provisioning installation failed";
@@ -34,10 +38,9 @@ const artifactShaPattern = /^[a-f\d]{64}$/u;
 const artifactSegmentPattern = /^[A-Za-z0-9.@_+-]+$/u;
 const provisioningPrefix = "scripts/delivery/provisioning/host-operations/";
 const productionSourceIdentity = Object.freeze({ groupId: 0n, userId: 0n });
-const productionRuntimeExecutablePath =
-    "/var/lib/mira-dashboard-host-provisioning/runtime/bun";
 const installerRelativePath =
     "scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts";
+const productionProvisioningBundlePath = "server/productionProvisioning.js";
 
 interface ReleaseArtifactRecord {
     readonly bytes: number;
@@ -76,9 +79,9 @@ const productionRuntimeBoundary = Object.freeze({
     actualExecutablePath: process.execPath,
     actualEntrypointPath: import.meta.path,
     expectedEntrypointPath: "",
-    expectedExecutablePath: productionRuntimeExecutablePath,
+    expectedExecutablePath: "",
     ...productionSourceIdentity,
-    trustRoot: "/var/lib/mira-dashboard-host-provisioning",
+    trustRoot: productionHostProvisioningRoot,
 });
 
 /** Deterministic non-production boundaries used only by focused installer tests. */
@@ -486,6 +489,12 @@ function parseManifestArtifacts(
     return Object.freeze(records);
 }
 
+function maximumProvisioningSourceBytes(artifactPath: string): number {
+    return artifactPath === productionProvisioningBundlePath
+        ? maximumProductionProvisioningBundleBytes
+        : maximumProvisioningArtifactBytes;
+}
+
 async function readHeldFile(
     directory: ReleaseDirectory,
     fileName: string,
@@ -641,7 +650,8 @@ async function loadProvisioningRelease(
         const sourceBytes = new Map<string, Uint8Array>();
         for (const artifactPath of hostOperationsProvisioningSourceArtifactPaths) {
             const record = byPath.get(artifactPath);
-            if (!record || record.bytes > maximumProvisioningArtifactBytes) {
+            const maximumBytes = maximumProvisioningSourceBytes(artifactPath);
+            if (!record || record.bytes > maximumBytes) {
                 throw installationFailure();
             }
             const source = directories.get(path.dirname(artifactPath));
@@ -651,7 +661,7 @@ async function loadProvisioningRelease(
                 await readHeldFile(
                     source,
                     path.basename(artifactPath),
-                    maximumProvisioningArtifactBytes,
+                    maximumBytes,
                     record
                 )
             );
@@ -775,6 +785,12 @@ export async function runInstallHostOperationsProvisioningCli(
         const runtimeBoundary = testHooks.runtimeBoundary ?? {
             ...productionRuntimeBoundary,
             expectedEntrypointPath: path.join(parsed.releaseRoot, installerRelativePath),
+            expectedExecutablePath: path.join(
+                productionProvisioningPairsRoot,
+                parsed.releaseId,
+                productionProvisioningRuntimeName
+            ),
+            trustRoot: productionProvisioningPairsRoot,
         };
         await validateRuntimeBoundary(runtimeBoundary, parsed.releaseRoot);
         const expectedSourceIdentity =

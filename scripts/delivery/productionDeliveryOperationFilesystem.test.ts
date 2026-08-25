@@ -17,6 +17,7 @@ import type {
     DeliveryProductionOperationCapsule,
     DeliveryProductionTerminalRecord,
 } from "../../src/shared/deliveryProductionOperation.ts";
+import { publishedReleaseAuthority } from "../../src/testSupport/publishedReleaseAuthority.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { withDeploymentLease } from "./deploymentLease.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
@@ -71,6 +72,11 @@ function capsule(
                   checkoutRevision: "2".repeat(64),
                   expectedMainHeadSha: targetReleaseId,
                   operation,
+                  release: publishedReleaseAuthority(
+                      targetReleaseId,
+                      "v1.2.3",
+                      "d".repeat(40)
+                  ),
                   sourceRevision: "f".repeat(64),
               };
     return {
@@ -113,7 +119,7 @@ function capsule(
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v1",
+        protocol: "delivery.production.v2",
         runId: transitionId,
         transitionId,
     };

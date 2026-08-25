@@ -10,6 +10,7 @@
         "build": "bun scripts/buildCommand.ts",
         "generate": "bun scripts/generateCommand.ts",
         "delivery": "bun scripts/deliveryCommand.ts",
+        "deploy": "bun scripts/productionDeploy.ts",
         "preflight": "bun scripts/productionPreflight.ts",
         "storybook": "bun scripts/storybookCommand.ts",
         "test": "bun scripts/testCommand.ts"

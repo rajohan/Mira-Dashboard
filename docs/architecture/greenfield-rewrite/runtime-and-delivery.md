@@ -817,13 +817,11 @@ required process roles, and the exact cross-release Delivery protocol. Every rel
 manifest-bound `productionDelivery.js` executor for `delivery.production.v1`. It contains no
 secrets.
 
-Every release also contains the manifest-bound `openClawHeartbeat.js` executable and the exact
-`scripts/delivery/provisioning/openclaw-heartbeat/HEARTBEAT.md` Markdown prompt source. The retained
-artifact filename is release inventory, not the runtime target. The executable has only `collect`
-and `report` modes and reads `openclaw-heartbeat.token` from its fixed private client path. OpenClaw
-owns the live authority at `agents.entries.ops.heartbeat.prompt`; Dashboard build, publication,
-retention, ordinary activation, and service restart never install or reset either that config value
-or the external credential.
+Every release also contains the manifest-bound `openClawHeartbeat.js` executable. It has only
+`collect` and `report` modes and reads `openclaw-heartbeat.token` from its fixed private client
+path. The OpenClaw automation scratch is the sole operative prompt authority; Dashboard build,
+publication, retention, activation, and service restart neither package a competing prompt nor
+install or reset the external credential.
 
 Email verification and password recovery are part of the web trust boundary rather than ancillary
 release executables. Bootstrap requires one syntactically valid canonical account email, creates
@@ -866,15 +864,21 @@ manifest-inventoried Tailscale provisioning artifact, which delegates the fixed 
 `NoNewPrivileges=true` and invokes only the fixed `/usr/bin/tailscale` binary directly; it never
 uses `sudo`. Production cutover reads Tailscale preferences and requires the exact operator before
 confirming the journal or stopping services. Missing or drifted delegation therefore fails closed
-before deployment effects, and bootstrap is never applied implicitly by deployment.
+before deployment effects. Later deployment reuses the bootstrap release-admission and
+manifest-bound root-provisioning boundary before activation; it does not rerun greenfield state
+initialization.
 
 Post-cutover Greenfield deployment flow:
 
-1. Build and test one artifact using the same resolved Bun runtime throughout the build.
+1. Release Please publishes the tested commit as a stable semantic GitHub release with permanent,
+   digest-bound `release.tar` and `receipt.json` assets. Ordinary pull requests only merge and can
+   never deploy directly.
 2. Verify every source artifact hash and the exact runtime identity without copying into the
    production artifact roots yet.
-3. Prepare and verify `<project-root>/production/state` plus its protected ancestor chain before
-   changing the active release pointer.
+3. Reapply the candidate manifest's root-owned systemd, polkit, log-maintenance, and related host
+   authority, then run `daemon-reload`. Prepare and verify
+   `<project-root>/production/state` plus its protected ancestor chain before changing the active
+   release pointer.
 4. Acquire the deployment lease, recover any durable activation journal, and run verified
    release/runtime retention before copying. Admit the missing source-tree and Bun runtime using
    destination allocation blocks, conservative directory metadata, free-inode capacity, a fixed

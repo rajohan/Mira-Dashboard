@@ -6,6 +6,7 @@ import type {
     DeliveryRequestOperationInput,
     DeliveryRequestOperationResult,
 } from "../../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     createTestApplicationRuntime,
@@ -37,7 +38,6 @@ const snapshotTransitionId = "018f6f50-6a9e-7b88-8000-000000000021";
 const approvePullRequestInput = Object.freeze({
     checkoutRevision: resourceRevision,
     confirmation: "merge-delivery-pull-request" as const,
-    deploy: false as const,
     expectedHeads: [{ headSha, number: 42 }],
     idempotencyKey,
     mergeStack: false,
@@ -71,6 +71,7 @@ const deployInput = Object.freeze({
     expectedMainHeadSha: headSha,
     idempotencyKey,
     operation: "deploy" as const,
+    release: publishedReleaseAuthority(headSha, "v1.2.3", runtimeRevision),
     sourceRevision,
 });
 const rejectPullRequestInput = Object.freeze({

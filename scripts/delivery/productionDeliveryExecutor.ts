@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { Effect } from "effect";
@@ -22,6 +22,10 @@ import {
 import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
 import { lowercaseUuidV7Schema } from "../../src/shared/validation.ts";
 import { resolveBuildSourceIdentity } from "../buildSourceIdentity.ts";
+import {
+    preparePublishedProductionRelease,
+    productionBootstrapDependencies,
+} from "../productionBootstrap.ts";
 import { buildDashboardRelease } from "./buildRelease.ts";
 import { withDeploymentLease, type DashboardDeploymentLease } from "./deploymentLease.ts";
 import { loadProductionActivationState } from "./productionActivationState.ts";
@@ -45,7 +49,9 @@ import {
     type ProductionReleaseActivationOptions,
     type ProductionServiceController,
 } from "./productionReleaseActivation.ts";
+import { admitProductionReleasePreparation } from "./productionReleasePreparationCapacity.ts";
 import {
+    discardOwnedProductionReleaseCandidate,
     loadPublishedProductionRelease,
     publishProductionRelease,
     type PublishedProductionRelease,
@@ -56,13 +62,34 @@ import {
     type InstalledProductionRuntime,
 } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
+import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import { verifyPreviewTailscaleOperator } from "./provisioning/preview-tailscale/operator.ts";
-import { verifyReleaseIdentity } from "./releaseIdentity.ts";
+import {
+    verifyReleaseArtifactIdentity,
+    verifyReleaseIdentity,
+} from "./releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./systemdProductionServices.ts";
 
 const executorFailureMessage = "Production Delivery executor failed";
 const executorUsage =
-    "Usage: bun productionDelivery.js --operation=prepare|inspect|inspect-active|clear|cutover --project-root=/absolute/project [--readiness-url=http://127.0.0.1:PORT/api/health/ready] [--transition=uuid-v7]";
+    "Usage: bun productionDelivery.js --operation=prepare|inspect|inspect-active|clear|cutover --project-root=/absolute/project [--artifact-source=published-release|retained] [--readiness-url=http://127.0.0.1:PORT/api/health/ready] [--transition=uuid-v7]";
+const admitProductionDeliveryArtifacts: typeof assertProductionArtifactCapacity = (
+    lease,
+    paths,
+    sourceReleaseRoot,
+    sourceManifest,
+    sourceExecutable
+) =>
+    assertProductionArtifactCapacity(
+        lease,
+        paths,
+        sourceReleaseRoot,
+        sourceManifest,
+        sourceExecutable,
+        {
+            additionalReleaseCopyDirectory: productionHostProvisioningRoot,
+        }
+    );
 const absoluteProjectRootSchema = v.pipe(
     v.string(executorUsage),
     v.maxLength(4096, executorUsage),
@@ -115,6 +142,7 @@ const argumentsSchema = v.variant("operation", [
         transitionId: lowercaseUuidV7Schema(executorUsage),
     }),
     v.strictObject({
+        artifactSource: v.picklist(["published-release", "retained"], executorUsage),
         operation: v.literal("cutover"),
         projectRoot: absoluteProjectRootSchema,
         readinessUrl: readinessUrlSchema,
@@ -136,6 +164,7 @@ export interface ProductionDeliveryExecutorDependencies {
         paths: PreparedProductionDeliveryPaths,
         readinessUrl: string
     ) => ProductionReleaseActivationDependencies["services"];
+    readonly discardCandidate?: typeof discardOwnedProductionReleaseCandidate;
     readonly loadActivation?: typeof loadProductionActivationState;
     readonly loadArtifacts?: (
         paths: PreparedProductionDeliveryPaths,
@@ -150,6 +179,8 @@ export interface ProductionDeliveryExecutorDependencies {
     readonly installRuntime?: typeof installProductionRuntime;
     readonly nowMs?: () => number;
     readonly publishRelease?: typeof publishProductionRelease;
+    readonly preparePublishedRelease?: typeof preparePublishedProductionRelease;
+    readonly preparationCapacityAdmission?: (checkoutRoot: string) => Promise<void>;
     readonly resolveSourceIdentity?: typeof resolveBuildSourceIdentity;
     readonly verifyRunBeforeSnapshot?: (
         paths: PreparedProductionDeliveryPaths,
@@ -193,6 +224,22 @@ function sha256(value: string): string {
     return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
+/**
+ * Compares exact release-manifest bytes with the published release authority.
+ * @param manifestBytes Exact immutable manifest bytes.
+ * @param expectedSha256 Published manifest digest.
+ * @returns Whether the cached bytes belong to the authorized release assets.
+ */
+export function releaseManifestMatchesAuthority(
+    manifestBytes: Uint8Array,
+    expectedSha256: string
+): boolean {
+    return (
+        new Bun.CryptoHasher("sha256").update(manifestBytes).digest("hex") ===
+        expectedSha256
+    );
+}
+
 function hasValidProductionRunState(run: ProductionRunRow): boolean {
     if (run.state === "queued") {
         return (
@@ -233,7 +280,8 @@ export async function verifyProductionRunBeforeSnapshot(
         }
         database = new Database(databasePath, { readonly: true, strict: true });
         const run = database
-            .query<ProductionRunRow, [string]>(`
+            .query<ProductionRunRow, [string]>(
+                `
                 SELECT
                     action_key AS actionKey,
                     enqueue_sha256 AS enqueueSha256,
@@ -249,10 +297,12 @@ export async function verifyProductionRunBeforeSnapshot(
                 FROM job_runs
                 WHERE id = ?1
                 LIMIT 2
-            `)
+            `
+            )
             .all(capsule.runId);
         const audit = database
-            .query<EnqueueAuditRow, [string]>(`
+            .query<EnqueueAuditRow, [string]>(
+                `
                 SELECT
                     action,
                     actor_id AS actorId,
@@ -266,7 +316,8 @@ export async function verifyProductionRunBeforeSnapshot(
                 FROM audit_events
                 WHERE id = ?1
                 LIMIT 2
-            `)
+            `
+            )
             .all(capsule.enqueue.audit.eventId);
         const expectedPayload = JSON.stringify(capsule.enqueue.payload);
         if (
@@ -337,15 +388,22 @@ export function parseProductionDeliveryExecutorArguments(
     if (
         Object.keys(named).some(
             (name) =>
-                !["operation", "project-root", "readiness-url", "transition"].includes(
-                    name
-                )
+                ![
+                    "artifact-source",
+                    "operation",
+                    "project-root",
+                    "readiness-url",
+                    "transition",
+                ].includes(name)
         )
     ) {
         throw new TypeError(executorUsage);
     }
     return Object.freeze(
         v.parse(argumentsSchema, {
+            ...(named["artifact-source"] === undefined
+                ? {}
+                : { artifactSource: named["artifact-source"] }),
             operation: named.operation,
             projectRoot: named["project-root"],
             ...(named["readiness-url"] === undefined
@@ -384,13 +442,22 @@ function activationMatchesTarget(
     );
 }
 
+/**
+ * Checks one release against the current Delivery execution contract.
+ * @param release Verified published release.
+ * @returns Whether the release declares the current protocol and process role.
+ */
+export function releaseSupportsCurrentDeliveryProtocol(
+    release: PublishedProductionRelease
+): boolean {
+    return (
+        release.manifest.deliveryProtocols.includes(deliveryProductionProtocol) &&
+        release.manifest.processRoles.includes("production-delivery")
+    );
+}
+
 function requireProtocol(release: PublishedProductionRelease): void {
-    if (
-        !release.manifest.deliveryProtocols.includes(deliveryProductionProtocol) ||
-        !release.manifest.processRoles.includes("production-delivery")
-    ) {
-        throw failure();
-    }
+    if (!releaseSupportsCurrentDeliveryProtocol(release)) throw failure();
 }
 
 async function loadExactArtifacts(
@@ -422,6 +489,7 @@ async function loadCurrentArtifacts(
         releaseId,
         runtimeRevision
     );
+    requireProtocol(release);
     const runtime = await loadInstalledProductionRuntime(paths, release.manifest.runtime);
     return Object.freeze({ release, runtime });
 }
@@ -449,6 +517,7 @@ async function pathState(candidate: string): Promise<"missing" | "present"> {
  * @param projectRoot Canonical Dashboard project root.
  * @param record Exact in-progress operation record.
  * @param current Verified active release and runtime.
+ * @param artifactSource Whether a missing target may be admitted from its published release.
  * @param dependencies Optional fixed delivery seams.
  * @returns The verified published target release and runtime.
  */
@@ -461,11 +530,30 @@ export async function prepareProductionDeliveryTargetUnderLease(
         release: PublishedProductionRelease;
         runtime: InstalledProductionRuntime;
     }>,
+    artifactSource: "published-release" | "retained",
     dependencies: ProductionDeliveryExecutorDependencies
 ): Promise<
     Readonly<{ release: PublishedProductionRelease; runtime: InstalledProductionRuntime }>
 > {
     const target = record.capsule.cas.target;
+    const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
+    if ((await pathState(publishedRoot)) === "present") {
+        if (record.capsule.enqueue.payload.operation === "deploy") {
+            const manifestBytes = await readFile(
+                path.join(publishedRoot, "release-manifest.json")
+            );
+            if (
+                !releaseManifestMatchesAuthority(
+                    manifestBytes,
+                    record.capsule.enqueue.payload.release.releaseManifestSha256
+                )
+            ) {
+                throw failure();
+            }
+        }
+        return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
+    }
+    if (artifactSource === "retained") throw failure();
     const checkoutRoot = path.join(projectRoot, "production/checkout");
     const source = await (
         dependencies.resolveSourceIdentity ?? resolveBuildSourceIdentity
@@ -474,58 +562,104 @@ export async function prepareProductionDeliveryTargetUnderLease(
         throw failure();
     }
 
-    const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
-    if ((await pathState(publishedRoot)) === "present") {
-        return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
+    const usesTestBuildSeams =
+        dependencies.preparePublishedRelease === undefined &&
+        (dependencies.buildRelease !== undefined ||
+            dependencies.verifyLocalRelease !== undefined);
+    let admittedPublishedRelease:
+        | Awaited<ReturnType<typeof preparePublishedProductionRelease>>
+        | undefined;
+    if (!usesTestBuildSeams) {
+        await (
+            dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
+        )(checkoutRoot, productionHostProvisioningRoot);
+        admittedPublishedRelease = await (
+            dependencies.preparePublishedRelease ?? preparePublishedProductionRelease
+        )(
+            target.releaseId,
+            checkoutRoot,
+            productionBootstrapDependencies,
+            undefined,
+            undefined,
+            record.capsule.enqueue.payload.operation === "deploy"
+                ? record.capsule.enqueue.payload.release
+                : undefined,
+            { stageRootAuthority: false }
+        );
     }
 
     const localReleaseRoot = path.join(checkoutRoot, "dist/releases", target.releaseId);
-    let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
-    if ((await pathState(localReleaseRoot)) === "present") {
-        const manifest = await (dependencies.verifyLocalRelease ?? verifyReleaseIdentity)(
-            localReleaseRoot,
-            current.runtime.identity
+    try {
+        let sourceRelease: Awaited<ReturnType<typeof buildDashboardRelease>>;
+        if (admittedPublishedRelease !== undefined) {
+            const manifest =
+                dependencies.verifyLocalRelease === undefined
+                    ? await verifyReleaseArtifactIdentity(
+                          admittedPublishedRelease.releaseRoot
+                      )
+                    : await dependencies.verifyLocalRelease(
+                          admittedPublishedRelease.releaseRoot,
+                          admittedPublishedRelease.authority.runtime
+                      );
+            sourceRelease = Object.freeze({
+                manifest,
+                releaseRoot: admittedPublishedRelease.releaseRoot,
+            });
+        } else if ((await pathState(localReleaseRoot)) === "present") {
+            const manifest = await (
+                dependencies.verifyLocalRelease ?? verifyReleaseIdentity
+            )(localReleaseRoot, current.runtime.identity);
+            sourceRelease = Object.freeze({ manifest, releaseRoot: localReleaseRoot });
+        } else {
+            sourceRelease = await (dependencies.buildRelease ?? buildDashboardRelease)(
+                checkoutRoot,
+                { runtimeIdentity: current.runtime.identity }
+            );
+        }
+        if (
+            sourceRelease.manifest.source.commitSha !== target.releaseId ||
+            sourceRelease.manifest.runtime.revision !== target.runtimeRevision
+        ) {
+            throw failure();
+        }
+        requireProtocol(
+            Object.freeze({
+                manifest: sourceRelease.manifest,
+                releaseRoot: sourceRelease.releaseRoot,
+            })
         );
-        sourceRelease = Object.freeze({ manifest, releaseRoot: localReleaseRoot });
-    } else {
-        sourceRelease = await (dependencies.buildRelease ?? buildDashboardRelease)(
-            checkoutRoot,
-            { runtimeIdentity: current.runtime.identity }
+        const candidateRuntimeExecutable = path.join(
+            sourceRelease.releaseRoot,
+            "runtime/bun"
         );
+        await (dependencies.capacityAdmission ?? admitProductionDeliveryArtifacts)(
+            lease,
+            paths,
+            sourceRelease.releaseRoot,
+            sourceRelease.manifest,
+            candidateRuntimeExecutable
+        );
+        const runtime = await (dependencies.installRuntime ?? installProductionRuntime)(
+            lease,
+            paths,
+            sourceRelease.manifest.runtime,
+            { sourceExecutable: candidateRuntimeExecutable }
+        );
+        const release = await (dependencies.publishRelease ?? publishProductionRelease)(
+            lease,
+            paths,
+            sourceRelease.releaseRoot,
+            sourceRelease.manifest.runtime
+        );
+        requireProtocol(release);
+        return Object.freeze({ release, runtime });
+    } finally {
+        if (admittedPublishedRelease !== undefined) {
+            await (
+                dependencies.discardCandidate ?? discardOwnedProductionReleaseCandidate
+            )(path.dirname(localReleaseRoot), localReleaseRoot, target.releaseId);
+        }
     }
-    if (
-        sourceRelease.manifest.source.commitSha !== target.releaseId ||
-        sourceRelease.manifest.runtime.revision !== target.runtimeRevision
-    ) {
-        throw failure();
-    }
-    requireProtocol(
-        Object.freeze({
-            manifest: sourceRelease.manifest,
-            releaseRoot: sourceRelease.releaseRoot,
-        })
-    );
-    await (dependencies.capacityAdmission ?? assertProductionArtifactCapacity)(
-        lease,
-        paths,
-        sourceRelease.releaseRoot,
-        sourceRelease.manifest,
-        current.runtime.executable
-    );
-    const runtime = await (dependencies.installRuntime ?? installProductionRuntime)(
-        lease,
-        paths,
-        sourceRelease.manifest.runtime,
-        { sourceExecutable: current.runtime.executable }
-    );
-    const release = await (dependencies.publishRelease ?? publishProductionRelease)(
-        lease,
-        paths,
-        sourceRelease.releaseRoot,
-        sourceRelease.manifest.runtime
-    );
-    requireProtocol(release);
-    return Object.freeze({ release, runtime });
 }
 
 async function advanceTo(
@@ -625,6 +759,7 @@ async function restartNormalRuntime(
         activation.current.runtimeRevision,
         dependencies
     );
+    await services.settle?.(active.release, active.runtime);
     await services.prepare(active.release, active.runtime);
     await services.start(active.release, active.runtime);
     await services.verifyReady(active.release, active.runtime);
@@ -691,6 +826,10 @@ export async function runProductionDeliveryExecutorUnderLease(
             dependencies.createServices?.(lease, paths, options.readinessUrl) ??
             createSystemdProductionServiceController(lease, paths, {
                 readinessUrl: options.readinessUrl,
+                releaseAuthority:
+                    record.capsule.enqueue.payload.operation === "deploy"
+                        ? record.capsule.enqueue.payload.release
+                        : undefined,
             });
         if (dependencies.loadArtifacts === undefined) {
             await (dependencies.artifactAdmission ?? prepareProductionArtifactAdmission)(
@@ -762,6 +901,7 @@ export async function runProductionDeliveryExecutorUnderLease(
                 options.projectRoot,
                 record,
                 current,
+                options.artifactSource,
                 dependencies
             );
         }
@@ -806,6 +946,22 @@ export async function runProductionDeliveryExecutorUnderLease(
     } catch {
         const terminal = await inspectDeliveryProductionOperation(lease, paths);
         if (terminal.state === "terminal") throw failure();
+        const recovery = await loadActivation(lease, paths).catch(() => null);
+        if (
+            services !== undefined &&
+            recovery?.record !== undefined &&
+            (activationMatchesCurrent(recovery.record, record) ||
+                activationMatchesTarget(recovery.record, record))
+        ) {
+            await restartNormalRuntime(paths, recovery.record, services, dependencies);
+            if (activationMatchesTarget(recovery.record, record)) {
+                return completeDeliveryProductionOperation(lease, paths, record, {
+                    activation: recovery.record,
+                    completedAtMs: Math.max(nowMs(), record.updatedAtMs),
+                    outcome: "succeeded",
+                });
+            }
+        }
         const receipt = await terminalFailure(
             lease,
             paths,
@@ -813,14 +969,6 @@ export async function runProductionDeliveryExecutorUnderLease(
             nowMs,
             loadActivation
         );
-        if (services !== undefined && receipt.result.activation !== null) {
-            await restartNormalRuntime(
-                paths,
-                receipt.result.activation,
-                services,
-                dependencies
-            );
-        }
         return receipt;
     }
 }

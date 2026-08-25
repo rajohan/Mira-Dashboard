@@ -1,12 +1,8 @@
 import * as v from "valibot";
 
-import type {
-    DeliveryExpectedHead,
-    DeliveryOperationAuthoritySnapshot,
-} from "../../contracts/delivery.ts";
+import type { DeliveryOperationAuthoritySnapshot } from "../../contracts/delivery.ts";
 import type {
     DeliveryDashboardMainGitSyncPort,
-    DeliveryGitHubMergeMutationOutcome,
     DeliveryGitHubPullRequestMutationPort,
     DeliveryGitHubPullRequestReadPort,
 } from "../../contracts/deliveryGithub.ts";
@@ -26,12 +22,14 @@ import {
     type DeliveryProductionOperationInspection,
     type DeliveryProductionOperationRecord,
 } from "../../shared/deliveryProductionOperation.ts";
+import { publishedReleaseAuthoritiesMatch } from "../../shared/publishedReleaseAuthority.ts";
 import { fullCommitShaSchema } from "../../shared/validation.ts";
 import type { DeliveryProductionAuthorityReader } from "./productionAuthorityReader.ts";
 import type { ProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
 import {
     ensureProductionDeliveryExecutor,
     launchProductionDeliveryExecutor,
+    productionDeliveryArtifactSource,
     type ProductionDeliveryLaunchOptions,
 } from "./productionDeliveryLauncher.ts";
 import type { DeliveryProductionExecutionPort } from "./runtime.ts";
@@ -73,10 +71,6 @@ export class DeliveryProductionExecutionError extends Error {
 
 export interface DeliveryProductionExecutionOptions {
     readonly authority: DeliveryProductionAuthorityReader;
-    readonly cleanupConfirmed?: (
-        expectedHeads: readonly DeliveryExpectedHead[],
-        signal?: AbortSignal
-    ) => Promise<boolean>;
     readonly control: ProductionDeliveryControlPort;
     /** Exact immutable executor that is currently running this worker release. */
     readonly executorReleaseId: string;
@@ -158,7 +152,6 @@ function terminalResult(
     if (!receiptBelongsToRun(inspection.record, payload, identity)) throw failure();
     const result = inspection.record.result;
     const preCutoverWarnings = inspection.record.capsule.preCutoverWarnings ?? [];
-    const mergeCompleted = payload.operation === "merge-pull-request";
     const partial = (
         warnings: readonly DeliveryOperationWarningCode[],
         releaseId?: string
@@ -170,18 +163,12 @@ function terminalResult(
             warnings: canonicalDeliveryOperationWarnings(warnings),
         });
     if (result.outcome === "unknown-outcome") {
-        if (mergeCompleted) {
-            return partial([...preCutoverWarnings, "deployment-outcome-unknown"]);
-        }
         return Object.freeze({
             operation: payload.operation,
             outcome: "unknown-outcome",
         });
     }
     if (result.outcome !== "succeeded") {
-        if (mergeCompleted) {
-            return partial([...preCutoverWarnings, "deployment-failed"]);
-        }
         throw failure();
     }
     if (
@@ -229,60 +216,6 @@ function validateRunIdentity(
     ) {
         throw failure();
     }
-}
-
-async function reconcileMerge(
-    options: DeliveryProductionExecutionOptions,
-    payload: Extract<DeliveryProductionJobPayload, { operation: "merge-pull-request" }>,
-    signal?: AbortSignal
-): Promise<DeliveryGitHubMergeMutationOutcome> {
-    const observed = await Promise.all(
-        payload.expectedHeads.map(({ number }) =>
-            options.github.getPullRequest(number, signal)
-        )
-    );
-    if (
-        observed.some(
-            (pullRequest, index) =>
-                pullRequest.number !== payload.expectedHeads[index]?.number ||
-                pullRequest.headSha !== payload.expectedHeads[index]?.headSha
-        )
-    ) {
-        throw failure();
-    }
-    if (observed.every(({ state }) => state === "MERGED")) {
-        const mainHeadSha = observed.at(-1)?.mergeCommitSha;
-        return mainHeadSha === undefined
-            ? Object.freeze({ outcome: "unknown-outcome" })
-            : Object.freeze({ mainHeadSha, outcome: "completed" });
-    }
-    if (!observed.every(({ state }) => state === "OPEN")) {
-        return Object.freeze({ outcome: "unknown-outcome" });
-    }
-    const outcome = payload.mergeStack
-        ? await options.github.mergeNativeStack(payload.expectedHeads, signal)
-        : await options.github.mergePullRequest(payload.expectedHeads[0]!, signal);
-    if (outcome.outcome === "enqueued" || outcome.outcome === "unknown-outcome") {
-        return outcome;
-    }
-    const confirmed = await Promise.all(
-        payload.expectedHeads.map(({ number }) =>
-            options.github.getPullRequest(number, signal)
-        )
-    );
-    const confirmedMainHeadSha = confirmed.at(-1)?.mergeCommitSha;
-    if (
-        confirmedMainHeadSha !== outcome.mainHeadSha ||
-        confirmed.some(
-            (pullRequest, index) =>
-                pullRequest.state !== "MERGED" ||
-                pullRequest.number !== payload.expectedHeads[index]?.number ||
-                pullRequest.headSha !== payload.expectedHeads[index]?.headSha
-        )
-    ) {
-        return Object.freeze({ outcome: "unknown-outcome" });
-    }
-    return outcome;
 }
 
 async function synchronizeMain(
@@ -382,6 +315,9 @@ export function createDeliveryProductionExecutionPort(
                             await ensureProductionDeliveryExecutor(launchOptions);
                         })
                     )({
+                        artifactSource: productionDeliveryArtifactSource(
+                            existing.record.capsule.enqueue.payload.operation
+                        ),
                         executorReleaseId: existing.record.capsule.executor.releaseId,
                         projectRoot: options.projectRoot,
                         readinessUrl: options.readinessUrl,
@@ -392,69 +328,23 @@ export function createDeliveryProductionExecutionPort(
                 return awaitReceipt(options, payload, identity, signal);
             }
 
-            let targetReleaseId: string;
-            let mergeCompleted = false;
-            const preCutoverWarnings: DeliveryOperationWarningCode[] = [];
-            if (payload.operation === "merge-pull-request") {
-                const merge = await reconcileMerge(options, payload, signal);
-                if (merge.outcome === "enqueued") {
-                    return Object.freeze({
-                        operation: payload.operation,
-                        outcome: "enqueued",
-                    });
-                }
-                if (merge.outcome === "unknown-outcome") {
-                    return Object.freeze({
-                        operation: payload.operation,
-                        outcome: "unknown-outcome",
-                    });
-                }
-                mergeCompleted = true;
-                if (merge.outcome === "partial-success") {
-                    preCutoverWarnings.push(merge.warning);
-                }
-                try {
-                    targetReleaseId = await synchronizeMain(
-                        options,
-                        merge.mainHeadSha,
-                        signal
-                    );
-                } catch {
-                    signal?.throwIfAborted();
-                    return Object.freeze({
-                        operation: payload.operation,
-                        outcome: "completed-with-warnings",
-                        warnings: canonicalDeliveryOperationWarnings([
-                            ...preCutoverWarnings,
-                            "deployment-not-started",
-                            "main-sync-failed",
-                        ]),
-                    });
-                }
-                if (options.cleanupConfirmed !== undefined) {
-                    try {
-                        if (
-                            !(await options.cleanupConfirmed(
-                                payload.expectedHeads,
-                                signal
-                            ))
-                        ) {
-                            preCutoverWarnings.push("preview-cleanup-failed");
-                        }
-                    } catch {
-                        signal?.throwIfAborted();
-                        preCutoverWarnings.push("preview-cleanup-failed");
-                    }
-                }
-            } else if (payload.operation === "deploy") {
-                targetReleaseId = await synchronizeMain(
-                    options,
-                    payload.expectedMainHeadSha,
-                    signal
-                );
-            } else {
-                targetReleaseId = payload.target.releaseId;
+            if (
+                payload.operation === "deploy" &&
+                (current.releases.candidate === undefined ||
+                    current.releases.current === undefined ||
+                    !publishedReleaseAuthoritiesMatch(
+                        current.releases.candidate,
+                        payload.release
+                    ))
+            ) {
+                throw failure();
             }
+
+            const preCutoverWarnings: DeliveryOperationWarningCode[] = [];
+            const targetReleaseId =
+                payload.operation === "deploy"
+                    ? await synchronizeMain(options, payload.expectedMainHeadSha, signal)
+                    : payload.target.releaseId;
 
             const authority = await options.authority.readExact(signal);
             const activation = authority.activation;
@@ -470,16 +360,6 @@ export function createDeliveryProductionExecutionPort(
                 activation.current.runtimeRevision !== currentRelease.runtimeRevision ||
                 targetReleaseId === activation.current.releaseId
             ) {
-                if (mergeCompleted) {
-                    return Object.freeze({
-                        operation: payload.operation,
-                        outcome: "completed-with-warnings",
-                        warnings: canonicalDeliveryOperationWarnings([
-                            ...preCutoverWarnings,
-                            "deployment-not-started",
-                        ]),
-                    });
-                }
                 throw failure();
             }
             if (
@@ -495,6 +375,27 @@ export function createDeliveryProductionExecutionPort(
                 throw failure();
             }
 
+            let target: Readonly<{
+                databaseSnapshotTransitionId: string | null;
+                releaseId: string;
+                runtimeRevision: string;
+            }>;
+            if (payload.operation === "rollback-release") {
+                target = {
+                    databaseSnapshotTransitionId:
+                        payload.target.databaseSnapshotTransitionId,
+                    releaseId: payload.target.releaseId,
+                    runtimeRevision: payload.target.runtimeRevision,
+                };
+            } else if (payload.operation === "deploy") {
+                target = {
+                    databaseSnapshotTransitionId: null,
+                    releaseId: targetReleaseId,
+                    runtimeRevision: payload.release.runtime.revision,
+                };
+            } else {
+                throw failure();
+            }
             const capsule: DeliveryProductionOperationCapsule =
                 parseDeliveryProductionOperationCapsule({
                     cas: {
@@ -504,19 +405,7 @@ export function createDeliveryProductionExecutionPort(
                             rollbackSnapshotTransitionId: identity.runId,
                             runtimeRevision: activation.current.runtimeRevision,
                         },
-                        target:
-                            payload.operation === "rollback-release"
-                                ? {
-                                      databaseSnapshotTransitionId:
-                                          payload.target.databaseSnapshotTransitionId,
-                                      releaseId: payload.target.releaseId,
-                                      runtimeRevision: payload.target.runtimeRevision,
-                                  }
-                                : {
-                                      databaseSnapshotTransitionId: null,
-                                      releaseId: targetReleaseId,
-                                      runtimeRevision: activation.current.runtimeRevision,
-                                  },
+                        target,
                     },
                     enqueue: {
                         actionKey: deliveryProductionActionKey,
@@ -547,6 +436,7 @@ export function createDeliveryProductionExecutionPort(
                 });
             await options.control.prepare(capsule, signal);
             await (options.launch ?? launchProductionDeliveryExecutor)({
+                artifactSource: productionDeliveryArtifactSource(payload.operation),
                 executorReleaseId: options.executorReleaseId,
                 projectRoot: options.projectRoot,
                 readinessUrl: options.readinessUrl,

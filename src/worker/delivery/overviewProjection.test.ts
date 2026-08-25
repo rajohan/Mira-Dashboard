@@ -263,12 +263,10 @@ describe("Delivery overview projection", () => {
             available: false,
             reason: "head-guard-unavailable",
         });
-        for (const id of ["merge", "merge-and-deploy"] as const) {
-            expect(action(nativeTop.number, id)).toMatchObject({
-                available: false,
-                reason: "head-guard-unavailable",
-            });
-        }
+        expect(action(nativeTop.number, "merge")).toMatchObject({
+            available: false,
+            reason: "head-guard-unavailable",
+        });
         expect(action(nativeTop.number, "preview-start")).toMatchObject({
             available: true,
         });
@@ -308,6 +306,20 @@ describe("Delivery overview projection", () => {
                 .actions.find(({ action }) => action === "preview-start")
         ).toMatchObject({ available: false, reason: "untrusted-author" });
         expect(merge(ordinary.number)).toMatchObject({ available: true });
+    });
+
+    test("omits preview execution from Release Please pull requests", () => {
+        const release = pullRequest(1, {
+            authorLogin: "mira-release",
+            headRefName: "release-please--branches--main--components--mira-dashboard",
+            title: "chore(main): release 0.3.0",
+        });
+        const member = project([release]).pullRequestGroups[0]!.members[0]!;
+
+        expect(member.actions.some(({ action }) => action === "preview-start")).toBe(
+            false
+        );
+        expect(member.actions.some(({ action }) => action === "merge")).toBe(true);
     });
 
     test("omits bodies deterministically before dropping any pull request inventory", () => {

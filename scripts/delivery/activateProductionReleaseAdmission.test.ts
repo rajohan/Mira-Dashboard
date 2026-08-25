@@ -5,7 +5,9 @@ import path from "node:path";
 
 import { Effect } from "effect";
 
+import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
+import { publishedReleaseAuthority } from "../../src/testSupport/publishedReleaseAuthority.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
     deliverProductionReleaseUnderLease,
@@ -28,6 +30,7 @@ import {
 import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
+import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
 
 const temporaryDirectories: string[] = [];
@@ -44,6 +47,7 @@ function filesystemCapacity(availableBytes: bigint, availableInodes = 1_000_000n
 }
 
 const services: ProductionServiceController = Object.freeze({
+    provision: async () => {},
     prepare: () => Promise.resolve(),
     start: () => Promise.resolve(),
     stop: () => Promise.resolve(),
@@ -79,8 +83,15 @@ async function createFixture() {
     temporaryDirectories.push(projectRoot, sourceRoot, runtimeRoot);
     const releaseRoot = path.join(sourceRoot, "release");
     const runtimeSource = path.join(runtimeRoot, "bun");
-    await mkdir(releaseRoot, { mode: 0o700 });
+    await mkdir(path.join(releaseRoot, "runtime"), { mode: 0o700, recursive: true });
+    await mkdir(path.join(releaseRoot, "server"), { mode: 0o700 });
     await writeFile(path.join(releaseRoot, "artifact"), "release", { mode: 0o600 });
+    await writeFile(path.join(releaseRoot, "runtime/bun"), "runtime", { mode: 0o500 });
+    await writeFile(
+        path.join(releaseRoot, "server/productionProvisioning.js"),
+        "provisioning",
+        { mode: 0o500 }
+    );
     await writeFile(runtimeSource, "runtime", { mode: 0o500 });
     await chmod(runtimeSource, 0o500);
     const state = await prepareProtectedProductionStatePath(projectRoot);
@@ -133,6 +144,7 @@ describe("production artifact pre-admission lifecycle", () => {
             const paths = await prepareProductionDeliveryDirectories(fixture.state);
             const candidateManifest = manifest(releaseA, runtimeA);
             const events: string[] = [];
+            let additionalReleaseCopyDirectory: string | undefined;
             const transitionId = "019fd974-54a2-74dd-a64b-d4186f8d8828";
             const activation = {
                 current: { releaseId: releaseA, runtimeRevision: runtimeA },
@@ -144,7 +156,18 @@ describe("production artifact pre-admission lifecycle", () => {
             const result = await deliverProductionReleaseUnderLease(
                 lease,
                 paths,
-                options(fixture.projectRoot, fixture.releaseRoot, fixture.runtimeSource),
+                {
+                    ...options(
+                        fixture.projectRoot,
+                        fixture.releaseRoot,
+                        fixture.runtimeSource
+                    ),
+                    releaseAuthority: publishedReleaseAuthority(
+                        releaseA,
+                        "v1.2.3",
+                        runtimeA
+                    ),
+                },
                 candidateManifest,
                 services,
                 {
@@ -156,8 +179,17 @@ describe("production artifact pre-admission lifecycle", () => {
                         events.push("retain");
                         return Promise.resolve();
                     },
-                    capacityAdmission: () => {
+                    capacityAdmission: (
+                        _lease,
+                        _paths,
+                        _releaseRoot,
+                        _manifest,
+                        _runtime,
+                        capacityDependencies
+                    ) => {
                         events.push("capacity");
+                        additionalReleaseCopyDirectory =
+                            capacityDependencies?.additionalReleaseCopyDirectory;
                         return Promise.resolve();
                     },
                     installRuntime: () => {
@@ -183,6 +215,7 @@ describe("production artifact pre-admission lifecycle", () => {
             );
 
             expect(result).toEqual(activation);
+            expect(additionalReleaseCopyDirectory).toBe(productionHostProvisioningRoot);
             expect(events).toEqual([
                 "retain",
                 "capacity",
@@ -441,6 +474,65 @@ describe("production artifact pre-admission lifecycle", () => {
         });
     });
 
+    test("charges the privileged retained release copy on a shared filesystem", async () => {
+        const fixture = await createFixture();
+        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(fixture.state);
+            const failure = await rejectionError(
+                assertProductionArtifactCapacity(
+                    lease,
+                    paths,
+                    fixture.releaseRoot,
+                    manifest(releaseA, runtimeA),
+                    fixture.runtimeSource,
+                    {
+                        additionalReleaseCopyDirectory: paths.productionDirectory,
+                        availableCapacity: () =>
+                            Promise.resolve(
+                                filesystemCapacity(
+                                    productionArtifactCapacityReserveBytes + 32n * 1024n
+                                )
+                            ),
+                        verifySourceRelease: () =>
+                            Promise.resolve(manifest(releaseA, runtimeA)),
+                    }
+                )
+            );
+
+            expect(failure.message).toBe("Production artifact capacity admission failed");
+        });
+    });
+
+    test("charges the transient host archive and provisioning pair", async () => {
+        const fixture = await createFixture();
+        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(fixture.state);
+            const failure = await rejectionError(
+                assertProductionArtifactCapacity(
+                    lease,
+                    paths,
+                    fixture.releaseRoot,
+                    manifest(releaseA, runtimeA),
+                    fixture.runtimeSource,
+                    {
+                        additionalReleaseCopyDirectory: paths.productionDirectory,
+                        availableCapacity: () =>
+                            Promise.resolve(
+                                filesystemCapacity(
+                                    productionArtifactCapacityReserveBytes +
+                                        BigInt(maximumProductionReleaseArchiveBytes)
+                                )
+                            ),
+                        verifySourceRelease: () =>
+                            Promise.resolve(manifest(releaseA, runtimeA)),
+                    }
+                )
+            );
+
+            expect(failure.message).toBe("Production artifact capacity admission failed");
+        });
+    });
+
     test("fails closed when the supplied identity does not match the source tree", async () => {
         const fixture = await createFixture();
         await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
@@ -489,6 +581,22 @@ describe("production artifact pre-admission lifecycle", () => {
         );
 
         expect(failure.message).toBe("Production artifact capacity admission failed");
+    });
+
+    test("accepts the maximum combined same-device object inventory", async () => {
+        const fixture = await createFixture();
+        const paths = await prepareProductionDeliveryDirectories(fixture.state);
+        await assertProductionArtifactCopyCapacity(
+            paths.productionDirectory,
+            Object.freeze({
+                fileBytes: Object.freeze(Array.from({ length: 8202 }, () => 1n)),
+                newDirectoryCount: 0n,
+            }),
+            {
+                availableCapacity: () =>
+                    Promise.resolve(filesystemCapacity(1024n * 1024n * 1024n)),
+            }
+        );
     });
 
     test("preserves a fixed free-inode reserve", async () => {

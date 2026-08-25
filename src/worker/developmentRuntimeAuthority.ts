@@ -547,13 +547,6 @@ function deliveryPullRequestsPayload(now: number) {
             reason: "head-guard-unavailable",
             scope: "prefix",
         },
-        {
-            action: "merge-and-deploy",
-            actor: "mira",
-            available: false,
-            reason: "head-guard-unavailable",
-            scope: "prefix",
-        },
         { action: "preview-start", actor: "mira", available: true, scope: "prefix" },
         {
             action: "reject",
@@ -573,12 +566,6 @@ function deliveryPullRequestsPayload(now: number) {
     const ordinaryActions = [
         { action: "approve-review", actor: "raymond", available: true, scope: "self" },
         { action: "merge", actor: "mira", available: true, scope: "prefix" },
-        {
-            action: "merge-and-deploy",
-            actor: "mira",
-            available: true,
-            scope: "prefix",
-        },
         { action: "preview-start", actor: "mira", available: true, scope: "prefix" },
         {
             action: "reject",
@@ -723,8 +710,8 @@ function createDeliveryPort(
                     branch: "main",
                     condition: "ready",
                     expectedBranch: "main",
-                    headSha: currentReleaseId,
-                    remoteHeadSha: currentReleaseId,
+                    headSha: secondPullRequestHead,
+                    remoteHeadSha: secondPullRequestHead,
                     revision: sourceRevision,
                     safeForDeploy: true,
                     upstream: "origin/main",
@@ -744,6 +731,27 @@ function createDeliveryPort(
                         releaseId: currentReleaseId,
                         runtimeRevision: currentReleaseId,
                         schemaTarget: 1,
+                    },
+                    candidate: {
+                        assets: [
+                            {
+                                digest: `sha256:${"a".repeat(64)}`,
+                                name: "receipt.json",
+                                size: 512,
+                            },
+                            {
+                                digest: `sha256:${"b".repeat(64)}`,
+                                name: "release.tar",
+                                size: 4096,
+                            },
+                        ],
+                        releaseId: secondPullRequestHead,
+                        releaseManifestSha256: "c".repeat(64),
+                        runtime: {
+                            revision: secondPullRequestHead,
+                            version: "1.4.0",
+                        },
+                        tagName: "v1.2.4",
                     },
                     previous: {
                         builtAtMs: now - 86_400_000,
@@ -803,11 +811,8 @@ function createDeliveryPort(
                 let releaseId: string | undefined;
                 if (payload.operation === "rollback-release") {
                     releaseId = payload.target.releaseId;
-                } else if (
-                    payload.operation === "deploy" ||
-                    (payload.operation === "merge-pull-request" && payload.deploy)
-                ) {
-                    releaseId = currentReleaseId;
+                } else if (payload.operation === "deploy") {
+                    releaseId = payload.release.releaseId;
                 }
                 return {
                     operation: payload.operation,

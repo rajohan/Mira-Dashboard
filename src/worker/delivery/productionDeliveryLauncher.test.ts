@@ -10,10 +10,12 @@ import {
     releaseDeliveryProtocols,
     releaseProcessRoles,
 } from "../../shared/releaseManifest.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { createProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
 import {
     ensureProductionDeliveryExecutor,
     launchProductionDeliveryExecutor,
+    productionDeliveryArtifactSource,
     type ProductionDeliveryLaunchProcessResult,
 } from "./productionDeliveryLauncher.ts";
 
@@ -95,6 +97,7 @@ async function fixture() {
     return {
         executor,
         options: {
+            artifactSource: "published-release" as const,
             executorReleaseId,
             projectRoot,
             readinessUrl: "http://127.0.0.1:3100/api/health/ready",
@@ -117,6 +120,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
         checkoutRevision: "2".repeat(64),
         expectedMainHeadSha: "c".repeat(40),
         operation: "deploy" as const,
+        release: publishedReleaseAuthority("c".repeat(40), "v1.2.3", "d".repeat(40)),
         sourceRevision: "f".repeat(64),
     };
     return Object.freeze({
@@ -156,7 +160,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
             releaseId: executorReleaseId,
             runtimeRevision,
         },
-        protocol: "delivery.production.v1" as const,
+        protocol: "delivery.production.v2" as const,
         runId: transitionId,
         transitionId,
     });
@@ -170,6 +174,11 @@ function jsonResult(value: unknown): ProductionDeliveryLaunchProcessResult {
 }
 
 describe("production Delivery launcher", () => {
+    test("derives the credential boundary from the durable operation kind", () => {
+        expect(productionDeliveryArtifactSource("deploy")).toBe("published-release");
+        expect(productionDeliveryArtifactSource("rollback-release")).toBe("retained");
+    });
+
     test("starts one fixed transient executor with an empty child environment", async () => {
         const { executor, options, runtime } = await fixture();
         let observedCommand: readonly string[] = [];
@@ -185,6 +194,9 @@ describe("production Delivery launcher", () => {
 
         expect(observedCommand).toContain("--property=NoNewPrivileges=yes");
         expect(observedCommand).toContain("--property=ProtectHome=tmpfs");
+        expect(observedCommand).toContain(
+            "--property=BindReadOnlyPaths=/home/ubuntu/.doppler"
+        );
         expect(observedCommand).toContain("--property=RuntimeMaxSec=90min");
         expect(observedCommand).toContain(`--property=BindPaths=${options.projectRoot}`);
         expect(observedCommand).toContain(
@@ -193,12 +205,15 @@ describe("production Delivery launcher", () => {
         expect(observedCommand).toContain("--property=PrivateDevices=yes");
         expect(observedCommand).toContain("/usr/bin/env");
         expect(observedCommand).toContain("-i");
+        expect(observedCommand).toContain("/usr/local/bin/doppler");
+        expect(observedCommand).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
         expect(observedCommand).toContain("NODE_ENV=production");
         expect(observedCommand).toContain(
             `XDG_RUNTIME_DIR=/run/user/${process.getuid?.()}`
         );
         expect(observedCommand).toContain(runtime);
         expect(observedCommand).toContain(executor);
+        expect(observedCommand).toContain("--artifact-source=published-release");
         expect(observedCommand).toContain(`--transition=${transitionId}`);
         expect(Object.keys(observedEnvironment).toSorted()).toEqual([
             "DBUS_SESSION_BUS_ADDRESS",
@@ -206,8 +221,31 @@ describe("production Delivery launcher", () => {
             "PATH",
             "XDG_RUNTIME_DIR",
         ]);
-        expect(JSON.stringify(observedCommand)).not.toContain("TOKEN");
         expect(JSON.stringify(observedEnvironment)).not.toContain("TOKEN");
+    });
+
+    test("starts retained-artifact recovery without Doppler or its configuration", async () => {
+        const fixture_ = await fixture();
+        let observedCommand: readonly string[] = [];
+
+        await launchProductionDeliveryExecutor(
+            { ...fixture_.options, artifactSource: "retained" },
+            {
+                execute: (command) => {
+                    observedCommand = command;
+                    return Promise.resolve(success);
+                },
+            }
+        );
+
+        expect(observedCommand).not.toContain("/usr/local/bin/doppler");
+        expect(observedCommand).not.toContain("--only-secrets=MIRA_GITHUB_TOKEN");
+        expect(observedCommand).not.toContain(
+            "--property=BindReadOnlyPaths=/home/ubuntu/.doppler"
+        );
+        expect(observedCommand).toContain(fixture_.runtime);
+        expect(observedCommand).toContain(fixture_.executor);
+        expect(observedCommand).toContain("--artifact-source=retained");
     });
 
     test("fails closed on mutable artifacts and process diagnostics", async () => {
@@ -289,6 +327,8 @@ describe("production Delivery launcher", () => {
         expect(commands[1]).toContain(runtime);
         expect(commands[1]).toContain(executor);
         expect(commands[1]).toContain("--property=RuntimeMaxSec=90min");
+        expect(commands[1]).toContain("--artifact-source=published-release");
+        expect(commands[1]).toContain("/usr/local/bin/doppler");
         expect(commands[1]).toContain(`--transition=${transitionId}`);
     });
 

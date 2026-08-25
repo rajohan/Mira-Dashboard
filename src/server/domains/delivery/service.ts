@@ -28,6 +28,7 @@ import {
 } from "../../../contracts/delivery.ts";
 import type { DeliveryOperationJobPayload } from "../../../contracts/deliveryWorker.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { publishedReleaseAuthoritiesMatch } from "../../../shared/publishedReleaseAuthority.ts";
 import type { DeliveryDeploymentHistoryReader } from "./deploymentHistory.ts";
 import type {
     DeliveryOperationActor,
@@ -297,7 +298,7 @@ function capabilityHeads(
 
 function publicActionFor(input: DeliveryRequestOperationInput) {
     if (input.operation === "merge-pull-request") {
-        return input.deploy ? "merge-and-deploy" : "merge";
+        return "merge";
     }
     if (input.operation === "create-pull-request-stack") return "create-stack";
     if (input.operation === "start-preview") return "preview-start";
@@ -329,30 +330,19 @@ function payloadFor(input: DeliveryRequestOperationInput): DeliveryOperationJobP
                 checkoutRevision: input.checkoutRevision,
                 expectedMainHeadSha: input.expectedMainHeadSha,
                 operation: input.operation,
+                release: input.release,
                 sourceRevision: input.sourceRevision,
             };
         }
         case "merge-pull-request": {
-            return input.deploy
-                ? {
-                      activationRevision: input.activationRevision,
-                      checkoutRevision: input.checkoutRevision,
-                      deploy: true,
-                      expectedHeads: input.expectedHeads,
-                      mergeStack: input.mergeStack,
-                      number: input.number,
-                      operation: input.operation,
-                      sourceRevision: input.sourceRevision,
-                  }
-                : {
-                      checkoutRevision: input.checkoutRevision,
-                      deploy: false,
-                      expectedHeads: input.expectedHeads,
-                      mergeStack: input.mergeStack,
-                      number: input.number,
-                      operation: input.operation,
-                      sourceRevision: input.sourceRevision,
-                  };
+            return {
+                checkoutRevision: input.checkoutRevision,
+                expectedHeads: input.expectedHeads,
+                mergeStack: input.mergeStack,
+                number: input.number,
+                operation: input.operation,
+                sourceRevision: input.sourceRevision,
+            };
         }
         case "reject-pull-request":
         case "update-branch": {
@@ -454,6 +444,13 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 !checkout.checkout.safeForDeploy ||
                 checkout.checkout.revision !== input.checkoutRevision ||
                 checkout.checkout.remoteHeadSha !== input.expectedMainHeadSha ||
+                input.release.releaseId !== input.expectedMainHeadSha ||
+                releases.releases.candidate === undefined ||
+                releases.releases.current === undefined ||
+                !publishedReleaseAuthoritiesMatch(
+                    releases.releases.candidate,
+                    input.release
+                ) ||
                 releases.releases.activationRevision !== input.activationRevision
             ) {
                 throw new DeliveryServiceError("conflict");
@@ -544,15 +541,6 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 !checkout.checkout.safeForDeploy
             ) {
                 throw new DeliveryServiceError("conflict");
-            }
-            if (input.deploy) {
-                const releases = freshSnapshot("releases");
-                if (
-                    releases.actionActive ||
-                    input.activationRevision !== releases.releases.activationRevision
-                ) {
-                    throw new DeliveryServiceError("conflict");
-                }
             }
         }
         return payloadFor(input);

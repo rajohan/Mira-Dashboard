@@ -260,7 +260,6 @@ function installVoiceEnvironment(): () => void {
 const meta = {
     beforeEach: () => {
         onlineManager.setOnline(true);
-        globalThis.dispatchEvent(new Event("online"));
     },
     component: DashboardPageStory,
     parameters: { layout: "fullscreen" },

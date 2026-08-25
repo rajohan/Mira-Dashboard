@@ -1,5 +1,6 @@
 import * as v from "valibot";
 
+import { publishedReleaseAuthoritySchema } from "../shared/publishedReleaseAuthority.ts";
 import { fullCommitShaSchema } from "../shared/validation.ts";
 
 export const deliveryGitHubRepositoryOwner = "rajohan" as const;
@@ -141,6 +142,8 @@ export const deliveryGitHubStackSchema = v.strictObject({
     ),
 });
 
+export const deliveryGitHubPublishedReleaseSchema = publishedReleaseAuthoritySchema;
+
 export const deliveryGitHubAsyncMergeSchema = v.strictObject({
     details: v.strictObject({
         expectedHeadSha: v.optional(deliveryGitHubCommitShaSchema),
@@ -163,6 +166,9 @@ export type DeliveryGitHubExpectedHead = v.InferOutput<
     typeof deliveryGitHubExpectedHeadSchema
 >;
 export type DeliveryGitHubStack = v.InferOutput<typeof deliveryGitHubStackSchema>;
+export type DeliveryGitHubPublishedRelease = v.InferOutput<
+    typeof deliveryGitHubPublishedReleaseSchema
+>;
 export type DeliveryGitHubAsyncMerge = v.InferOutput<
     typeof deliveryGitHubAsyncMergeSchema
 >;
@@ -199,6 +205,9 @@ export interface DeliveryGitHubPullRequestReadPort {
     readonly listOpenPullRequests: (
         signal?: AbortSignal
     ) => Promise<readonly DeliveryGitHubPullRequest[]>;
+    readonly readLatestPublishedRelease?: (
+        signal?: AbortSignal
+    ) => Promise<DeliveryGitHubPublishedRelease>;
     readonly readMainRef: (signal?: AbortSignal) => Promise<string>;
     readonly supportsNativeStacks: (signal?: AbortSignal) => Promise<boolean>;
 }

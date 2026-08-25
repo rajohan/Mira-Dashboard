@@ -1,6 +1,6 @@
 # Repository commands
 
-`package.json` exposes nine stable entrypoints. Typed subcommands keep implementation partitions out
+`package.json` exposes ten stable entrypoints. Typed subcommands keep implementation partitions out
 of the package-script list while preserving explicit, shell-free argument handling.
 
 | Command                                                                      | Purpose                                                                                               | Writes or starts processes                                          |
@@ -24,6 +24,7 @@ of the package-script list while preserving explicit, shell-free argument handli
 | `bun run test timings <bun\|browser\|storybook>`                             | Refresh one timing inventory after its complete partition passes                                      | Replaces one checked-in timing file                                 |
 | `bun run storybook [dev\|build]`                                             | Start the workbench or build static Storybook                                                         | Starts upstream port 6007 or writes `dist/storybook`                |
 | `bun run delivery <prepare-state\|activate> ...`                             | Prepare protected production state or activate an already-qualified immutable release                 | Production-sensitive; can change active production                  |
+| `bun run deploy`                                                             | Deploy the permanent Release Please assets for the exact clean `main` commit                          | Reprovisions root authority, then atomically activates production   |
 | `bun run preflight [--parallel]`                                             | Prove a clean candidate through audit, checks, coverage, builds, and immutable release creation       | Sequential by default; `--parallel` uses bounded two-command phases |
 
 Internal files under `scripts/` are not additional public commands. CI uses the same entrypoints and
@@ -31,6 +32,12 @@ passes explicit partitions rather than calling implementation files. Production 
 the independently built, digest-bound artifact for the exact `main` commit and invokes the
 root-owned installer only after staging that immutable release and the selected Bun runtime below
 the fixed provisioning trust root.
+
+Ordinary pull requests can only be merged. A deployment becomes eligible only after Release Please
+publishes a stable semantic release whose tag resolves to the exact `main` commit and whose
+permanent `release.tar` and `receipt.json` assets pass digest admission. The Delivery UI and
+`bun run deploy` share that release/provision/activation authority; neither builds production from
+an arbitrary checkout.
 
 The SSE resource-evidence runner remains at
 `src/test/integration/resources/runSseMemoryEvidence.ts` for explicit runtime qualification. It is

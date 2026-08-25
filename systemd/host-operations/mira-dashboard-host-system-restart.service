@@ -1,3 +1,4 @@
+# Mira Dashboard managed unit.
 [Unit]
 Description=Mira Dashboard reviewed host restart request
 After=local-fs.target

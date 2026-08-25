@@ -1,12 +1,13 @@
+# Mira Dashboard managed unit.
 [Unit]
-Description=Mira Dashboard deferred host reboot
+Description=Mira Dashboard deferred stack restart
 
 [Service]
 Type=oneshot
 User=root
 Group=root
 UMask=0077
-ExecStart=/usr/bin/systemctl reboot
+ExecStart=/usr/bin/systemctl restart mira-dashboard-web.service mira-dashboard-worker.service
 NoNewPrivileges=true
 PrivateDevices=true
 PrivateTmp=true
@@ -20,4 +21,4 @@ RemoveIPC=true
 SystemCallArchitectures=native
 StandardOutput=null
 StandardError=null
-TimeoutStartSec=30s
+TimeoutStartSec=2min

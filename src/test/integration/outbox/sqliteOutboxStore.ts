@@ -145,7 +145,9 @@ const contentionRetrySchedule = Schedule.exponential(Duration.millis(1)).pipe(
         const boundedDelayMs = Math.min(Duration.toMillis(duration), 10);
         return Effect.succeed(Duration.millis(boundedDelayMs));
     }),
-    Schedule.upTo({ times: 40 }),
+    // Keep the retry budget below the scenario's five-second child deadline while
+    // allowing coverage runners to absorb short process-wide SQLite contention.
+    Schedule.upTo({ times: 200 }),
     Schedule.while(({ input }) => isContentionError(input))
 );
 

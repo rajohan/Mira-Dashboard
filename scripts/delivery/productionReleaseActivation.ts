@@ -67,6 +67,14 @@ export class ProductionReleaseActivationError extends TaggedErrorClass<Productio
 
 /** Idempotent process-control port implemented by the project-local systemd adapter. */
 export interface ProductionServiceController {
+    readonly provision: (
+        release: PublishedProductionRelease,
+        runtime: InstalledProductionRuntime
+    ) => Promise<void>;
+    readonly settle?: (
+        release: PublishedProductionRelease,
+        runtime: InstalledProductionRuntime
+    ) => Promise<void>;
     readonly prepare: (
         release: PublishedProductionRelease,
         runtime: InstalledProductionRuntime
@@ -131,8 +139,24 @@ async function prepareAndStartServices(
     services: ProductionServiceController,
     artifacts: ActiveArtifacts
 ): Promise<void> {
+    await services.provision(artifacts.release, artifacts.runtime);
     await services.prepare(artifacts.release, artifacts.runtime);
     await services.start(artifacts.release, artifacts.runtime);
+}
+
+async function provisionAndPrepareServices(
+    services: ProductionServiceController,
+    artifacts: ActiveArtifacts
+): Promise<void> {
+    await services.provision(artifacts.release, artifacts.runtime);
+    await services.prepare(artifacts.release, artifacts.runtime);
+}
+
+async function settleServices(
+    services: ProductionServiceController,
+    artifacts: ActiveArtifacts
+): Promise<void> {
+    await services.settle?.(artifacts.release, artifacts.runtime);
 }
 
 function sameRecord(
@@ -478,20 +502,6 @@ async function rollbackTransition(
     const previous = journal.previousActivation
         ? await loadActiveArtifacts(paths, journal.previousActivation, dependencies)
         : undefined;
-    const targetMayOwnProcesses =
-        candidateCommitted ||
-        journal.phase === "database-promoted" ||
-        journal.phase === "rollback-required";
-    const stopOwner =
-        targetMayOwnProcesses || !previous
-            ? await loadExactArtifacts(
-                  paths,
-                  journal.candidate.releaseId,
-                  journal.candidate.runtimeRevision,
-                  dependencies
-              )
-            : previous;
-    await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
     await dependencies.services.stop();
     if (journal.phase === "service-stop-requested") {
         await discardOrphanDatabaseTransitionWorkspace(
@@ -550,6 +560,7 @@ async function recoverExistingTransition(
             const rollback = await markProductionRollbackRequired(lease, paths, journal);
             return rollbackTransition(lease, paths, rollback, activation, dependencies);
         }
+        await settleServices(dependencies.services, current);
         await discardOrphanDatabaseTransitionWorkspace(
             lease,
             paths,
@@ -591,8 +602,22 @@ async function activateRelease(
     dependencies: ProductionReleaseActivationDependencies,
     options: ProductionReleaseActivationOptions
 ): Promise<ProductionActivationRecord> {
+    const pendingJournal = await loadProductionActivationJournal(lease, paths);
+    const pendingActivation = await loadProductionActivationState(lease, paths);
+    const resumesCommittedCandidate =
+        pendingJournal?.phase === "database-promoted" &&
+        activationMatchesCandidate(pendingActivation, pendingJournal) &&
+        pendingJournal.candidate.releaseId ===
+            candidateRelease.manifest.source.commitSha &&
+        pendingJournal.candidate.runtimeRevision === candidateRuntime.identity.revision;
     const activation = await recoverExistingTransition(lease, paths, dependencies);
     await retainCommittedDatabaseSnapshots(lease, paths, activation);
+    if (resumesCommittedCandidate) {
+        const recovered = activation.record;
+        if (!recovered) throw activationError();
+        await retainCommittedProductionArtifacts(lease, paths, activation, dependencies);
+        return recovered;
+    }
     const candidate = await verifyCandidateArtifacts(
         paths,
         candidateRelease,
@@ -613,6 +638,7 @@ async function activateRelease(
     ) {
         await prepareAndStartServices(dependencies.services, candidate);
         await dependencies.services.verifyReady(candidate.release, candidate.runtime);
+        await settleServices(dependencies.services, candidate);
         return activation.record;
     }
 
@@ -633,14 +659,15 @@ async function activateRelease(
     let journal: ProductionActivationTransition | undefined;
     let workspace: DatabaseTransitionWorkspace | undefined;
     let promoted: PromotedDatabaseState | undefined;
+    let settlementFailed = false;
     try {
         const stopOwner = previous ?? candidate;
-        await dependencies.services.prepare(stopOwner.release, stopOwner.runtime);
         journal = await createProductionActivationJournal(
             lease,
             paths,
             journalFor(transitionId, activation, candidate)
         );
+        await provisionAndPrepareServices(dependencies.services, stopOwner);
         await dependencies.services.stop();
         await dependencies.testHooks?.afterServicesStopped?.();
         await options.onProgress?.("services-stopped");
@@ -714,6 +741,12 @@ async function activateRelease(
         const committed = committedState.record;
         if (!committed) throw activationError();
         await dependencies.testHooks?.afterActivationCommit?.();
+        try {
+            await settleServices(dependencies.services, candidate);
+        } catch {
+            settlementFailed = true;
+            throw activationError();
+        }
         await discardDatabaseTransitionWorkspace(lease, paths, workspace);
         workspace = undefined;
         await clearProductionActivationJournal(lease, paths, journal);
@@ -736,6 +769,13 @@ async function activateRelease(
             paths
         ).catch(() => activation);
         if (observedJournal) {
+            if (
+                settlementFailed &&
+                observedJournal.phase === "database-promoted" &&
+                activationMatchesCandidate(observedActivation, observedJournal)
+            ) {
+                throw activationError();
+            }
             const recovered = await recoverExistingTransition(lease, paths, dependencies);
             if (sameRecord(recovered.record, expectedCommitted)) {
                 await retainCommittedDatabaseSnapshots(lease, paths, recovered);

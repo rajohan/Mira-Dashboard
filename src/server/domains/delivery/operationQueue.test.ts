@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { publishedReleaseAuthority } from "../../../testSupport/publishedReleaseAuthority.ts";
 import type { JobRunRecord } from "../jobs/records.ts";
 import type {
     EnqueueManualRunInput,
@@ -117,6 +118,7 @@ function deployRequest(authorize: () => void = () => {}) {
                     checkoutRevision: sourceRevision,
                     expectedMainHeadSha: headSha,
                     operation: "deploy" as const,
+                    release: publishedReleaseAuthority(headSha),
                     sourceRevision,
                 },
             }),
@@ -127,6 +129,7 @@ function deployRequest(authorize: () => void = () => {}) {
             expectedMainHeadSha: headSha,
             idempotencyKey,
             operation: "deploy" as const,
+            release: publishedReleaseAuthority(headSha),
             sourceRevision,
         },
         requestId: "request-1",
@@ -154,6 +157,7 @@ describe("Delivery operation queue", () => {
             checkoutRevision: sourceRevision,
             expectedMainHeadSha: headSha,
             operation: "deploy",
+            release: publishedReleaseAuthority(headSha),
             sourceRevision,
         });
     });
@@ -184,6 +188,38 @@ describe("Delivery operation queue", () => {
                             checkoutRevision: sourceRevision,
                             expectedMainHeadSha: "d".repeat(40),
                             operation: "deploy" as const,
+                            release: publishedReleaseAuthority("d".repeat(40)),
+                            sourceRevision,
+                        },
+                    }),
+            });
+            throw new Error("expected queue conflict");
+        } catch (error) {
+            expect(error).toBeInstanceOf(DeliveryOperationQueueError);
+            expect((error as DeliveryOperationQueueError).reason).toBe("conflict");
+        }
+        expect(fixture.enqueues).toHaveLength(0);
+    });
+
+    test("rejects dispatch whose release authority differs from the confirmed input", async () => {
+        const fixture = queueFixture();
+        const request = deployRequest();
+        const differentRelease = {
+            ...publishedReleaseAuthority(headSha),
+            releaseManifestSha256: "0".repeat(64),
+        };
+        try {
+            await fixture.queue.enqueue({
+                ...request,
+                authorizeDispatch: () =>
+                    Promise.resolve({
+                        authorize: () => {},
+                        payload: {
+                            activationRevision: sourceRevision,
+                            checkoutRevision: sourceRevision,
+                            expectedMainHeadSha: headSha,
+                            operation: "deploy" as const,
+                            release: differentRelease,
                             sourceRevision,
                         },
                     }),

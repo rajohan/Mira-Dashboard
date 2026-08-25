@@ -6,6 +6,7 @@ import type {
     DeliveryGitHubPullRequest,
     DeliveryGitHubPullRequestReadPort,
 } from "../../contracts/deliveryGithub.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import {
     createDeliveryOverviewCollector,
     type DeliveryOverviewCollector,
@@ -59,6 +60,8 @@ function github(
         findNativeStack: () => Promise.resolve(undefined),
         getPullRequest: () => Promise.reject(new Error("unused")),
         listOpenPullRequests: list,
+        readLatestPublishedRelease: () =>
+            Promise.resolve(publishedReleaseAuthority(mainHead)),
         readMainRef: () => Promise.resolve(mainHead),
         supportsNativeStacks: () => Promise.resolve(true),
     };
@@ -137,9 +140,11 @@ describe("Delivery overview collector", () => {
             checkoutRevision: "b".repeat(64),
             expectedMainHeadSha: mainHead,
             operation: "deploy",
+            release: publishedReleaseAuthority(mainHead),
             sourceRevision,
         });
         expect(deploy.checkout.remoteHeadSha).toBe(mainHead);
+        expect(deploy.releases.candidate).toEqual(publishedReleaseAuthority(mainHead));
 
         const rollback = await collector.collectForOperation(
             {

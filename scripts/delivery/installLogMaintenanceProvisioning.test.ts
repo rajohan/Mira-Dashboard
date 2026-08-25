@@ -23,7 +23,7 @@ import {
 } from "./provisioning/log-maintenance/installLogMaintenanceProvisioning.ts";
 import {
     logMaintenanceProvisioningArtifacts,
-    logMaintenanceProvisioningReleaseArtifactPaths,
+    logMaintenanceProvisioningSourceArtifactPaths,
 } from "./provisioning/log-maintenance/policy.ts";
 
 const releaseId = "a".repeat(40);
@@ -74,8 +74,13 @@ async function releaseFixture(): Promise<string> {
     );
     await mkdir(releaseRoot, { recursive: true, mode: 0o700 });
     await cp(source, destination, { recursive: true });
+    await cp(
+        path.join(sourceProjectRoot, "systemd/log-maintenance"),
+        path.join(releaseRoot, "systemd/log-maintenance"),
+        { recursive: true }
+    );
     const artifacts = [];
-    for (const artifactPath of logMaintenanceProvisioningReleaseArtifactPaths) {
+    for (const artifactPath of logMaintenanceProvisioningSourceArtifactPaths) {
         const bytes = await readFile(path.join(releaseRoot, artifactPath));
         artifacts.push({
             bytes: bytes.byteLength,
@@ -98,6 +103,8 @@ async function releaseFixture(): Promise<string> {
         "scripts/delivery/provisioning",
         "scripts/delivery",
         "scripts",
+        "systemd/log-maintenance",
+        "systemd",
         "",
     ]) {
         await chmod(path.join(releaseRoot, directory), 0o500);

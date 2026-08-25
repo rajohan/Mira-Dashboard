@@ -15,6 +15,7 @@ import { resolveRepositoryBuildPath } from "./buildPaths.ts";
 import {
     inventoryReleaseArtifactTree,
     maximumReleaseArtifactBytes,
+    maximumReleaseRuntimeBytes,
     type ReleaseArtifactInventoryRecord,
 } from "./releaseArtifactInventory.ts";
 
@@ -23,6 +24,7 @@ const commitShaPattern = /^[a-f\d]{40}$/u;
 const privateDirectoryMode = 0o700;
 const privateFileMode = 0o600;
 const immutableDirectoryMode = 0o500;
+const immutableExecutableMode = 0o500;
 const immutableFileMode = 0o400;
 const maximumMetadataBytes = 4 * 1024 * 1024;
 
@@ -37,6 +39,7 @@ export interface ReleaseStagingSources {
     readonly browserRoot: string;
     readonly processRoot: string;
     readonly repositoryRoot: string;
+    readonly runtimeExecutable: string;
     readonly stagingRoot: string;
 }
 
@@ -166,6 +169,35 @@ async function copyMetadataFile(
     }
 }
 
+async function copyRuntimeExecutable(source: string, destination: string): Promise<void> {
+    const contents = await readBoundedRegularFile(
+        source,
+        path.dirname(source),
+        maximumReleaseRuntimeBytes,
+        invalidReleaseStagingMessage
+    );
+    await mkdir(path.dirname(destination), {
+        mode: privateDirectoryMode,
+        recursive: false,
+    });
+    await writeFile(destination, contents, {
+        flag: "wx",
+        mode: immutableExecutableMode,
+    });
+    const reread = await readBoundedRegularFile(
+        source,
+        path.dirname(source),
+        maximumReleaseRuntimeBytes,
+        invalidReleaseStagingMessage
+    );
+    if (
+        contents.byteLength !== reread.byteLength ||
+        sha256(contents) !== sha256(reread)
+    ) {
+        throw invalidReleaseStaging();
+    }
+}
+
 /**
  * Allocates an exclusive staging directory and reserves a commit-addressed final path.
  * @param repositoryRoot Canonical future-root checkout.
@@ -233,6 +265,10 @@ export async function stageReleaseArtifacts(
             path.join(sources.repositoryRoot, "scripts/delivery/provisioning"),
             path.join(stagingRoot, "scripts/delivery/provisioning")
         ),
+        copyRuntimeExecutable(
+            sources.runtimeExecutable,
+            path.join(stagingRoot, "runtime/bun")
+        ),
         copyMetadataFile(
             path.join(sources.repositoryRoot, ".bun-version"),
             sources.repositoryRoot,
@@ -269,7 +305,10 @@ export async function makeReleaseTreeImmutable(
     const before = await inventoryReleaseArtifactTree(output);
     const directories = new Set<string>([output]);
     for (const artifact of before) {
-        await chmod(path.join(output, artifact.path), immutableFileMode);
+        await chmod(
+            path.join(output, artifact.path),
+            artifact.path === "runtime/bun" ? immutableExecutableMode : immutableFileMode
+        );
         let directory = path.dirname(artifact.path);
         while (directory !== ".") {
             directories.add(path.join(output, directory));

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { publishedReleaseAuthority } from "../testSupport/publishedReleaseAuthority.ts";
 import {
     deliveryProductionOperationPhases,
     parseDeliveryProductionOperationCapsule,
@@ -15,7 +16,7 @@ const transitionId = "019fd974-54a2-74dd-a64b-d4186f8d8828";
 const previousTransitionId = "019fd974-54a2-74dd-a64b-d4186f8d8827";
 
 function operationPayload(
-    operation: "deploy" | "merge-pull-request" | "rollback-release",
+    operation: "deploy" | "rollback-release",
     targetReleaseId: string
 ): DeliveryProductionOperationCapsule["enqueue"]["payload"] {
     switch (operation) {
@@ -31,24 +32,17 @@ function operationPayload(
                 },
             };
         }
-        case "merge-pull-request": {
-            return {
-                activationRevision: "1".repeat(64),
-                checkoutRevision: "2".repeat(64),
-                deploy: true,
-                expectedHeads: [{ headSha: "9".repeat(40), number: 7 }],
-                mergeStack: false,
-                number: 7,
-                operation,
-                sourceRevision: "f".repeat(64),
-            };
-        }
         case "deploy": {
             return {
                 activationRevision: "1".repeat(64),
                 checkoutRevision: "2".repeat(64),
                 expectedMainHeadSha: targetReleaseId,
                 operation,
+                release: publishedReleaseAuthority(
+                    targetReleaseId,
+                    "v1.2.3",
+                    "d".repeat(40)
+                ),
                 sourceRevision: "f".repeat(64),
             };
         }
@@ -56,7 +50,7 @@ function operationPayload(
 }
 
 function capsule(
-    operation: "deploy" | "merge-pull-request" | "rollback-release" = "deploy"
+    operation: "deploy" | "rollback-release" = "deploy"
 ): DeliveryProductionOperationCapsule {
     const targetReleaseId = "c".repeat(40);
     const payload = operationPayload(operation, targetReleaseId);
@@ -100,7 +94,7 @@ function capsule(
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v1",
+        protocol: "delivery.production.v2",
         runId: transitionId,
         transitionId,
     };
@@ -126,7 +120,7 @@ describe("delivery production operation protocol", () => {
     test("canonically parses, freezes, and serializes the secret-free rehydration capsule", () => {
         const parsed = parseDeliveryProductionOperationCapsule(capsule());
 
-        expect(parsed.protocol).toBe("delivery.production.v1");
+        expect(parsed.protocol).toBe("delivery.production.v2");
         expect(Object.isFrozen(parsed)).toBe(true);
         expect(Object.isFrozen(parsed.enqueue.actor)).toBe(true);
         expect(Object.isFrozen(parsed.enqueue.payload)).toBe(true);

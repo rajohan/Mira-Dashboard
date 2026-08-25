@@ -91,7 +91,7 @@ describe("Delivery contracts", () => {
     test("requires truthful terminal deployment outcomes", () => {
         const base = {
             jobRunId: "018f0000-0000-7000-8000-000000000001",
-            operation: "merge-and-deploy",
+            operation: "deploy",
             queuedAtMs: 1000,
             state: "succeeded",
             updatedAtMs: 2000,
@@ -171,7 +171,6 @@ describe("Delivery contracts", () => {
         const input = {
             checkoutRevision: revision,
             confirmation: "merge-delivery-pull-request",
-            deploy: false,
             expectedHeads: [
                 { headSha: sha, number: 41 },
                 { headSha: "f".repeat(40), number: 42 },

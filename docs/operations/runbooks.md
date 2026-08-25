@@ -30,6 +30,33 @@ If bootstrap fails, fix the first reported prerequisite and rerun it. Resolve fr
 failures in the lockfile on a development branch; never weaken the target-host install. Missing
 assets mean the exact `main` commit has not been published as a completed semantic release yet.
 
+## Later production deployments
+
+The provisioning boundary must already have been installed by a successful clean-host
+`bun run bootstrap`. The release that first introduces this boundary is installed through that
+clean bootstrap, never through `bun run deploy` or the Delivery page. The deploy command fails
+closed when the root-owned provisioning unit is absent or the active release does not declare the
+current Delivery protocol. Protocol boundaries are never normalized or migrated in place: install
+them through a clean greenfield bootstrap so no incompatible rollback target is retained. After
+bootstrap, later releases use the same fixed boundary and may update its manifest-bound
+systemd/polkit authority during cutover.
+
+Merge ordinary pull requests without deployment. Release Please then opens its version/changelog
+pull request; merging that pull request publishes the stable GitHub release and permanent
+`release.tar` plus `receipt.json` assets for the exact `main` commit. Only that published commit is
+eligible in Delivery.
+
+Use the Delivery page or, from the clean canonical production checkout, run:
+
+```bash
+bun run deploy
+```
+
+Both paths download and verify the exact published assets, rerun manifest-bound root provisioning
+(including changed systemd/polkit/log-maintenance authority), run `daemon-reload`, and activate
+with the existing paired snapshot/rollback protocol. A normal feature pull request is never merged
+and deployed in one operation.
+
 ## Fresh checkout and local first start
 
 For development, run `bun run bootstrap development`. Add `--no-start`, `--with-browser`, or

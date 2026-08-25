@@ -8,6 +8,7 @@ import type {
     DeliveryPullRequestGroup,
     DeliveryReleases,
 } from "../../contracts/delivery.ts";
+import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import {
     deployMainPrompt,
     deliveryOperationIsCurrent,
@@ -68,6 +69,7 @@ const preview = {
 
 const releases = {
     activationRevision: secondResourceRevision,
+    candidate: publishedReleaseAuthority(secondSha),
     current: {
         builtAtMs: 1_800_000_000_000,
         commitTitle: "Current",
@@ -339,33 +341,6 @@ describe("Delivery operation intents", () => {
         });
     });
 
-    test("captures full ordered stack heads for Mira merge and deploy", () => {
-        const action = {
-            ...capability("merge-and-deploy"),
-            scope: "prefix",
-        } satisfies DeliveryPullRequestActionCapability;
-        const prompt = pullRequestOperationPrompt({
-            action,
-            checkout,
-            group: stackGroup,
-            pullRequest,
-            releases,
-            sourceRevision,
-        });
-        expect(prompt?.description).toContain("Mira (mira-2026)");
-        expect(prompt?.input).toMatchObject({
-            activationRevision: secondResourceRevision,
-            checkoutRevision: resourceRevision,
-            deploy: true,
-            expectedHeads: [
-                { headSha: secondSha, number: 423 },
-                { headSha: sha, number: 424 },
-            ],
-            mergeStack: true,
-            operation: "merge-pull-request",
-        });
-    });
-
     test("keeps native stack authority when only one open layer remains", () => {
         const oneLayerStack = {
             ...stackGroup,
@@ -467,7 +442,10 @@ describe("Delivery operation intents", () => {
     test("binds deploy to remote main while the clean checkout is behind", () => {
         const remoteHeadSha = "f".repeat(40);
         const behindCheckout = { ...checkout, remoteHeadSha };
-        const prompt = deployMainPrompt(behindCheckout, sourceRevision, releases);
+        const prompt = deployMainPrompt(behindCheckout, sourceRevision, {
+            ...releases,
+            candidate: publishedReleaseAuthority(remoteHeadSha, "v1.2.4"),
+        });
 
         expect(prompt.description).toContain(remoteHeadSha);
         expect(prompt.input).toMatchObject({ expectedMainHeadSha: remoteHeadSha });

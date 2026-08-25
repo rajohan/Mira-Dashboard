@@ -15,6 +15,7 @@ import {
     parseDeliveryOperationJobPayload,
 } from "../../../contracts/deliveryWorker.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { publishedReleaseAuthoritiesMatch } from "../../../shared/publishedReleaseAuthority.ts";
 import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { preflightManualEnqueue } from "../jobs/manualEnqueue.ts";
@@ -147,20 +148,17 @@ function payloadMatchesInput(
                 payload.operation === input.operation &&
                 payload.activationRevision === input.activationRevision &&
                 payload.checkoutRevision === input.checkoutRevision &&
-                payload.expectedMainHeadSha === input.expectedMainHeadSha
+                payload.expectedMainHeadSha === input.expectedMainHeadSha &&
+                publishedReleaseAuthoritiesMatch(payload.release, input.release)
             );
         }
         case "merge-pull-request": {
             return (
                 payload.operation === input.operation &&
                 payload.number === input.number &&
-                payload.deploy === input.deploy &&
                 payload.mergeStack === input.mergeStack &&
                 payload.checkoutRevision === input.checkoutRevision &&
-                headsMatch(payload.expectedHeads, input.expectedHeads) &&
-                (input.deploy === false ||
-                    (payload.deploy === true &&
-                        payload.activationRevision === input.activationRevision))
+                headsMatch(payload.expectedHeads, input.expectedHeads)
             );
         }
         case "reject-pull-request":
@@ -244,11 +242,7 @@ function actionKeyForInput(
     if (input.operation === "start-preview" || input.operation === "stop-preview") {
         return deliveryPreviewActionKey;
     }
-    if (
-        input.operation === "deploy" ||
-        input.operation === "rollback-release" ||
-        (input.operation === "merge-pull-request" && input.deploy)
-    ) {
+    if (input.operation === "deploy" || input.operation === "rollback-release") {
         return deliveryProductionActionKey;
     }
     return deliveryGitHubActionKey;

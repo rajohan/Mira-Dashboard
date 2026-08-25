@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/tanstack-react";
+import { expect, within } from "storybook/test";
 
 import type { IncidentRecord, IncidentSummary } from "../../../contracts/monitoring.ts";
 import { liveHistoryArchiveQueryKey } from "../../api/liveHistory.ts";
@@ -76,6 +77,14 @@ export const Loading: Story = {
 
 export const List: Story = {
     args: { fixtures: incidentFixtures(), route: "/incidents" },
+    play: async ({ canvasElement }) => {
+        const canvas = within(canvasElement);
+        await expect(
+            await canvas.findByRole("button", {
+                name: "PostgreSQL maintenance needs attention; warning; active",
+            })
+        ).toBeVisible();
+    },
 };
 
 export const Empty: Story = {

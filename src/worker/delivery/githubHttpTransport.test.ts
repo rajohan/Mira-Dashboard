@@ -67,6 +67,78 @@ describe("Delivery GitHub HTTPS transport", () => {
         ).toBeTrue();
     });
 
+    test("reads the latest release from the fixed repository authority", () => {
+        const calls: string[] = [];
+        const transport = createDeliveryGitHubHttpTransport({
+            expectedLogin: "mira-2026",
+            fetch: (input) => {
+                calls.push(input);
+                return Promise.resolve(
+                    calls.length === 1
+                        ? Response.json({ id: 42, login: "mira-2026", type: "User" })
+                        : Response.json({ tag_name: "v1.2.3" })
+                );
+            },
+            token: token(),
+        });
+
+        expect(transport.requestJson({ kind: "latest-release" })).resolves.toEqual({
+            tag_name: "v1.2.3",
+        });
+        expect(calls.at(-1)).toBe(
+            "https://api.github.com/repos/rajohan/Mira-Dashboard/releases/latest"
+        );
+    });
+
+    test("follows the fixed GitHub redirect only for release assets", async () => {
+        const redirects: Array<"error" | "follow" | "manual" | undefined> = [];
+        const transport = createDeliveryGitHubHttpTransport({
+            expectedLogin: "mira-2026",
+            fetch: (_input, init) => {
+                redirects.push(init.redirect);
+                return Promise.resolve(
+                    Response.json(
+                        redirects.length === 1
+                            ? { id: 42, login: "mira-2026", type: "User" }
+                            : { formatVersion: 1 }
+                    )
+                );
+            },
+            token: token(),
+        });
+
+        expect(
+            await transport.requestJson({ assetId: 42, kind: "release-asset" })
+        ).toEqual({ formatVersion: 1 });
+        expect(redirects).toEqual(["error", "follow"]);
+    });
+
+    test("resolves one release tag through the fixed commit endpoint", () => {
+        const calls: string[] = [];
+        const transport = createDeliveryGitHubHttpTransport({
+            expectedLogin: "mira-2026",
+            fetch: (input) => {
+                calls.push(input);
+                return Promise.resolve(
+                    calls.length === 1
+                        ? Response.json({ id: 42, login: "mira-2026", type: "User" })
+                        : Response.json({ sha: "a".repeat(40) })
+                );
+            },
+            token: token(),
+        });
+
+        expect(
+            transport.requestJson({
+                kind: "release-tag-commit",
+                tagName: "v1.2.3",
+            })
+        ).resolves.toEqual({ sha: "a".repeat(40) });
+        expect(calls.at(-1)).toBe(
+            "https://api.github.com/repos/rajohan/Mira-Dashboard/commits/v1.2.3"
+        );
+    });
+
     test("rejects identity mismatch without calling the requested endpoint", async () => {
         const calls: string[] = [];
         const transport = createDeliveryGitHubHttpTransport({
