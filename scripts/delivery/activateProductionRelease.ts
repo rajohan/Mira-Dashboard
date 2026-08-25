@@ -224,9 +224,7 @@ export async function deliverProductionReleaseUnderLease(
         options.releaseAuthority === undefined
             ? {}
             : {
-                  additionalReleaseCopyDirectory: path.dirname(
-                      productionHostProvisioningRoot
-                  ),
+                  additionalReleaseCopyDirectory: productionHostProvisioningRoot,
               }
     );
 

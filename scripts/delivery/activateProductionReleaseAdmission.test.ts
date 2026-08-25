@@ -7,6 +7,7 @@ import { Effect } from "effect";
 
 import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
+import { publishedReleaseAuthority } from "../../src/testSupport/publishedReleaseAuthority.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
     deliverProductionReleaseUnderLease,
@@ -29,6 +30,7 @@ import {
 import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
+import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import type { ReleaseRuntimeIdentity } from "./releaseIdentity.ts";
 
 const temporaryDirectories: string[] = [];
@@ -154,7 +156,18 @@ describe("production artifact pre-admission lifecycle", () => {
             const result = await deliverProductionReleaseUnderLease(
                 lease,
                 paths,
-                options(fixture.projectRoot, fixture.releaseRoot, fixture.runtimeSource),
+                {
+                    ...options(
+                        fixture.projectRoot,
+                        fixture.releaseRoot,
+                        fixture.runtimeSource
+                    ),
+                    releaseAuthority: publishedReleaseAuthority(
+                        releaseA,
+                        "v1.2.3",
+                        runtimeA
+                    ),
+                },
                 candidateManifest,
                 services,
                 {
@@ -202,7 +215,7 @@ describe("production artifact pre-admission lifecycle", () => {
             );
 
             expect(result).toEqual(activation);
-            expect(additionalReleaseCopyDirectory).toBeUndefined();
+            expect(additionalReleaseCopyDirectory).toBe(productionHostProvisioningRoot);
             expect(events).toEqual([
                 "retain",
                 "capacity",

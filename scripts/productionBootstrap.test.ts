@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { maximumProductionReleaseArchiveBytes } from "../src/shared/productionReleaseArtifactReceipt.ts";
+import { publishedReleaseAuthority } from "../src/testSupport/publishedReleaseAuthority.ts";
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
 import {
     assertProductionReleaseArchiveListing,
@@ -262,6 +263,48 @@ describe("production bootstrap admission", () => {
         expect(failure).toEqual(new Error("Production bootstrap failed"));
         expect(cancelled).toBe(true);
     });
+
+    for (const deliveryOutcome of ["succeeded", "failed"] as const) {
+        test(`discards a direct-deploy candidate after delivery ${deliveryOutcome}`, async () => {
+            const candidateRoot = `/checkout/dist/releases/${releaseId}`;
+            const discarded: unknown[] = [];
+            const deliveryFailure = new Error("delivery failed");
+            const operation =
+                productionBootstrapTestSupport.withDiscardedPreparedPublishedRelease(
+                    () =>
+                        Promise.resolve({
+                            authority: publishedReleaseAuthority(
+                                releaseId,
+                                "v1.2.3",
+                                "b".repeat(40)
+                            ),
+                            releaseId,
+                            releaseRoot: candidateRoot,
+                        }),
+                    () =>
+                        deliveryOutcome === "succeeded"
+                            ? Promise.resolve()
+                            : Promise.reject(deliveryFailure),
+                    (releasesDirectory, releaseRoot, expectedName) => {
+                        discarded.push({ expectedName, releaseRoot, releasesDirectory });
+                        return Promise.resolve();
+                    }
+                );
+
+            if (deliveryOutcome === "failed") {
+                expect(await captureFailure(operation)).toBe(deliveryFailure);
+            } else {
+                await operation;
+            }
+            expect(discarded).toEqual([
+                {
+                    expectedName: releaseId,
+                    releaseRoot: candidateRoot,
+                    releasesDirectory: "/checkout/dist/releases",
+                },
+            ]);
+        });
+    }
 
     test("binds clean-host prerequisites to root-owned runtime bytes", async () => {
         const runtimeBytes = new TextEncoder().encode("qualified-runtime");
@@ -1021,6 +1064,7 @@ describe("production bootstrap admission", () => {
         );
 
         commands.length = 0;
+        preparationCapacityAdmitted = false;
         expect(
             await captureFailure(
                 deployProduction(dependencies, {
@@ -1032,10 +1076,12 @@ describe("production bootstrap admission", () => {
             )
         ).toBeInstanceOf(Error);
         expect(manualDeployDelivered).toBe(false);
+        expect(preparationCapacityAdmitted).toBe(false);
 
         commands.length = 0;
         prerequisitesInspected = false;
         provisioningBoundaryAvailable = true;
+        preparationCapacityAdmitted = false;
         await deployProduction(dependencies, {
             createTemporaryRoot,
             expectedCheckout: targetRepositoryRoot,
@@ -1050,6 +1096,7 @@ describe("production bootstrap admission", () => {
             "/usr/bin/systemctl cat mira-dashboard-production-provisioning@.service"
         );
         expect(manualDeployDelivered).toBe(true);
+        expect(preparationCapacityAdmitted).toBe(true);
         expect(prerequisitesInspected).toBe(false);
         expect(prepareStateWorkingDirectories).toEqual([
             admittedReleaseRoot,

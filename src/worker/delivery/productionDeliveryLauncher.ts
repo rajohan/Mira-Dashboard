@@ -64,10 +64,17 @@ const optionsSchema = v.strictObject({
 export type ProductionDeliveryLaunchOptions = Readonly<
     v.InferOutput<typeof optionsSchema>
 >;
-export type ProductionDeliveryExecutorIdentityOptions = Omit<
-    ProductionDeliveryLaunchOptions,
-    "artifactSource"
->;
+
+/**
+ * Resolves the credential boundary from the durable operation kind.
+ * @param operation Exact operation persisted in the cutover capsule.
+ * @returns Artifact authority required by every initial or recovered executor.
+ */
+export function productionDeliveryArtifactSource(
+    operation: "deploy" | "rollback-release"
+): ProductionDeliveryLaunchOptions["artifactSource"] {
+    return operation === "deploy" ? "published-release" : "retained";
+}
 
 export interface ProductionDeliveryLaunchProcessResult {
     readonly exitCode: number;
@@ -461,13 +468,11 @@ export type ProductionDeliveryExecutorEnsureResult = "already-running" | "launch
  * @returns Whether the exact executor was already running or newly launched.
  */
 export async function ensureProductionDeliveryExecutor(
-    untrustedOptions: ProductionDeliveryExecutorIdentityOptions,
+    untrustedOptions: ProductionDeliveryLaunchOptions,
     dependencies: ProductionDeliveryLauncherDependencies = {},
     signal?: AbortSignal
 ): Promise<ProductionDeliveryExecutorEnsureResult> {
-    const options = Object.freeze(
-        v.parse(optionsSchema, { ...untrustedOptions, artifactSource: "retained" })
-    );
+    const options = Object.freeze(v.parse(optionsSchema, untrustedOptions));
     await resolveVerifiedProductionDeliveryExecutor({
         executorReleaseId: options.executorReleaseId,
         projectRoot: options.projectRoot,

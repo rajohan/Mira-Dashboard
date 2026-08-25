@@ -29,7 +29,7 @@ import type { ProductionDeliveryControlPort } from "./productionDeliveryControl.
 import {
     ensureProductionDeliveryExecutor,
     launchProductionDeliveryExecutor,
-    type ProductionDeliveryExecutorIdentityOptions,
+    productionDeliveryArtifactSource,
     type ProductionDeliveryLaunchOptions,
 } from "./productionDeliveryLauncher.ts";
 import type { DeliveryProductionExecutionPort } from "./runtime.ts";
@@ -78,9 +78,7 @@ export interface DeliveryProductionExecutionOptions {
     readonly executorRuntimeRevision: string;
     readonly github: DeliveryGitHubPullRequestReadPort &
         DeliveryGitHubPullRequestMutationPort;
-    readonly ensure?: (
-        options: ProductionDeliveryExecutorIdentityOptions
-    ) => Promise<void>;
+    readonly ensure?: (options: ProductionDeliveryLaunchOptions) => Promise<void>;
     readonly launch?: (options: ProductionDeliveryLaunchOptions) => Promise<void>;
     readonly mainGit: DeliveryDashboardMainGitSyncPort;
     readonly projectRoot: string;
@@ -317,6 +315,9 @@ export function createDeliveryProductionExecutionPort(
                             await ensureProductionDeliveryExecutor(launchOptions);
                         })
                     )({
+                        artifactSource: productionDeliveryArtifactSource(
+                            existing.record.capsule.enqueue.payload.operation
+                        ),
                         executorReleaseId: existing.record.capsule.executor.releaseId,
                         projectRoot: options.projectRoot,
                         readinessUrl: options.readinessUrl,
@@ -435,8 +436,7 @@ export function createDeliveryProductionExecutionPort(
                 });
             await options.control.prepare(capsule, signal);
             await (options.launch ?? launchProductionDeliveryExecutor)({
-                artifactSource:
-                    payload.operation === "deploy" ? "published-release" : "retained",
+                artifactSource: productionDeliveryArtifactSource(payload.operation),
                 executorReleaseId: options.executorReleaseId,
                 projectRoot: options.projectRoot,
                 readinessUrl: options.readinessUrl,

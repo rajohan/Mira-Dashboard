@@ -15,6 +15,7 @@ import { createProductionDeliveryControlPort } from "./productionDeliveryControl
 import {
     ensureProductionDeliveryExecutor,
     launchProductionDeliveryExecutor,
+    productionDeliveryArtifactSource,
     type ProductionDeliveryLaunchProcessResult,
 } from "./productionDeliveryLauncher.ts";
 
@@ -173,6 +174,11 @@ function jsonResult(value: unknown): ProductionDeliveryLaunchProcessResult {
 }
 
 describe("production Delivery launcher", () => {
+    test("derives the credential boundary from the durable operation kind", () => {
+        expect(productionDeliveryArtifactSource("deploy")).toBe("published-release");
+        expect(productionDeliveryArtifactSource("rollback-release")).toBe("retained");
+    });
+
     test("starts one fixed transient executor with an empty child environment", async () => {
         const { executor, options, runtime } = await fixture();
         let observedCommand: readonly string[] = [];
@@ -321,8 +327,8 @@ describe("production Delivery launcher", () => {
         expect(commands[1]).toContain(runtime);
         expect(commands[1]).toContain(executor);
         expect(commands[1]).toContain("--property=RuntimeMaxSec=90min");
-        expect(commands[1]).toContain("--artifact-source=retained");
-        expect(commands[1]).not.toContain("/usr/local/bin/doppler");
+        expect(commands[1]).toContain("--artifact-source=published-release");
+        expect(commands[1]).toContain("/usr/local/bin/doppler");
         expect(commands[1]).toContain(`--transition=${transitionId}`);
     });
 

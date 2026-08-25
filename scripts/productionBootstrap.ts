@@ -153,26 +153,44 @@ async function deliverPreparedPublishedRelease(
 ): Promise<void> {
     const state = await prepareProtectedProductionStatePath(projectHome);
     await withDeploymentLease(state.stateDirectory, async (lease) => {
-        const admitted = await prepare();
-        const paths = await prepareProductionDeliveryDirectories(state);
-        const services = createSystemdProductionServiceController(lease, paths, {
-            readinessUrl: "http://127.0.0.1:3100/api/health/ready",
-            releaseAuthority: admitted.authority,
-        });
-        await deliverProductionReleaseUnderLease(
-            lease,
-            paths,
-            {
-                projectRoot: projectHome,
+        await withDiscardedPreparedPublishedRelease(prepare, async (admitted) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            const services = createSystemdProductionServiceController(lease, paths, {
                 readinessUrl: "http://127.0.0.1:3100/api/health/ready",
                 releaseAuthority: admitted.authority,
-                releaseRoot: admitted.releaseRoot,
-                runtimeSource: path.join(admitted.releaseRoot, "runtime/bun"),
-            },
-            await verifyReleaseArtifactIdentity(admitted.releaseRoot),
-            services
-        );
+            });
+            await deliverProductionReleaseUnderLease(
+                lease,
+                paths,
+                {
+                    projectRoot: projectHome,
+                    readinessUrl: "http://127.0.0.1:3100/api/health/ready",
+                    releaseAuthority: admitted.authority,
+                    releaseRoot: admitted.releaseRoot,
+                    runtimeSource: path.join(admitted.releaseRoot, "runtime/bun"),
+                },
+                await verifyReleaseArtifactIdentity(admitted.releaseRoot),
+                services
+            );
+        });
     });
+}
+
+async function withDiscardedPreparedPublishedRelease(
+    prepare: () => Promise<PreparedPublishedProductionRelease>,
+    deliver: (admitted: PreparedPublishedProductionRelease) => Promise<void>,
+    discard: typeof discardOwnedProductionReleaseCandidate = discardOwnedProductionReleaseCandidate
+): Promise<void> {
+    const admitted = await prepare();
+    try {
+        await deliver(admitted);
+    } finally {
+        await discard(
+            path.dirname(admitted.releaseRoot),
+            admitted.releaseRoot,
+            admitted.releaseId
+        );
+    }
 }
 
 export interface ProductionBootstrapOptions {
@@ -558,6 +576,7 @@ export const productionBootstrapTestSupport = Object.freeze({
     download: defaultDownload,
     environment: productionCommandEnvironment,
     readBounded,
+    withDiscardedPreparedPublishedRelease,
 });
 
 /**
@@ -1264,6 +1283,9 @@ export async function deployProduction(
         "cat",
         "mira-dashboard-production-provisioning@.service",
     ]);
+    await (
+        dependencies.preparationCapacityAdmission ?? admitProductionReleasePreparation
+    )(repositoryRoot, productionHostProvisioningRoot);
     await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(() =>
         preparePublishedProductionRelease(
             releaseId,
