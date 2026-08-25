@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { Effect } from "effect";
@@ -50,6 +50,7 @@ import {
     type ProductionServiceController,
 } from "./productionReleaseActivation.ts";
 import {
+    discardOwnedProductionReleaseCandidate,
     loadPublishedProductionRelease,
     publishProductionRelease,
     type PublishedProductionRelease,
@@ -199,6 +200,22 @@ interface EnqueueAuditRow {
 
 function sha256(value: string): string {
     return new Bun.CryptoHasher("sha256").update(value).digest("hex");
+}
+
+/**
+ * Compares exact release-manifest bytes with the published release authority.
+ * @param manifestBytes Exact immutable manifest bytes.
+ * @param expectedSha256 Published manifest digest.
+ * @returns Whether the cached bytes belong to the authorized release assets.
+ */
+export function releaseManifestMatchesAuthority(
+    manifestBytes: Uint8Array,
+    expectedSha256: string
+): boolean {
+    return (
+        new Bun.CryptoHasher("sha256").update(manifestBytes).digest("hex") ===
+        expectedSha256
+    );
 }
 
 function hasValidProductionRunState(run: ProductionRunRow): boolean {
@@ -475,8 +492,28 @@ export async function prepareProductionDeliveryTargetUnderLease(
 > {
     const target = record.capsule.cas.target;
     const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
+    let stalePublishedRoot = false;
     if ((await pathState(publishedRoot)) === "present") {
-        return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
+        const cached = await loadExactArtifacts(
+            paths,
+            target.releaseId,
+            target.runtimeRevision
+        );
+        if (record.capsule.enqueue.payload.operation === "rollback-release") {
+            return cached;
+        }
+        const manifestBytes = await readFile(
+            path.join(publishedRoot, "release-manifest.json")
+        );
+        if (
+            releaseManifestMatchesAuthority(
+                manifestBytes,
+                record.capsule.enqueue.payload.release.releaseManifestSha256
+            )
+        ) {
+            return cached;
+        }
+        stalePublishedRoot = true;
     }
     const checkoutRoot = path.join(projectRoot, "production/checkout");
     const source = await (
@@ -559,6 +596,13 @@ export async function prepareProductionDeliveryTargetUnderLease(
         sourceRelease.manifest.runtime,
         { sourceExecutable: path.join(sourceRelease.releaseRoot, "runtime/bun") }
     );
+    if (stalePublishedRoot) {
+        await discardOwnedProductionReleaseCandidate(
+            paths.releasesDirectory,
+            publishedRoot,
+            target.releaseId
+        );
+    }
     const release = await (dependencies.publishRelease ?? publishProductionRelease)(
         lease,
         paths,

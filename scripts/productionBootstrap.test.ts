@@ -139,11 +139,16 @@ describe("production bootstrap admission", () => {
             await downloadProductionBootstrapRelease(
                 releaseId,
                 "/tmp/artifact",
-                dependencies
+                dependencies,
+                sourceProjectRoot,
+                "v0.2.0"
             )
         ).toEqual({ artifactRoot: "/tmp/artifact", tagName: "v0.2.0" });
         expect(commands.some((command) => command.includes(" fetch --force "))).toBe(
             true
+        );
+        expect(commands).toContain(
+            "/usr/bin/gh release view v0.2.0 --repo=rajohan/Mira-Dashboard --json=tagName"
         );
         expect(commands.at(-1)).toContain("release download v0.2.0");
     });

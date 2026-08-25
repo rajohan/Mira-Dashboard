@@ -285,18 +285,21 @@ export function parseProductionBootstrapRelease(
  * @param temporaryRoot Private destination directory.
  * @param dependencies Fixed process boundary.
  * @param repositoryRoot Checkout used to resolve the release tag.
+ * @param expectedTagName Optional payload-bound release tag for normal Delivery.
  * @returns The supplied artifact directory after a successful download.
  */
 export async function downloadProductionBootstrapRelease(
     releaseId: string,
     temporaryRoot: string,
     dependencies: ProductionBootstrapDependencies,
-    repositoryRoot = projectRoot
+    repositoryRoot = projectRoot,
+    expectedTagName?: string
 ): Promise<DownloadedProductionBootstrapRelease> {
     const releaseText = await requireSuccess(dependencies, [
         "/usr/bin/gh",
         "release",
         "view",
+        ...(expectedTagName === undefined ? [] : [expectedTagName]),
         `--repo=${canonicalRepository}`,
         "--json=tagName",
     ]);
@@ -785,7 +788,8 @@ export async function preparePublishedProductionRelease(
             releaseId,
             temporaryRoot,
             dependencies,
-            repositoryRoot
+            repositoryRoot,
+            expectedAuthority?.tagName
         );
         const admitted = await admitProductionBootstrapRelease(
             downloaded.artifactRoot,

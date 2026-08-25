@@ -37,6 +37,7 @@ import {
     parseProductionDeliveryExecutorArguments,
     prepareProductionDeliveryOperation,
     prepareProductionDeliveryTargetUnderLease,
+    releaseManifestMatchesAuthority,
     runProductionDeliveryExecutor,
     runProductionDeliveryExecutorUnderLease,
     verifyProductionRunBeforeSnapshot,
@@ -303,6 +304,14 @@ async function createClaimedProductionRunDatabase(
 }
 
 describe("production Delivery executor", () => {
+    test("binds cached release manifests to the published authority digest", () => {
+        const bytes = new TextEncoder().encode("manifest-bytes");
+        const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+
+        expect(releaseManifestMatchesAuthority(bytes, digest)).toBe(true);
+        expect(releaseManifestMatchesAuthority(bytes, "0".repeat(64))).toBe(false);
+    });
+
     test("accepts the exact claimed production run before snapshot", async () => {
         const { paths } = await fixture();
         const capsule = operationCapsule();
