@@ -98,10 +98,8 @@ export const hostOperationsProvisioningArtifacts = Object.freeze([
         mode: 0o644,
     }),
     Object.freeze({
-        artifactPath:
-            "systemd/host-operations/mira-dashboard-production-provisioning@.service",
-        destinationPath:
-            "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
+        artifactPath: "systemd/host-operations/mira-dashboard-provision@.service",
+        destinationPath: "/etc/systemd/system/mira-dashboard-provision@.service",
         mode: 0o644,
     }),
     Object.freeze({

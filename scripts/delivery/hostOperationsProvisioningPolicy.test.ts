@@ -14,10 +14,7 @@ const systemdRoot = path.resolve(import.meta.dir, "../../systemd/host-operations
 describe("host-operations provisioning artifact policy", () => {
     test("injects only the ordinary GitHub credential into release provisioning", async () => {
         const [unit, launcher] = await Promise.all([
-            readFile(
-                path.join(systemdRoot, "mira-dashboard-production-provisioning@.service"),
-                "utf8"
-            ),
+            readFile(path.join(systemdRoot, "mira-dashboard-provision@.service"), "utf8"),
             readFile(
                 path.join(sourceRoot, "mira-dashboard-production-provisioning"),
                 "utf8"
@@ -148,10 +145,8 @@ describe("host-operations provisioning artifact policy", () => {
                 mode: 0o644,
             },
             {
-                artifactPath:
-                    "systemd/host-operations/mira-dashboard-production-provisioning@.service",
-                destinationPath:
-                    "/etc/systemd/system/mira-dashboard-production-provisioning@.service",
+                artifactPath: "systemd/host-operations/mira-dashboard-provision@.service",
+                destinationPath: "/etc/systemd/system/mira-dashboard-provision@.service",
                 mode: 0o644,
             },
             {

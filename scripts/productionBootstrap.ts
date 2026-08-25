@@ -38,6 +38,7 @@ import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./delivery/systemdProductionServices.ts";
 
 const failureMessage = "Production bootstrap failed";
+const productionProvisioningTemplateUnit = "mira-dashboard-provision@.service";
 const projectRoot = path.resolve(import.meta.dir, "..");
 const projectHome = "/home/ubuntu/projects/mira-dashboard";
 const canonicalRepository = "rajohan/Mira-Dashboard";
@@ -1314,7 +1315,7 @@ export async function deployProduction(
     await requireSuccess(dependencies, [
         "/usr/bin/systemctl",
         "cat",
-        "mira-dashboard-production-provisioning@.service",
+        productionProvisioningTemplateUnit,
     ]);
     await (dependencies.deliverPublishedRelease ?? deliverPreparedPublishedRelease)(
         async () => {
