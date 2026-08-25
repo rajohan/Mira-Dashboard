@@ -61,6 +61,7 @@ import {
     type InstalledProductionRuntime,
 } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
+import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import { verifyPreviewTailscaleOperator } from "./provisioning/preview-tailscale/operator.ts";
 import {
     verifyReleaseArtifactIdentity,
@@ -71,6 +72,27 @@ import { createSystemdProductionServiceController } from "./systemdProductionSer
 const executorFailureMessage = "Production Delivery executor failed";
 const executorUsage =
     "Usage: bun productionDelivery.js --operation=prepare|inspect|inspect-active|clear|cutover --project-root=/absolute/project [--readiness-url=http://127.0.0.1:PORT/api/health/ready] [--transition=uuid-v7]";
+const productionHostProvisioningCapacityDirectory = path.dirname(
+    productionHostProvisioningRoot
+);
+
+const admitProductionDeliveryArtifacts: typeof assertProductionArtifactCapacity = (
+    lease,
+    paths,
+    sourceReleaseRoot,
+    sourceManifest,
+    sourceExecutable
+) =>
+    assertProductionArtifactCapacity(
+        lease,
+        paths,
+        sourceReleaseRoot,
+        sourceManifest,
+        sourceExecutable,
+        {
+            additionalReleaseCopyDirectory: productionHostProvisioningCapacityDirectory,
+        }
+    );
 const absoluteProjectRootSchema = v.pipe(
     v.string(executorUsage),
     v.maxLength(4096, executorUsage),
@@ -595,7 +617,7 @@ export async function prepareProductionDeliveryTargetUnderLease(
             sourceRelease.releaseRoot,
             "runtime/bun"
         );
-        await (dependencies.capacityAdmission ?? assertProductionArtifactCapacity)(
+        await (dependencies.capacityAdmission ?? admitProductionDeliveryArtifacts)(
             lease,
             paths,
             sourceRelease.releaseRoot,

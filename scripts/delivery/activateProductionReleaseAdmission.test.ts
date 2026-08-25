@@ -442,6 +442,35 @@ describe("production artifact pre-admission lifecycle", () => {
         });
     });
 
+    test("charges the privileged retained release copy on a shared filesystem", async () => {
+        const fixture = await createFixture();
+        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(fixture.state);
+            const failure = await rejectionError(
+                assertProductionArtifactCapacity(
+                    lease,
+                    paths,
+                    fixture.releaseRoot,
+                    manifest(releaseA, runtimeA),
+                    fixture.runtimeSource,
+                    {
+                        additionalReleaseCopyDirectory: paths.productionDirectory,
+                        availableCapacity: () =>
+                            Promise.resolve(
+                                filesystemCapacity(
+                                    productionArtifactCapacityReserveBytes + 32n * 1024n
+                                )
+                            ),
+                        verifySourceRelease: () =>
+                            Promise.resolve(manifest(releaseA, runtimeA)),
+                    }
+                )
+            );
+
+            expect(failure.message).toBe("Production artifact capacity admission failed");
+        });
+    });
+
     test("fails closed when the supplied identity does not match the source tree", async () => {
         const fixture = await createFixture();
         await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {

@@ -24,11 +24,12 @@ import {
 } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
 import { assertProductionReleaseArchiveListing } from "./productionReleaseArchive.ts";
+import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
 import { verifyReleaseArtifactIdentity } from "./releaseIdentity.ts";
 
 const failureMessage = "Production release provisioning failed";
 const repositoryApi = "https://api.github.com/repos/rajohan/Mira-Dashboard";
-const provisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
+const provisioningRoot = productionHostProvisioningRoot;
 const releasesRoot = `${provisioningRoot}/releases`;
 const productionActivationStatePath =
     "/home/ubuntu/projects/mira-dashboard/production/state/activation.json";

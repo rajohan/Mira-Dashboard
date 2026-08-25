@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import { measureProcessArtifact } from "./buildProcesses.ts";
+import { maximumProductionProvisioningBundleBytes } from "./provisioning/host-operations/policy.ts";
 
 const repositoryRoot = path.resolve(import.meta.dir, "../..");
 const scriptPath = path.join(import.meta.dir, "buildProcesses.ts");
@@ -33,6 +36,30 @@ async function runBuild(outputDirectory: string) {
 }
 
 describe("Dashboard process artifacts", () => {
+    test("rejects a compressible provisioning bundle above the raw installer limit", async () => {
+        const outputDirectory = path.join(
+            repositoryRoot,
+            `dist/test-process-budget-${Bun.randomUUIDv7()}`
+        );
+        outputDirectories.push(outputDirectory);
+        await mkdir(path.dirname(outputDirectory), { recursive: true });
+        await writeFile(
+            outputDirectory,
+            new Uint8Array(maximumProductionProvisioningBundleBytes + 1)
+        );
+
+        expect(
+            measureProcessArtifact(
+                outputDirectory,
+                2 * 1024 * 1024,
+                maximumProductionProvisioningBundleBytes,
+                "production-provisioning"
+            )
+        ).rejects.toThrow(
+            "Dashboard production-provisioning process bundle exceeds its byte budget"
+        );
+    });
+
     test("bundles only reviewed executable roots without source maps", async () => {
         const outputDirectory = path.join(
             repositoryRoot,

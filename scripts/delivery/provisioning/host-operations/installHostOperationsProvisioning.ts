@@ -11,6 +11,8 @@ import {
     hostOperationsProvisioningArtifacts,
     hostOperationsProvisioningReleaseArtifactPaths,
     hostOperationsProvisioningSourceArtifactPaths,
+    maximumProductionProvisioningBundleBytes,
+    productionHostProvisioningRoot,
 } from "./policy.ts";
 
 const installationFailureMessage = "Host operations provisioning installation failed";
@@ -26,7 +28,6 @@ const immutableDirectoryMode = 0o500n;
 const immutableFileMode = 0o400n;
 const maximumManifestBytes = 4 * 1024 * 1024;
 const maximumProvisioningArtifactBytes = 64 * 1024;
-const maximumProductionProvisioningBundleBytes = 4 * 1024 * 1024;
 const maximumActivationOutputBytes = 64 * 1024;
 const activationDeadlineMs = 30_000;
 const maximumArtifactCount = 4096;
@@ -35,8 +36,7 @@ const artifactShaPattern = /^[a-f\d]{64}$/u;
 const artifactSegmentPattern = /^[A-Za-z0-9.@_+-]+$/u;
 const provisioningPrefix = "scripts/delivery/provisioning/host-operations/";
 const productionSourceIdentity = Object.freeze({ groupId: 0n, userId: 0n });
-const productionRuntimeExecutablePath =
-    "/var/lib/mira-dashboard-host-provisioning/runtime/bun";
+const productionRuntimeExecutablePath = `${productionHostProvisioningRoot}/runtime/bun`;
 const installerRelativePath =
     "scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts";
 const productionProvisioningBundlePath = "server/productionProvisioning.js";
@@ -80,7 +80,7 @@ const productionRuntimeBoundary = Object.freeze({
     expectedEntrypointPath: "",
     expectedExecutablePath: productionRuntimeExecutablePath,
     ...productionSourceIdentity,
-    trustRoot: "/var/lib/mira-dashboard-host-provisioning",
+    trustRoot: productionHostProvisioningRoot,
 });
 
 /** Deterministic non-production boundaries used only by focused installer tests. */

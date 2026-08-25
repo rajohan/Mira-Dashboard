@@ -1,3 +1,9 @@
+/** Root-owned durable namespace used by the production provisioning service. */
+export const productionHostProvisioningRoot = "/var/lib/mira-dashboard-host-provisioning";
+
+/** Largest raw production provisioning process admitted by both build and installer. */
+export const maximumProductionProvisioningBundleBytes = 4 * 1024 * 1024;
+
 /** Exact release-relative and host destination policy for root host operations. */
 export const hostOperationsProvisioningArtifacts = Object.freeze([
     Object.freeze({

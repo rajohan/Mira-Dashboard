@@ -4,6 +4,7 @@ import path from "node:path";
 import { withBunBuildAdmission } from "./buildAdmission.ts";
 import { parseBuildOutputArgument } from "./buildCli.ts";
 import { resolveRepositoryBuildPath } from "./buildPaths.ts";
+import { maximumProductionProvisioningBundleBytes } from "./provisioning/host-operations/policy.ts";
 
 const webEntrypoint = "src/app/dashboardServer.ts";
 const workerEntrypoint = "src/app/worker.ts";
@@ -59,9 +60,18 @@ function validatedOutputDirectory(
     ).output;
 }
 
-async function measurements(
+/**
+ * Measures one bundled process against its compressed and optional raw byte budgets.
+ * @param filePath Exact emitted bundle path.
+ * @param maximumGzipBytes Largest admitted gzip representation.
+ * @param maximumRawBytes Optional raw-byte ceiling shared with a later consumer.
+ * @param role Stable process name used in the bounded failure.
+ * @returns Immutable compressed and raw measurements.
+ */
+export async function measureProcessArtifact(
     filePath: string,
     maximumGzipBytes: number,
+    maximumRawBytes: number | undefined,
     role:
         | "database-maintenance"
         | "openclaw-heartbeat"
@@ -73,7 +83,11 @@ async function measurements(
 ): Promise<Readonly<{ gzipBytes: number; rawBytes: number }>> {
     const contents = await readFile(filePath);
     const gzipBytes = Bun.gzipSync(contents, { level: 9 }).byteLength;
-    if (contents.byteLength === 0 || gzipBytes > maximumGzipBytes) {
+    if (
+        contents.byteLength === 0 ||
+        gzipBytes > maximumGzipBytes ||
+        (maximumRawBytes !== undefined && contents.byteLength > maximumRawBytes)
+    ) {
         throw new Error(`Dashboard ${role} process bundle exceeds its byte budget`);
     }
     return Object.freeze({ gzipBytes, rawBytes: contents.byteLength });
@@ -156,35 +170,46 @@ export async function buildProcessArtifacts(
             web,
             worker,
         ] = await Promise.all([
-            measurements(
+            measureProcessArtifact(
                 path.join(output, "databaseMaintenance.js"),
                 maximumDatabaseMaintenanceGzipBytes,
+                undefined,
                 "database-maintenance"
             ),
-            measurements(
+            measureProcessArtifact(
                 path.join(output, "openClawHeartbeat.js"),
                 maximumOpenClawHeartbeatGzipBytes,
+                undefined,
                 "openclaw-heartbeat"
             ),
-            measurements(
+            measureProcessArtifact(
                 path.join(output, "prepareProductionState.js"),
                 maximumPrepareProductionStateGzipBytes,
+                undefined,
                 "prepare-production-state"
             ),
-            measurements(
+            measureProcessArtifact(
                 path.join(output, "productionDelivery.js"),
                 maximumProductionDeliveryGzipBytes,
+                undefined,
                 "production-delivery"
             ),
-            measurements(
+            measureProcessArtifact(
                 path.join(output, "productionProvisioning.js"),
                 maximumProductionProvisioningGzipBytes,
+                maximumProductionProvisioningBundleBytes,
                 "production-provisioning"
             ),
-            measurements(path.join(output, "web.js"), maximumWebGzipBytes, "web"),
-            measurements(
+            measureProcessArtifact(
+                path.join(output, "web.js"),
+                maximumWebGzipBytes,
+                undefined,
+                "web"
+            ),
+            measureProcessArtifact(
                 path.join(output, "worker.js"),
                 maximumWorkerGzipBytes,
+                undefined,
                 "worker"
             ),
         ]);
