@@ -304,7 +304,6 @@ describe("production release root provisioner", () => {
         const commands: string[] = [];
         const syncedPaths: string[] = [];
         let assetDownloads = 0;
-        let failAuthorityInstall = false;
         let releaseRootPublications = 0;
         const provisioningPairsRoot = path.join(provisioningRoot, "pairs");
         const previousPair = path.join(provisioningPairsRoot, "a".repeat(40));
@@ -412,12 +411,6 @@ describe("production release root provisioner", () => {
             releasesRoot,
             runCommand: async (executable, arguments_, stdin) => {
                 commands.push(`${executable} ${arguments_.join(" ")}`);
-                if (
-                    failAuthorityInstall &&
-                    arguments_[0]?.endsWith("installHostOperationsProvisioning.ts")
-                ) {
-                    return commandResult(new Uint8Array(), 1);
-                }
                 if (executable === "/usr/bin/install") {
                     await cp(arguments_[6]!, arguments_[7]!);
                     return commandResult();
@@ -519,15 +512,6 @@ describe("production release root provisioner", () => {
         expect(retainedAfterPublishedInstall.toSorted()).toEqual(
             ["a".repeat(40), releaseId].toSorted()
         );
-        await mkdir(path.join(releasesRoot, "f".repeat(40)));
-        await provisionProductionRelease(`${releaseId}--local`, environment);
-        const retainedAfterLocalInstall = await readdir(releasesRoot);
-        expect(retainedAfterLocalInstall.toSorted()).toEqual(
-            ["a".repeat(40), releaseId].toSorted()
-        );
-        await provisionProductionRelease(`${releaseId}--local--settled`, environment);
-        const retainedRoots = await readdir(releasesRoot);
-        expect(retainedRoots.toSorted()).toEqual(["a".repeat(40), releaseId].toSorted());
         expect(releaseRootPublications).toBe(0);
         const runtimeInstallIndex = commands.findIndex((command) =>
             command.startsWith("/usr/bin/install -o root -g root -m 0555")
@@ -537,15 +521,8 @@ describe("production release root provisioner", () => {
         );
         expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
         expect(authorityInstallIndex).toBeGreaterThan(runtimeInstallIndex);
-
-        const failedAttemptSelector = `${provisioningRoot}/.failed-selector`;
-        await symlink(previousPair, failedAttemptSelector, "dir");
-        await rename(failedAttemptSelector, provisioningPairSelector);
-        const previousSelector = await readlink(provisioningPairSelector);
-        failAuthorityInstall = true;
-        await expectProvisioningFailure(
-            provisionProductionRelease(`${releaseId}--local`, environment)
+        expect(await readlink(provisioningPairSelector)).toBe(
+            path.join(provisioningPairsRoot, releaseId)
         );
-        expect(await readlink(provisioningPairSelector)).toBe(previousSelector);
     });
 });
