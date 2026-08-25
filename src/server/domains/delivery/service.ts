@@ -28,6 +28,7 @@ import {
 } from "../../../contracts/delivery.ts";
 import type { DeliveryOperationJobPayload } from "../../../contracts/deliveryWorker.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { publishedReleaseAuthoritiesMatch } from "../../../shared/publishedReleaseAuthority.ts";
 import type { DeliveryDeploymentHistoryReader } from "./deploymentHistory.ts";
 import type {
     DeliveryOperationActor,
@@ -446,8 +447,10 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
                 input.release.releaseId !== input.expectedMainHeadSha ||
                 releases.releases.candidate === undefined ||
                 releases.releases.current === undefined ||
-                JSON.stringify(releases.releases.candidate) !==
-                    JSON.stringify(input.release) ||
+                !publishedReleaseAuthoritiesMatch(
+                    releases.releases.candidate,
+                    input.release
+                ) ||
                 releases.releases.activationRevision !== input.activationRevision
             ) {
                 throw new DeliveryServiceError("conflict");

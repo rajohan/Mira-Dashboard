@@ -167,14 +167,52 @@ function sha256(bytes: Uint8Array): string {
     return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
 
+async function cancelResponse(response: Response, reason: string): Promise<void> {
+    try {
+        await response.body?.cancel(reason);
+    } catch {
+        // Rejected provider bodies are discarded without exposing diagnostics.
+    }
+}
+
 async function boundedBytes(response: Response, maximum: number): Promise<Uint8Array> {
-    if (!response.ok) throw failure();
-    const declared = response.headers.get("content-length");
-    if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > maximum)) {
+    if (!response.ok) {
+        await cancelResponse(response, failureMessage);
         throw failure();
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > maximum) throw failure();
+    const declared = response.headers.get("content-length");
+    if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > maximum)) {
+        await cancelResponse(response, failureMessage);
+        throw failure();
+    }
+    if (response.body === null) throw failure();
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            const chunk = next.value as Uint8Array;
+            if (chunk.byteLength > maximum - length) {
+                await reader.cancel(failureMessage).catch(() => {});
+                throw failure();
+            }
+            length += chunk.byteLength;
+            chunks.push(chunk);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    if (length === 0 || (declared !== null && Number(declared) !== length)) {
+        throw failure();
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
     return bytes;
 }
 

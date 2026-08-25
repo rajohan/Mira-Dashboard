@@ -22,6 +22,7 @@ import {
     type DeliveryProductionOperationInspection,
     type DeliveryProductionOperationRecord,
 } from "../../shared/deliveryProductionOperation.ts";
+import { publishedReleaseAuthoritiesMatch } from "../../shared/publishedReleaseAuthority.ts";
 import { fullCommitShaSchema } from "../../shared/validation.ts";
 import type { DeliveryProductionAuthorityReader } from "./productionAuthorityReader.ts";
 import type { ProductionDeliveryControlPort } from "./productionDeliveryControl.ts";
@@ -327,8 +328,10 @@ export function createDeliveryProductionExecutionPort(
                 payload.operation === "deploy" &&
                 (current.releases.candidate === undefined ||
                     current.releases.current === undefined ||
-                    JSON.stringify(current.releases.candidate) !==
-                        JSON.stringify(payload.release))
+                    !publishedReleaseAuthoritiesMatch(
+                        current.releases.candidate,
+                        payload.release
+                    ))
             ) {
                 throw failure();
             }

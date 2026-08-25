@@ -155,6 +155,32 @@ describe("production release root provisioner", () => {
                 16
             )
         );
+        await expectProvisioningFailure(
+            productionReleaseProvisionerTestSupport.boundedBytes(
+                new Response(encoder.encode("size"), {
+                    headers: { "content-length": "2" },
+                }),
+                8
+            )
+        );
+        let canceled = false;
+        let chunk = 0;
+        const oversizedStream = new ReadableStream<Uint8Array>({
+            cancel: () => {
+                canceled = true;
+            },
+            pull: (controller) => {
+                chunk += 1;
+                controller.enqueue(encoder.encode(chunk === 1 ? "ok" : "x"));
+            },
+        });
+        await expectProvisioningFailure(
+            productionReleaseProvisionerTestSupport.boundedBytes(
+                new Response(oversizedStream),
+                2
+            )
+        );
+        expect(canceled).toBe(true);
 
         const result = await productionReleaseProvisionerTestSupport.run(
             "/usr/bin/tee",

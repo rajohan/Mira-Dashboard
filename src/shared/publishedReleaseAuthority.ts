@@ -41,3 +41,31 @@ export const publishedReleaseAuthoritySchema = v.strictObject({
 export type PublishedReleaseAuthority = Readonly<
     v.InferOutput<typeof publishedReleaseAuthoritySchema>
 >;
+
+/**
+ * Compares every immutable field in two normalized published release authorities.
+ * Asset order is provider-controlled and does not change the authorized identity.
+ * @param left First normalized release authority.
+ * @param right Second normalized release authority.
+ * @returns Whether both values authorize the same exact published bytes and runtime.
+ */
+export function publishedReleaseAuthoritiesMatch(
+    left: PublishedReleaseAuthority,
+    right: PublishedReleaseAuthority
+): boolean {
+    return (
+        left.releaseId === right.releaseId &&
+        left.releaseManifestSha256 === right.releaseManifestSha256 &&
+        left.runtime.revision === right.runtime.revision &&
+        left.runtime.version === right.runtime.version &&
+        left.tagName === right.tagName &&
+        left.assets.every((leftAsset) =>
+            right.assets.some(
+                (rightAsset) =>
+                    leftAsset.name === rightAsset.name &&
+                    leftAsset.digest === rightAsset.digest &&
+                    leftAsset.size === rightAsset.size
+            )
+        )
+    );
+}

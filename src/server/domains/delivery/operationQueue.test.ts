@@ -200,4 +200,35 @@ describe("Delivery operation queue", () => {
         }
         expect(fixture.enqueues).toHaveLength(0);
     });
+
+    test("rejects dispatch whose release authority differs from the confirmed input", async () => {
+        const fixture = queueFixture();
+        const request = deployRequest();
+        const differentRelease = {
+            ...publishedReleaseAuthority(headSha),
+            releaseManifestSha256: "0".repeat(64),
+        };
+        try {
+            await fixture.queue.enqueue({
+                ...request,
+                authorizeDispatch: () =>
+                    Promise.resolve({
+                        authorize: () => {},
+                        payload: {
+                            activationRevision: sourceRevision,
+                            checkoutRevision: sourceRevision,
+                            expectedMainHeadSha: headSha,
+                            operation: "deploy" as const,
+                            release: differentRelease,
+                            sourceRevision,
+                        },
+                    }),
+            });
+            throw new Error("expected queue conflict");
+        } catch (error) {
+            expect(error).toBeInstanceOf(DeliveryOperationQueueError);
+            expect((error as DeliveryOperationQueueError).reason).toBe("conflict");
+        }
+        expect(fixture.enqueues).toHaveLength(0);
+    });
 });

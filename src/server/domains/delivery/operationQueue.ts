@@ -15,6 +15,7 @@ import {
     parseDeliveryOperationJobPayload,
 } from "../../../contracts/deliveryWorker.ts";
 import { parseJsonText } from "../../../shared/json.ts";
+import { publishedReleaseAuthoritiesMatch } from "../../../shared/publishedReleaseAuthority.ts";
 import { fullCommitShaSchema } from "../../../shared/validation.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { preflightManualEnqueue } from "../jobs/manualEnqueue.ts";
@@ -147,7 +148,8 @@ function payloadMatchesInput(
                 payload.operation === input.operation &&
                 payload.activationRevision === input.activationRevision &&
                 payload.checkoutRevision === input.checkoutRevision &&
-                payload.expectedMainHeadSha === input.expectedMainHeadSha
+                payload.expectedMainHeadSha === input.expectedMainHeadSha &&
+                publishedReleaseAuthoritiesMatch(payload.release, input.release)
             );
         }
         case "merge-pull-request": {
