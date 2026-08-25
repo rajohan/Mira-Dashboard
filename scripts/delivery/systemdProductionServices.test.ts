@@ -120,7 +120,7 @@ function inactiveProcessResult(): SystemctlProcessResult {
 }
 
 describe("production root-systemd service control", () => {
-    test("rejects published authority that would exceed the systemd unit-name limit", async () => {
+    test("rejects published authority whose escaped systemd unit exceeds the limit", async () => {
         const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -128,7 +128,7 @@ describe("production root-systemd service control", () => {
             const fixtures = await createRuntimePointerFixture(paths);
             const authority = {
                 ...publishedAuthority(firstReleaseId),
-                tagName: `v1.2.3-${"a".repeat(64)}`,
+                tagName: `v1.2.3.${"a".repeat(26)}`,
             } as PublishedReleaseAuthority;
             const controller = createSystemdProductionServiceController(lease, paths, {
                 execute: () => Promise.resolve(successfulProcessResult()),

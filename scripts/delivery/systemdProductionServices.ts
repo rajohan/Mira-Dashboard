@@ -76,6 +76,10 @@ function validateExecutable(executable: string): void {
     }
 }
 
+function systemdEscapedInstanceByteLength(instance: string): number {
+    return Buffer.byteLength(instance.replaceAll("-", String.raw`\x2d`));
+}
+
 async function requireSystemctlSuccess(
     execute: SystemctlExecutor,
     executable: string,
@@ -198,7 +202,10 @@ export function createSystemdProductionServiceController(
                 throw serviceFailure();
             }
             const unit = `${provisioningUnitPrefix}${instance}.service`;
-            if (Buffer.byteLength(unit) > maximumSystemdUnitNameBytes) {
+            const escapedUnitBytes =
+                Buffer.byteLength(`${provisioningUnitPrefix}.service`) +
+                systemdEscapedInstanceByteLength(instance);
+            if (escapedUnitBytes > maximumSystemdUnitNameBytes) {
                 throw serviceFailure();
             }
             await requireSystemctlSuccess(
