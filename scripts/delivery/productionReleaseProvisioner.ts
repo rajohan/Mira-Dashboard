@@ -968,6 +968,16 @@ async function retainReleaseRoots(
     const retained = new Set(
         candidateReleaseId === undefined ? [] : [candidateReleaseId]
     );
+    const selectedPairRoot = await environment.canonicalPath(
+        environment.provisioningPairSelector
+    );
+    if (
+        path.dirname(selectedPairRoot) !== environment.provisioningPairsRoot ||
+        !/^[a-f\d]{40}$/u.test(path.basename(selectedPairRoot))
+    ) {
+        throw failure();
+    }
+    retained.add(path.basename(selectedPairRoot));
     const userIdText = new TextDecoder("utf-8", { fatal: true })
         .decode(await requireSuccess("/usr/bin/id", ["-u", "ubuntu"], environment))
         .trim();

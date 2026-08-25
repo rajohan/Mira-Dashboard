@@ -931,6 +931,10 @@ describe("production Delivery executor", () => {
                 record,
                 current,
                 {
+                    preparationCapacityAdmission: () => {
+                        calls.push("preparation-capacity");
+                        return Promise.resolve();
+                    },
                     capacityAdmission: () => Promise.resolve(),
                     discardCandidate: (releasesRoot, releaseRoot, releaseId) => {
                         expect(releasesRoot).toBe(`${checkoutRoot}/dist/releases`);
@@ -976,9 +980,49 @@ describe("production Delivery executor", () => {
                 }
             );
             expect(calls).toEqual([
+                "preparation-capacity",
                 "published-assets-and-root-provisioning",
                 "discard-checkout-candidate",
             ]);
+        });
+    });
+
+    test("rejects insufficient staging capacity before downloading release assets", async () => {
+        const { options, paths } = await fixture();
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            const record = await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            let preparationStarted = false;
+
+            const capacityFailure = await rejectionError(
+                prepareProductionDeliveryTargetUnderLease(
+                    lease,
+                    paths,
+                    options.projectRoot,
+                    record,
+                    artifact(currentReleaseId, currentRuntimeRevision),
+                    {
+                        preparationCapacityAdmission: () =>
+                            Promise.reject(new Error("insufficient capacity")),
+                        preparePublishedRelease: () => {
+                            preparationStarted = true;
+                            throw new Error("must not be reached");
+                        },
+                        resolveSourceIdentity: () =>
+                            Promise.resolve({
+                                commitSha: targetReleaseId,
+                                commitTitle: "Target release",
+                                state: "clean",
+                            }),
+                    }
+                )
+            );
+            expect(capacityFailure.message).toBe("insufficient capacity");
+            expect(preparationStarted).toBeFalse();
         });
     });
 

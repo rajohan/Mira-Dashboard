@@ -5,7 +5,10 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { createBunRuntimePolicy } from "../../src/shared/bunRuntimePolicy.ts";
-import { maximumProductionReleaseArchiveBytes } from "../../src/shared/productionReleaseArtifactReceipt.ts";
+import {
+    maximumProductionReleaseArchiveBytes,
+    maximumProductionReleaseArtifactTreeBytes,
+} from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
@@ -31,6 +34,9 @@ afterEach(() => removeProductionDeliveryFixtures(temporaryDirectories));
 describe("production release artifact receipt", () => {
     test("admits the bounded digest-bound handoff format", () => {
         expect(v.parse(productionReleaseArtifactReceiptSchema, receipt)).toEqual(receipt);
+        expect(maximumProductionReleaseArchiveBytes).toBeGreaterThan(
+            maximumProductionReleaseArtifactTreeBytes
+        );
     });
 
     test("rejects malformed archive identity and unknown fields", () => {

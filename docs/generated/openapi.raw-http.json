@@ -20775,7 +20775,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 536870912
+                                    "maximum": 570425344
                                   }
                                 },
                                 "required": [
@@ -20804,7 +20804,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 536870912
+                                    "maximum": 570425344
                                   }
                                 },
                                 "required": [
@@ -21174,7 +21174,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 536870912
+                                    "maximum": 570425344
                                   }
                                 },
                                 "required": [
@@ -21203,7 +21203,7 @@
                                   "size": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 536870912
+                                    "maximum": 570425344
                                   }
                                 },
                                 "required": [
@@ -22123,7 +22123,7 @@
                           "size": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 536870912
+                            "maximum": 570425344
                           }
                         },
                         "required": [
@@ -22152,7 +22152,7 @@
                           "size": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 536870912
+                            "maximum": 570425344
                           }
                         },
                         "required": [

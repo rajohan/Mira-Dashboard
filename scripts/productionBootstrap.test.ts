@@ -3,6 +3,7 @@ import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { maximumProductionReleaseArchiveBytes } from "../src/shared/productionReleaseArtifactReceipt.ts";
 import { packageProductionReleaseArtifact } from "./delivery/packageProductionReleaseArtifact.ts";
 import {
     assertProductionReleaseArchiveListing,
@@ -198,7 +199,9 @@ describe("production bootstrap admission", () => {
         );
         expect(downloads).toHaveLength(2);
         expect(downloads[0]).toContain("application/octet-stream");
-        expect(downloads[1]).toContain("release.tar | 536870912 | 1024");
+        expect(downloads[1]).toContain(
+            `release.tar | ${maximumProductionReleaseArchiveBytes} | 1024`
+        );
     });
 
     test("bounds release bytes while writing and projects private GitHub auth", async () => {

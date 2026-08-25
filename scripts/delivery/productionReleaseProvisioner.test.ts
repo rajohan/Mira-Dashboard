@@ -336,7 +336,7 @@ describe("production release root provisioner", () => {
         let assetDownloads = 0;
         let releaseRootPublications = 0;
         const provisioningPairsRoot = path.join(provisioningRoot, "pairs");
-        const previousPair = path.join(provisioningPairsRoot, "a".repeat(40));
+        const previousPair = path.join(provisioningPairsRoot, "b".repeat(40));
         const provisioningPairSelector = path.join(provisioningRoot, "current");
         const runtimeExecutable = path.join(provisioningPairSelector, "bun");
         const installedEntrypoint = path.join(
@@ -499,7 +499,7 @@ describe("production release root provisioner", () => {
         ).toMatchObject({ source: { commitSha: releaseId } });
         const retainedAfterRejectedDownload = await readdir(releasesRoot);
         expect(retainedAfterRejectedDownload.toSorted()).toEqual(
-            ["a".repeat(40), releaseId].toSorted()
+            ["a".repeat(40), "b".repeat(40), releaseId].toSorted()
         );
 
         const mismatchedReleaseRoot = await createLocalReleaseFixture(

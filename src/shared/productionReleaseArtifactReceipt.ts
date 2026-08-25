@@ -1,7 +1,11 @@
 import * as v from "valibot";
 
-/** Maximum accepted byte length for one published production release archive. */
-export const maximumProductionReleaseArchiveBytes = 512 * 1024 * 1024;
+/** Maximum logical bytes admitted in one unpacked production release tree. */
+export const maximumProductionReleaseArtifactTreeBytes = 512 * 1024 * 1024;
+
+/** Maximum accepted archive size, including bounded tar headers around a 512 MiB tree. */
+export const maximumProductionReleaseArchiveBytes =
+    maximumProductionReleaseArtifactTreeBytes + 32 * 1024 * 1024;
 
 /** Digest-bound receipt published beside one immutable production release archive. */
 export const productionReleaseArtifactReceiptSchema = v.strictObject({
