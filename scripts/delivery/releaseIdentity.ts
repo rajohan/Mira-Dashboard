@@ -70,10 +70,7 @@ const exactScriptPaths = Object.freeze(
         ...previewTailscaleProvisioningReleaseArtifactPaths,
     ].toSorted()
 );
-const exactSourcePaths = Object.freeze([
-    "src/shared/logRotationEpochProjection.ts",
-    "src/shared/managedLogManifest.ts",
-] as const);
+const exactSourcePaths = Object.freeze(["src/shared/managedLogManifest.ts"] as const);
 
 /** Bun identity observed by release creation and activation verification. */
 export interface ReleaseRuntimeIdentity {

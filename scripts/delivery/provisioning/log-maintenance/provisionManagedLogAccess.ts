@@ -12,6 +12,8 @@ import path from "node:path";
 
 import {
     createManagedLogManifest,
+    type ManagedLogProvisionedDirectory,
+    type ManagedLogProvisioningAnchor,
     type ManagedLogFileTarget,
     type ManagedLogManifest,
     validateManagedLogManifest,
@@ -42,6 +44,82 @@ async function close(handle: FileHandle | undefined): Promise<void> {
 
 function trustedTargetOwner(target: ManagedLogFileTarget, status: BigIntStats): boolean {
     return target.trustedOwnerIds.includes(Number(status.uid));
+}
+
+function descriptorPath(handle: FileHandle): string {
+    return `/proc/${process.pid}/fd/${handle.fd}`;
+}
+
+async function openProvisionedDirectory(
+    parent: FileHandle,
+    specification: ManagedLogProvisionedDirectory
+): Promise<FileHandle> {
+    const anchoredPath = path.join(
+        `/proc/self/fd/${parent.fd}`,
+        path.basename(specification.directoryPath)
+    );
+    let created = false;
+    try {
+        await mkdir(anchoredPath, { mode: 0o700 });
+        created = true;
+    } catch (error) {
+        if (errorCode(error) !== "EEXIST") throw error;
+    }
+    const directory = await open(anchoredPath, directoryFlags);
+    try {
+        if (created) {
+            await directory.chown(specification.ownerId, specification.groupId);
+        }
+        const status = await canonicalStatus(directory, specification.directoryPath);
+        if (
+            !status.isDirectory() ||
+            Number(status.uid) !== specification.ownerId ||
+            Number(status.gid) !== specification.groupId
+        ) {
+            throw failure();
+        }
+        await directory.chmod(specification.mode);
+        const verified = await canonicalStatus(directory, specification.directoryPath);
+        if ((verified.mode & 0o7777n) !== BigInt(specification.mode)) throw failure();
+        return directory;
+    } catch (error) {
+        await close(directory);
+        throw error;
+    }
+}
+
+async function provisionDirectoryChain(
+    anchorSpecification: ManagedLogProvisioningAnchor,
+    directories: readonly ManagedLogProvisionedDirectory[],
+    applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>
+): Promise<FileHandle> {
+    let parent = await open(anchorSpecification.directoryPath, directoryFlags);
+    try {
+        const anchor = await canonicalStatus(parent, anchorSpecification.directoryPath);
+        if (
+            !anchor.isDirectory() ||
+            Number(anchor.uid) !== anchorSpecification.ownerId ||
+            Number(anchor.gid) !== anchorSpecification.groupId ||
+            (anchor.mode & 0o7777n) !== BigInt(anchorSpecification.mode)
+        ) {
+            throw failure();
+        }
+        for (const specification of directories) {
+            const directory = await openProvisionedDirectory(parent, specification);
+            await close(parent);
+            parent = directory;
+            if (specification.inheritGroupAccess) {
+                await applyDefaultAccess(
+                    descriptorPath(directory),
+                    specification.groupId
+                );
+            }
+        }
+        return parent;
+    } catch (error) {
+        await close(parent);
+        throw error;
+    }
 }
 
 async function canonicalStatus(
@@ -86,41 +164,23 @@ async function provisionTarget(
 ): Promise<void> {
     const directoryPath = path.dirname(target.filePath);
     let directory: FileHandle | undefined;
-    let parent: FileHandle | undefined;
     let file: FileHandle | undefined;
     try {
-        try {
-            directory = await open(directoryPath, directoryFlags);
-        } catch (error) {
-            if (
-                errorCode(error) !== "ENOENT" ||
-                target.provisionedDirectoryOwnerId === undefined
-            ) {
-                if (errorCode(error) === "ENOENT") return;
-                throw error;
-            }
-            const parentPath = path.dirname(directoryPath);
+        if (target.provisionedDirectories === undefined) {
             try {
-                parent = await open(parentPath, directoryFlags);
-            } catch (parentError) {
-                if (errorCode(parentError) === "ENOENT") return;
-                throw parentError;
+                directory = await open(directoryPath, directoryFlags);
+            } catch (error) {
+                if (errorCode(error) !== "ENOENT") throw error;
             }
-            const parentStatus = await canonicalStatus(parent, parentPath);
-            if (
-                !parentStatus.isDirectory() ||
-                !trustedTargetOwner(target, parentStatus)
-            ) {
-                throw failure();
-            }
-            try {
-                await mkdir(directoryPath, { mode: 0o700 });
-            } catch (mkdirError) {
-                if (errorCode(mkdirError) !== "EEXIST") throw mkdirError;
-            }
-            directory = await open(directoryPath, directoryFlags);
-            await directory.chown(target.provisionedDirectoryOwnerId, groupId);
+        } else {
+            if (target.provisioningAnchor === undefined) throw failure();
+            directory = await provisionDirectoryChain(
+                target.provisioningAnchor,
+                target.provisionedDirectories,
+                applyDefaultAccess
+            );
         }
+        if (directory === undefined) return;
         const directoryStatus = await canonicalStatus(directory, directoryPath);
         if (
             !directoryStatus.isDirectory() ||
@@ -130,10 +190,15 @@ async function provisionTarget(
         }
         await directory.chown(Number(directoryStatus.uid), groupId);
         await directory.chmod(0o2770);
-        await applyDefaultAccess(directoryPath, groupId);
+        if (target.provisionedDirectories === undefined) {
+            await applyDefaultAccess(descriptorPath(directory), groupId);
+        }
 
         try {
-            file = await open(target.filePath, fileFlags);
+            file = await open(
+                path.join(descriptorPath(directory), path.basename(target.filePath)),
+                fileFlags
+            );
         } catch (error) {
             if (errorCode(error) === "ENOENT") return;
             throw error;
@@ -167,7 +232,6 @@ async function provisionTarget(
     } finally {
         await close(file);
         await close(directory);
-        await close(parent);
     }
 }
 

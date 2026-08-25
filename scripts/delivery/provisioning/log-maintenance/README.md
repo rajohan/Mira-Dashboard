@@ -33,9 +33,12 @@ After creating the maintenance group, bootstrap runs the descriptor-bound
 `provisionManagedLogAccess.ts` boundary. It reads the same managed-log manifest as the
 rotation worker and grants bounded group access to every file target that opts into shared
 maintenance. It preserves each admitted source owner, rejects symlinks and owner drift,
-and applies one source-agnostic directory/file policy. Adding or removing a shared log
-therefore changes the manifest only; bootstrap has no Docker-, application-, or
-container-specific path rules. The separate `migrateManagedApplicationLogs.ts` boundary
+creates the complete manifest-declared directory hierarchy beneath its exact trusted
+anchor through held descriptors, and applies one source-agnostic directory/file/default-ACL
+policy. Each directory level carries its own exact owner, group, and mode contract, so a
+source account cannot replace a protected parent boundary. Adding or removing a shared log
+therefore changes the manifest only; bootstrap has no Docker-, application-, or container-specific
+path rules. The separate `migrateManagedApplicationLogs.ts` boundary
 reassigns the four fixed Dashboard stdout/stderr files from the root launcher to the service
 user before state admission.
 

@@ -133,10 +133,6 @@ async function repositoryFixture(): Promise<string> {
             { recursive: true }
         ),
         cp(
-            path.join(sourceProjectRoot, "src/shared/logRotationEpochProjection.ts"),
-            path.join(repositoryRoot, "src/shared/logRotationEpochProjection.ts")
-        ),
-        cp(
             path.join(sourceProjectRoot, "src/shared/managedLogManifest.ts"),
             path.join(repositoryRoot, "src/shared/managedLogManifest.ts")
         ),

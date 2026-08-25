@@ -153,10 +153,6 @@ async function releaseFixture(): Promise<{
             path.join(releaseRoot, "scripts/delivery/provisioning/database-observability")
         ),
         copyFile(
-            path.join(sourceProjectRoot, "src/shared/logRotationEpochProjection.ts"),
-            path.join(releaseRoot, "src/shared/logRotationEpochProjection.ts")
-        ),
-        copyFile(
             path.join(sourceProjectRoot, "src/shared/managedLogManifest.ts"),
             path.join(releaseRoot, "src/shared/managedLogManifest.ts")
         ),

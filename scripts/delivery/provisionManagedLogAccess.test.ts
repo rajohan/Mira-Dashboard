@@ -13,7 +13,16 @@ afterEach(async () => {
     root = undefined;
 });
 
-function manifest(filePath: string, userId: number, groupId: number): ManagedLogManifest {
+function manifest(
+    filePath: string,
+    userId: number,
+    groupId: number,
+    provisionMissingDirectory = false
+): ManagedLogManifest {
+    const directoryPath = path.dirname(filePath);
+    const anchorPath = provisionMissingDirectory
+        ? path.dirname(path.dirname(directoryPath))
+        : path.dirname(directoryPath);
     return {
         archiveTargets: [],
         fileTargets: [
@@ -24,7 +33,29 @@ function manifest(filePath: string, userId: number, groupId: number): ManagedLog
                 id: "shared.test",
                 maximumSizeBytes: 1024,
                 maximumSourceBytes: 2048,
-                provisionedDirectoryOwnerId: userId,
+                ...(provisionMissingDirectory
+                    ? {
+                          provisionedDirectories: path
+                              .relative(anchorPath, directoryPath)
+                              .split(path.sep)
+                              .map((_segment, index, segments) => ({
+                                  directoryPath: path.join(
+                                      anchorPath,
+                                      ...segments.slice(0, index + 1)
+                                  ),
+                                  groupId,
+                                  inheritGroupAccess: index === segments.length - 1,
+                                  mode: index === segments.length - 1 ? 0o2770 : 0o750,
+                                  ownerId: userId,
+                              })),
+                          provisioningAnchor: {
+                              directoryPath: anchorPath,
+                              groupId,
+                              mode: 0o700,
+                              ownerId: userId,
+                          },
+                      }
+                    : {}),
                 retentionAgeMs: 0,
                 retentionCount: 1,
                 strategy: "copytruncate",
@@ -67,7 +98,9 @@ describe("managed log access provisioning", () => {
         expect(fileStatus.uid).toBe(userId);
         expect(fileStatus.gid).toBe(groupId);
         expect(fileStatus.mode & 0o7777).toBe(0o660);
-        expect(defaultAccess).toEqual([[directory, groupId]]);
+        expect(defaultAccess).toHaveLength(1);
+        expect(defaultAccess[0]?.[0]).toMatch(/^\/proc\/\d+\/fd\/\d+$/u);
+        expect(defaultAccess[0]?.[1]).toBe(groupId);
     });
 
     test("rejects a manifest target reached through a symlink", async () => {
@@ -91,9 +124,9 @@ describe("managed log access provisioning", () => {
         ).rejects.toThrow("Managed log access provisioning failed");
     });
 
-    test("creates only the missing manifest leaf directory under a trusted parent", async () => {
+    test("creates the complete admitted hierarchy under a trusted anchor", async () => {
         root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
-        const directory = path.join(root, "logs");
+        const directory = path.join(root, "source", "logs");
         const file = path.join(directory, "application.log");
         const userId = process.getuid?.() ?? 0;
         const groupId = process.getgid?.() ?? 0;
@@ -104,7 +137,7 @@ describe("managed log access provisioning", () => {
                 defaultAccess.push([directoryPath, selectedGroupId]);
                 return Promise.resolve();
             },
-            manifest: manifest(file, userId, groupId),
+            manifest: manifest(file, userId, groupId, true),
             requireRoot: () => true,
         });
 
@@ -112,7 +145,9 @@ describe("managed log access provisioning", () => {
         expect(directoryStatus.uid).toBe(userId);
         expect(directoryStatus.gid).toBe(groupId);
         expect(directoryStatus.mode & 0o7777).toBe(0o2770);
-        expect(defaultAccess).toEqual([[directory, groupId]]);
+        expect(defaultAccess).toHaveLength(1);
+        expect(defaultAccess[0]?.[0]).toMatch(/^\/proc\/\d+\/fd\/\d+$/u);
+        expect(defaultAccess[0]?.[1]).toBe(groupId);
         expect(await lstat(file).catch(() => null)).toBeNull();
     });
 });

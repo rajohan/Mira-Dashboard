@@ -270,11 +270,6 @@ export async function stageReleaseArtifacts(
             path.join(stagingRoot, "scripts/delivery/provisioning")
         ),
         copyMetadataFile(
-            path.join(sources.repositoryRoot, "src/shared/logRotationEpochProjection.ts"),
-            sources.repositoryRoot,
-            path.join(sharedSourceRoot, "logRotationEpochProjection.ts")
-        ),
-        copyMetadataFile(
             path.join(sources.repositoryRoot, "src/shared/managedLogManifest.ts"),
             sources.repositoryRoot,
             path.join(sharedSourceRoot, "managedLogManifest.ts")
