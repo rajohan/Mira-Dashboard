@@ -19,7 +19,10 @@ import {
 import { deliverProductionReleaseUnderLease } from "./delivery/activateProductionRelease.ts";
 import { withDeploymentLease } from "./delivery/deploymentLease.ts";
 import { prepareProductionDeliveryDirectories } from "./delivery/productionDeliveryFilesystem.ts";
-import { assertProductionReleaseArchiveListing } from "./delivery/productionReleaseArchive.ts";
+import {
+    assertProductionReleaseArchiveListing,
+    maximumProductionReleaseArchiveListingBytes,
+} from "./delivery/productionReleaseArchive.ts";
 import { discardOwnedProductionReleaseCandidate } from "./delivery/productionReleasePublication.ts";
 import { prepareProtectedProductionStatePath } from "./delivery/productionStateFilesystem.ts";
 import {
@@ -133,7 +136,11 @@ export interface ProductionBootstrapDependencies {
         prepare: () => Promise<PreparedPublishedProductionRelease>
     ) => Promise<void>;
     readonly inspectPrerequisites?: () => Promise<Readonly<{ runtimeSha256: string }>>;
-    readonly run: (command: readonly string[], cwd?: string) => Promise<CommandResult>;
+    readonly run: (
+        command: readonly string[],
+        cwd?: string,
+        stdoutMaximumBytes?: number
+    ) => Promise<CommandResult>;
 }
 
 async function deliverPreparedPublishedRelease(
@@ -227,16 +234,20 @@ export interface ProductionBootstrapPrerequisiteFilesystem {
     readonly status: (target: string) => Promise<ProductionBootstrapPathStatus>;
 }
 
-async function readBounded(stream: ReadableStream<Uint8Array>): Promise<string> {
+async function readBounded(
+    stream: ReadableStream<Uint8Array>,
+    maximumBytes = maximumOutputBytes
+): Promise<string> {
     const response = new Response(stream);
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maximumOutputBytes) throw new Error(failureMessage);
+    if (bytes.byteLength > maximumBytes) throw new Error(failureMessage);
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 async function defaultRun(
     command: readonly string[],
-    cwd = projectRoot
+    cwd = projectRoot,
+    stdoutMaximumBytes = maximumOutputBytes
 ): Promise<CommandResult> {
     const child = Bun.spawn([...command], {
         cwd,
@@ -247,7 +258,7 @@ async function defaultRun(
     });
     const [exitCode, stdout] = await Promise.all([
         child.exited,
-        readBounded(child.stdout),
+        readBounded(child.stdout, stdoutMaximumBytes),
     ]);
     return Object.freeze({ exitCode, stdout });
 }
@@ -332,9 +343,10 @@ async function defaultDownload(
 async function requireSuccess(
     dependencies: ProductionBootstrapDependencies,
     command: readonly string[],
-    cwd = projectRoot
+    cwd = projectRoot,
+    stdoutMaximumBytes?: number
 ): Promise<string> {
-    const result = await dependencies.run(command, cwd);
+    const result = await dependencies.run(command, cwd, stdoutMaximumBytes);
     if (result.exitCode !== 0) throw new Error(failureMessage);
     return result.stdout.trim();
 }
@@ -577,11 +589,12 @@ export async function admitProductionBootstrapRelease(
     ) {
         throw new Error(failureMessage);
     }
-    const listing = await requireSuccess(dependencies, [
-        "/usr/bin/tar",
-        "-tf",
-        path.join(artifactRoot, "release.tar"),
-    ]);
+    const listing = await requireSuccess(
+        dependencies,
+        ["/usr/bin/tar", "-tf", path.join(artifactRoot, "release.tar")],
+        projectRoot,
+        maximumProductionReleaseArchiveListingBytes
+    );
     assertProductionReleaseArchiveListing(listing, releaseId);
     const releasesRoot = path.join(repositoryRoot, "dist/releases");
     const releaseRoot = path.join(releasesRoot, releaseId);
@@ -649,7 +662,7 @@ export async function stageProductionBootstrapRootAuthority(
     const sudo = "/usr/bin/sudo";
     const stagedRelease = `${provisioningRoot}/releases/${releaseId}`;
     const stagedPair = `${productionProvisioningPairsRoot}/${releaseId}`;
-    const pairCandidate = `${productionProvisioningPairsRoot}/.pair-${Bun.randomUUIDv7()}`;
+    const pairCandidate = `${provisioningRoot}/.pair-stage-${Bun.randomUUIDv7()}`;
     const candidateRuntime = `${pairCandidate}/${productionProvisioningRuntimeName}`;
     const candidateEntrypoint = `${pairCandidate}/${productionProvisioningEntrypointName}`;
     const stagedRuntime = `${stagedPair}/${productionProvisioningRuntimeName}`;

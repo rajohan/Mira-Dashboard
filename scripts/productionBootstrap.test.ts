@@ -409,10 +409,19 @@ describe("production bootstrap admission", () => {
             ),
         ]);
 
+        const listingBudgets: number[] = [];
+        const boundedProcessDependencies: ProductionBootstrapDependencies = {
+            run: (command, cwd, stdoutMaximumBytes) => {
+                if (command[0] === "/usr/bin/tar" && command[1] === "-tf") {
+                    listingBudgets.push(stdoutMaximumBytes ?? 0);
+                }
+                return realProcessDependencies.run(command, cwd, stdoutMaximumBytes);
+            },
+        };
         const admitted = await admitProductionBootstrapRelease(
             targetArtifactRoot,
             releaseId,
-            realProcessDependencies,
+            boundedProcessDependencies,
             targetRepositoryRoot
         );
 
@@ -424,10 +433,14 @@ describe("production bootstrap admission", () => {
         const readmitted = await admitProductionBootstrapRelease(
             targetArtifactRoot,
             releaseId,
-            realProcessDependencies,
+            boundedProcessDependencies,
             targetRepositoryRoot
         );
         expect(readmitted.manifestSha256).toBe(receipt.releaseManifestSha256);
+        expect(listingBudgets).toEqual([
+            maximumProductionReleaseArchiveListingBytes,
+            maximumProductionReleaseArchiveListingBytes,
+        ]);
     });
 
     test("stages every fixed root authority command without shell interpretation", async () => {
@@ -483,6 +496,14 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) =>
                 command.some((argument) => argument.endsWith("/groupadd"))
+            )
+        ).toBe(true);
+        expect(
+            commands.some(
+                (command) =>
+                    command.includes("/usr/bin/install") &&
+                    command.some((argument) => argument.includes("/.pair-stage-")) &&
+                    command.every((argument) => !argument.includes("/pairs/.pair-stage-"))
             )
         ).toBe(true);
         expect(
