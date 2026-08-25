@@ -8,7 +8,7 @@ Type=oneshot
 User=root
 Group=root
 WorkingDirectory=/
-ExecStart=/usr/local/bin/doppler run --config=prd --project=rajohan --config-dir=/home/ubuntu/.doppler --no-read-env --only-secrets=MIRA_GITHUB_TOKEN -- /var/lib/mira-dashboard-host-provisioning/runtime/bun /usr/local/libexec/mira-dashboard-production-provisioning.js --authority=%I
+ExecStart=/usr/local/bin/doppler run --config=prd --project=rajohan --config-dir=/home/ubuntu/.doppler --no-read-env --only-secrets=MIRA_GITHUB_TOKEN -- /var/lib/mira-dashboard-host-provisioning/runtime/bun /usr/local/libexec/mira-dashboard-production-provisioning.js --authority=%i
 UMask=0077
 NoNewPrivileges=yes
 PrivateDevices=yes

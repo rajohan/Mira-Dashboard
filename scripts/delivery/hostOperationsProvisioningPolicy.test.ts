@@ -20,6 +20,8 @@ describe("host-operations provisioning artifact policy", () => {
         expect(unit).toContain("--no-read-env");
         expect(unit).toContain("--only-secrets=MIRA_GITHUB_TOKEN");
         expect(unit).toContain("--config-dir=/home/ubuntu/.doppler");
+        expect(unit).toContain("--authority=%i");
+        expect(unit).not.toContain("--authority=%I");
         expect(unit).not.toContain("RAJOHAN_GITHUB_TOKEN");
     });
 

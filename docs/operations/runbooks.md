@@ -35,8 +35,11 @@ assets mean the exact `main` commit has not been published as a completed semant
 The provisioning boundary must already have been installed by a successful clean-host
 `bun run bootstrap`. The release that first introduces this boundary is installed through that
 clean bootstrap, never through `bun run deploy` or the Delivery page. The deploy command fails
-closed when the root-owned provisioning unit is absent. After bootstrap, later releases use the
-same fixed boundary and may update its manifest-bound systemd/polkit authority during cutover.
+closed when the root-owned provisioning unit is absent or the active release does not declare the
+current Delivery protocol. Protocol boundaries are never normalized or migrated in place: install
+them through a clean greenfield bootstrap so no incompatible rollback target is retained. After
+bootstrap, later releases use the same fixed boundary and may update its manifest-bound
+systemd/polkit authority during cutover.
 
 Merge ordinary pull requests without deployment. Release Please then opens its version/changelog
 pull request; merging that pull request publishes the stable GitHub release and permanent

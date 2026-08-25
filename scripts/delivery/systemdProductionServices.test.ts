@@ -127,11 +127,13 @@ describe("production root-systemd service control", () => {
             const paths = await prepareProductionDeliveryDirectories(state);
             const fixtures = await createRuntimePointerFixture(paths);
             const commands: string[][] = [];
+            const deadlines: (number | undefined)[] = [];
             const requests: Request[] = [];
             const smokes: string[] = [];
             const controller = createSystemdProductionServiceController(lease, paths, {
-                execute: (_executable, arguments_) => {
+                execute: (_executable, arguments_, options_) => {
                     commands.push([...arguments_]);
+                    deadlines.push(options_?.deadlineMs);
                     return Promise.resolve(successfulProcessResult());
                 },
                 fetch: (request) => {
@@ -189,6 +191,10 @@ describe("production root-systemd service control", () => {
                 ["stop", "mira-dashboard-web.service"],
                 ["stop", "mira-dashboard-worker.service"],
             ]);
+            expect(deadlines[0]).toBe(330_000);
+            expect(deadlines.slice(1).every((deadline) => deadline === undefined)).toBe(
+                true
+            );
             expect(requests).toHaveLength(1);
             expect(requests[0]?.method).toBe("HEAD");
             expect(requests[0]?.url).toBe("http://127.0.0.1:3100/api/health/ready");

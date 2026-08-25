@@ -24,6 +24,7 @@ const readinessRetryMs = 250;
 const webUnit = "mira-dashboard-web.service";
 const workerUnit = "mira-dashboard-worker.service";
 const provisioningUnitPrefix = "mira-dashboard-production-provisioning@";
+const provisioningDeadlineMs = secondsToMilliseconds(5 * 60 + 30);
 const systemctlExecutableDefault = "/usr/bin/systemctl";
 const loopbackReadinessUrlSchema = v.pipe(
     v.string(),
@@ -77,10 +78,13 @@ function validateExecutable(executable: string): void {
 async function requireSystemctlSuccess(
     execute: SystemctlExecutor,
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    deadlineMs?: number
 ): Promise<void> {
     try {
-        await requireSuccessfulSystemctlProcess(execute, executable, arguments_);
+        const options =
+            deadlineMs === undefined ? Object.freeze({}) : Object.freeze({ deadlineMs });
+        await requireSuccessfulSystemctlProcess(execute, executable, arguments_, options);
     } catch {
         throw serviceFailure();
     }
@@ -192,10 +196,12 @@ export function createSystemdProductionServiceController(
             ) {
                 throw serviceFailure();
             }
-            await requireSystemctlSuccess(execute, executable, [
-                "start",
-                `${provisioningUnitPrefix}${instance}.service`,
-            ]);
+            await requireSystemctlSuccess(
+                execute,
+                executable,
+                ["start", `${provisioningUnitPrefix}${instance}.service`],
+                provisioningDeadlineMs
+            );
         },
         prepare(release: PublishedProductionRelease): Promise<void> {
             return verifyUnits(lease, paths, release);

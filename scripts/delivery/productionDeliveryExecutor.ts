@@ -409,13 +409,22 @@ function activationMatchesTarget(
     );
 }
 
+/**
+ * Checks one release against the current Delivery execution contract.
+ * @param release Verified published release.
+ * @returns Whether the release declares the current protocol and process role.
+ */
+export function releaseSupportsCurrentDeliveryProtocol(
+    release: PublishedProductionRelease
+): boolean {
+    return (
+        release.manifest.deliveryProtocols.includes(deliveryProductionProtocol) &&
+        release.manifest.processRoles.includes("production-delivery")
+    );
+}
+
 function requireProtocol(release: PublishedProductionRelease): void {
-    if (
-        !release.manifest.deliveryProtocols.includes(deliveryProductionProtocol) ||
-        !release.manifest.processRoles.includes("production-delivery")
-    ) {
-        throw failure();
-    }
+    if (!releaseSupportsCurrentDeliveryProtocol(release)) throw failure();
 }
 
 async function loadExactArtifacts(
@@ -447,6 +456,7 @@ async function loadCurrentArtifacts(
         releaseId,
         runtimeRevision
     );
+    requireProtocol(release);
     const runtime = await loadInstalledProductionRuntime(paths, release.manifest.runtime);
     return Object.freeze({ release, runtime });
 }

@@ -28,6 +28,8 @@ const installedEntrypoint =
 const maximumJsonBytes = 4 * 1024 * 1024;
 const maximumArchiveBytes = 512 * 1024 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
+const runtimeProbeExpression =
+    "process.stdout.write(JSON.stringify({revision:Bun.revision,version:Bun.version}))";
 const localAuthorityPattern = /^([a-f\d]{40})--local$/u;
 const publishedAuthorityPattern =
     /^([a-f\d]{40})--(v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?)--([a-f\d]{64})--([a-f\d]{64})$/u;
@@ -58,6 +60,11 @@ const githubRefSchema = v.object({
         sha: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
         type: v.picklist(["commit", "tag"]),
     }),
+});
+
+const runtimeIdentitySchema = v.strictObject({
+    revision: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
+    version: v.pipe(v.string(), v.regex(/^\d+\.\d+\.\d+$/u)),
 });
 
 interface CommandResult {
@@ -355,6 +362,96 @@ async function verifyStagedRelease(
     return releaseRoot;
 }
 
+/**
+ * Hashes one root-controlled file with the fixed host utility.
+ * @param target Absolute file path.
+ * @param environment Privileged command boundary.
+ * @returns Lowercase SHA-256 digest.
+ */
+async function sha256File(
+    target: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<string> {
+    const output = new TextDecoder("utf-8", { fatal: true })
+        .decode(await requireSuccess("/usr/bin/sha256sum", [target], environment))
+        .trim();
+    const match = /^([a-f\d]{64}) {2}/.exec(output);
+    if (!match) throw failure();
+    return match[1]!;
+}
+
+/**
+ * Reads the exact identity reported by one root-controlled Bun executable.
+ * @param executable Candidate runtime path.
+ * @param environment Privileged command boundary.
+ * @returns Validated Bun identity.
+ */
+async function probeRuntime(
+    executable: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<v.InferOutput<typeof runtimeIdentitySchema>> {
+    const output = await requireSuccess(
+        executable,
+        ["-e", runtimeProbeExpression],
+        environment
+    );
+    try {
+        return v.parse(
+            runtimeIdentitySchema,
+            JSON.parse(
+                new TextDecoder("utf-8", { fatal: true }).decode(output)
+            ) as unknown
+        );
+    } catch {
+        throw failure();
+    }
+}
+
+/**
+ * Atomically promotes the verified release runtime before candidate scripts execute.
+ * @param releaseRoot Verified root-owned release directory.
+ * @param environment Privileged provisioning boundary.
+ */
+async function installCandidateRuntime(
+    releaseRoot: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
+    const source = path.join(releaseRoot, "runtime/bun");
+    const staged = `${environment.runtimeExecutable}.stage-${Bun.randomUUIDv7()}`;
+    const sourceSha256 = await sha256File(source, environment);
+    try {
+        await requireSuccess(
+            "/usr/bin/install",
+            ["-o", "root", "-g", "root", "-m", "0555", source, staged],
+            environment
+        );
+        if ((await sha256File(staged, environment)) !== sourceSha256) throw failure();
+        const stagedIdentity = await probeRuntime(staged, environment);
+        if (
+            stagedIdentity.revision !== manifest.runtime.revision ||
+            stagedIdentity.version !== manifest.runtime.version
+        ) {
+            throw failure();
+        }
+        await environment.rename(staged, environment.runtimeExecutable);
+        const installedIdentity = await probeRuntime(
+            environment.runtimeExecutable,
+            environment
+        );
+        if (
+            (await sha256File(environment.runtimeExecutable, environment)) !==
+                sourceSha256 ||
+            installedIdentity.revision !== manifest.runtime.revision ||
+            installedIdentity.version !== manifest.runtime.version
+        ) {
+            throw failure();
+        }
+    } finally {
+        await environment.remove(staged);
+    }
+}
+
 async function downloadAndStageRelease(
     releaseId: string,
     tagName: string,
@@ -627,6 +724,7 @@ export async function provisionProductionRelease(
             environment
         );
     }
+    await installCandidateRuntime(releaseRoot, environment);
     await installAuthority(releaseId, releaseRoot, environment);
     await retainRecentReleaseRoots(releaseId, environment);
 }

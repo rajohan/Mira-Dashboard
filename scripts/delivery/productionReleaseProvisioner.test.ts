@@ -289,6 +289,23 @@ describe("production release root provisioner", () => {
             releasesRoot,
             runCommand: async (executable, arguments_, stdin) => {
                 commands.push(`${executable} ${arguments_.join(" ")}`);
+                if (executable === "/usr/bin/install") {
+                    await cp(arguments_[6]!, arguments_[7]!);
+                    return commandResult();
+                }
+                if (executable === "/usr/bin/sha256sum") {
+                    const target = arguments_[0]!;
+                    return commandResult(
+                        `${sha256(await readFile(target))}  ${target}\n`
+                    );
+                }
+                if (
+                    arguments_[0] === "-e" &&
+                    (executable === runtimeExecutable ||
+                        executable.startsWith(`${runtimeExecutable}.stage-`))
+                ) {
+                    return commandResult(JSON.stringify(runtime));
+                }
                 if (executable === "/usr/bin/tar" && arguments_[0] === "-tf") {
                     expect(stdin).toEqual(archiveBytes);
                     return commandResult(
@@ -335,8 +352,13 @@ describe("production release root provisioner", () => {
         const retainedRoots = await readdir(releasesRoot);
         expect(retainedRoots).toHaveLength(3);
         expect(retainedRoots).toContain(releaseId);
-        expect(
-            commands.filter((command) => command.startsWith(runtimeExecutable))
-        ).toHaveLength(4);
+        const runtimeInstallIndex = commands.findIndex((command) =>
+            command.startsWith("/usr/bin/install -o root -g root -m 0555")
+        );
+        const authorityInstallIndex = commands.findIndex((command) =>
+            command.includes("installHostOperationsProvisioning.ts")
+        );
+        expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
+        expect(authorityInstallIndex).toBeGreaterThan(runtimeInstallIndex);
     });
 });

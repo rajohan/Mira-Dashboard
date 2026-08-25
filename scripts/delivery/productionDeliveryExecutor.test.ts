@@ -38,6 +38,7 @@ import {
     prepareProductionDeliveryOperation,
     prepareProductionDeliveryTargetUnderLease,
     releaseManifestMatchesAuthority,
+    releaseSupportsCurrentDeliveryProtocol,
     runProductionDeliveryExecutor,
     runProductionDeliveryExecutorUnderLease,
     verifyProductionRunBeforeSnapshot,
@@ -120,7 +121,11 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
     };
 }
 
-function artifact(releaseId: string, runtimeRevision: string) {
+function artifact(
+    releaseId: string,
+    runtimeRevision: string,
+    deliveryProtocols: readonly string[] = releaseDeliveryProtocols
+) {
     return Object.freeze({
         release: Object.freeze({
             manifest: parseReleaseManifest({
@@ -132,12 +137,18 @@ function artifact(releaseId: string, runtimeRevision: string) {
                     },
                 ],
                 buildCommands: [...releaseBuildCommands],
-                deliveryProtocols: [...releaseDeliveryProtocols],
-                display: {
-                    builtAtMs: 1_800_000_000_000,
-                    commitTitle: "Test release",
-                    schemaTarget: 1,
-                },
+                ...(deliveryProtocols.length === 0
+                    ? {}
+                    : { deliveryProtocols: [...deliveryProtocols] }),
+                ...(deliveryProtocols.length === 0
+                    ? {}
+                    : {
+                          display: {
+                              builtAtMs: 1_800_000_000_000,
+                              commitTitle: "Test release",
+                              schemaTarget: 1,
+                          },
+                      }),
                 documentationSha256: checksum,
                 formatVersion: 1,
                 lockfileSha256: checksum,
@@ -151,7 +162,10 @@ function artifact(releaseId: string, runtimeRevision: string) {
                 packages: [
                     { name: "effect", scope: "dependency", version: "4.0.0-beta.106" },
                 ],
-                processRoles: [...releaseProcessRoles],
+                processRoles:
+                    deliveryProtocols.length === 0
+                        ? ["web", "worker"]
+                        : [...releaseProcessRoles],
                 runtime: { revision: runtimeRevision, version: "1.4.0" },
                 source: { commitSha: releaseId, treeState: "clean" },
             }),
@@ -304,6 +318,19 @@ async function createClaimedProductionRunDatabase(
 }
 
 describe("production Delivery executor", () => {
+    test("rejects pre-Delivery releases instead of normalizing legacy state", () => {
+        expect(
+            releaseSupportsCurrentDeliveryProtocol(
+                artifact(currentReleaseId, currentRuntimeRevision).release
+            )
+        ).toBeTrue();
+        expect(
+            releaseSupportsCurrentDeliveryProtocol(
+                artifact(currentReleaseId, currentRuntimeRevision, []).release
+            )
+        ).toBeFalse();
+    });
+
     test("binds cached release manifests to the published authority digest", () => {
         const bytes = new TextEncoder().encode("manifest-bytes");
         const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
