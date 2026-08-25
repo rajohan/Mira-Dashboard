@@ -90,6 +90,29 @@ describe("Delivery GitHub HTTPS transport", () => {
         );
     });
 
+    test("follows the fixed GitHub redirect only for release assets", async () => {
+        const redirects: Array<"error" | "follow" | "manual" | undefined> = [];
+        const transport = createDeliveryGitHubHttpTransport({
+            expectedLogin: "mira-2026",
+            fetch: (_input, init) => {
+                redirects.push(init.redirect);
+                return Promise.resolve(
+                    Response.json(
+                        redirects.length === 1
+                            ? { id: 42, login: "mira-2026", type: "User" }
+                            : { formatVersion: 1 }
+                    )
+                );
+            },
+            token: token(),
+        });
+
+        expect(
+            await transport.requestJson({ assetId: 42, kind: "release-asset" })
+        ).toEqual({ formatVersion: 1 });
+        expect(redirects).toEqual(["error", "follow"]);
+    });
+
     test("resolves one release tag through the fixed commit endpoint", () => {
         const calls: string[] = [];
         const transport = createDeliveryGitHubHttpTransport({

@@ -74,7 +74,7 @@ function terminalInspection(): Extract<
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v1",
+        protocol: "delivery.production.v2",
         runId: transitionId,
         transitionId,
     });

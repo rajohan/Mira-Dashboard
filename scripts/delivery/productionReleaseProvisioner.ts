@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 import * as v from "valibot";
@@ -48,6 +48,35 @@ interface CommandResult {
     readonly exitCode: number;
     readonly stderr: Uint8Array;
     readonly stdout: Uint8Array;
+}
+
+interface TrustedFileStatus {
+    readonly gid: number;
+    isDirectory(): boolean;
+    isFile(): boolean;
+    isSymbolicLink(): boolean;
+    readonly mode: number;
+    readonly uid: number;
+}
+
+interface ProductionReleaseProvisionerEnvironment {
+    readonly executablePath: string;
+    readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
+    readonly getUid: () => number | undefined;
+    readonly installedEntrypoint: string;
+    readonly lstat: (target: string) => Promise<TrustedFileStatus>;
+    readonly modulePath: string;
+    readonly provisioningRoot: string;
+    readonly rename: (source: string, destination: string) => Promise<void>;
+    readonly releasesRoot: string;
+    readonly repositoryApi: string;
+    readonly runCommand: (
+        executable: string,
+        arguments_: readonly string[],
+        stdin?: Uint8Array
+    ) => Promise<CommandResult>;
+    readonly runtimeExecutable: string;
+    readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
 }
 
 function failure(): Error {
@@ -111,9 +140,12 @@ async function boundedBytes(response: Response, maximum: number): Promise<Uint8A
     return bytes;
 }
 
-async function githubJson(endpoint: string): Promise<unknown> {
+async function githubJson(
+    endpoint: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<unknown> {
     const bytes = await boundedBytes(
-        await fetch(`${repositoryApi}${endpoint}`, {
+        await environment.fetch(`${environment.repositoryApi}${endpoint}`, {
             headers: {
                 Accept: "application/vnd.github+json",
                 "User-Agent": "mira-dashboard-production-provisioner",
@@ -127,30 +159,40 @@ async function githubJson(endpoint: string): Promise<unknown> {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
 }
 
-async function githubAsset(assetId: number, maximum: number): Promise<Uint8Array> {
+async function githubAsset(
+    assetId: number,
+    maximum: number,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<Uint8Array> {
     return boundedBytes(
-        await fetch(`${repositoryApi}/releases/assets/${assetId}`, {
-            headers: {
-                Accept: "application/octet-stream",
-                "User-Agent": "mira-dashboard-production-provisioner",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            redirect: "follow",
-            signal: AbortSignal.timeout(60_000),
-        }),
+        await environment.fetch(
+            `${environment.repositoryApi}/releases/assets/${assetId}`,
+            {
+                headers: {
+                    Accept: "application/octet-stream",
+                    "User-Agent": "mira-dashboard-production-provisioner",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                redirect: "follow",
+                signal: AbortSignal.timeout(60_000),
+            }
+        ),
         maximum
     );
 }
 
-async function resolveTagCommit(tagName: string): Promise<string> {
+async function resolveTagCommit(
+    tagName: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<string> {
     let object = v.parse(
         githubRefSchema,
-        await githubJson(`/git/ref/tags/${encodeURIComponent(tagName)}`)
+        await githubJson(`/git/ref/tags/${encodeURIComponent(tagName)}`, environment)
     ).object;
     for (let depth = 0; object.type === "tag" && depth < 4; depth += 1) {
         object = v.parse(
             githubRefSchema,
-            await githubJson(`/git/tags/${object.sha}`)
+            await githubJson(`/git/tags/${object.sha}`, environment)
         ).object;
     }
     if (object.type !== "commit") throw failure();
@@ -185,7 +227,8 @@ async function readBoundedStream(
 
 async function run(
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    stdin?: Uint8Array
 ): Promise<CommandResult> {
     const child = Bun.spawn([executable, ...arguments_], {
         env: {
@@ -196,7 +239,7 @@ async function run(
         },
         signal: AbortSignal.timeout(120_000),
         stderr: "pipe",
-        stdin: "ignore",
+        stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
         stdout: "pipe",
     });
     try {
@@ -215,23 +258,30 @@ async function run(
 
 async function requireSuccess(
     executable: string,
-    arguments_: readonly string[]
+    arguments_: readonly string[],
+    environment: ProductionReleaseProvisionerEnvironment,
+    stdin?: Uint8Array
 ): Promise<Uint8Array> {
-    const result = await run(executable, arguments_);
+    const result = await environment.runCommand(executable, arguments_, stdin);
     if (result.exitCode !== 0) throw failure();
     return result.stdout;
 }
 
-async function verifyInstalledBoundary(): Promise<void> {
+async function verifyInstalledBoundary(
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
     if (
-        process.getuid?.() !== 0 ||
-        process.execPath !== runtimeExecutable ||
-        import.meta.path !== installedEntrypoint
+        environment.getUid() !== 0 ||
+        environment.executablePath !== environment.runtimeExecutable ||
+        environment.modulePath !== environment.installedEntrypoint
     ) {
         throw failure();
     }
-    for (const target of [runtimeExecutable, installedEntrypoint]) {
-        const status = await lstat(target);
+    for (const target of [
+        environment.runtimeExecutable,
+        environment.installedEntrypoint,
+    ]) {
+        const status = await environment.lstat(target);
         if (
             !status.isFile() ||
             status.isSymbolicLink() ||
@@ -243,7 +293,7 @@ async function verifyInstalledBoundary(): Promise<void> {
         }
         let ancestor = path.dirname(target);
         while (true) {
-            const ancestorStatus = await lstat(ancestor);
+            const ancestorStatus = await environment.lstat(ancestor);
             if (
                 !ancestorStatus.isDirectory() ||
                 ancestorStatus.isSymbolicLink() ||
@@ -260,9 +310,12 @@ async function verifyInstalledBoundary(): Promise<void> {
     }
 }
 
-async function verifyStagedRelease(releaseId: string): Promise<string> {
-    const releaseRoot = path.join(releasesRoot, releaseId);
-    const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
+async function verifyStagedRelease(
+    releaseId: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<string> {
+    const releaseRoot = path.join(environment.releasesRoot, releaseId);
+    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
     if (manifest.source.commitSha !== releaseId) {
         throw failure();
     }
@@ -271,19 +324,27 @@ async function verifyStagedRelease(releaseId: string): Promise<string> {
 
 async function downloadAndStageRelease(
     releaseId: string,
-    tagName: string
+    tagName: string,
+    environment: ProductionReleaseProvisionerEnvironment
 ): Promise<string> {
     const release = v.parse(
         githubReleaseSchema,
-        await githubJson(`/releases/tags/${encodeURIComponent(tagName)}`)
+        await githubJson(`/releases/tags/${encodeURIComponent(tagName)}`, environment)
     );
-    if (release.tag_name !== tagName || (await resolveTagCommit(tagName)) !== releaseId) {
+    if (
+        release.tag_name !== tagName ||
+        (await resolveTagCommit(tagName, environment)) !== releaseId
+    ) {
         throw failure();
     }
     const receiptAsset = release.assets.find(({ name }) => name === "receipt.json");
     const archiveAsset = release.assets.find(({ name }) => name === "release.tar");
     if (!receiptAsset || !archiveAsset) throw failure();
-    const receiptBytes = await githubAsset(receiptAsset.id, maximumJsonBytes);
+    const receiptBytes = await githubAsset(
+        receiptAsset.id,
+        maximumJsonBytes,
+        environment
+    );
     if (
         receiptBytes.byteLength !== receiptAsset.size ||
         `sha256:${sha256(receiptBytes)}` !== receiptAsset.digest
@@ -303,7 +364,11 @@ async function downloadAndStageRelease(
     ) {
         throw failure();
     }
-    const archiveBytes = await githubAsset(archiveAsset.id, maximumArchiveBytes);
+    const archiveBytes = await githubAsset(
+        archiveAsset.id,
+        maximumArchiveBytes,
+        environment
+    );
     if (
         archiveBytes.byteLength !== archiveAsset.size ||
         archiveBytes.byteLength !== receipt.archive.bytes ||
@@ -311,18 +376,28 @@ async function downloadAndStageRelease(
     ) {
         throw failure();
     }
-    const temporaryRoot = await mkdtemp(path.join(provisioningRoot, ".release-stage-"));
+    const temporaryRoot = await mkdtemp(
+        path.join(environment.provisioningRoot, ".release-stage-")
+    );
     try {
-        const archivePath = path.join(temporaryRoot, "release.tar");
-        await writeFile(archivePath, archiveBytes, { flag: "wx", mode: 0o400 });
-        const listing = await requireSuccess("/usr/bin/tar", ["-tf", archivePath]);
+        const listing = await requireSuccess(
+            "/usr/bin/tar",
+            ["-tf", "-"],
+            environment,
+            archiveBytes
+        );
         assertProductionReleaseArchiveListing(
             new TextDecoder("utf-8", { fatal: true }).decode(listing),
             releaseId
         );
-        await requireSuccess("/usr/bin/tar", ["-xf", archivePath, "-C", temporaryRoot]);
+        await requireSuccess(
+            "/usr/bin/tar",
+            ["-xf", "-", "-C", temporaryRoot],
+            environment,
+            archiveBytes
+        );
         const stagedRoot = path.join(temporaryRoot, releaseId);
-        const manifest = await verifyReleaseArtifactIdentity(stagedRoot);
+        const manifest = await environment.verifyReleaseArtifactIdentity(stagedRoot);
         const manifestBytes = await readFile(
             path.join(stagedRoot, "release-manifest.json")
         );
@@ -334,8 +409,8 @@ async function downloadAndStageRelease(
         ) {
             throw failure();
         }
-        const destination = path.join(releasesRoot, releaseId);
-        await rename(stagedRoot, destination).catch((error: unknown) => {
+        const destination = path.join(environment.releasesRoot, releaseId);
+        await environment.rename(stagedRoot, destination).catch((error: unknown) => {
             if (
                 !(error instanceof Error) ||
                 !("code" in error) ||
@@ -344,30 +419,35 @@ async function downloadAndStageRelease(
                 throw error;
             }
         });
-        return await verifyStagedRelease(releaseId);
+        return await verifyStagedRelease(releaseId, environment);
     } finally {
         await chmod(temporaryRoot, 0o700).catch(() => {});
         await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
     }
 }
 
-async function installAuthority(releaseId: string, releaseRoot: string): Promise<void> {
+async function installAuthority(
+    releaseId: string,
+    releaseRoot: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
     const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
     const manifestSha256 = sha256(manifestBytes);
     const userIdText = new TextDecoder("utf-8", { fatal: true })
-        .decode(await requireSuccess("/usr/bin/id", ["-u", "ubuntu"]))
+        .decode(await requireSuccess("/usr/bin/id", ["-u", "ubuntu"], environment))
         .trim();
     if (!/^[1-9]\d{0,9}$/u.test(userIdText)) throw failure();
     const maintenanceGroup = new TextDecoder("utf-8", { fatal: true })
         .decode(
-            await requireSuccess("/usr/bin/getent", [
-                "group",
-                "mira-dashboard-log-maintenance",
-            ])
+            await requireSuccess(
+                "/usr/bin/getent",
+                ["group", "mira-dashboard-log-maintenance"],
+                environment
+            )
         )
         .trim();
     const groupInventory = new TextDecoder("utf-8", { fatal: true })
-        .decode(await requireSuccess("/usr/bin/getent", ["group"]))
+        .decode(await requireSuccess("/usr/bin/getent", ["group"], environment))
         .trim();
     if (!productionMaintenanceGroupIsTrusted(maintenanceGroup, groupInventory)) {
         throw failure();
@@ -377,7 +457,7 @@ async function installAuthority(releaseId: string, releaseRoot: string): Promise
         arguments_: readonly string[];
     }>[] = [
         {
-            executable: runtimeExecutable,
+            executable: environment.runtimeExecutable,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/host-operations/installHostOperationsProvisioning.ts`,
                 `--release-root=${releaseRoot}`,
@@ -386,7 +466,7 @@ async function installAuthority(releaseId: string, releaseRoot: string): Promise
             ],
         },
         {
-            executable: runtimeExecutable,
+            executable: environment.runtimeExecutable,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/log-maintenance/installLogMaintenanceProvisioning.ts`,
                 `--release-root=${releaseRoot}`,
@@ -394,7 +474,7 @@ async function installAuthority(releaseId: string, releaseRoot: string): Promise
             ],
         },
         {
-            executable: runtimeExecutable,
+            executable: environment.runtimeExecutable,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts`,
                 `--user-id=${userIdText}`,
@@ -409,7 +489,7 @@ async function installAuthority(releaseId: string, releaseRoot: string): Promise
         },
         { executable: "/usr/bin/systemctl", arguments_: ["daemon-reload"] },
         {
-            executable: runtimeExecutable,
+            executable: environment.runtimeExecutable,
             arguments_: [
                 `${releaseRoot}/scripts/delivery/provisioning/preview-tailscale/operator.ts`,
                 "--mode=apply",
@@ -417,24 +497,54 @@ async function installAuthority(releaseId: string, releaseRoot: string): Promise
         },
     ];
     for (const command of commands) {
-        await requireSuccess(command.executable, command.arguments_);
+        await requireSuccess(command.executable, command.arguments_, environment);
     }
 }
 
-export async function provisionProductionRelease(authority: string): Promise<void> {
-    await verifyInstalledBoundary();
+const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freeze({
+    executablePath: process.execPath,
+    fetch,
+    getUid: () => process.getuid?.(),
+    installedEntrypoint,
+    lstat,
+    modulePath: import.meta.path,
+    provisioningRoot,
+    rename,
+    releasesRoot,
+    repositoryApi,
+    runCommand: run,
+    runtimeExecutable,
+    verifyReleaseArtifactIdentity,
+});
+
+/** Test-only dependency surface for exercising the privileged orchestration safely. */
+export const productionReleaseProvisionerTestSupport = Object.freeze({
+    boundedBytes,
+    createEnvironment: (
+        overrides: Partial<ProductionReleaseProvisionerEnvironment>
+    ): ProductionReleaseProvisionerEnvironment =>
+        Object.freeze({ ...defaultEnvironment, ...overrides }),
+    readBoundedStream,
+    run,
+});
+
+export async function provisionProductionRelease(
+    authority: string,
+    environment: ProductionReleaseProvisionerEnvironment = defaultEnvironment
+): Promise<void> {
+    await verifyInstalledBoundary(environment);
     const { releaseId, source } = parseProductionProvisioningAuthority(authority);
     const releaseRoot =
         source === "local"
-            ? await verifyStagedRelease(releaseId)
-            : await verifyStagedRelease(releaseId).catch(async () => {
-                  await rm(path.join(releasesRoot, releaseId), {
+            ? await verifyStagedRelease(releaseId, environment)
+            : await verifyStagedRelease(releaseId, environment).catch(async () => {
+                  await rm(path.join(environment.releasesRoot, releaseId), {
                       force: true,
                       recursive: true,
                   });
-                  return downloadAndStageRelease(releaseId, source);
+                  return downloadAndStageRelease(releaseId, source, environment);
               });
-    await installAuthority(releaseId, releaseRoot);
+    await installAuthority(releaseId, releaseRoot, environment);
 }
 
 if (import.meta.main) {

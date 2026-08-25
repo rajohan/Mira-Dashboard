@@ -291,15 +291,6 @@ export function createDeliveryProductionExecutionPort(
             signal?: AbortSignal
         ): Promise<DeliveryJobOperationResult> {
             validateRunIdentity(payload, identity);
-            if (
-                payload.operation === "deploy" &&
-                (current.releases.candidate === undefined ||
-                    current.releases.current === undefined ||
-                    JSON.stringify(current.releases.candidate) !==
-                        JSON.stringify(payload.release))
-            ) {
-                throw failure();
-            }
             const existing = await options.control.inspect(identity.runId, signal);
             if (existing.state === "terminal") {
                 return consumeTerminalResult(
@@ -330,6 +321,16 @@ export function createDeliveryProductionExecutionPort(
                     });
                 }
                 return awaitReceipt(options, payload, identity, signal);
+            }
+
+            if (
+                payload.operation === "deploy" &&
+                (current.releases.candidate === undefined ||
+                    current.releases.current === undefined ||
+                    JSON.stringify(current.releases.candidate) !==
+                        JSON.stringify(payload.release))
+            ) {
+                throw failure();
             }
 
             const preCutoverWarnings: DeliveryOperationWarningCode[] = [];

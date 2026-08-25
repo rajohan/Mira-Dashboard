@@ -194,7 +194,7 @@ describe("Delivery production execution", () => {
                 releaseId: currentReleaseId,
                 runtimeRevision: currentRuntimeRevision,
             },
-            protocol: "delivery.production.v1",
+            protocol: "delivery.production.v2",
             runId,
             transitionId: runId,
         });
@@ -227,7 +227,13 @@ describe("Delivery production execution", () => {
         expect(
             await port.execute(
                 input,
-                currentAuthority(candidateRuntimeRevision),
+                {
+                    ...currentAuthority(candidateRuntimeRevision),
+                    releases: {
+                        ...currentAuthority(candidateRuntimeRevision).releases,
+                        candidate: undefined,
+                    },
+                },
                 runIdentity
             )
         ).toEqual({
@@ -287,7 +293,7 @@ describe("Delivery production execution", () => {
                 releaseId: currentReleaseId,
                 runtimeRevision: currentRuntimeRevision,
             },
-            protocol: "delivery.production.v1",
+            protocol: "delivery.production.v2",
             runId,
             transitionId: runId,
         });

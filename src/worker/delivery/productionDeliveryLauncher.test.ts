@@ -158,7 +158,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
             releaseId: executorReleaseId,
             runtimeRevision,
         },
-        protocol: "delivery.production.v1" as const,
+        protocol: "delivery.production.v2" as const,
         runId: transitionId,
         transitionId,
     });

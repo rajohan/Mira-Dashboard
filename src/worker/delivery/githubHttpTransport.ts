@@ -130,6 +130,7 @@ interface PreparedRequest {
     readonly body?: string;
     readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly mutation: boolean;
+    readonly redirect?: "follow";
     readonly url: string;
 }
 
@@ -212,6 +213,7 @@ function prepareRequest(operation: DeliveryGitHubHttpOperation): PreparedRequest
                 accept: "application/octet-stream",
                 method,
                 mutation,
+                redirect: "follow",
                 url: `${apiOrigin}${path}`,
             });
         }
@@ -454,7 +456,7 @@ export function createDeliveryGitHubHttpTransport(
                         "X-GitHub-Api-Version": apiVersion,
                     },
                     method: prepared.method,
-                    redirect: "error",
+                    redirect: prepared.redirect ?? "error",
                     signal,
                 });
             } catch {

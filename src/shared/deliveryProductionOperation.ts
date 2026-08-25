@@ -16,7 +16,7 @@ const invalidDeliveryProductionOperation = "Delivery production operation is inv
 const deliveryProductionPayloadMaximumBytes = 16 * 1024;
 
 /** Immutable protocol supported by production cutover executors. */
-export const deliveryProductionProtocol = "delivery.production.v1" as const;
+export const deliveryProductionProtocol = "delivery.production.v2" as const;
 /** Maximum canonical bytes accepted for an operation journal or terminal receipt. */
 export const deliveryProductionOperationMaximumBytes = 64 * 1024;
 

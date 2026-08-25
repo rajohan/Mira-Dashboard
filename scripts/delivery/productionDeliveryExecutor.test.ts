@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { Effect } from "effect";
 
+import { deliveryProductionActionKey } from "../../src/contracts/deliveryWorker.ts";
 import {
     productionCutoverRequiresReconciliation,
     productionCutoverRequiresValidationMode,
@@ -90,7 +91,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
             },
         },
         enqueue: {
-            actionKey: deliveryProductionProtocol,
+            actionKey: deliveryProductionActionKey,
             actor: {
                 authenticatorId: "1".repeat(32),
                 id: "019fd974-54a2-74dd-a64b-d4186f8d8803",
