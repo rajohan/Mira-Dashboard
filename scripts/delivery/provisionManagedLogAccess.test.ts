@@ -105,6 +105,34 @@ describe("managed log access provisioning", () => {
         expect(fileStatus.mode & 0o7777).toBe(0o660);
     });
 
+    test("repairs current managed archives left unreadable by a source restart", async () => {
+        root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
+        const directory = path.join(root, "logs");
+        const file = path.join(directory, "application.log");
+        const archive = path.join(
+            directory,
+            "application.log.2026-08-26T06-56-18.967Z.bbcc6203-0cbf-44fb-a633-1e6d122ab3bc.gz"
+        );
+        await mkdir(directory, { mode: 0o755 });
+        await Promise.all([
+            writeFile(file, "log\n", { mode: 0o644 }),
+            writeFile(archive, "archive\n", { mode: 0o600 }),
+        ]);
+        const userId = process.getuid?.() ?? 0;
+        const groupId = process.getgid?.() ?? 0;
+
+        await provisionManagedLogAccess(groupId, userId, {
+            manifest: manifest(file, userId, groupId),
+            requireRoot: () => true,
+            temporaryAccessRootPrefix: path.join(root, "access-config-"),
+        });
+
+        const archiveStatus = await lstat(archive);
+        expect(archiveStatus.uid).toBe(userId);
+        expect(archiveStatus.gid).toBe(groupId);
+        expect(archiveStatus.mode & 0o7777).toBe(0o640);
+    });
+
     test("rejects a manifest target reached through a symlink", async () => {
         root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
         const actual = path.join(root, "actual");
