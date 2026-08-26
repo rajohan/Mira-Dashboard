@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.7...v0.3.8) (2026-08-26)
+
+
+### Bug Fixes
+
+* **delivery:** repair host provisioning and log drift ([#470](https://github.com/rajohan/Mira-Dashboard/issues/470)) ([dd5c192](https://github.com/rajohan/Mira-Dashboard/commit/dd5c192d0b1afbb9a452c5fcc41c05b15b95ab5d))
+
 ## [0.3.7](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.6...v0.3.7) (2026-08-26)
 
 
