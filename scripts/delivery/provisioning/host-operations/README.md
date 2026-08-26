@@ -85,10 +85,10 @@ Rollback invokes this same installer with the previous root-owned immutable rele
 exact authority files and reloading systemd. The deferred timer is never enabled; it is started only by the root-owned
 restart helper after systemd accepts the reviewed restart unit.
 
-The first installation must run the production bootstrap. Bootstrap stages this
+The first `delivery.production.v3` installation must run the production bootstrap. Bootstrap stages this
 template and the remaining root-owned authority before it invokes greenfield
 Delivery activation. A normal deploy assumes that bootstrap has completed; no
-pre-bootstrap unit name is supported.
+pre-bootstrap unit name or earlier protocol is supported.
 
 Normal Delivery activation starts only the fixed
 `mira-p@<commit>--<tag>--<receipt-sha256>--<archive-sha256>.service`

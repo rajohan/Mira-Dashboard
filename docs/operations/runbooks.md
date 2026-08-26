@@ -32,7 +32,7 @@ assets mean the exact `main` commit has not been published as a completed semant
 
 ## Later production deployments
 
-The provisioning boundary must already have been installed by a successful clean-host
+The `delivery.production.v3` provisioning boundary must already have been installed by a successful clean-host
 `bun run bootstrap`. The release that first introduces this boundary is installed through that
 clean bootstrap, never through `bun run deploy` or the Delivery page. The deploy command fails
 closed when the root-owned provisioning unit is absent or the active release does not declare the

@@ -94,7 +94,7 @@ function capsule(
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v2",
+        protocol: "delivery.production.v3",
         runId: transitionId,
         transitionId,
     };
@@ -120,7 +120,7 @@ describe("delivery production operation protocol", () => {
     test("canonically parses, freezes, and serializes the secret-free rehydration capsule", () => {
         const parsed = parseDeliveryProductionOperationCapsule(capsule());
 
-        expect(parsed.protocol).toBe("delivery.production.v2");
+        expect(parsed.protocol).toBe("delivery.production.v3");
         expect(Object.isFrozen(parsed)).toBe(true);
         expect(Object.isFrozen(parsed.enqueue.actor)).toBe(true);
         expect(Object.isFrozen(parsed.enqueue.payload)).toBe(true);
