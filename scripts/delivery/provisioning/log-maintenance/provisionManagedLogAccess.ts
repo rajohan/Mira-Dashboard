@@ -32,6 +32,8 @@ const accessProbeFlags =
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 const groupIdPattern = /^(?:0|[1-9]\d{0,9})$/u;
 const archiveEntryMaximum = 4096;
+const archiveLinkRetryMaximum = 5;
+const archiveLinkRetryDelayMs = 10;
 
 function failure(): Error {
     return new Error(failureMessage);
@@ -251,7 +253,15 @@ async function canonicalArchiveStatus(
     handle: FileHandle,
     expectedPath: string
 ): Promise<BigIntStats | undefined> {
-    const status = await handle.stat({ bigint: true });
+    let status = await handle.stat({ bigint: true });
+    for (
+        let attempt = 0;
+        status.nlink === 2n && attempt < archiveLinkRetryMaximum;
+        attempt += 1
+    ) {
+        await Bun.sleep(archiveLinkRetryDelayMs);
+        status = await handle.stat({ bigint: true });
+    }
     if (status.nlink === 0n) return undefined;
     let canonical: string;
     try {
