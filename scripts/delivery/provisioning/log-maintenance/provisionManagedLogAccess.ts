@@ -4,6 +4,7 @@ import {
     mkdtemp,
     mkdir,
     open,
+    opendir,
     realpath,
     rm,
     writeFile,
@@ -30,6 +31,9 @@ const fileFlags = constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const accessProbeFlags =
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 const groupIdPattern = /^(?:0|[1-9]\d{0,9})$/u;
+const archiveEntryMaximum = 4096;
+const archiveLinkRetryMaximum = 5;
+const archiveLinkRetryDelayMs = 10;
 
 function failure(): Error {
     return new Error(failureMessage);
@@ -51,6 +55,83 @@ function trustedTargetOwner(target: ManagedLogFileTarget, status: BigIntStats): 
 
 function descriptorPath(handle: FileHandle): string {
     return `/proc/${process.pid}/fd/${handle.fd}`;
+}
+
+function escapeRegularExpression(value: string): string {
+    return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+}
+
+function rotatedArchivePattern(fileName: string): RegExp {
+    return new RegExp(
+        `^${escapeRegularExpression(fileName)}\\.\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\.\\d{3}Z\\.[0-9a-f-]{36}(?:\\.gz)?$`,
+        "u"
+    );
+}
+
+async function provisionExistingArchives(
+    directory: FileHandle,
+    directoryStatus: BigIntStats,
+    target: ManagedLogFileTarget,
+    groupId: number,
+    beforeArchiveOpen?: (fileName: string) => Promise<void> | void,
+    afterArchiveOpen?: (fileName: string) => Promise<void> | void
+): Promise<void> {
+    const sourceName = path.basename(target.filePath);
+    const archivePattern = rotatedArchivePattern(sourceName);
+    const stream = await opendir(descriptorPath(directory));
+    let checkedEntries = 0;
+    try {
+        for await (const entry of stream) {
+            checkedEntries += 1;
+            if (checkedEntries > archiveEntryMaximum) throw failure();
+            if (!archivePattern.test(entry.name)) continue;
+            await beforeArchiveOpen?.(entry.name);
+            const archivePath = path.join(descriptorPath(directory), entry.name);
+            let archive: FileHandle | undefined;
+            try {
+                try {
+                    archive = await open(archivePath, fileFlags);
+                } catch (error) {
+                    if (errorCode(error) === "ENOENT") continue;
+                    throw error;
+                }
+                await afterArchiveOpen?.(entry.name);
+                const archiveStatus = await canonicalArchiveStatus(
+                    archive,
+                    path.join(path.dirname(target.filePath), entry.name)
+                );
+                if (archiveStatus === undefined) continue;
+                if (
+                    !archiveStatus.isFile() ||
+                    archiveStatus.nlink !== 1n ||
+                    archiveStatus.dev !== directoryStatus.dev ||
+                    archiveStatus.size >
+                        BigInt(target.maximumSourceBytes + 1024 * 1024) ||
+                    !trustedTargetOwner(target, archiveStatus)
+                ) {
+                    throw failure();
+                }
+                await archive.chown(Number(archiveStatus.uid), groupId);
+                await archive.chmod(0o640);
+                const verified = await canonicalArchiveStatus(
+                    archive,
+                    path.join(path.dirname(target.filePath), entry.name)
+                );
+                if (verified === undefined) continue;
+                if (
+                    verified.uid !== archiveStatus.uid ||
+                    verified.gid !== BigInt(groupId) ||
+                    (verified.mode & 0o7777n) !== 0o640n
+                ) {
+                    throw failure();
+                }
+            } finally {
+                await close(archive);
+            }
+        }
+    } finally {
+        await stream.close().catch(() => {});
+    }
 }
 
 async function verifyDefaultGroupAccess(
@@ -168,6 +249,31 @@ async function canonicalStatus(
     return status;
 }
 
+async function canonicalArchiveStatus(
+    handle: FileHandle,
+    expectedPath: string
+): Promise<BigIntStats | undefined> {
+    let status = await handle.stat({ bigint: true });
+    for (
+        let attempt = 0;
+        status.nlink === 2n && attempt < archiveLinkRetryMaximum;
+        attempt += 1
+    ) {
+        await Bun.sleep(archiveLinkRetryDelayMs);
+        status = await handle.stat({ bigint: true });
+    }
+    if (status.nlink === 0n) return undefined;
+    let canonical: string;
+    try {
+        canonical = await realpath(`/proc/self/fd/${handle.fd}`);
+    } catch (error) {
+        if (errorCode(error) === "ENOENT") return undefined;
+        throw error;
+    }
+    if (canonical !== expectedPath || status.isSymbolicLink()) throw failure();
+    return status;
+}
+
 async function applyDefaultGroupAccess(
     directoryPath: string,
     groupId: number,
@@ -201,7 +307,9 @@ async function provisionTarget(
     target: ManagedLogFileTarget,
     groupId: number,
     applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>,
-    verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>
+    verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>,
+    beforeArchiveOpen?: (fileName: string) => Promise<void> | void,
+    afterArchiveOpen?: (fileName: string) => Promise<void> | void
 ): Promise<void> {
     const directoryPath = path.dirname(target.filePath);
     let directory: FileHandle | undefined;
@@ -236,6 +344,14 @@ async function provisionTarget(
             await applyDefaultAccess(descriptorPath(directory), groupId);
             await verifyDefaultAccess(directory, groupId);
         }
+        await provisionExistingArchives(
+            directory,
+            directoryStatus,
+            target,
+            groupId,
+            beforeArchiveOpen,
+            afterArchiveOpen
+        );
 
         try {
             file = await open(
@@ -299,6 +415,8 @@ export async function provisionManagedLogAccess(
             directory: FileHandle,
             groupId: number
         ) => Promise<void>;
+        readonly beforeArchiveOpen?: (fileName: string) => Promise<void> | void;
+        readonly afterArchiveOpen?: (fileName: string) => Promise<void> | void;
     } = {}
 ): Promise<void> {
     if (
@@ -331,7 +449,9 @@ export async function provisionManagedLogAccess(
                 target,
                 groupId,
                 applyDefaultAccess,
-                verifyDefaultAccess
+                verifyDefaultAccess,
+                options.beforeArchiveOpen,
+                options.afterArchiveOpen
             );
         }
     } catch {
