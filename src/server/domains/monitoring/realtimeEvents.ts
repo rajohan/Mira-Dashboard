@@ -80,6 +80,7 @@ export function insertMonitoringReportNotification(input: {
     occurredAt: Date;
     outboxOccurredAt: Date;
     problems: readonly NormalizedMonitoringProblem[];
+    incidents: readonly { readonly generation: number; readonly id: string }[];
     reportId: string;
     reportTitle: string;
     source: string;
@@ -104,6 +105,13 @@ export function insertMonitoringReportNotification(input: {
         source: input.source,
         title: input.reportTitle,
     });
+    for (const incident of input.incidents) {
+        input.unit.insertNotificationIncidentLink({
+            incidentGeneration: incident.generation,
+            incidentId: incident.id,
+            notificationId: notification.id,
+        });
+    }
     insertRealtimeEvent(input.unit, input.counts, {
         entityId: notification.id,
         entityType: "notification",

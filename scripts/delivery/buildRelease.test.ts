@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { databaseSchemaTarget } from "../../src/shared/databaseMigrationManifest.ts";
 import { releaseBuildCommands } from "../../src/shared/releaseManifest.ts";
 import type { BuildSourceIdentity } from "../buildSourceIdentity.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
@@ -160,7 +161,7 @@ describe("Dashboard release build", () => {
         expect(result.manifest.display).toEqual({
             builtAtMs: 1_800_000_000_000,
             commitTitle: "Test release",
-            schemaTarget: 1,
+            schemaTarget: databaseSchemaTarget,
         });
         const releaseStatus = await stat(result.releaseRoot);
         const manifestStatus = await stat(

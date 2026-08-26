@@ -7,8 +7,11 @@ import * as v from "valibot";
 import { monitoringChangePayloadSchema } from "../../../contracts/monitoring.ts";
 import { incidentObservations } from "../../database/schema/incidentObservations.ts";
 import { incidents } from "../../database/schema/incidents.ts";
+import { notificationIncidentLinks } from "../../database/schema/notificationIncidentLinks.ts";
 import { notifications } from "../../database/schema/notifications.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { createMonitoringRepository } from "./repository.ts";
 import {
     allRowCounts,
     oneDayMs,
@@ -148,7 +151,7 @@ describe("monitoring service", () => {
                 )
             ).toMatchObject({
                 observedIncidents: 0,
-                realtimeEvents: 2,
+                realtimeEvents: 3,
                 resolvedIncidents: 1,
             });
 
@@ -208,7 +211,7 @@ describe("monitoring service", () => {
                     generation: null,
                     incidentId: null,
                     linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
-                    readAt: null,
+                    readAt: toDate(6000),
                     reportId: expect.any(String),
                 },
                 {
@@ -225,7 +228,7 @@ describe("monitoring service", () => {
                 monitorRuns: 6,
                 notifications: 3,
                 observations: 6,
-                realtimeEvents: 17,
+                realtimeEvents: 18,
                 reports: 6,
             });
             expect(wakeups).toBe(6);
@@ -302,6 +305,138 @@ describe("monitoring service", () => {
                 message: "2 problems detected.",
                 reportId: result.reportId,
             });
+
+            await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 3000,
+                    problems: [problem("filesystem")],
+                    run: 302,
+                })
+            );
+            expect(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .where(eq(notifications.id, rows[0]!.id))
+                    .get()?.readAt
+            ).toBeNull();
+
+            await submitSnapshot(
+                service,
+                snapshot({ completedAtMs: 4000, problems: [], run: 303 })
+            );
+            expect(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .where(eq(notifications.id, rows[0]!.id))
+                    .get()?.readAt
+            ).toEqual(toDate(4000));
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reads an aggregate only after its exact incident generations resolve", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = serviceFor(database);
+
+        try {
+            const first = await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 2000,
+                    problems: [problem("filesystem")],
+                    run: 401,
+                })
+            );
+            const second = await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 3000,
+                    problems: [problem("filesystem"), problem("backup")],
+                    run: 402,
+                })
+            );
+            const unrelatedId = Bun.randomUUIDv7();
+            database.orm
+                .insert(notifications)
+                .values({
+                    channel: "dashboard",
+                    id: unrelatedId,
+                    incidentGeneration: null,
+                    incidentId: null,
+                    kind: "unrelated.report-notification",
+                    linkUrl: null,
+                    message: "Unrelated",
+                    occurredAt: toDate(3000),
+                    readAt: null,
+                    reportId: second.reportId,
+                    severity: "info",
+                    source: "test",
+                    title: "Unrelated",
+                })
+                .run();
+
+            const incidentLinks = database.orm
+                .select()
+                .from(notificationIncidentLinks)
+                .all();
+            expect(incidentLinks).toHaveLength(2);
+            const repository = createMonitoringRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission
+            );
+            for (const link of incidentLinks) {
+                const filtered = repository.listNotifications({
+                    filters: {
+                        incidentId: link.incidentId,
+                        readState: "all",
+                    },
+                    limit: 10,
+                });
+                expect(filtered.map(({ id }) => id)).toContain(link.notificationId);
+                expect(
+                    repository.findIncidentNotification(
+                        link.incidentId,
+                        link.incidentGeneration
+                    )?.id
+                ).toBe(link.notificationId);
+            }
+            await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 4000,
+                    problems: [problem("filesystem")],
+                    run: 403,
+                })
+            );
+
+            const notificationsByReport = new Map(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .all()
+                    .map((notification) => [
+                        `${String(notification.reportId)}:${notification.kind}`,
+                        notification,
+                    ])
+            );
+            expect(
+                notificationsByReport.get(`${first.reportId}:monitoring.incident`)?.readAt
+            ).toBeNull();
+            expect(
+                notificationsByReport.get(`${second.reportId}:monitoring.incident`)
+                    ?.readAt
+            ).toEqual(toDate(4000));
+            expect(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .where(eq(notifications.id, unrelatedId))
+                    .get()?.readAt
+            ).toBeNull();
         } finally {
             database.sqlite.close(true);
         }

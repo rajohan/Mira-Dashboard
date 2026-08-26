@@ -49,6 +49,7 @@ export function applyMonitoringSnapshotLifecycle(input: {
     );
     const observedFingerprints = new Set<string>();
     const notificationProblems: NormalizedMonitoringProblem[] = [];
+    const notificationIncidents: IncidentRecord[] = [];
 
     for (const problem of input.snapshot.problems) {
         observedFingerprints.add(problem.fingerprint);
@@ -115,6 +116,7 @@ export function applyMonitoringSnapshotLifecycle(input: {
 
         if (existingIncident === undefined || existingIncident.state === "resolved") {
             notificationProblems.push(problem);
+            notificationIncidents.push(incident);
         }
     }
 
@@ -125,6 +127,7 @@ export function applyMonitoringSnapshotLifecycle(input: {
         occurredAt: input.snapshotOccurredAt,
         outboxOccurredAt: input.outboxOccurredAt,
         problems: notificationProblems,
+        incidents: notificationIncidents,
         reportId: input.reportId,
         reportTitle: input.snapshot.report.title,
         source: input.snapshot.report.source,
@@ -161,6 +164,20 @@ export function applyMonitoringSnapshotLifecycle(input: {
         if (readNotification !== undefined) {
             insertRealtimeEvent(input.unit, input.counts, {
                 entityId: readNotification.id,
+                entityType: "notification",
+                expiresAt: input.expiresAt,
+                occurredAt: input.outboxOccurredAt,
+                operation: "updated",
+                topic: monitoringRealtimeTopics.notifications,
+            });
+        }
+        for (const reportNotification of input.unit.markResolvedReportNotificationsRead(
+            incident.id,
+            incident.generation,
+            input.snapshotOccurredAt
+        )) {
+            insertRealtimeEvent(input.unit, input.counts, {
+                entityId: reportNotification.id,
                 entityType: "notification",
                 expiresAt: input.expiresAt,
                 occurredAt: input.outboxOccurredAt,

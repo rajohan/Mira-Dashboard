@@ -185,6 +185,7 @@ export interface DashboardWorkerProcessDependencies {
     readonly createLogMaintenanceExecutor: (
         layout: DashboardProjectLayout
     ) => LogMaintenanceExecutor;
+    readonly createWorkspaceGitSync: typeof createWorkspaceGitSync;
     readonly createHostOperations?: () => FixedHostOperationsExecutionPort | undefined;
     readonly createDocker?: (
         options: WorkerDockerCompositionOptions
@@ -622,6 +623,7 @@ const defaultDependencies = Object.freeze({
     createLogDestination: (logsDirectory, processRole) =>
         createProjectFileLogDestination(logsDirectory, processRole),
     createLogMaintenanceExecutor: createWorkerLogMaintenanceExecutor,
+    createWorkspaceGitSync,
     createOpenClawGatewayLifecycle: (openClawRoot) =>
         createFixedOpenClawGatewayLifecycle({ openClawRoot }),
     createOpenClawServiceActions: createPersistentGatewayOpenClawServiceActionsProvider,
@@ -927,7 +929,9 @@ export async function runDashboardWorkerProcess(
                     ],
                     signal
                 ),
-            syncWorkspace: createWorkspaceGitSync(configuration.workspaceRoot),
+            syncWorkspace: dependencies.createWorkspaceGitSync(
+                configuration.openClawRoot
+            ),
             quota: async (signal?: AbortSignal) =>
                 collectQuotaPayload(quotaCredentials, signal, {
                     codex: await resolveCodexQuotaCollectorOptions(

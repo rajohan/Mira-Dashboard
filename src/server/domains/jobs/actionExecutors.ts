@@ -49,6 +49,7 @@ import {
     OpenClawServiceActionsExecutionError,
     type OpenClawServiceActionsExecutionPort,
 } from "../../../shared/openClawServiceActions.ts";
+import { WorkspaceGitSyncOutcomeUnknownError } from "../../../shared/workspaceGitSync.ts";
 import type { BackupActivityRepository } from "../backups/activityRepository.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
@@ -934,7 +935,10 @@ export function createJobWorkerActionResolver(
                 ? undefined
                 : (_context, payload) =>
                       Effect.tryPromise({
-                          catch: () => new Error("OpenClaw workspace sync failed"),
+                          catch: (error) =>
+                              error instanceof WorkspaceGitSyncOutcomeUnknownError
+                                  ? new JobActionOutcomeUnknownError()
+                                  : new Error("OpenClaw workspace sync failed"),
                           try: async (signal) => {
                               v.parse(emptyPayloadSchema, payload);
                               return await dependencies.overviewProviders!.syncWorkspace!(

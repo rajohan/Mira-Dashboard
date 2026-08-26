@@ -14,6 +14,7 @@ import {
     createVerifiedDatabaseSnapshot,
     type DatabaseSnapshotResult,
 } from "../../src/server/database/runtime/databaseSnapshot.ts";
+import { migrationManifest } from "../../src/shared/databaseMigrationManifest.ts";
 import { parseProductionActivationTransition } from "../../src/shared/productionActivationTransition.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import {
@@ -147,7 +148,7 @@ describe("database transition filesystem", () => {
                         "SELECT COUNT(*) AS count FROM schema_migrations"
                     )
                     .get()
-            ).toEqual({ count: 1 });
+            ).toEqual({ count: migrationManifest.length });
         } finally {
             database.close(true);
         }

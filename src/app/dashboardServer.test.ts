@@ -1939,6 +1939,7 @@ describe("Dashboard security composition", () => {
                 "cache.weather",
                 "database.sqlite-maintenance",
                 "docker.updater",
+                "git.openclaw.workspace-sync",
                 "maintenance.rotate-managed-logs",
             ] as const;
             expect(schedules.schedules.map(({ id }) => id)).toEqual(expectedScheduleIds);

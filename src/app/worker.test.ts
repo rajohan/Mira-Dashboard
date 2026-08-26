@@ -264,6 +264,10 @@ function processFixture(
             events.push("log-maintenance-create");
             return logMaintenance;
         },
+        createWorkspaceGitSync(observedOpenClawRoot) {
+            expect(observedOpenClawRoot).toBe(openClawRoot);
+            return () => Promise.resolve({ changedFileCount: 0, pushed: false });
+        },
         createOpenClawGatewayLifecycle(observedOpenClawRoot) {
             expect(observedOpenClawRoot).toBe(openClawRoot);
             return openClawGateway;

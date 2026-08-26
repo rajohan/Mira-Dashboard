@@ -420,6 +420,10 @@ function overviewProviders(nowMs: () => number): DevelopmentOverviewProviderColl
                     ],
                 });
             }),
+        syncWorkspace: (signal?: AbortSignal) => {
+            signal?.throwIfAborted();
+            return Promise.resolve({ changedFileCount: 0, pushed: false });
+        },
         quota: (signal?: AbortSignal): Promise<QuotaCachePayload> =>
             Promise.resolve().then(() => {
                 signal?.throwIfAborted();

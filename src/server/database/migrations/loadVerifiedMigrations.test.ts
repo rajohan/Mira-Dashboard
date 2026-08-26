@@ -478,7 +478,11 @@ describe("reviewed migration manifest", () => {
                 snapshotSha256: "0".repeat(64),
             });
         }
-        await rm(sourceNode, { recursive: true });
+        await Promise.all(
+            migrationManifest.map(({ id }) =>
+                rm(path.join(directory, id), { recursive: true })
+            )
+        );
 
         await expectRejection(
             loadVerifiedMigrations({ directory, manifest }),
@@ -495,12 +499,14 @@ describe("reviewed migration manifest", () => {
         await expectRejection(
             loadVerifiedMigrations({
                 directory,
-                manifest: [
-                    {
-                        ...migration,
-                        migrationSha256: sha256Hex(invalidUtf8),
-                    },
-                ],
+                manifest: migrationManifest.map((entry) =>
+                    entry.id === migration.id
+                        ? {
+                              ...entry,
+                              migrationSha256: sha256Hex(invalidUtf8),
+                          }
+                        : entry
+                ),
             }),
             `Migration SQL is not valid UTF-8: ${migration.id}`
         );
