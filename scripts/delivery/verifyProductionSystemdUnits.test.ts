@@ -122,10 +122,8 @@ describe("root-installed production systemd unit verification", () => {
             release,
             identity
         );
-        expect(inspectedUnits).toContain(
-            "mira-dashboard-provision@mira-dashboard-verification.service"
-        );
-        expect(inspectedUnits).not.toContain("mira-dashboard-provision@.service");
+        expect(inspectedUnits).toContain("mira-p@mira-dashboard-verification.service");
+        expect(inspectedUnits).not.toContain("mira-p@.service");
 
         staleWebDropIn = true;
         const dropInFailure = await rejectionError(

@@ -32,7 +32,7 @@ export const releaseProcessRoles = Object.freeze([
 
 /** Cross-release production protocols implemented by every immutable release. */
 export const releaseDeliveryProtocols = Object.freeze([
-    "delivery.production.v2",
+    "delivery.production.v3",
 ] as const);
 
 function boundedToken(maximumLength: number) {
@@ -247,7 +247,7 @@ export function parseReleaseManifest(input: unknown): ReleaseManifest {
 export function serializeReleaseManifest(input: unknown): string {
     const manifest = parseReleaseManifest(input);
     if (
-        !manifest.deliveryProtocols.includes("delivery.production.v2") ||
+        !manifest.deliveryProtocols.includes("delivery.production.v3") ||
         !manifest.processRoles.includes("production-delivery")
     ) {
         throw new TypeError(invalidReleaseManifest);

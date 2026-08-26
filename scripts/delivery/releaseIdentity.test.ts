@@ -216,7 +216,7 @@ describe("release identity", () => {
                 "systemd/host-operations/mira-dashboard-host-system-cleanup.service",
                 "systemd/host-operations/mira-dashboard-host-system-restart.service",
                 "systemd/host-operations/mira-dashboard-host-system-update.service",
-                "systemd/host-operations/mira-dashboard-provision@.service",
+                "systemd/host-operations/mira-p@.service",
                 "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
                 "systemd/mira-dashboard-web.service",
                 "systemd/mira-dashboard-worker.service",

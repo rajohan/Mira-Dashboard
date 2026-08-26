@@ -16,7 +16,7 @@ parameter.
 | `mira-dashboard-deferred-reboot.timer`       | `/etc/systemd/system/mira-dashboard-deferred-reboot.timer`       | `root:root 0644` |
 | `60-mira-dashboard-host-operations.rules`    | `/etc/polkit-1/rules.d/60-mira-dashboard-host-operations.rules`  | `root:root 0644` |
 | `mira-dashboard-production-authority.conf`   | `/etc/sysusers.d/mira-dashboard-production-authority.conf`       | `root:root 0644` |
-| `mira-dashboard-provision@.service`          | `/etc/systemd/system/mira-dashboard-provision@.service`          | `root:root 0644` |
+| `mira-p@.service`                            | `/etc/systemd/system/mira-p@.service`                            | `root:root 0644` |
 | `systemd/mira-dashboard-web.service`         | `/etc/systemd/system/mira-dashboard-web.service`                 | `root:root 0644` |
 | `systemd/mira-dashboard-worker.service`      | `/etc/systemd/system/mira-dashboard-worker.service`              | `root:root 0644` |
 
@@ -85,13 +85,13 @@ Rollback invokes this same installer with the previous root-owned immutable rele
 exact authority files and reloading systemd. The deferred timer is never enabled; it is started only by the root-owned
 restart helper after systemd accepts the reviewed restart unit.
 
-The first installation must run the production bootstrap. Bootstrap stages this
+The first `delivery.production.v3` installation must run the production bootstrap. Bootstrap stages this
 template and the remaining root-owned authority before it invokes greenfield
 Delivery activation. A normal deploy assumes that bootstrap has completed; no
-pre-bootstrap unit name is supported.
+pre-bootstrap unit name or earlier protocol is supported.
 
 Normal Delivery activation starts only the fixed
-`mira-dashboard-provision@<commit>--<tag>--<receipt-sha256>--<archive-sha256>.service`
+`mira-p@<commit>--<tag>--<receipt-sha256>--<archive-sha256>.service`
 boundary. The root-owned
 provisioner independently resolves the stable GitHub tag, downloads the permanent
 `receipt.json` and `release.tar` assets, verifies their published digests and immutable

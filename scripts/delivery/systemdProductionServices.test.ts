@@ -120,7 +120,7 @@ function inactiveProcessResult(): SystemctlProcessResult {
 }
 
 describe("production root-systemd service control", () => {
-    test("rejects published authority that would exceed the systemd unit-name limit", async () => {
+    test("rejects published authority whose escaped systemd unit exceeds the limit", async () => {
         const { projectRoot } = await createProductionTargetFixture(temporaryDirectories);
         const state = await prepareProtectedProductionStatePath(projectRoot);
         await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -128,7 +128,7 @@ describe("production root-systemd service control", () => {
             const fixtures = await createRuntimePointerFixture(paths);
             const authority = {
                 ...publishedAuthority(firstReleaseId),
-                tagName: `v1.2.3-${"a".repeat(64)}`,
+                tagName: `v1.2.3.${"a".repeat(64)}`,
             } as PublishedReleaseAuthority;
             const controller = createSystemdProductionServiceController(lease, paths, {
                 execute: () => Promise.resolve(successfulProcessResult()),
@@ -200,7 +200,7 @@ describe("production root-systemd service control", () => {
             expect(commands).toEqual([
                 [
                     "start",
-                    `mira-dashboard-provision@${firstReleaseId}--v1.2.3--${"d".repeat(64)}--${"e".repeat(64)}.service`,
+                    `mira-p@${firstReleaseId}--v1.2.3--${"d".repeat(64)}--${"e".repeat(64)}.service`,
                 ],
                 ["restart", "mira-dashboard-worker.service"],
                 ["restart", "mira-dashboard-web.service"],
@@ -210,10 +210,7 @@ describe("production root-systemd service control", () => {
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
                 ["is-active", "--quiet", "mira-dashboard-worker.service"],
                 ["is-active", "--quiet", "mira-dashboard-web.service"],
-                [
-                    "start",
-                    `mira-dashboard-provision@${firstReleaseId}--local--settled.service`,
-                ],
+                ["start", `mira-p@${firstReleaseId}--local--settled.service`],
                 ["stop", "mira-dashboard-web.service"],
                 ["stop", "mira-dashboard-worker.service"],
             ]);
@@ -330,7 +327,7 @@ describe("production root-systemd service control", () => {
             await controller.provision(fixtures.first, fixtures.runtime);
 
             expect(commands).toEqual([
-                ["start", `mira-dashboard-provision@${firstReleaseId}--local.service`],
+                ["start", `mira-p@${firstReleaseId}--local.service`],
             ]);
         });
     });

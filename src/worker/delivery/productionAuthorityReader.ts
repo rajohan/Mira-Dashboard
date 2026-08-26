@@ -31,7 +31,7 @@ const directoryFlags =
     constants.O_NOFOLLOW |
     constants.O_NONBLOCK;
 const fileFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-const productionProtocol = "delivery.production.v2";
+const productionProtocol = "delivery.production.v3";
 
 interface FileIdentity {
     readonly ctimeNs: bigint;

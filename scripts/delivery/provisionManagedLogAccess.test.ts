@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    chown,
+    lstat,
+    mkdir,
+    mkdtemp,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -143,5 +152,35 @@ describe("managed log access provisioning", () => {
         expect(defaultAccess[0]?.[0]).toMatch(/^\/proc\/\d+\/fd\/\d+$/u);
         expect(defaultAccess[0]?.[1]).toBe(groupId);
         expect(await lstat(file).catch(() => null)).toBeNull();
+    });
+
+    test("repairs group drift on an existing admitted hierarchy", async () => {
+        const userId = process.getuid?.() ?? 0;
+        const currentGroupId = process.getgid?.() ?? 0;
+        const selectedGroupId = (process.getgroups?.() ?? []).find(
+            (candidate) => candidate !== currentGroupId
+        );
+        if (selectedGroupId === undefined) return;
+
+        root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
+        const anchor = path.join(root, "anchor");
+        const directory = path.join(anchor, "source", "logs");
+        const file = path.join(directory, "application.log");
+        await mkdir(directory, { mode: 0o755, recursive: true });
+        await chown(anchor, userId, selectedGroupId);
+        await chmod(anchor, 0o700);
+
+        await provisionManagedLogAccess(selectedGroupId, userId, {
+            applyDefaultAccess: () => Promise.resolve(),
+            manifest: manifest(file, userId, selectedGroupId, true),
+            requireRoot: () => true,
+            verifyDefaultAccess: () => Promise.resolve(),
+        });
+
+        for (const managedDirectory of [path.join(anchor, "source"), directory]) {
+            const status = await lstat(managedDirectory);
+            expect(status.uid).toBe(userId);
+            expect(status.gid).toBe(selectedGroupId);
+        }
     });
 });

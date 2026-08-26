@@ -194,7 +194,7 @@ describe("Delivery production execution", () => {
                 releaseId: currentReleaseId,
                 runtimeRevision: currentRuntimeRevision,
             },
-            protocol: "delivery.production.v2",
+            protocol: "delivery.production.v3",
             runId,
             transitionId: runId,
         });
@@ -293,7 +293,7 @@ describe("Delivery production execution", () => {
                 releaseId: currentReleaseId,
                 runtimeRevision: currentRuntimeRevision,
             },
-            protocol: "delivery.production.v2",
+            protocol: "delivery.production.v3",
             runId,
             transitionId: runId,
         });
