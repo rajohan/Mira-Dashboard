@@ -32,8 +32,8 @@ BEGIN
       true
     ) IS DISTINCT FROM 'approved'
     OR NOT execution_role_is_superuser
-    OR catalog_database_count + CASE WHEN capability_exists THEN 0 ELSE 1 END > 80
-    OR observed_database_count + CASE WHEN capability_exists THEN 0 ELSE 1 END > 64
+    OR catalog_database_count + (CASE WHEN capability_exists THEN 0 ELSE 1 END) > 80
+    OR observed_database_count + (CASE WHEN capability_exists THEN 0 ELSE 1 END) > 64
   THEN
     RAISE EXCEPTION 'Database observability control capability preflight failed';
   END IF;

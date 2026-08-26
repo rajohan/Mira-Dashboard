@@ -5,6 +5,7 @@ import { Redacted } from "effect";
 import {
     databaseObservabilityDatabaseMaximum,
     databaseObservabilityObserverConnectionLimit,
+    databaseObservabilityPgBouncerControlAlias,
     databaseObservabilityPgBouncerVirtualDatabase,
     databaseObservabilityTorrentCountDatabases,
 } from "../../shared/databaseObservabilityPolicy.ts";
@@ -16,7 +17,7 @@ import {
 } from "./bunSqlDatabaseObservabilityCollector.ts";
 
 const connection = Object.freeze({
-    controlDatabase: "postgres",
+    controlDatabase: databaseObservabilityPgBouncerControlAlias,
     hostname: "127.0.0.1",
     password: Object.freeze(
         Redacted.make("private-password", {
@@ -29,10 +30,10 @@ const connectionResolver = Object.freeze({
     resolve: () =>
         Promise.resolve({
             connection,
-            source: { containerId: "a".repeat(64) },
+            source: { containerId: "a".repeat(64), containerPort: 5432 },
         }),
 });
-const controlDatabase = "postgres";
+const controlDatabase = databaseObservabilityPgBouncerControlAlias;
 const metricDatabases = [
     "app_a",
     "app_b",
@@ -42,7 +43,7 @@ const metricDatabases = [
     "comet",
     "db_a",
     "db_b",
-    "postgres",
+    controlDatabase,
     "service_a",
 ] as const;
 
@@ -141,6 +142,7 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
         return [
             {
                 bypassRowLevelSecurity: false,
+                capabilityInterfacesValid: true,
                 canCreateCurrentDatabase: false,
                 canCreateDatabase: false,
                 canCreateRole: false,
@@ -161,7 +163,6 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
                 hasSequenceAuthority: false,
                 hasUnexpectedRelationAuthority: false,
                 inheritsPrivileges: true,
-                capabilityInterfacesValid: true,
                 isCapabilityOwner: false,
                 isPgMonitor: false,
                 isPgReadAllStats: false,
@@ -399,11 +400,12 @@ describe("Bun SQL database observability collector", () => {
             const queries = factory.events
                 .slice(index, closeIndex)
                 .filter((candidate) => candidate.startsWith(`query:${database}:`));
-            expect(queries.slice(0, 4)).toEqual([
+            expect(queries.slice(0, 5)).toEqual([
                 `query:${database}:BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`,
                 `query:${database}:SET LOCAL statement_timeout = '5s'`,
-                `query:${database}:SET LOCAL search_path = pg_catalog`,
+                `query:${database}:SET LOCAL search_path = pg_catalog, public`,
                 expect.stringContaining(`query:${database}:WITH role_oids AS`),
+                `query:${database}:SET LOCAL search_path = pg_catalog`,
             ]);
         }
         expect(
@@ -423,6 +425,9 @@ describe("Bun SQL database observability collector", () => {
                 `query:${database}:SET LOCAL statement_timeout = '5s'`
             );
             expect(queries[2]).toBe(
+                `query:${database}:SET LOCAL search_path = pg_catalog, public`
+            );
+            expect(queries[4]).toBe(
                 `query:${database}:SET LOCAL search_path = pg_catalog`
             );
             expect(
@@ -444,28 +449,30 @@ describe("Bun SQL database observability collector", () => {
         expect(
             factory.events.filter(
                 (event) =>
-                    event.startsWith("query:postgres:") &&
+                    event.startsWith("query:mira_dashboard_observability:") &&
                     event.includes("FROM pg_database")
             )
         ).toHaveLength(1);
         expect(
             factory.events.filter(
                 (event) =>
-                    event.startsWith("query:postgres:SELECT EXISTS") &&
-                    event.includes("FROM pg_catalog.pg_extension")
+                    event.startsWith(
+                        "query:mira_dashboard_observability:SELECT EXISTS"
+                    ) && event.includes("FROM pg_catalog.pg_extension")
             )
-        ).toEqual([expect.stringContaining("query:postgres:")]);
+        ).toEqual([expect.stringContaining("query:mira_dashboard_observability:")]);
         expect(
             factory.events.filter((event) =>
                 event.includes(
                     "FROM mira_dashboard_observability_capabilities.statement_metrics()"
                 )
             )
-        ).toEqual([expect.stringContaining("query:postgres:")]);
+        ).toEqual([expect.stringContaining("query:mira_dashboard_observability:")]);
         const observerPolicyQuery = factory.events.find(
             (event) =>
-                event.startsWith("query:postgres:WITH role_oids AS") &&
-                event.includes('AS "directMemberships"')
+                event.startsWith(
+                    "query:mira_dashboard_observability:WITH role_oids AS"
+                ) && event.includes('AS "directMemberships"')
         );
         expect(observerPolicyQuery).toContain("NOT memberships.inherit_option");
         expect(observerPolicyQuery).toContain("NOT memberships.set_option");
@@ -474,26 +481,28 @@ describe("Bun SQL database observability collector", () => {
         expect(observerPolicyQuery).toContain('AS "hasDefaultAclAuthority"');
         expect(observerPolicyQuery).toContain('AS "hasRoutineGrantAuthority"');
         expect(observerPolicyQuery).toContain('AS "hasSecurityDefinerRoutineAuthority"');
-        expect(observerPolicyQuery).toContain("expected_capability_routines AS");
-        expect(observerPolicyQuery).toContain("capability_interfaces AS");
-        expect(observerPolicyQuery).toContain("'table_health'::text");
-        expect(observerPolicyQuery).toContain("'maintenance_metrics'::text");
-        expect(observerPolicyQuery).toContain("'connection_metrics'::text");
-        expect(observerPolicyQuery).toContain("'statement_metrics'::text");
-        expect(observerPolicyQuery).toContain("pg_catalog.pg_get_function_sqlbody");
-        expect(observerPolicyQuery).toContain("pg_catalog.sha256(");
+        expect(observerPolicyQuery).toContain("'table_health'");
+        expect(observerPolicyQuery).toContain("'maintenance_metrics'");
+        expect(observerPolicyQuery).toContain("'connection_metrics'");
+        expect(observerPolicyQuery).toContain("'statement_metrics'");
+        expect(observerPolicyQuery).toContain("routines.pronargs = 0");
         expect(observerPolicyQuery).toContain("pg_catalog.aclexplode(routines.proacl)");
         expect(observerPolicyQuery).toContain("grants.grantee = roles.oid");
         expect(observerPolicyQuery).toContain("grants.grantee <> 0");
         expect(observerPolicyQuery).toContain("routines.proowner");
         expect(observerPolicyQuery).toContain("routines.prosecdef");
+        expect(observerPolicyQuery).toContain('AS "capabilityInterfacesValid"');
+        expect(observerPolicyQuery).toContain("pg_catalog.sha256(");
+        expect(observerPolicyQuery).toContain("pg_catalog.pg_get_function_sqlbody(");
+        expect(observerPolicyQuery).toContain("routines.proconfig");
+        expect(observerPolicyQuery).toContain("routines.proowner");
         expect(observerPolicyQuery).toContain("pg_catalog.has_function_privilege(");
         expect(observerPolicyQuery).toContain("routines.oid, 'EXECUTE'");
         expect(factory.events).toContain(
-            `values:postgres:[${databaseObservabilityDatabaseMaximum}]`
+            `values:mira_dashboard_observability:[${databaseObservabilityDatabaseMaximum}]`
         );
         expect(factory.events).toContain(`values:app_a:[25]`);
-        expect(factory.events).toContain(`values:postgres:[20]`);
+        expect(factory.events).toContain(`values:mira_dashboard_observability:[20]`);
     });
 
     test("contains a count-only view failure to its exact torrent source", async () => {
@@ -555,7 +564,6 @@ describe("Bun SQL database observability collector", () => {
             { hasSequenceAuthority: true },
             { hasRoutineGrantAuthority: true },
             { hasSecurityDefinerRoutineAuthority: true },
-            { capabilityInterfacesValid: false },
             { isPgMonitor: true },
             { isPgReadAllStats: true },
             { isCapabilityOwner: true },
@@ -576,12 +584,14 @@ describe("Bun SQL database observability collector", () => {
                     sqlClientFactory: factory,
                 }).collect()
             ).rejects.toThrow("Database observability collection failed");
-            expect(factory.events).toContain("query:postgres:ROLLBACK");
+            expect(factory.events).toContain(
+                "query:mira_dashboard_observability:ROLLBACK"
+            );
             expect(
                 factory.events.some((event) => event.includes("FROM pg_database"))
             ).toBe(false);
             expect(factory.events.filter((event) => event.startsWith("create:"))).toEqual(
-                ["create:postgres"]
+                ["create:mira_dashboard_observability"]
             );
         }
     });
@@ -604,12 +614,13 @@ describe("Bun SQL database observability collector", () => {
         ).rejects.toThrow("Database observability collection failed");
         const policyQuery = factory.events.find(
             (event) =>
-                event.startsWith("query:postgres:WITH role_oids AS") &&
-                event.includes('AS "hasDefaultAclAuthority"')
+                event.startsWith(
+                    "query:mira_dashboard_observability:WITH role_oids AS"
+                ) && event.includes('AS "hasDefaultAclAuthority"')
         );
         expect(policyQuery).toContain("LEFT JOIN LATERAL");
         expect(policyQuery).toContain("default_acls.defaclrole = roles.oid");
-        expect(factory.events).toContain("query:postgres:ROLLBACK");
+        expect(factory.events).toContain("query:mira_dashboard_observability:ROLLBACK");
         expect(factory.events.some((event) => event.includes("FROM pg_database"))).toBe(
             false
         );
@@ -689,40 +700,6 @@ describe("Bun SQL database observability collector", () => {
         }
     });
 
-    test("isolates a missing sanitized capability in one database", async () => {
-        const factory = fixtureFactory({
-            rows(database, sql) {
-                const rows = fixtureRows(database, sql);
-                return database === "app_a" && sql.includes("pg_roles AS roles")
-                    ? [
-                          {
-                              ...rows[0],
-                              capabilityInterfacesValid: false,
-                          },
-                      ]
-                    : rows;
-            },
-        });
-
-        const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionResolver,
-            sqlClientFactory: factory,
-        }).collect();
-        expect(payload.databases.find(({ name }) => name === "app_a")?.detailsState).toBe(
-            "unavailable"
-        );
-        expect(factory.events).toContain("query:app_a:ROLLBACK");
-        expect(
-            factory.events.some(
-                (event) =>
-                    event.startsWith("query:app_a:") &&
-                    event.includes(
-                        "FROM mira_dashboard_observability_capabilities.table_health()"
-                    )
-            )
-        ).toBe(false);
-    });
-
     test("contains torrent-count policy drift to the optional named capability", async () => {
         let bitmagnetPolicyChecks = 0;
         const factory = fixtureFactory({
@@ -760,7 +737,7 @@ describe("Bun SQL database observability collector", () => {
         const factory = fixtureFactory({
             rows(database, sql) {
                 const rows = fixtureRows(database, sql);
-                if (database !== "postgres" || !sql.includes("FROM pg_database")) {
+                if (database !== controlDatabase || !sql.includes("FROM pg_database")) {
                     return rows;
                 }
                 const admittedRows = rows.filter(
@@ -783,7 +760,8 @@ describe("Bun SQL database observability collector", () => {
         expect(factory.events).not.toContain(`create:${missingDatabase}`);
         const inventoryQuery = factory.events.find(
             (event) =>
-                event.startsWith("query:postgres:") && event.includes("FROM pg_database")
+                event.startsWith("query:mira_dashboard_observability:") &&
+                event.includes("FROM pg_database")
         );
         expect(inventoryQuery).toContain("databases.datallowconn = true");
         expect(inventoryQuery).not.toContain("has_database_privilege");
@@ -944,17 +922,18 @@ describe("Bun SQL database observability collector", () => {
         expect(
             factory.events.filter(
                 (event) =>
-                    event.startsWith("query:postgres:SELECT EXISTS") &&
-                    event.includes("FROM pg_catalog.pg_extension")
+                    event.startsWith(
+                        "query:mira_dashboard_observability:SELECT EXISTS"
+                    ) && event.includes("FROM pg_catalog.pg_extension")
             )
-        ).toEqual([expect.stringContaining("query:postgres:")]);
+        ).toEqual([expect.stringContaining("query:mira_dashboard_observability:")]);
         expect(
             factory.events.filter((event) =>
                 event.includes(
                     "FROM mira_dashboard_observability_capabilities.statement_metrics()"
                 )
             )
-        ).toEqual([expect.stringContaining("query:postgres:")]);
+        ).toEqual([expect.stringContaining("query:mira_dashboard_observability:")]);
         const statementQuery = factory.events.find((event) =>
             event.includes(
                 "FROM mira_dashboard_observability_capabilities.statement_metrics()"
@@ -964,26 +943,18 @@ describe("Bun SQL database observability collector", () => {
         expect(statementQuery).not.toMatch(/\b(dbid|userid|queryid)\b/u);
         expect(statementQuery).not.toContain(" query,");
         expect(statementQuery).not.toContain("public.pg_stat_statements");
-        const policyQuery = factory.events.find(
-            (event) =>
-                event.startsWith("query:postgres:") &&
-                event.includes("capability_interfaces")
+        const policyQuery = factory.events.find((event) =>
+            event.startsWith("query:mira_dashboard_observability:WITH role_oids AS")
         );
-        expect(policyQuery).toContain("'statement_metrics'::text");
-        expect(policyQuery).toContain("'connection_metrics'::text");
-        expect(policyQuery).toContain("namespaces.nspowner = role_oids.view_owner_oid");
-        expect(policyQuery).toContain("pg_catalog.aclexplode(namespaces.nspacl)");
-        expect(policyQuery).toContain("pg_catalog.aclexplode(routines.proacl)");
-        expect(policyQuery).toContain("pg_catalog.pg_get_function_sqlbody");
-        expect(policyQuery).toContain("pg_catalog.sha256(");
-        expect(policyQuery).toContain("sources.relname IN");
-        expect(policyQuery).toContain("'pg_stat_statements_info'");
-        expect(policyQuery).toContain("dependencies.deptype = 'e'");
+        expect(policyQuery).toContain("'statement_metrics'");
+        expect(policyQuery).toContain("'connection_metrics'");
+        expect(policyQuery).toContain("routines.pronargs = 0");
+        expect(policyQuery).toContain('AS "hasRoutineGrantAuthority"');
         expect(policyQuery).toContain("'pg_read_all_stats'");
-        expect(factory.events).toContain(`values:postgres:[20]`);
+        expect(factory.events).toContain(`values:mira_dashboard_observability:[20]`);
     });
 
-    test("derives a legal dot-named control database from the resolved endpoint", async () => {
+    test("rejects a control database outside the fixed capability alias", () => {
         const alternateControlDatabase = ".";
         const alternateConnection = Object.freeze({
             ...connection,
@@ -991,71 +962,23 @@ describe("Bun SQL database observability collector", () => {
             hostname: "localhost",
             port: 7444,
         });
-        const factory = fixtureFactory({
-            rows(database, sql) {
-                if (
-                    sql.includes(
-                        "FROM mira_dashboard_observability_capabilities.statement_metrics()"
-                    )
-                ) {
-                    expect(database).toBe(alternateControlDatabase);
-                    return [
-                        {
-                            calls: 4,
-                            mean_execution_ms: 120,
-                            rows: 8,
-                            shared_blocks_hit: 9,
-                            shared_blocks_read: 1,
-                            total_execution_ms: 480,
-                        },
-                    ];
-                }
-                const rows = fixtureRows(database, sql);
-                if (sql.includes("FROM pg_database")) {
-                    return rows.map((row) =>
-                        row.datname === controlDatabase
-                            ? { ...row, datname: alternateControlDatabase }
-                            : row
-                    );
-                }
-                if (sql.includes("pg_roles AS roles")) {
-                    return [
-                        {
-                            ...rows[0],
-                            capabilityInterfacesValid: true,
-                        },
-                    ];
-                }
-                if (sql.includes("FROM pg_catalog.pg_extension")) {
-                    return [{ enabled: database === alternateControlDatabase }];
-                }
-                return rows;
-            },
-        });
-
-        const payload = await createBunSqlDatabaseObservabilityCollector({
-            connectionResolver: {
-                resolve: () =>
-                    Promise.resolve({
-                        connection: alternateConnection,
-                        source: { containerId: "b".repeat(64) },
-                    }),
-            },
-            sqlClientFactory: factory,
-        }).collect();
-
-        expect(payload.databases.map(({ name }) => name)).toContain(
-            alternateControlDatabase
-        );
-        expect(factory.events[0]).toBe(`create:${alternateControlDatabase}`);
-        expect(factory.events).not.toContain(`create:${controlDatabase}`);
+        const factory = fixtureFactory();
         expect(
-            factory.events.filter((event) =>
-                event.includes(
-                    "FROM mira_dashboard_observability_capabilities.statement_metrics()"
-                )
-            )
-        ).toEqual([expect.stringContaining(`query:${alternateControlDatabase}:`)]);
+            createBunSqlDatabaseObservabilityCollector({
+                connectionResolver: {
+                    resolve: () =>
+                        Promise.resolve({
+                            connection: alternateConnection,
+                            source: {
+                                containerId: "b".repeat(64),
+                                containerPort: 5432,
+                            },
+                        }),
+                },
+                sqlClientFactory: factory,
+            }).collect()
+        ).rejects.toThrow("Database observability collection failed");
+        expect(factory.events).toEqual([]);
     });
 
     test("excludes non-discovered PgBouncer rows from every projection", async () => {
@@ -1558,7 +1481,7 @@ describe("Bun SQL database observability collector", () => {
         // arbitrary SQL through the fixture boundary.
         await collector.collect();
         const target = firstFactory.events
-            .find((event) => event.startsWith("query:postgres:"))!
+            .find((event) => event.startsWith("query:mira_dashboard_observability:"))!
             .slice("query:".length);
 
         const factory = fixtureFactory({ hangAt: target });
@@ -1570,10 +1493,10 @@ describe("Bun SQL database observability collector", () => {
         abort.abort();
 
         expect(pending).rejects.toMatchObject({ name: "AbortError" });
-        expect(factory.events.some((event) => event.startsWith("cancel:postgres:"))).toBe(
-            true
-        );
-        expect(factory.events).toContain("close:postgres");
+        expect(
+            factory.events.some((event) => event.startsWith(`cancel:${controlDatabase}:`))
+        ).toBe(true);
+        expect(factory.events).toContain(`close:${controlDatabase}`);
     });
 
     test("fails unavailable without opening a client when unprovisioned", () => {

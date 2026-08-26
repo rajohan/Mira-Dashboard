@@ -260,6 +260,10 @@ const kopiaStatus = {
                 health: "current",
                 id: "primary",
                 latestCompletedAtMs: observedAtMs - 60_000,
+                snapshots: Array.from({ length: 8 }, (_, index) => ({
+                    completedAtMs: observedAtMs - 60_000 - index,
+                    retentionReasons: [],
+                })),
                 snapshotCount: 8,
             },
         ],

@@ -33,8 +33,8 @@ import type {
     JobCacheAttemptCommit,
     JobCacheAttemptWriteResult,
 } from "../jobs/actionRegistry.ts";
-import { findJobActionDefinition } from "../jobs/actionRegistry.ts";
 import {
+    cacheProviderAcceptsWriter,
     findCacheProviderDefinition,
     parseCacheProviderPayload,
 } from "./providerRegistry.ts";
@@ -81,38 +81,15 @@ function attemptKeys(outcome: JobCacheAttemptCommit): readonly string[] {
         : outcome.entries.map((entry) => entry.key);
 }
 
-interface CacheAttemptAuthority {
-    readonly actionKey: string;
-    readonly payloadJson: string;
-}
-
-function cacheAttemptAuthority(keys: readonly string[]): CacheAttemptAuthority {
-    const authorities = keys.map((key) => {
-        const provider = findCacheProviderDefinition(key);
-        const action =
-            provider === undefined
-                ? undefined
-                : findJobActionDefinition(provider.actionKey);
-        if (provider === undefined || action === undefined) {
-            throw new Error("Cache provider action authority is unavailable");
-        }
-        return {
-            actionKey: action.actionKey,
-            payloadJson: JSON.stringify(action.actionPayload),
-        };
-    });
-    const authority = authorities[0];
-    if (
-        authority === undefined ||
-        authorities.some(
-            (candidate) =>
-                candidate.actionKey !== authority.actionKey ||
-                candidate.payloadJson !== authority.payloadJson
-        )
-    ) {
-        throw new Error("Cache provider group spans multiple action authorities");
-    }
-    return authority;
+function cacheAttemptHasAuthority(
+    keys: readonly string[],
+    actionKey: string,
+    payloadJson: string
+): boolean {
+    return (
+        keys.length > 0 &&
+        keys.every((key) => cacheProviderAcceptsWriter(key, actionKey, payloadJson))
+    );
 }
 
 function validateAttemptOutcome(outcome: JobCacheAttemptCommit): JobCacheAttemptCommit {
@@ -278,7 +255,6 @@ export function createCacheRepository(
         async commitAttempt(input: CacheAttemptCommitInput) {
             const outcome = validateAttemptOutcome(input.outcome);
             const keys = attemptKeys(outcome);
-            const authority = cacheAttemptAuthority(keys);
             const result = await writeAdmission.run((markTransactionStarted) =>
                 runTransaction(
                     (transaction): JobCacheAttemptWriteResult => {
@@ -302,10 +278,15 @@ export function createCacheRepository(
                             .from(jobRuns)
                             .where(eq(jobRuns.id, input.runId))
                             .get();
+                        if (rawRun === undefined) {
+                            return "lost-claim";
+                        }
                         if (
-                            rawRun === undefined ||
-                            rawRun.actionKey !== authority.actionKey ||
-                            rawRun.payloadJson !== authority.payloadJson
+                            !cacheAttemptHasAuthority(
+                                keys,
+                                rawRun.actionKey,
+                                rawRun.payloadJson
+                            )
                         ) {
                             return "lost-claim";
                         }
@@ -327,8 +308,8 @@ export function createCacheRepository(
                                     eq(jobRuns.id, input.runId),
                                     eq(jobRuns.state, "running"),
                                     eq(jobRuns.attemptCount, input.attempt),
-                                    eq(jobRuns.actionKey, authority.actionKey),
-                                    eq(jobRuns.payloadJson, authority.payloadJson),
+                                    eq(jobRuns.actionKey, rawRun.actionKey),
+                                    eq(jobRuns.payloadJson, rawRun.payloadJson),
                                     eq(jobRuns.leaseOwnerId, input.workerId),
                                     eq(jobRuns.leaseToken, input.leaseToken),
                                     gt(jobRuns.leaseExpiresAt, authorityAt)

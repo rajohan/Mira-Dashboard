@@ -34,12 +34,25 @@ describe("backup contracts", () => {
                     latestCompletedAtMs: 1_000_000,
                     latestFileCount: 12,
                     latestSizeBytes: 42,
+                    snapshots: [
+                        {
+                            completedAtMs: 1_000_000,
+                            fileCount: 12,
+                            retentionReasons: ["daily-1"],
+                            sizeBytes: 42,
+                        },
+                        { completedAtMs: 900_000, retentionReasons: ["daily-2"] },
+                    ],
                     snapshotCount: 2,
                 },
                 {
                     health: "current",
                     id: "projects",
                     latestCompletedAtMs: 1_500_000,
+                    snapshots: [
+                        { completedAtMs: 1_500_000, retentionReasons: ["daily-1"] },
+                        { completedAtMs: 1_400_000, retentionReasons: ["daily-2"] },
+                    ],
                     snapshotCount: 2,
                 },
             ],
@@ -72,6 +85,7 @@ describe("backup contracts", () => {
                     health: "current",
                     id: "safe-source",
                     latestCompletedAtMs: 1_000_000,
+                    snapshots: [{ completedAtMs: 1_000_000, retentionReasons: [] }],
                     snapshotCount: 1,
                 },
             ],
@@ -99,6 +113,38 @@ describe("backup contracts", () => {
         }
     });
 
+    test("accepts a complete bounded newest-first inventory for a larger repository", () => {
+        const snapshots = Array.from({ length: 64 }, (_, index) => ({
+            completedAtMs: 1_000_000 - index,
+            retentionReasons: [],
+        }));
+        const payload = {
+            backupCount: 65,
+            healthy: true,
+            observedAtMs: 2_000_000,
+            providerIdle: true,
+            sourceRevision,
+            sources: [
+                {
+                    health: "current",
+                    id: "docker",
+                    latestCompletedAtMs: 1_000_000,
+                    snapshots,
+                    snapshotCount: 65,
+                },
+            ],
+            type: "kopia",
+        } as const;
+
+        expect(v.safeParse(kopiaBackupCachePayloadSchema, payload).success).toBe(true);
+        expect(
+            v.safeParse(kopiaBackupCachePayloadSchema, {
+                ...payload,
+                sources: [{ ...payload.sources[0], snapshots: snapshots.slice(1) }],
+            }).success
+        ).toBe(false);
+    });
+
     test("requires causal fresh and last-known-good envelopes with exact Jobs links", () => {
         const payload = {
             backupCount: 0,
@@ -106,7 +152,9 @@ describe("backup contracts", () => {
             observedAtMs: 1000,
             providerIdle: true,
             sourceRevision,
-            sources: [{ health: "missing", id: "files", snapshotCount: 0 }],
+            sources: [
+                { health: "missing", id: "files", snapshots: [], snapshotCount: 0 },
+            ],
             type: "kopia",
         } as const;
         const status = v.parse(kopiaBackupStatusSchema, {
@@ -200,7 +248,7 @@ describe("backup contracts", () => {
             v.parse(backupWrapperStatusSchema, {
                 idle: true,
                 protocol: backupWrapperProtocol,
-                sources: [{ id: "openclaw", snapshotCount: 0 }],
+                sources: [{ id: "openclaw", snapshots: [], snapshotCount: 0 }],
                 type: "kopia",
             }).type
         ).toBe("kopia");
@@ -209,7 +257,7 @@ describe("backup contracts", () => {
                 container: "kopia",
                 idle: true,
                 protocol: backupWrapperProtocol,
-                sources: [{ id: "openclaw", snapshotCount: 0 }],
+                sources: [{ id: "openclaw", snapshots: [], snapshotCount: 0 }],
                 type: "kopia",
             }).success
         ).toBe(false);

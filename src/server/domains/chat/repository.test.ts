@@ -592,6 +592,58 @@ describe("durable chat repository", () => {
                     updatedAtMs: snapshot.updatedAtMs,
                 },
             ]);
+            expect(afterRestart.readMetrics()).toMatchObject({
+                activeRuns: 1,
+                failedOrUnknownRuns: 0,
+                retainedEventBytes: 0,
+                retainedEvents: 0,
+                retainedRuns: 1,
+                retainedSnapshotBytes: expect.any(Number),
+                retainedSnapshots: 1,
+            });
+            expect(afterRestart.readMetrics().retainedSnapshotBytes).toBeGreaterThan(0);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("counts a provider run once when local and external runtime state overlap", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createChatRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission,
+            "main",
+            () => 1200
+        );
+        const sharedProviderRunId = "provider-shared";
+        try {
+            await repository.admit(input(), actor);
+            await repository.beginDispatch(firstRunId);
+            await repository.acknowledgeDispatch(firstRunId, sharedProviderRunId);
+            expect(
+                await repository.replaceExternalRuntimeSnapshot(
+                    externalRuntimeSnapshotWrite({
+                        payload: {
+                            entries: [
+                                externalRuntimeSnapshotEntry({
+                                    providerRunId: sharedProviderRunId,
+                                }),
+                                externalRuntimeSnapshotEntry({
+                                    providerRunId: "provider-external",
+                                }),
+                            ],
+                            truncated: false,
+                        },
+                    })
+                )
+            ).toBeTrue();
+
+            expect(repository.readMetrics()).toMatchObject({
+                activeRuns: 2,
+                failedOrUnknownRuns: 0,
+                retainedRuns: 2,
+                retainedSnapshots: 2,
+            });
         } finally {
             database.sqlite.close(true);
         }

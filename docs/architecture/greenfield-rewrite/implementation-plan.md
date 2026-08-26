@@ -129,7 +129,8 @@ including restart during streaming.
   empty topology.
 - database observability already applies that Engine rule narrowly for endpoint discovery: every
   snapshot uses bounded ID-only `docker ps -a` plus one fixed-template batched inspect, accepts one
-  healthy `mira.dashboard.database-observability=pgbouncer-v1` capability, resolves its loopback
+  healthy `mira.dashboard.database-observability=pgbouncer-psql-v1` capability with a verified
+  container-local `psql` client, resolves its loopback
   binding, and keeps only the observer password in Dashboard configuration. That single opt-in
   capability owns the fixed `mira_dashboard_observability` PgBouncer control alias. Approved
   provisioning creates a dedicated same-named physical database from `template0`; PgBouncer's
@@ -288,8 +289,8 @@ including restart during streaming.
   against malicious concurrent mutation by that UID.
   The six Kopia/WAL-G status/control rows are implemented in one separate privileged backup
   vertical. It discovers exactly one healthy provider per reviewed capability from the canonical
-  root Compose graph, using only `mira.dashboard.backup=kopia-v1` or
-  `mira.dashboard.backup=wal-g-v1` as membership authority.
+  root Compose graph, using only `mira.dashboard.backup=kopia-v2` or
+  `mira.dashboard.backup=wal-g-v2` as membership authority.
   Container, service, project, image, port, and source-mount names remain data rather than
   allowlists; additions, removals, and renames therefore converge without Dashboard changes.
   Ambiguity, disappearance, or graph drift preserves bounded last-known-good state and never

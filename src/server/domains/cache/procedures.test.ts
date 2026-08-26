@@ -16,6 +16,7 @@ import { createTestCacheService } from "./testSupport/service.ts";
 
 const runId = "018f6f50-6a9e-7b88-8000-000000000001";
 const systemHostKey = "system.host";
+const databaseObservabilityKey = "database.observability";
 const queuedRun = Object.freeze({
     actionKey: systemHostKey,
     attemptCount: 0,
@@ -78,6 +79,36 @@ describe("cache procedures", () => {
             "FORBIDDEN"
         );
         await expectTrpcCode(() => writeOnly.getHeartbeat({}), "FORBIDDEN");
+    });
+
+    test("requires the owning domain capability for generic saved payload reads", async () => {
+        const cacheService = createTestCacheService({
+            getEntry: () =>
+                Effect.fail(new CacheNotFoundError({ key: databaseObservabilityKey })),
+        });
+        const cacheOnly = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestAutomationAuthentication(["cache:read"]),
+                createTestApplicationRuntime(),
+                { cacheService }
+            )
+        ).cache;
+        const databaseReader = appRouter.createCaller(
+            await createTestRequestContext(
+                createTestAutomationAuthentication(["cache:read", "database:read"]),
+                createTestApplicationRuntime(),
+                { cacheService }
+            )
+        ).cache;
+
+        await expectTrpcCode(
+            () => cacheOnly.getEntry({ key: databaseObservabilityKey }),
+            "FORBIDDEN"
+        );
+        await expectTrpcCode(
+            () => databaseReader.getEntry({ key: databaseObservabilityKey }),
+            "NOT_FOUND"
+        );
     });
 
     test("serves bounded status and durable refresh results", async () => {

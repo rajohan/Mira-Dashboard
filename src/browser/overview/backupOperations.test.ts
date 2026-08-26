@@ -29,6 +29,7 @@ const status = Object.freeze({
                 health: "current",
                 id: "primary",
                 latestCompletedAtMs: nowMs,
+                snapshots: [{ completedAtMs: nowMs, retentionReasons: ["daily-1"] }],
                 snapshotCount: 1,
             },
         ],

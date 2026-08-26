@@ -22,6 +22,10 @@ const kopiaFresh = {
                 health: "current",
                 id: "primary",
                 latestCompletedAtMs: nowMs - 60_000,
+                snapshots: Array.from({ length: 8 }, (_, index) => ({
+                    completedAtMs: nowMs - 60_000 - index,
+                    retentionReasons: [],
+                })),
                 snapshotCount: 8,
             },
         ],

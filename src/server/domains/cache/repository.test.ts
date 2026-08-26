@@ -278,6 +278,38 @@ describe("cache repository", () => {
         }
     });
 
+    test("accepts the Docker updater as an explicit docker overview writer", async () => {
+        const fixture = await runningClaim({
+            actionKey: "docker.updater",
+            payloadJson: '{"kind":"updater-run"}',
+        });
+        try {
+            expect(
+                await fixture.cache.commitAttempt({
+                    at: new Date(3000),
+                    attempt: fixture.run.attemptCount,
+                    leaseToken: fixture.leaseToken,
+                    outcome: {
+                        durationMs: 10,
+                        failureCode: "provider/docker-overview-unavailable",
+                        failureMessage:
+                            "Docker overview projection could not be collected.",
+                        key: "docker.overview",
+                        kind: "failed",
+                    },
+                    runId: fixture.run.id,
+                    workerId: fixture.workerId,
+                })
+            ).toBe("committed");
+            expect(fixture.cache.findEntry("docker.overview")).toMatchObject({
+                key: "docker.overview",
+                lastAttemptStatus: "failed",
+            });
+        } finally {
+            fixture.database.sqlite.close(true);
+        }
+    });
+
     test("preserves last-known-good data when a later claimed attempt fails", async () => {
         const fixture = await runningClaim();
         try {

@@ -667,7 +667,9 @@ async function activateRelease(
             paths,
             journalFor(transitionId, activation, candidate)
         );
-        await provisionAndPrepareServices(dependencies.services, stopOwner);
+        await (previous
+            ? dependencies.services.prepare(previous.release, previous.runtime)
+            : provisionAndPrepareServices(dependencies.services, stopOwner));
         await dependencies.services.stop();
         await dependencies.testHooks?.afterServicesStopped?.();
         await options.onProgress?.("services-stopped");

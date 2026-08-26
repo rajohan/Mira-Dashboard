@@ -24,8 +24,8 @@ export const backupRunScheduleIds = Object.freeze({
 
 /** Root-Compose capability labels accepted by worker discovery. */
 export const backupCapabilityByType = Object.freeze({
-    kopia: "kopia-v1",
-    walg: "wal-g-v1",
+    kopia: "kopia-v2",
+    walg: "wal-g-v2",
 } as const satisfies Readonly<Record<BackupType, string>>);
 export const backupCapabilitySchema = v.picklist(
     [backupCapabilityByType.kopia, backupCapabilityByType.walg],
@@ -44,10 +44,11 @@ export const backupStatusCacheSchemaIds = Object.freeze({
 } as const satisfies Readonly<Record<BackupType, string>>);
 export const backupStatusCacheSource = "docker-engine.compose.backup";
 export const backupStatusCacheTtlMs = 5 * 60_000;
-export const backupStatusPayloadMaximumBytes = 64 * 1024;
+/** Cache projection budget, including Dashboard-owned health and source metadata. */
+export const backupStatusPayloadMaximumBytes = 640 * 1024;
 export const backupFreshnessMaximumAgeMs = 30 * 60 * 60_000;
 export const backupKopiaSourceMaximum = 64;
-export const backupKopiaSnapshotMaximum = 16;
+export const backupKopiaSnapshotMaximum = 64;
 export const backupRetentionReasonMaximum = 16;
 export const backupCountMaximum = 1_000_000;
 
@@ -107,13 +108,11 @@ const kopiaSourceSummaryObjectSchema = v.strictObject({
     latestCompletedAtMs: v.optional(backupTimestampSchema),
     latestFileCount: v.optional(backupCountSchema),
     latestSizeBytes: v.optional(backupByteCountSchema),
-    snapshots: v.optional(
-        v.pipe(
-            v.array(kopiaSnapshotSummarySchema),
-            v.maxLength(
-                backupKopiaSnapshotMaximum,
-                "Backup snapshots are outside their budget"
-            )
+    snapshots: v.pipe(
+        v.array(kopiaSnapshotSummarySchema),
+        v.maxLength(
+            backupKopiaSnapshotMaximum,
+            "Backup snapshots are outside their budget"
         )
     ),
     snapshotCount: backupCountSchema,
@@ -136,7 +135,7 @@ export function backupKopiaSourceSummaryIsConsistent(
     if (source.health === "missing") {
         return (
             source.snapshotCount === 0 &&
-            (source.snapshots?.length ?? 0) === 0 &&
+            source.snapshots.length === 0 &&
             source.latestCompletedAtMs === undefined &&
             source.latestFileCount === undefined &&
             source.latestSizeBytes === undefined
@@ -145,16 +144,15 @@ export function backupKopiaSourceSummaryIsConsistent(
     if (
         source.snapshotCount === 0 ||
         source.latestCompletedAtMs === undefined ||
-        (source.snapshots !== undefined && source.snapshots.length === 0) ||
-        (source.snapshots?.length ?? 0) > source.snapshotCount ||
-        (source.snapshots !== undefined &&
-            source.snapshots[0]?.completedAtMs !== source.latestCompletedAtMs) ||
-        source.snapshots?.some(
+        source.snapshots.length !==
+            Math.min(source.snapshotCount, backupKopiaSnapshotMaximum) ||
+        source.snapshots[0]?.completedAtMs !== source.latestCompletedAtMs ||
+        source.snapshots.some(
             (snapshot, index, snapshots) =>
                 snapshot.completedAtMs > observedAtMs ||
                 (index > 0 &&
                     snapshots[index - 1]!.completedAtMs < snapshot.completedAtMs)
-        ) === true
+        )
     ) {
         return false;
     }

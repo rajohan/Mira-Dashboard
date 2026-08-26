@@ -71,14 +71,19 @@ async function readWebMetrics(): Promise<SystemApplicationMetrics["web"]> {
     const startedAtMs = performance.now();
     await Bun.sleep(0);
     const memory = process.memoryUsage();
+    const heapUsedBytes = safeInteger(memory.heapUsed, "heap used");
+    const heapTotalBytes = Math.max(
+        heapUsedBytes,
+        safeInteger(memory.heapTotal, "heap total")
+    );
     return {
         eventLoopDelayMs: safeInteger(
             Math.max(0, performance.now() - startedAtMs),
             "event-loop delay"
         ),
         externalBytes: safeInteger(memory.external, "external memory"),
-        heapTotalBytes: safeInteger(memory.heapTotal, "heap total"),
-        heapUsedBytes: safeInteger(memory.heapUsed, "heap used"),
+        heapTotalBytes,
+        heapUsedBytes,
         rssBytes: safeInteger(memory.rss, "RSS"),
         state: "observed",
         uptimeSeconds: safeInteger(performance.now() / 1000, "web uptime"),

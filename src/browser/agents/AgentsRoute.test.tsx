@@ -280,7 +280,7 @@ describe("Dashboard agents route", () => {
         renderAgentRoute(transport, queryClient);
         await expectAgentShellReady();
         expect(await screen.findByText("Live-head agent task")).toBeTruthy();
-        expect(screen.getByRole("alert")).toBeTruthy();
+        expect(await screen.findByRole("alert")).toBeTruthy();
     });
 
     test("invalidates mutable archived agent runs", async () => {

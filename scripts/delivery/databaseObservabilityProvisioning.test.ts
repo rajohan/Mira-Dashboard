@@ -110,7 +110,7 @@ interface ProvisioningDockerFixtureRow {
     readonly capability: string | null;
     readonly configFiles: string | null;
     readonly containerNumber: string | null;
-    readonly dependsOn: string | null;
+    readonly administrativeService: string | null;
     readonly health: string | null;
     readonly id: string;
     readonly project: string | null;
@@ -132,7 +132,7 @@ function provisioningDockerRow(
         capability: null,
         configFiles: "/opt/docker/compose.yaml",
         containerNumber: "1",
-        dependsOn: "",
+        administrativeService: null,
         health: "healthy",
         id: provisioningContainerId(index),
         oneOff: "False",
@@ -147,8 +147,8 @@ function provisioningDockerRow(
 function validProvisioningDockerRows(): readonly ProvisioningDockerFixtureRow[] {
     return Object.freeze([
         provisioningDockerRow(1, {
-            capability: "pgbouncer-v1",
-            dependsOn: "postgres:service_healthy:false",
+            capability: "pgbouncer-psql-v1",
+            administrativeService: "postgres",
             service: "pgbouncer",
         }),
         provisioningDockerRow(2, { service: "postgres" }),
@@ -162,7 +162,7 @@ function projectedProvisioningInspectLine(row: ProvisioningDockerFixtureRow): st
         row.capability,
         row.project,
         row.service,
-        row.dependsOn,
+        row.administrativeService,
         row.workingDirectory,
         row.configFiles,
         row.containerNumber,
@@ -375,7 +375,7 @@ describe("database observability provisioning", () => {
             dockerHost: "unix:///var/run/docker.sock",
             identityGuard:
                 "superuser-role-oid, postgresql-system-identifier, activation approval, and exact current/previous policy digests",
-            target: "single healthy PostgreSQL service_healthy dependency of the opted-in PgBouncer capability",
+            target: "single healthy root-Compose service named by the PgBouncer postgres-service capability label",
         });
         expect(manifest.postgresql.observerConnectionLimit).toBe(
             databaseObservabilityObserverConnectionLimit
@@ -572,8 +572,12 @@ describe("database observability provisioning", () => {
         expect(applyCapability.indexOf("$approval_and_preflight$")).toBeLessThan(
             applyCapability.indexOf("CREATE DATABASE mira_dashboard_observability")
         );
-        expect(applyCapability).toContain("catalog_database_count > 80");
-        expect(applyCapability).toContain("observed_database_count > 64");
+        expect(applyCapability).toContain(
+            "catalog_database_count + (CASE WHEN capability_exists THEN 0 ELSE 1 END) > 80"
+        );
+        expect(applyCapability).toContain(
+            "observed_database_count + (CASE WHEN capability_exists THEN 0 ELSE 1 END) > 64"
+        );
         expect(applyControl.match(/CREATE EXTENSION/gu)).toHaveLength(1);
         expect(applyControl).toContain(
             "CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;"
@@ -702,8 +706,73 @@ describe("database observability provisioning", () => {
         ).toHaveLength(6);
     });
 
+    test("activation reconciles and verification requires both named torrent projections", async () => {
+        const catalog = catalogJson([
+            provisioningControlDatabase,
+            "bitmagnet",
+            "comet",
+            "application",
+        ]);
+        const run = provisioningProcessFixture({ catalogs: [catalog, catalog] });
+
+        await runDatabaseObservabilityProvisioning("activate-current-catalog", { run });
+
+        const databaseRequests = run.requests.filter(
+            ({ executable, stdin }) =>
+                executable === "/opt/docker/bin/docker-compose-doppler" && stdin !== null
+        );
+        const torrentApplyRequests = databaseRequests.filter(({ stdin }) =>
+            stdin?.includes(
+                "CREATE OR REPLACE VIEW mira_dashboard_observability.torrent_count"
+            )
+        );
+        const torrentVerifyRequests = databaseRequests.filter(({ stdin }) =>
+            stdin?.includes("Database observability view result is invalid")
+        );
+        expect(torrentApplyRequests).toHaveLength(2);
+        expect(torrentVerifyRequests).toHaveLength(2);
+        expect(
+            torrentApplyRequests.every(({ stdin }) =>
+                stdin?.includes(
+                    "DROP VIEW IF EXISTS mira_dashboard_observability.statement_metrics"
+                )
+            )
+        ).toBe(true);
+        expect(
+            torrentVerifyRequests.every(
+                ({ stdin }) =>
+                    !stdin?.includes("'statement_metrics:v',") &&
+                    stdin?.includes("ARRAY['torrent_count:v']::text[]")
+            )
+        ).toBe(true);
+        for (const database of ["bitmagnet", "comet"] as const) {
+            expect(
+                torrentApplyRequests.some(({ argv }) =>
+                    argv.some(
+                        (argument) =>
+                            argument.startsWith("postgresql:///") &&
+                            decodeURIComponent(
+                                argument.slice("postgresql:///".length)
+                            ) === database
+                    )
+                )
+            ).toBe(true);
+            expect(
+                torrentVerifyRequests.some(({ argv }) =>
+                    argv.some(
+                        (argument) =>
+                            argument.startsWith("postgresql:///") &&
+                            decodeURIComponent(
+                                argument.slice("postgresql:///".length)
+                            ) === database
+                    )
+                )
+            ).toBe(true);
+        }
+    });
+
     test("opens only after approved reconciliation and closes independently", async () => {
-        const catalog = catalogJson([provisioningControlDatabase, "app"]);
+        const catalog = catalogJson([provisioningControlDatabase, "app", "bitmagnet"]);
         const collectionLeaseToken = "12345678-1234-4123-8123-123456789abc";
         const openRun = provisioningProcessFixture({ catalogs: [catalog, catalog] });
         expect(
@@ -714,13 +783,24 @@ describe("database observability provisioning", () => {
         ).toEqual({
             catalogDigest: catalogDigest(catalog),
             collectionLeaseToken,
-            databaseCount: 2,
+            databaseCount: 3,
             mode: "open-approved-collection",
             status: "RECONCILED",
         });
         const openSql = openRun.requests
             .filter(({ stdin }) => stdin !== null)
             .map(({ stdin }) => stdin ?? "");
+        const torrentMutationIndex = openSql.findIndex((sql) =>
+            sql.includes(
+                "CREATE OR REPLACE VIEW mira_dashboard_observability.torrent_count"
+            )
+        );
+        expect(torrentMutationIndex).toBeGreaterThan(-1);
+        expect(
+            openSql
+                .slice(0, torrentMutationIndex)
+                .findLastIndex((sql) => sql.includes("$verify_reconciliation_approval$"))
+        ).toBe(torrentMutationIndex - 1);
         const firstMutationIndex = openSql.findIndex((sql) =>
             sql.includes("$administrator_boundary$")
         );
@@ -756,7 +836,7 @@ describe("database observability provisioning", () => {
                 run: enableRun,
             })
         ).toEqual({
-            databaseCount: 2,
+            databaseCount: 3,
             mode: "enable-approved-collection",
             status: "OPENED",
         });
@@ -1047,7 +1127,7 @@ describe("database observability provisioning", () => {
         expect(provisioningSqlIncludeCountMaximum).toBe(32);
         expect(provisioningSqlInputMaximumBytes).toBe(512 * 1024);
         expect(provisioningDockerInspectFormat).toContain(
-            "com.docker.compose.depends_on"
+            "mira.dashboard.database-observability.postgres-service"
         );
         expect(provisioningDockerInspectFormat).toContain(
             "com.docker.compose.container-number"
@@ -1061,13 +1141,12 @@ describe("database observability provisioning", () => {
         expect(provisioningDockerInspectFormat).toContain('index .State "Health"');
     });
 
-    test("tolerates unrelated dependencies and resolves one psql-capable healthy dependency", async () => {
+    test("resolves the one explicitly declared healthy PostgreSQL service", async () => {
         const catalog = catalogJson([provisioningControlDatabase]);
         const rows = [
             provisioningDockerRow(1, {
-                capability: "pgbouncer-v1",
-                dependsOn:
-                    "cache:service_healthy:false,Postgres_Primary:service_healthy:false,web:service_started:false",
+                capability: "pgbouncer-psql-v1",
+                administrativeService: "Postgres_Primary",
                 project: "Docker.Project",
                 service: "Pool.Service",
             }),
@@ -1111,13 +1190,12 @@ describe("database observability provisioning", () => {
         const catalog = catalogJson([provisioningControlDatabase]);
         const ambiguousRows = [
             provisioningDockerRow(1, {
-                capability: "pgbouncer-v1",
-                dependsOn:
-                    "postgres-a:service_healthy:false,postgres-b:service_healthy:false",
+                capability: "pgbouncer-psql-v1",
+                administrativeService: "postgres-a",
                 service: "pool",
             }),
             provisioningDockerRow(2, { service: "postgres-a" }),
-            provisioningDockerRow(3, { service: "postgres-b" }),
+            provisioningDockerRow(3, { service: "postgres-a" }),
         ];
         const ambiguousRun = provisioningProcessFixture({
             catalogs: [catalog],

@@ -50,6 +50,7 @@ const kopia = Object.freeze({
                 health: "current",
                 id: "primary",
                 latestCompletedAtMs: nowMs,
+                snapshots: [{ completedAtMs: nowMs, retentionReasons: ["daily-1"] }],
                 snapshotCount: 1,
             },
         ],
@@ -245,6 +246,92 @@ function renderConnectedSection(
 }
 
 describe("BackupOverviewSectionView", () => {
+    test("renders every Kopia snapshot represented by the source count", async () => {
+        const snapshots = [
+            {
+                completedAtMs: nowMs,
+                description: "/opt/docker 2026-08-25",
+                retentionReasons: ["daily-1", "weekly-1", "monthly-1"],
+            },
+            {
+                completedAtMs: nowMs - 1,
+                description: "/opt/docker 2026-08-24",
+                retentionReasons: ["daily-2"],
+            },
+            {
+                completedAtMs: nowMs - 2,
+                description: "/opt/docker 2026-08-23",
+                retentionReasons: ["daily-3"],
+            },
+        ];
+        renderBackupOverviewView(
+            <BackupOverviewSectionView
+                kopia={{
+                    ...kopia,
+                    payload: {
+                        ...kopia.payload,
+                        backupCount: snapshots.length,
+                        sources: [
+                            {
+                                ...kopia.payload.sources[0],
+                                snapshots: [...snapshots],
+                                snapshotCount: snapshots.length,
+                            },
+                        ],
+                    },
+                }}
+                walg={walg}
+            />
+        );
+
+        const kopiaCard = await screen.findByLabelText("Kopia backup");
+        expect(
+            within(kopiaCard).getByRole("region", {
+                name: "Kopia snapshot inventory",
+            })
+        ).toHaveAttribute("tabindex", "0");
+        expect(within(kopiaCard).getByText("3 snapshots")).toBeTruthy();
+        for (const snapshot of snapshots) {
+            expect(within(kopiaCard).getByText(snapshot.description)).toBeTruthy();
+        }
+    });
+
+    test("pages a large Kopia inventory without hiding retained snapshots", async () => {
+        const snapshots = Array.from({ length: 25 }, (_, index) => ({
+            completedAtMs: nowMs - index,
+            description: `Snapshot ${index + 1}`,
+            retentionReasons: [`daily-${index + 1}`],
+        }));
+        renderBackupOverviewView(
+            <BackupOverviewSectionView
+                kopia={{
+                    ...kopia,
+                    payload: {
+                        ...kopia.payload,
+                        backupCount: snapshots.length,
+                        sources: [
+                            {
+                                ...kopia.payload.sources[0],
+                                snapshots,
+                                snapshotCount: snapshots.length,
+                            },
+                        ],
+                    },
+                }}
+                walg={walg}
+            />
+        );
+
+        const inventory = await screen.findByRole("region", {
+            name: "Kopia snapshot inventory",
+        });
+        expect(within(inventory).getByText("Snapshot 1")).toBeTruthy();
+        expect(within(inventory).queryByText("Snapshot 25")).toBeNull();
+        fireEvent.click(within(inventory).getByRole("button", { name: "Next" }));
+        expect(await within(inventory).findByText("Snapshot 25")).toBeTruthy();
+        expect(within(inventory).getByText("Page 2 of 2")).toBeTruthy();
+    });
+
     test("keeps one healthy provider visible when the other query fails", async () => {
         renderBackupOverviewView(
             <BackupOverviewSectionView

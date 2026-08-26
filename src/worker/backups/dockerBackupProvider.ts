@@ -19,6 +19,7 @@ import {
     backupKopiaSourceSummaryFromWrapper,
     backupWrapperRunResultSchema,
     backupWrapperStatusSchema,
+    backupWrapperStatusMaximumBytes,
 } from "../../contracts/backupsWorker.ts";
 import {
     discoverDockerComposeServices,
@@ -54,7 +55,9 @@ const backupDockerEnvironment = Object.freeze({
     LC_ALL: "C",
     PATH: "/usr/bin:/bin",
 });
-const backupProviderOutputMaximumBytes = 64 * 1024;
+/** Allows bounded transport framing beyond the normalized wrapper document. */
+export const backupProviderOutputMaximumBytes =
+    backupWrapperStatusMaximumBytes + 4 * 1024;
 const backupProviderStderrMaximumBytes = 16 * 1024;
 const backupProviderBusyExitCode = 73;
 const backupProviderTerminationGraceMs = 250;

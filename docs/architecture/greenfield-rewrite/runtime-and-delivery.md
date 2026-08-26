@@ -392,7 +392,8 @@ prevent it from obtaining a new backend after close. The observer password is th
 credential input. On every snapshot
 attempt the worker runs bounded `docker ps -a` followed by one batched, fixed-template
 `docker inspect`, then requires exactly one running, healthy container with
-the explicit `mira.dashboard.database-observability=pgbouncer-v1` capability label and exactly one
+the explicit `mira.dashboard.database-observability=pgbouncer-psql-v1` capability label, a verified
+container-local `psql` client, and exactly one
 loopback-published TCP binding. That single capability owns the fixed
 `mira_dashboard_observability` PgBouncer control alias. Approved provisioning creates the
 dedicated same-named physical database from `template0`, and PgBouncer's existing wildcard route
@@ -413,7 +414,8 @@ environment, mounts, or the remaining labels into the Dashboard process.
 
 The approval-gated provisioning runner has a separate Docker execution boundary. It pins the
 local Engine socket and root Compose file/project directory, resolves the one healthy PostgreSQL
-dependency of that capability, and runs container-local psql over the fixed Unix socket. A fixed
+root-Compose service declared by that capability's exact `postgres-service` label, and runs
+container-local psql over the fixed Unix socket. A fixed
 launcher carries only the existing non-secret administrative username into `env -i`; it discards
 host/container endpoint variables and passwords. Every bounded stdin execution verifies the
 probed superuser role OID and PostgreSQL system identifier before SQL runs. Provisioning artifacts

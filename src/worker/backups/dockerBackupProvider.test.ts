@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import { rejectionError } from "../../../scripts/testSupport/rejection.ts";
-import type { BackupType } from "../../contracts/backups.ts";
-import { backupWrapperProtocol } from "../../contracts/backupsWorker.ts";
+import {
+    backupStatusPayloadMaximumBytes,
+    type BackupType,
+} from "../../contracts/backups.ts";
+import {
+    backupWrapperProtocol,
+    backupWrapperStatusMaximumBytes,
+} from "../../contracts/backupsWorker.ts";
 import type {
     DockerComposeDiscoveredService,
     DockerComposeDiscoveryResult,
@@ -19,6 +25,7 @@ import {
     DockerBackupProviderProcessError,
     backupDockerExecutable,
     backupProviderRunWrapper,
+    backupProviderOutputMaximumBytes,
     backupProviderStatusWrapper,
     type DockerBackupProviderProcess,
     type DockerBackupProviderProcessRequest,
@@ -29,6 +36,15 @@ const rootCompose = "/opt/docker/compose.yaml";
 const firstId = "1".repeat(64);
 const secondId = "2".repeat(64);
 const foreignId = "3".repeat(64);
+
+test("reserves distinct transport and projection headroom", () => {
+    expect(backupProviderOutputMaximumBytes).toBeGreaterThan(
+        backupWrapperStatusMaximumBytes
+    );
+    expect(backupStatusPayloadMaximumBytes).toBeGreaterThan(
+        backupProviderOutputMaximumBytes
+    );
+});
 
 interface ManualTerminationDeadline {
     cancelled: boolean;
@@ -85,7 +101,7 @@ function composeService(
         enabled: false,
         imageReference: `example/${service}:current`,
         labels: Object.freeze({
-            "mira.dashboard.backup": type === "kopia" ? "kopia-v1" : "wal-g-v1",
+            "mira.dashboard.backup": type === "kopia" ? "kopia-v2" : "wal-g-v2",
         }),
         pinMode: "tag",
         project: "dynamic-root",
@@ -125,7 +141,7 @@ function container(
             "com.docker.compose.project": "dynamic-root",
             "com.docker.compose.project.config_files": rootCompose,
             "com.docker.compose.service": service,
-            "mira.dashboard.backup": type === "kopia" ? "kopia-v1" : "wal-g-v1",
+            "mira.dashboard.backup": type === "kopia" ? "kopia-v2" : "wal-g-v2",
         }),
         mounts:
             type === "kopia"
@@ -224,11 +240,26 @@ function providerProcess() {
                               latestCompletedAtMs: 1_900_000,
                               latestFileCount: 12,
                               latestSizeBytes: 42,
+                              snapshots: [
+                                  {
+                                      completedAtMs: 1_900_000,
+                                      fileCount: 12,
+                                      retentionReasons: ["daily-1"],
+                                      sizeBytes: 42,
+                                  },
+                                  {
+                                      completedAtMs: 1_800_000,
+                                      retentionReasons: ["daily-2"],
+                                  },
+                              ],
                               snapshotCount: 2,
                           },
                           {
                               id: "projects",
                               latestCompletedAtMs: 1_800_000,
+                              snapshots: [
+                                  { completedAtMs: 1_800_000, retentionReasons: [] },
+                              ],
                               snapshotCount: 1,
                           },
                       ],
@@ -272,7 +303,7 @@ describe("Docker backup provider discovery", () => {
                 "com.docker.compose.project": "foreign",
                 "com.docker.compose.project.config_files": "/foreign/compose.yaml",
                 "com.docker.compose.service": "files-provider",
-                "mira.dashboard.backup": "kopia-v1",
+                "mira.dashboard.backup": "kopia-v2",
             }),
         });
         const withForeign = createDockerBackupProviderDiscovery({
@@ -565,8 +596,8 @@ describe("Docker backup execution port", () => {
                                   idle: false,
                                   protocol: backupWrapperProtocol,
                                   sources: [
-                                      { id: "openclaw", snapshotCount: 0 },
-                                      { id: "projects", snapshotCount: 0 },
+                                      { id: "openclaw", snapshots: [], snapshotCount: 0 },
+                                      { id: "projects", snapshots: [], snapshotCount: 0 },
                                   ],
                                   type: "kopia",
                               }
@@ -591,7 +622,7 @@ describe("Docker backup execution port", () => {
                     result({
                         idle: true,
                         protocol: backupWrapperProtocol,
-                        sources: [{ id: "unexpected", snapshotCount: 0 }],
+                        sources: [{ id: "unexpected", snapshots: [], snapshotCount: 0 }],
                         type: "kopia",
                     })
                 ),

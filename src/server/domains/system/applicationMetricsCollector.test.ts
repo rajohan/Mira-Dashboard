@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 import type { DatabaseRuntimeObservation } from "../../database/runtime/databaseService.ts";
 import type { RealtimeEventPumpMetrics } from "../../platform/realtime/eventPump.ts";
@@ -29,6 +29,10 @@ const realtimeMetrics = {
     topicFilteredDeliveries: 7,
     wakeups: 8,
 } as const satisfies RealtimeEventPumpMetrics;
+
+afterEach(() => {
+    mock.restore();
+});
 
 function dependencies(): SystemApplicationMetricsReaderDependencies {
     return {
@@ -131,6 +135,24 @@ function dependencies(): SystemApplicationMetricsReaderDependencies {
 }
 
 describe("application metrics collector", () => {
+    test("normalizes a transient Bun heap-capacity inversion", async () => {
+        spyOn(process, "memoryUsage").mockReturnValue({
+            arrayBuffers: 0,
+            external: 30,
+            heapTotal: 10,
+            heapUsed: 20,
+            rss: 40,
+        });
+
+        const result = await createSystemApplicationMetricsReader(dependencies())();
+
+        expect(result.web).toMatchObject({
+            heapTotalBytes: 20,
+            heapUsedBytes: 20,
+            state: "observed",
+        });
+    });
+
     test("collects bounded process, jobs, SQLite, Gateway, realtime, and cache signals", async () => {
         const result = await createSystemApplicationMetricsReader(dependencies())();
 

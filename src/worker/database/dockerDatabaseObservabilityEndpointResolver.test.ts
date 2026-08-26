@@ -32,6 +32,7 @@ function inspectRow(
     overrides: {
         readonly bindings?: unknown;
         readonly capability?: string;
+        readonly containerPort?: string;
         readonly containerName?: string;
         readonly health?: string;
         readonly hostPort?: string;
@@ -62,8 +63,8 @@ function inspectRow(
         Name: overrides.containerName ?? "/pool-1",
         NetworkSettings: {
             Ports: {
-                "5432/tcp": bindings,
-                "6432/tcp": null,
+                [`${overrides.containerPort ?? "5432"}/tcp`]: bindings,
+                "15432/tcp": null,
             },
         },
         State: {
@@ -120,6 +121,13 @@ function discoveryProcess(
     let snapshotIndex = 0;
     const process = ((executable, arguments_, _signal, maximumBytes) => {
         calls.push({ arguments_, executable, maximumBytes });
+        if (arguments_[2] === "exec") {
+            return Promise.resolve({
+                exitCode: 0,
+                stderr: new Uint8Array(),
+                stdout: new Uint8Array(),
+            });
+        }
         const snapshot = snapshots[snapshotIndex];
         if (snapshot === undefined) throw new Error("Unexpected discovery call");
         if (arguments_[2] === "ps") {
@@ -176,6 +184,7 @@ describe("Docker database observability endpoint resolver", () => {
             [
                 inspectRow(1, {
                     containerName: "/renamed-container",
+                    containerPort: "6432",
                     hostPort: "7543",
                     project: "renamed-project",
                     service: "renamed-service",
@@ -197,6 +206,7 @@ describe("Docker database observability endpoint resolver", () => {
             composeProject: "first-project",
             composeService: "first-service",
             containerId: containerId(1),
+            containerPort: 5432,
         });
         expect(second.connection).toMatchObject({
             controlDatabase: databaseObservabilityPgBouncerControlAlias,
@@ -207,6 +217,7 @@ describe("Docker database observability endpoint resolver", () => {
             composeProject: "renamed-project",
             composeService: "renamed-service",
             containerId: containerId(1),
+            containerPort: 6432,
         });
         expect(process.calls.map(({ arguments_ }) => arguments_)).toEqual([
             [
@@ -230,6 +241,15 @@ describe("Docker database observability endpoint resolver", () => {
             [
                 "--host",
                 "unix:///var/run/docker.sock",
+                "exec",
+                containerId(1),
+                "/bin/sh",
+                "-ceu",
+                "command -v psql >/dev/null",
+            ],
+            [
+                "--host",
+                "unix:///var/run/docker.sock",
                 "ps",
                 "-a",
                 "--no-trunc",
@@ -245,10 +265,50 @@ describe("Docker database observability endpoint resolver", () => {
                 containerId(1),
                 containerId(2),
             ],
+            [
+                "--host",
+                "unix:///var/run/docker.sock",
+                "exec",
+                containerId(1),
+                "/bin/sh",
+                "-ceu",
+                "command -v psql >/dev/null",
+            ],
         ]);
+        expect(
+            process.calls.filter(({ arguments_ }) => arguments_[2] === "exec")
+        ).toHaveLength(2);
         expect(
             process.calls.every(({ executable }) => executable === "/usr/bin/docker")
         ).toBe(true);
+    });
+
+    test("rejects a capability container without its declared psql client", () => {
+        const row = inspectRow(1);
+        const process: DockerDatabaseObservabilityProcess = (_executable, arguments_) => {
+            if (arguments_[2] === "ps") {
+                return Promise.resolve({
+                    exitCode: 0,
+                    stderr: new Uint8Array(),
+                    stdout: new TextEncoder().encode(JSON.stringify(row.Id)),
+                });
+            }
+            if (arguments_[2] === "inspect") {
+                return Promise.resolve({
+                    exitCode: 0,
+                    stderr: new Uint8Array(),
+                    stdout: new TextEncoder().encode(projectedInspectLine(row)),
+                });
+            }
+            return Promise.resolve({
+                exitCode: 127,
+                stderr: new Uint8Array(),
+                stdout: new Uint8Array(),
+            });
+        };
+        expect(resolver(process).resolve()).rejects.toThrow(
+            "Database observability Docker discovery failed"
+        );
     });
 
     test("accepts exact IPv4 and IPv6 loopback bindings", async () => {
