@@ -1148,7 +1148,7 @@ that the durable run was queued.
 
 Every refresh re-discovers exactly one healthy provider for each capability from the canonical
 root Compose graph and current Docker Engine inventory. Only
-`mira.dashboard.backup=kopia-v1|wal-g-v1` grants membership. Container, service, project, image,
+`mira.dashboard.backup=kopia-v2|wal-g-v2` grants membership. Container, service, project, image,
 port, and mount-source names remain observed data rather than code or configuration allowlists.
 Kopia source identifiers come only from validated read-only `/source/<safe-id>` mounts. The worker
 invokes a fixed status or run wrapper by exact container ID with no caller-selected command,
@@ -1205,7 +1205,7 @@ present, but its absence or failure cannot filter or fail the remaining observat
 The worker also re-discovers the database endpoint for every snapshot through bounded Docker
 inventory plus one batched fixed-template inspect that excludes environment, mounts, and unrelated
 labels. Exactly one healthy, running container must opt in with
-`mira.dashboard.database-observability=pgbouncer-v1` and expose exactly one TCP port on an IPv4 or
+`mira.dashboard.database-observability=pgbouncer-psql-v1`, contain `/bin/sh` plus `psql`, and expose exactly one TCP port on an IPv4 or
 IPv6 loopback binding. That single capability owns the fixed
 `mira_dashboard_observability` PgBouncer control alias and dedicated same-named physical database.
 Approved provisioning creates that database from `template0`; PgBouncer's existing wildcard route

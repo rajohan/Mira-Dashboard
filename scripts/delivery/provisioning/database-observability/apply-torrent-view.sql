@@ -31,7 +31,11 @@ BEGIN
       OR EXISTS (
         SELECT 1 FROM pg_catalog.pg_class
         WHERE relnamespace = schema_oid
-          AND relname = 'torrent_count'
+          AND relname IN ('statement_metrics', 'torrent_count')
+          AND (
+            relkind <> 'v'
+            OR relowner IS DISTINCT FROM owner_oid
+          )
       )
     )
   THEN
@@ -54,7 +58,8 @@ REVOKE ALL PRIVILEGES ON TABLE public.torrents
   FROM mira_dashboard_observer;
 
 SET LOCAL ROLE mira_dashboard_observability_owner;
-CREATE VIEW mira_dashboard_observability.torrent_count
+DROP VIEW IF EXISTS mira_dashboard_observability.statement_metrics;
+CREATE OR REPLACE VIEW mira_dashboard_observability.torrent_count
   WITH (security_barrier = true)
 AS
 SELECT pg_catalog.count(*)::bigint AS count

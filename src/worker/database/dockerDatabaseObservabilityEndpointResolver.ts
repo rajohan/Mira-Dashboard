@@ -14,7 +14,7 @@ import type {
 /** Exact opt-in authority read from the candidate container's Compose labels. */
 export const databaseObservabilityDockerCapabilityLabel =
     "mira.dashboard.database-observability" as const;
-export const databaseObservabilityDockerCapabilityValue = "pgbouncer-v1" as const;
+export const databaseObservabilityDockerCapabilityValue = "pgbouncer-psql-v1" as const;
 export const databaseObservabilityDockerInspectFormat = [
     "{{json .Id}}",
     "{{json .State.Running}}",
@@ -36,6 +36,7 @@ const dockerEngineArguments = Object.freeze([
 ] as const);
 const dockerPsOutputMaximumBytes = 256 * 1024;
 const dockerInspectOutputMaximumBytes = 4 * 1024 * 1024;
+const dockerCapabilityProbeOutputMaximumBytes = 1024;
 const dockerStderrMaximumBytes = 64 * 1024;
 const credentialMaximumLength = 4096;
 const composeIdentityMaximumLength = 128;
@@ -452,6 +453,25 @@ export function createDockerDatabaseObservabilityConnectionResolver(options: {
                     (row) => rowHasCapability(row) && rowIsRunningAndHealthy(row)
                 );
                 if (candidates.length !== 1) throw discoveryFailure();
+                const candidateId = ownRecordProperty(candidates[0]!, "Id");
+                if (typeof candidateId !== "string") throw discoveryFailure();
+                const probeResult = await execute(
+                    executable,
+                    [
+                        ...dockerEngineArguments,
+                        "exec",
+                        candidateId,
+                        "/bin/sh",
+                        "-ceu",
+                        "command -v psql >/dev/null",
+                    ],
+                    signal,
+                    dockerCapabilityProbeOutputMaximumBytes
+                );
+                requireSuccessfulProcess(
+                    probeResult,
+                    dockerCapabilityProbeOutputMaximumBytes
+                );
                 return resolvedConnection(candidates[0]!, credentials);
             } catch {
                 throw discoveryFailure();

@@ -24,8 +24,8 @@ export const backupRunScheduleIds = Object.freeze({
 
 /** Root-Compose capability labels accepted by worker discovery. */
 export const backupCapabilityByType = Object.freeze({
-    kopia: "kopia-v1",
-    walg: "wal-g-v1",
+    kopia: "kopia-v2",
+    walg: "wal-g-v2",
 } as const satisfies Readonly<Record<BackupType, string>>);
 export const backupCapabilitySchema = v.picklist(
     [backupCapabilityByType.kopia, backupCapabilityByType.walg],
@@ -44,7 +44,8 @@ export const backupStatusCacheSchemaIds = Object.freeze({
 } as const satisfies Readonly<Record<BackupType, string>>);
 export const backupStatusCacheSource = "docker-engine.compose.backup";
 export const backupStatusCacheTtlMs = 5 * 60_000;
-export const backupStatusPayloadMaximumBytes = 64 * 1024;
+/** Cache projection budget, including Dashboard-owned health and source metadata. */
+export const backupStatusPayloadMaximumBytes = 640 * 1024;
 export const backupFreshnessMaximumAgeMs = 30 * 60 * 60_000;
 export const backupKopiaSourceMaximum = 64;
 export const backupKopiaSnapshotMaximum = 64;

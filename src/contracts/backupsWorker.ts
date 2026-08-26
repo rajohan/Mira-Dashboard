@@ -12,6 +12,9 @@ import {
     backupSourceRevisionSchema,
     backupTypeSchema,
 } from "./backups.ts";
+
+/** Normalized provider-owned status document before Dashboard projection. */
+export const backupWrapperStatusMaximumBytes = 512 * 1024;
 import { jobRunIdSchema } from "./jobModel.ts";
 
 const wrapperCountSchema = v.pipe(
@@ -69,10 +72,22 @@ const backupWrapperKopiaSourceSchema = v.strictObject({
     ),
     snapshotCount: wrapperCountSchema,
 });
+const backupWrapperKopiaSourceInventorySchema = v.pipe(
+    backupWrapperKopiaSourceSchema,
+    v.check(
+        (source) =>
+            source.snapshots.length ===
+            Math.min(source.snapshotCount, backupKopiaSnapshotMaximum),
+        "Backup wrapper snapshot inventory is incomplete"
+    )
+);
 const backupWrapperKopiaStatusSchema = v.strictObject({
     ...backupWrapperBaseEntries,
     sources: v.pipe(
-        v.array(backupWrapperKopiaSourceSchema, "Backup wrapper sources are invalid"),
+        v.array(
+            backupWrapperKopiaSourceInventorySchema,
+            "Backup wrapper sources are invalid"
+        ),
         v.minLength(1, "Backup wrapper sources are invalid"),
         v.maxLength(
             backupKopiaSourceMaximum,
@@ -98,10 +113,15 @@ const backupWrapperWalgStatusSchema = v.strictObject({
 });
 
 /** Strict normalized output emitted by the fixed provider-owned status wrapper. */
-export const backupWrapperStatusSchema = v.variant("type", [
-    backupWrapperKopiaStatusSchema,
-    backupWrapperWalgStatusSchema,
-]);
+export const backupWrapperStatusSchema = v.pipe(
+    v.variant("type", [backupWrapperKopiaStatusSchema, backupWrapperWalgStatusSchema]),
+    v.check(
+        (status) =>
+            new TextEncoder().encode(JSON.stringify(status)).byteLength <=
+            backupWrapperStatusMaximumBytes,
+        "Backup wrapper output is outside its byte budget"
+    )
+);
 export type BackupWrapperStatus = v.InferOutput<typeof backupWrapperStatusSchema>;
 
 /** Minimal proof emitted only after the fixed wrapper knows a run settled successfully. */

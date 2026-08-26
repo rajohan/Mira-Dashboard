@@ -60,7 +60,7 @@ describe("Docker Compose discovery", () => {
                 "      mira.updater.track: tag",
                 String.raw`      mira.updater.tagPattern: ^v\d+\.\d+\.\d+$$`,
                 '      mira.updater.tagPatternIsRegex: "true"',
-                "      mira.dashboard.backup: kopia-v1",
+                "      mira.dashboard.backup: kopia-v2",
                 "",
             ].join("\n")
         );
@@ -89,7 +89,7 @@ describe("Docker Compose discovery", () => {
             },
             imageReference: "ghcr.io/example/sample:v2.10.0",
             labels: {
-                "mira.dashboard.backup": "kopia-v1",
+                "mira.dashboard.backup": "kopia-v2",
                 "mira.updater.autoUpdate": "true",
                 "mira.updater.enabled": "true",
                 "mira.updater.tagPattern": String.raw`^v\d+\.\d+\.\d+$`,
@@ -112,7 +112,7 @@ describe("Docker Compose discovery", () => {
     });
 
     test("removes backup authority when projected labels are duplicated", () => {
-        for (const duplicate of ["kopia-v1", "wal-g-v1"]) {
+        for (const duplicate of ["kopia-v2", "wal-g-v2"]) {
             const { appCompose, root, rootCompose } = fixture();
             Fs.writeFileSync(rootCompose, "include:\n  - apps/sample/compose.yaml\n");
             Fs.writeFileSync(
@@ -122,7 +122,7 @@ describe("Docker Compose discovery", () => {
                     "  dynamic-service:",
                     "    image: ghcr.io/example/sample:current",
                     "    labels:",
-                    "      - mira.dashboard.backup=kopia-v1",
+                    "      - mira.dashboard.backup=kopia-v2",
                     `      - mira.dashboard.backup=${duplicate}`,
                     "",
                 ].join("\n")

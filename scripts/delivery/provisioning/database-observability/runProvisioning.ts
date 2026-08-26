@@ -17,7 +17,9 @@ const containerPsqlProbeLauncher =
 const containerPsqlLauncher =
     ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 2 45 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"';
 const capabilityLabel = "mira.dashboard.database-observability";
-const capabilityValue = "pgbouncer-v1";
+const capabilityValue = "pgbouncer-psql-v1";
+const administrativeServiceLabel =
+    "mira.dashboard.database-observability.postgres-service";
 const processDeadlineMs = 60_000;
 const discoveryDeadlineMs = 5000;
 const provisioningOperationDeadlineMs = 5 * 60_000;
@@ -29,7 +31,6 @@ const psqlOutputMaximumBytes = 64 * 1024;
 const catalogOutputMaximumBytes = 16 * 1024;
 const sqlArtifactMaximumBytes = 64 * 1024;
 const composeIdentityMaximumBytes = 128;
-const composeDependsOnMaximumBytes = 4096;
 const containerIdPattern = /^[0-9a-f]{64}$/u;
 const composeIdentityPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
 const unsafeTextPattern = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
@@ -42,7 +43,7 @@ export const provisioningDockerInspectFormat = [
     `{{with .Config.Labels}}{{json (index . "${capabilityLabel}")}}{{else}}null{{end}}`,
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.project")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.service")}}{{else}}null{{end}}',
-    '{{with .Config.Labels}}{{json (index . "com.docker.compose.depends_on")}}{{else}}null{{end}}',
+    `{{with .Config.Labels}}{{json (index . "${administrativeServiceLabel}")}}{{else}}null{{end}}`,
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.project.working_dir")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.project.config_files")}}{{else}}null{{end}}',
     '{{with .Config.Labels}}{{json (index . "com.docker.compose.container-number")}}{{else}}null{{end}}',
@@ -120,7 +121,7 @@ interface ProvisioningDockerRow {
     readonly capability: string | null;
     readonly configFiles: string | null;
     readonly containerNumber: string | null;
-    readonly dependsOn: string | null;
+    readonly administrativeService: string | null;
     readonly health: string | null;
     readonly id: string;
     readonly project: string | null;
@@ -440,7 +441,7 @@ function parseInspectRows(
             capability,
             project,
             service,
-            dependsOn,
+            administrativeService,
             workingDirectory,
             configFiles,
             containerNumber,
@@ -462,7 +463,7 @@ function parseInspectRows(
             capability: nullableString(capability),
             configFiles: nullableString(configFiles),
             containerNumber: nullableString(containerNumber),
-            dependsOn: nullableString(dependsOn),
+            administrativeService: nullableString(administrativeService),
             health: nullableString(health),
             id,
             project: nullableString(project),
@@ -489,40 +490,6 @@ function rootedComposeRow(row: ProvisioningDockerRow): boolean {
         row.containerNumber === "1" &&
         row.oneOff === "False"
     );
-}
-
-function serviceHealthyDependencies(value: string | null): readonly string[] {
-    if (
-        value === null ||
-        value === "" ||
-        utf8Bytes(value) > composeDependsOnMaximumBytes ||
-        unsafeTextPattern.test(value)
-    ) {
-        fail();
-    }
-    const entries = value.split(",");
-    if (entries.length > 32) fail();
-    const dependencies = entries.flatMap((entry) => {
-        const fields = entry.split(":");
-        if (fields.length !== 3) fail();
-        const [service, condition, restart] = fields;
-        if (
-            !validComposeIdentity(service) ||
-            ![
-                "service_healthy",
-                "service_started",
-                "service_completed_successfully",
-            ].includes(condition ?? "") ||
-            !["true", "false"].includes(restart ?? "")
-        ) {
-            fail();
-        }
-        return condition === "service_healthy" ? [service] : [];
-    });
-    if (dependencies.length === 0 || new Set(dependencies).size !== dependencies.length) {
-        fail();
-    }
-    return Object.freeze(dependencies);
 }
 
 function composePsqlProbeRequest(
@@ -613,27 +580,27 @@ async function discoverComposeTarget(
     if (candidates.length !== 1) fail();
     const candidate = candidates[0]!;
     if (!rootedComposeRow(candidate)) fail();
-    const dependencyServices = serviceHealthyDependencies(candidate.dependsOn);
-    const potentialTargets: ProvisioningComposeTarget[] = [];
-    for (const dependencyService of dependencyServices) {
-        if (dependencyService === candidate.service) fail();
-        const dependencies = rows.filter(
-            (row) =>
-                row.project === candidate.project &&
-                row.service === dependencyService &&
-                healthy(row)
-        );
-        if (dependencies.length === 0) continue;
-        if (dependencies.length !== 1 || !rootedComposeRow(dependencies[0]!)) fail();
-        potentialTargets.push(
-            Object.freeze({
-                capabilityContainerId: candidate.id,
-                containerId: dependencies[0]!.id,
-                project: candidate.project!,
-                service: dependencyService,
-            })
-        );
+    if (
+        !validComposeIdentity(candidate.administrativeService) ||
+        candidate.administrativeService === candidate.service
+    ) {
+        fail();
     }
+    const dependencies = rows.filter(
+        (row) =>
+            row.project === candidate.project &&
+            row.service === candidate.administrativeService &&
+            healthy(row)
+    );
+    if (dependencies.length !== 1 || !rootedComposeRow(dependencies[0]!)) fail();
+    const potentialTargets: ProvisioningComposeTarget[] = [
+        Object.freeze({
+            capabilityContainerId: candidate.id,
+            containerId: dependencies[0]!.id,
+            project: candidate.project!,
+            service: candidate.administrativeService,
+        }),
+    ];
     const psqlTargets: ProvisioningComposeTarget[] = [];
     for (const potentialTarget of potentialTargets) {
         try {
@@ -1599,6 +1566,14 @@ export async function runDatabaseObservabilityProvisioning(
                       artifactRoot
                   )
                 : null;
+        const torrentViewApplySql =
+            mode === "activate-current-catalog" || mode === "open-approved-collection"
+                ? await expandSqlArtifact(
+                      "apply-torrent-view.sql",
+                      dependencies.afterSqlArtifactDescriptorStat,
+                      artifactRoot
+                  )
+                : null;
         for (const database of databaseNames) {
             if (databaseCapabilitiesSql !== null) {
                 if (mode === "open-approved-collection") {
@@ -1627,6 +1602,35 @@ export async function runDatabaseObservabilityProvisioning(
                     ) {
                         throw error;
                     }
+                    await quarantineDriftedApplication(database);
+                }
+            }
+            if (
+                torrentViewApplySql !== null &&
+                (database === "bitmagnet" || database === "comet") &&
+                !quarantinedApplicationDatabases.has(database)
+            ) {
+                if (mode === "open-approved-collection") {
+                    await verifyReconciliationApproval(
+                        run,
+                        target,
+                        policyDigest,
+                        deadline,
+                        dependencies.afterSqlArtifactDescriptorStat,
+                        artifactRoot
+                    );
+                }
+                try {
+                    await runSql(
+                        run,
+                        target,
+                        database,
+                        torrentViewApplySql,
+                        {},
+                        deadline
+                    );
+                } catch (error) {
+                    if (mode !== "open-approved-collection") throw error;
                     await quarantineDriftedApplication(database);
                 }
             }
@@ -1666,6 +1670,11 @@ export async function runDatabaseObservabilityProvisioning(
                     artifactRoot
                 ),
             ]);
+        const verifyTorrentViewSql = await expandSqlArtifact(
+            "verify-torrent-view.sql",
+            dependencies.afterSqlArtifactDescriptorStat,
+            artifactRoot
+        );
         for (const database of databaseNames) {
             if (quarantinedApplicationDatabases.has(database)) continue;
             try {
@@ -1679,6 +1688,16 @@ export async function runDatabaseObservabilityProvisioning(
                     {},
                     deadline
                 );
+                if (database === "bitmagnet" || database === "comet") {
+                    await runSql(
+                        run,
+                        target,
+                        database,
+                        verifyTorrentViewSql,
+                        {},
+                        deadline
+                    );
+                }
             } catch (error) {
                 if (
                     mode !== "open-approved-collection" ||

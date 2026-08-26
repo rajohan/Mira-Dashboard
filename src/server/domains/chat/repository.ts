@@ -2294,9 +2294,9 @@ export function createChatRepository(
                     );
                 const external = transaction
                     .select({
-                        activeRuns: sql<number>`coalesce(sum((select count(*) from json_each(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') as entry where coalesce(json_extract(entry.value, '$.run.lifecycle'), 'active') = 'active')), 0)`,
-                        failedOrUnknownRuns: sql<number>`coalesce(sum((select count(*) from json_each(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') as entry where json_extract(entry.value, '$.run.continuity') = 'interrupted' or json_extract(entry.value, '$.run.abortBoundary.settlement') = 'unknown')), 0)`,
-                        retainedRuns: sql<number>`coalesce(sum(json_array_length(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries')), 0)`,
+                        activeRuns: sql<number>`coalesce(sum((select count(*) from json_each(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') as entry where coalesce(json_extract(entry.value, '$.run.lifecycle'), 'active') = 'active' and not exists (select 1 from ${chatRuns} as local_run where local_run.provider_run_id = json_extract(entry.value, '$.run.providerRunId')))), 0)`,
+                        failedOrUnknownRuns: sql<number>`coalesce(sum((select count(*) from json_each(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') as entry where (json_extract(entry.value, '$.run.continuity') = 'interrupted' or json_extract(entry.value, '$.run.abortBoundary.settlement') = 'unknown') and not exists (select 1 from ${chatRuns} as local_run where local_run.provider_run_id = json_extract(entry.value, '$.run.providerRunId')))), 0)`,
+                        retainedRuns: sql<number>`coalesce(sum((select count(*) from json_each(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') as entry where not exists (select 1 from ${chatRuns} as local_run where local_run.provider_run_id = json_extract(entry.value, '$.run.providerRunId')))), 0)`,
                         retainedSnapshotBytes: sql<number>`coalesce(sum(case when json_array_length(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') > 0 then ${chatExternalRuntimeSnapshots.snapshotBytes} else 0 end), 0)`,
                         retainedSnapshots: sql<number>`coalesce(sum(case when json_array_length(${chatExternalRuntimeSnapshots.snapshotJson}, '$.entries') > 0 then 1 else 0 end), 0)`,
                     })

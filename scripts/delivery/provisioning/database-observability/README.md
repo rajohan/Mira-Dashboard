@@ -62,7 +62,8 @@ an approved database-admin session, a current backup, and a tested rollback wind
   `max_user_connections=64`, and `max_user_client_connections=2`. Its existing wildcard route
   exposes the same-named physical
   `mira_dashboard_observability` database, and the container carries only
-  `mira.dashboard.database-observability=pgbouncer-v1` for endpoint discovery. PostgreSQL's
+  `mira.dashboard.database-observability=pgbouncer-psql-v1` for endpoint discovery. The capability
+  contract requires `/bin/sh` and `psql` in that container. PostgreSQL's
   matching 64-backend role limit is the final cap.
 
 The existing hourly `cache.refresh.database-observability` job owns one bounded collection lease.
@@ -142,7 +143,8 @@ file, resolved Compose configuration, or secret values while validating the cuto
 
 Never put a password, connection URL, SCRAM verifier, or other credential in this repository,
 argv, shell history, CI output, or logs. The runner discovers the one healthy opted-in PgBouncer
-Compose service and its one healthy local PostgreSQL dependency through a fixed, projected Docker
+Compose service and the one healthy local PostgreSQL service declared by its exact
+`mira.dashboard.database-observability.postgres-service` label through a fixed, projected Docker
 inventory. It pins the local Docker socket, root Compose file/project directory, observed project,
 service index, OS user, local PostgreSQL socket, and container-local `/usr/local/bin/psql`. A fixed
 `env -i` launcher carries only the existing non-secret `POSTGRES_USER`; it discards every other
@@ -176,10 +178,10 @@ password-null quarantine intentionally survives any later verification failure.
    `EXECUTE` boundary. In the fixed control database, then apply `apply-control-database.sql` with
    `--set=apply_statement_capability=approved`. It installs or updates `pg_stat_statements`, revokes
    raw extension relation/routine access from `PUBLIC` and the observer, and adds the sanitized
-   `connection_metrics()` and identity-free `statement_metrics()` functions. Optionally apply
-   `apply-torrent-view.sql` in `bitmagnet` and `comet` after reviewing their
-   `public.torrents` ownership and ACL. The artifact is intentionally first-install-only for
-   the `torrent_count` object and rejects unrelated objects in the private schema.
+   `connection_metrics()` and identity-free `statement_metrics()` functions. The activation
+   runner applies and verifies `apply-torrent-view.sql` in the exact `bitmagnet` and `comet`
+   databases when present. It reconciles the count-only view while rejecting unrelated objects
+   or an incompatible object at that name in the private schema.
 6. Configure PgBouncer's exact observer policy and single capability label. The existing wildcard
    route needs no alias mapping or database environment variable. Compose the separate privileged
    collection-lease port into the existing hourly `cache.refresh.database-observability` executor,

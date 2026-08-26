@@ -97,7 +97,7 @@
             "containerPsql": "/usr/local/bin/psql over /var/run/postgresql",
             "dockerHost": "unix:///var/run/docker.sock",
             "identityGuard": "superuser-role-oid, postgresql-system-identifier, activation approval, and exact current/previous policy digests",
-            "target": "single healthy PostgreSQL service_healthy dependency of the opted-in PgBouncer capability"
+            "target": "single healthy root-Compose service named by the PgBouncer postgres-service capability label"
         },
         "observerConnectionLimit": 64,
         "sessionDefaults": {
@@ -140,8 +140,8 @@
         "interactive-observer-password",
         "apply-database-capabilities.sql@each-discovered-database",
         "apply-control-database.sql@mira_dashboard_observability",
-        "optional-apply-torrent-view.sql@bitmagnet",
-        "optional-apply-torrent-view.sql@comet",
+        "apply-torrent-view.sql@bitmagnet-when-present",
+        "apply-torrent-view.sql@comet-when-present",
         "configure-pgbouncer-observer-policy-and-single-capability-label",
         "compose-separate-privileged-preflight-port-into-existing-hourly-cache-job"
     ],
@@ -155,8 +155,8 @@
     "verifyOrder": [
         "runProvisioning.ts verify-current-catalog --approved after initial activation",
         "verify-database-capabilities.sql@each-discovered-database",
-        "optional-verify-torrent-view.sql@bitmagnet",
-        "optional-verify-torrent-view.sql@comet",
+        "verify-torrent-view.sql@bitmagnet-when-present",
+        "verify-torrent-view.sql@comet-when-present",
         "verify-reconciliation-approval.sql@mira_dashboard_observability-after-activation",
         "manual-pgbouncer-and-preflight-port-config-check"
     ],

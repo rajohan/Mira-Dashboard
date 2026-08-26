@@ -296,6 +296,42 @@ describe("BackupOverviewSectionView", () => {
         }
     });
 
+    test("pages a large Kopia inventory without hiding retained snapshots", async () => {
+        const snapshots = Array.from({ length: 25 }, (_, index) => ({
+            completedAtMs: nowMs - index,
+            description: `Snapshot ${index + 1}`,
+            retentionReasons: [`daily-${index + 1}`],
+        }));
+        renderBackupOverviewView(
+            <BackupOverviewSectionView
+                kopia={{
+                    ...kopia,
+                    payload: {
+                        ...kopia.payload,
+                        backupCount: snapshots.length,
+                        sources: [
+                            {
+                                ...kopia.payload.sources[0],
+                                snapshots,
+                                snapshotCount: snapshots.length,
+                            },
+                        ],
+                    },
+                }}
+                walg={walg}
+            />
+        );
+
+        const inventory = await screen.findByRole("region", {
+            name: "Kopia snapshot inventory",
+        });
+        expect(within(inventory).getByText("Snapshot 1")).toBeTruthy();
+        expect(within(inventory).queryByText("Snapshot 25")).toBeNull();
+        fireEvent.click(within(inventory).getByRole("button", { name: "Next" }));
+        expect(await within(inventory).findByText("Snapshot 25")).toBeTruthy();
+        expect(within(inventory).getByText("Page 2 of 2")).toBeTruthy();
+    });
+
     test("keeps one healthy provider visible when the other query fails", async () => {
         renderBackupOverviewView(
             <BackupOverviewSectionView
