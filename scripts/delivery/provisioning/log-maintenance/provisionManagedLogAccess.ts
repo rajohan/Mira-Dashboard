@@ -71,7 +71,8 @@ async function provisionExistingArchives(
     directoryStatus: BigIntStats,
     target: ManagedLogFileTarget,
     groupId: number,
-    beforeArchiveOpen?: (fileName: string) => Promise<void> | void
+    beforeArchiveOpen?: (fileName: string) => Promise<void> | void,
+    afterArchiveOpen?: (fileName: string) => Promise<void> | void
 ): Promise<void> {
     const sourceName = path.basename(target.filePath);
     const archivePattern = rotatedArchivePattern(sourceName);
@@ -92,10 +93,12 @@ async function provisionExistingArchives(
                     if (errorCode(error) === "ENOENT") continue;
                     throw error;
                 }
-                const archiveStatus = await canonicalStatus(
+                await afterArchiveOpen?.(entry.name);
+                const archiveStatus = await canonicalArchiveStatus(
                     archive,
                     path.join(path.dirname(target.filePath), entry.name)
                 );
+                if (archiveStatus === undefined) continue;
                 if (
                     !archiveStatus.isFile() ||
                     archiveStatus.nlink !== 1n ||
@@ -108,10 +111,11 @@ async function provisionExistingArchives(
                 }
                 await archive.chown(Number(archiveStatus.uid), groupId);
                 await archive.chmod(0o640);
-                const verified = await canonicalStatus(
+                const verified = await canonicalArchiveStatus(
                     archive,
                     path.join(path.dirname(target.filePath), entry.name)
                 );
+                if (verified === undefined) continue;
                 if (
                     verified.uid !== archiveStatus.uid ||
                     verified.gid !== BigInt(groupId) ||
@@ -243,6 +247,23 @@ async function canonicalStatus(
     return status;
 }
 
+async function canonicalArchiveStatus(
+    handle: FileHandle,
+    expectedPath: string
+): Promise<BigIntStats | undefined> {
+    const status = await handle.stat({ bigint: true });
+    if (status.nlink === 0n) return undefined;
+    let canonical: string;
+    try {
+        canonical = await realpath(`/proc/self/fd/${handle.fd}`);
+    } catch (error) {
+        if (errorCode(error) === "ENOENT") return undefined;
+        throw error;
+    }
+    if (canonical !== expectedPath || status.isSymbolicLink()) throw failure();
+    return status;
+}
+
 async function applyDefaultGroupAccess(
     directoryPath: string,
     groupId: number,
@@ -277,7 +298,8 @@ async function provisionTarget(
     groupId: number,
     applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>,
     verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>,
-    beforeArchiveOpen?: (fileName: string) => Promise<void> | void
+    beforeArchiveOpen?: (fileName: string) => Promise<void> | void,
+    afterArchiveOpen?: (fileName: string) => Promise<void> | void
 ): Promise<void> {
     const directoryPath = path.dirname(target.filePath);
     let directory: FileHandle | undefined;
@@ -317,7 +339,8 @@ async function provisionTarget(
             directoryStatus,
             target,
             groupId,
-            beforeArchiveOpen
+            beforeArchiveOpen,
+            afterArchiveOpen
         );
 
         try {
@@ -383,6 +406,7 @@ export async function provisionManagedLogAccess(
             groupId: number
         ) => Promise<void>;
         readonly beforeArchiveOpen?: (fileName: string) => Promise<void> | void;
+        readonly afterArchiveOpen?: (fileName: string) => Promise<void> | void;
     } = {}
 ): Promise<void> {
     if (
@@ -416,7 +440,8 @@ export async function provisionManagedLogAccess(
                 groupId,
                 applyDefaultAccess,
                 verifyDefaultAccess,
-                options.beforeArchiveOpen
+                options.beforeArchiveOpen,
+                options.afterArchiveOpen
             );
         }
     } catch {
