@@ -70,7 +70,8 @@ async function provisionExistingArchives(
     directory: FileHandle,
     directoryStatus: BigIntStats,
     target: ManagedLogFileTarget,
-    groupId: number
+    groupId: number,
+    beforeArchiveOpen?: (fileName: string) => Promise<void> | void
 ): Promise<void> {
     const sourceName = path.basename(target.filePath);
     const archivePattern = rotatedArchivePattern(sourceName);
@@ -81,10 +82,16 @@ async function provisionExistingArchives(
             checkedEntries += 1;
             if (checkedEntries > archiveEntryMaximum) throw failure();
             if (!archivePattern.test(entry.name)) continue;
+            await beforeArchiveOpen?.(entry.name);
             const archivePath = path.join(descriptorPath(directory), entry.name);
             let archive: FileHandle | undefined;
             try {
-                archive = await open(archivePath, fileFlags);
+                try {
+                    archive = await open(archivePath, fileFlags);
+                } catch (error) {
+                    if (errorCode(error) === "ENOENT") continue;
+                    throw error;
+                }
                 const archiveStatus = await canonicalStatus(
                     archive,
                     path.join(path.dirname(target.filePath), entry.name)
@@ -269,7 +276,8 @@ async function provisionTarget(
     target: ManagedLogFileTarget,
     groupId: number,
     applyDefaultAccess: (directoryPath: string, groupId: number) => Promise<void>,
-    verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>
+    verifyDefaultAccess: (directory: FileHandle, groupId: number) => Promise<void>,
+    beforeArchiveOpen?: (fileName: string) => Promise<void> | void
 ): Promise<void> {
     const directoryPath = path.dirname(target.filePath);
     let directory: FileHandle | undefined;
@@ -304,7 +312,13 @@ async function provisionTarget(
             await applyDefaultAccess(descriptorPath(directory), groupId);
             await verifyDefaultAccess(directory, groupId);
         }
-        await provisionExistingArchives(directory, directoryStatus, target, groupId);
+        await provisionExistingArchives(
+            directory,
+            directoryStatus,
+            target,
+            groupId,
+            beforeArchiveOpen
+        );
 
         try {
             file = await open(
@@ -368,6 +382,7 @@ export async function provisionManagedLogAccess(
             directory: FileHandle,
             groupId: number
         ) => Promise<void>;
+        readonly beforeArchiveOpen?: (fileName: string) => Promise<void> | void;
     } = {}
 ): Promise<void> {
     if (
@@ -400,7 +415,8 @@ export async function provisionManagedLogAccess(
                 target,
                 groupId,
                 applyDefaultAccess,
-                verifyDefaultAccess
+                verifyDefaultAccess,
+                options.beforeArchiveOpen
             );
         }
     } catch {
