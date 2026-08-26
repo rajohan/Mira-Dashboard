@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.6...v0.3.7) (2026-08-26)
+
+
+### Bug Fixes
+
+* **database:** make maintenance review actionable ([#468](https://github.com/rajohan/Mira-Dashboard/issues/468)) ([e8385bc](https://github.com/rajohan/Mira-Dashboard/commit/e8385bcb09958907d4906b0330e69f404b502dff))
+
 ## [0.3.6](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.5...v0.3.6) (2026-08-26)
 
 
