@@ -22,10 +22,8 @@ export const sqliteReusableSpaceReviewMinimumBytes = 256 * 1024 * 1024;
 export const sqliteReusableSpaceReviewPercent = 50;
 /** Durable cache identity reserved for the worker-owned database snapshot. */
 export const databaseObservabilityCacheKey = "database.observability";
-/** Retired payload identity admitted only for bounded LKG migration. */
-export const databaseObservabilityLegacyCacheSchemaId = "database.observability.v1";
-/** Current dynamic-topology payload identity written by the worker. */
-export const databaseObservabilityCacheSchemaId = "database.observability.v2";
+/** Current material-maintenance payload identity written by the worker. */
+export const databaseObservabilityCacheSchemaId = "database.observability.v3";
 /** Source identity for the fixed PostgreSQL and PgBouncer collector. */
 export const databaseObservabilityCacheSource = "postgresql.pgbouncer";
 /** Maximum number of dynamically discovered PostgreSQL rows exposed in one snapshot. */
@@ -51,9 +49,12 @@ export const databaseObservabilityHighDeadTupleMinimum = 1000;
 export const databaseObservabilityHighDeadTupleMinimumBytes = 64 * 1024 * 1024;
 /** Minimum dead-tuple share for one table to count as high-dead. */
 export const databaseObservabilityHighDeadTuplePercent = 20;
-/** Mean execution time at which one ranked statement counts as slow. */
-export const databaseObservabilitySlowStatementMeanMs = 500;
-const databaseObservabilityLegacyV1DatabaseMaximum = 16;
+/** Minimum recurring executions required before one statement can require review. */
+export const databaseObservabilitySlowStatementMinimumCalls = 25;
+/** Mean execution time at which one recurring statement requires review. */
+export const databaseObservabilitySlowStatementMeanMs = 1000;
+/** Unassessed table bytes that make the material bloat assessment incomplete. */
+export const databaseObservabilityUnassessedReviewBytes = 64 * 1024 * 1024;
 /** Maximum immutable SQLite maintenance snapshots retained and projected. */
 export const sqliteMaintenanceBackupMaximum = 14;
 export const sqliteBackupInventoryMaximum = 32;
@@ -544,80 +545,6 @@ export const databaseObservabilityTorrentCountsSchema = v.strictObject({
     comet: databaseObservabilityTorrentCountSchema,
 });
 
-const databaseObservabilityLegacyV1DatabaseSchema = v.strictObject({
-    cacheHitRatio: databaseObservabilityRatioSchema,
-    committedTransactions: databaseObservabilityCountSchema,
-    connections: databaseObservabilityCountSchema,
-    name: databaseObservabilityNameSchema,
-    pool: v.optional(
-        v.strictObject({
-            activeClients: databaseObservabilityCountSchema,
-            activeServers: databaseObservabilityCountSchema,
-            averageQueryMs: databaseObservabilityDurationSchema,
-            averageTransactionMs: databaseObservabilityDurationSchema,
-            idleServers: databaseObservabilityCountSchema,
-            totalQueries: databaseObservabilityCountSchema,
-            usedServers: databaseObservabilityCountSchema,
-            waitingClients: databaseObservabilityCountSchema,
-        })
-    ),
-    rolledBackTransactions: databaseObservabilityCountSchema,
-    sizeBytes: databaseObservabilityByteCountSchema,
-});
-
-const databaseObservabilityLegacyV1SummarySchema = v.strictObject({
-    activeConnections: databaseObservabilityCountSchema,
-    averageCacheHitRatio: databaseObservabilityRatioSchema,
-    idleConnections: databaseObservabilityCountSchema,
-    maintenance: v.strictObject({
-        assessedPhysicalBytes: databaseObservabilityByteCountSchema,
-        assessmentComplete: v.boolean(),
-        estimatedReclaimableBytes: databaseObservabilityByteCountSchema,
-        estimatedReclaimablePercent: databaseObservabilityRatioSchema,
-        highDeadTupleTableCount: databaseObservabilityCountSchema,
-        requiresBloatReview: v.boolean(),
-        slowStatementCount: databaseObservabilityCountSchema,
-        status: v.picklist(["healthy", "not-assessed", "review"]),
-        unassessedPhysicalBytes: databaseObservabilityByteCountSchema,
-        unassessedTableCount: databaseObservabilityCountSchema,
-    }),
-    pgStatStatementsEnabled: v.boolean(),
-    totalConnections: databaseObservabilityCountSchema,
-    totalDatabaseSizeBytes: databaseObservabilityByteCountSchema,
-});
-
-const databaseObservabilityLegacyV1CachePayloadObjectSchema = v.strictObject({
-    databases: v.pipe(
-        v.array(databaseObservabilityLegacyV1DatabaseSchema),
-        v.minLength(1, "Database observation inventory is absent"),
-        v.maxLength(
-            databaseObservabilityLegacyV1DatabaseMaximum,
-            "Database observation row count is outside its legacy budget"
-        )
-    ),
-    pgbouncer: databaseObservabilityPgBouncerSchema,
-    statements: v.pipe(
-        v.array(databaseObservabilityStatementSchema),
-        v.maxLength(
-            databaseObservabilityStatementMaximum,
-            "Database statement row count is outside its budget"
-        )
-    ),
-    summary: databaseObservabilityLegacyV1SummarySchema,
-    tableHealth: v.pipe(
-        v.array(databaseObservabilityTableHealthSchema),
-        v.maxLength(
-            databaseObservabilityTableHealthMaximum,
-            "Database table-health row count is outside its budget"
-        )
-    ),
-    torrentCounts: databaseObservabilityTorrentCountsSchema,
-});
-
-type DatabaseObservabilityLegacyV1CachePayload = v.InferOutput<
-    typeof databaseObservabilityLegacyV1CachePayloadObjectSchema
->;
-
 interface DatabaseObservabilityCachePayloadLike extends JsonObject {
     databases: {
         readonly blocksHit: number;
@@ -717,21 +644,6 @@ function compareTableHealthRows(
     );
 }
 
-function compareLegacyV1TableHealthRows(
-    left: DatabaseObservabilityLegacyV1CachePayload["tableHealth"][number],
-    right: DatabaseObservabilityLegacyV1CachePayload["tableHealth"][number]
-): number {
-    const leftHighRisk = tableHealthRowIsHighDead(left);
-    const rightHighRisk = tableHealthRowIsHighDead(right);
-    return (
-        Number(rightHighRisk) - Number(leftHighRisk) ||
-        right.deadTuples - left.deadTuples ||
-        compareStrings(left.database, right.database) ||
-        compareStrings(left.schema, right.schema) ||
-        compareStrings(left.table, right.table)
-    );
-}
-
 function compareStatementRows(
     left: DatabaseObservabilityCachePayloadLike["statements"][number],
     right: DatabaseObservabilityCachePayloadLike["statements"][number]
@@ -781,6 +693,23 @@ function expectedBloatReview(
     );
 }
 
+function statementRequiresReview(
+    statement: DatabaseObservabilityCachePayloadLike["statements"][number]
+): boolean {
+    return (
+        statement.calls >= databaseObservabilitySlowStatementMinimumCalls &&
+        statement.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
+    );
+}
+
+function materialTableAssessmentIsComplete(
+    maintenance: DatabaseObservabilityCachePayloadLike["summary"]["maintenance"]
+): boolean {
+    return (
+        maintenance.unassessedPhysicalBytes < databaseObservabilityUnassessedReviewBytes
+    );
+}
+
 function safeCountTotal(values: readonly number[]): number | undefined {
     let total = 0;
     for (const value of values) {
@@ -799,78 +728,6 @@ function expectedCacheHitRatio(
     return total === 0 ? 100 : (blocksHit / total) * 100;
 }
 
-function databaseObservabilityLegacyV1CachePayloadIsConsistent(
-    payload: DatabaseObservabilityLegacyV1CachePayload
-): boolean {
-    const databaseNames = new Set(payload.databases.map((row) => row.name));
-    const tableNames = new Set(
-        payload.tableHealth.map((row) =>
-            JSON.stringify([row.database, row.schema, row.table])
-        )
-    );
-    const maintenance = payload.summary.maintenance;
-    const visibleSlowStatementCount = payload.statements.filter(
-        (row) => row.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
-    ).length;
-    const expectedReclaimablePercent =
-        maintenance.assessedPhysicalBytes === 0
-            ? 0
-            : (maintenance.estimatedReclaimableBytes /
-                  maintenance.assessedPhysicalBytes) *
-              100;
-    const expectedAverageCacheHitRatio =
-        payload.databases.reduce((total, row) => total + row.cacheHitRatio, 0) /
-        payload.databases.length;
-    return (
-        utf8ByteLength(JSON.stringify(payload)) <=
-            databaseObservabilityCachePayloadMaximumBytes &&
-        databaseNames.size === payload.databases.length &&
-        payload.databases.every(
-            (row, index, rows) =>
-                index === 0 || compareStrings(rows[index - 1]!.name, row.name) < 0
-        ) &&
-        tableNames.size === payload.tableHealth.length &&
-        payload.tableHealth.every(
-            (row, index, rows) =>
-                databaseNames.has(row.database) &&
-                (index === 0 || compareLegacyV1TableHealthRows(rows[index - 1]!, row) < 0)
-        ) &&
-        payload.statements.every((row, index) => row.rank === index + 1) &&
-        payload.statements.every(
-            (row, index, rows) =>
-                index === 0 || compareStatementRows(rows[index - 1]!, row) <= 0
-        ) &&
-        (payload.summary.pgStatStatementsEnabled || payload.statements.length === 0) &&
-        payload.summary.totalDatabaseSizeBytes ===
-            payload.databases.reduce((total, row) => total + row.sizeBytes, 0) &&
-        payload.summary.averageCacheHitRatio === expectedAverageCacheHitRatio &&
-        payload.summary.activeConnections + payload.summary.idleConnections <=
-            payload.summary.totalConnections &&
-        maintenance.assessmentComplete === (maintenance.unassessedTableCount === 0) &&
-        maintenance.estimatedReclaimableBytes <= maintenance.assessedPhysicalBytes &&
-        maintenance.estimatedReclaimablePercent === expectedReclaimablePercent &&
-        maintenance.slowStatementCount === visibleSlowStatementCount &&
-        maintenance.requiresBloatReview === expectedBloatReview(maintenance) &&
-        payload.tableHealth.every(
-            (row) =>
-                (row.assessment === "assessed") ===
-                    (row.estimatedReclaimableBytes !== undefined) &&
-                (row.estimatedReclaimableBytes === undefined ||
-                    row.estimatedReclaimableBytes <= row.physicalBytes)
-        ) &&
-        maintenance.status === expectedMaintenanceStatus(maintenance, true)
-    );
-}
-
-/** Exact retired payload schema used only to authenticate one bounded v1 LKG migration. */
-export const databaseObservabilityLegacyV1CachePayloadSchema = v.pipe(
-    databaseObservabilityLegacyV1CachePayloadObjectSchema,
-    v.check(
-        databaseObservabilityLegacyV1CachePayloadIsConsistent,
-        "Legacy database observation payload is inconsistent or outside its budget"
-    )
-);
-
 /** @returns Whether one payload is deterministic, unique, internally consistent, and bounded. */
 export function databaseObservabilityCachePayloadIsConsistent(
     payload: DatabaseObservabilityCachePayloadLike
@@ -883,7 +740,7 @@ export function databaseObservabilityCachePayloadIsConsistent(
     );
     const maintenance = payload.summary.maintenance;
     const visibleSlowStatementCount = payload.statements.filter(
-        (row) => row.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
+        statementRequiresReview
     ).length;
     const expectedReclaimablePercent =
         maintenance.assessedPhysicalBytes === 0
@@ -937,7 +794,7 @@ export function databaseObservabilityCachePayloadIsConsistent(
             payload.databases.filter(({ detailsState }) => detailsState === "unavailable")
                 .length &&
         maintenance.assessmentComplete ===
-            (maintenance.unassessedTableCount === 0 &&
+            (materialTableAssessmentIsComplete(maintenance) &&
                 payload.summary.unavailableDatabaseCount === 0) &&
         maintenance.estimatedReclaimableBytes <= maintenance.assessedPhysicalBytes &&
         maintenance.estimatedReclaimablePercent === expectedReclaimablePercent &&
@@ -1000,50 +857,6 @@ export type DatabaseObservabilityCachePayload = v.InferOutput<
     typeof databaseObservabilityCachePayloadSchema
 >;
 
-/**
- * Canonicalizes a validated v1 payload into the current dynamic contract.
- * Historical rows were all-or-nothing, so each retained database has available details.
- * @returns A current, strictly validated cache payload.
- */
-export function migrateDatabaseObservabilityLegacyV1CachePayload(
-    payload: v.InferOutput<typeof databaseObservabilityLegacyV1CachePayloadSchema>
-): DatabaseObservabilityCachePayload {
-    // V1 retained only ratios, not traffic weights. Equal 10,000-block samples preserve
-    // its former unweighted meaning to two decimals for the bounded 24-hour LKG bridge.
-    const databases = payload.databases.map((database) => {
-        const blocksHit = Math.round(database.cacheHitRatio * 100);
-        const blocksRead = 10_000 - blocksHit;
-        return {
-            ...database,
-            blocksHit,
-            blocksRead,
-            cacheHitRatio: expectedCacheHitRatio(blocksHit, blocksRead)!,
-            detailsState: "available" as const,
-        };
-    });
-    const totalBlocksHit = safeCountTotal(databases.map(({ blocksHit }) => blocksHit))!;
-    const totalBlocksRead = safeCountTotal(
-        databases.map(({ blocksRead }) => blocksRead)
-    )!;
-    const maintenance = {
-        ...payload.summary.maintenance,
-        status: expectedMaintenanceStatus(
-            payload.summary.maintenance,
-            payload.summary.pgStatStatementsEnabled
-        ),
-    };
-    return v.parse(databaseObservabilityCachePayloadSchema, {
-        ...payload,
-        databases,
-        summary: {
-            ...payload.summary,
-            averageCacheHitRatio: expectedCacheHitRatio(totalBlocksHit, totalBlocksRead)!,
-            maintenance,
-            unavailableDatabaseCount: 0,
-        },
-        tableHealth: payload.tableHealth.toSorted(compareTableHealthRows),
-    });
-}
 export type DatabaseObservabilityDatabase = v.InferOutput<
     typeof databaseObservabilityDatabaseSchema
 >;

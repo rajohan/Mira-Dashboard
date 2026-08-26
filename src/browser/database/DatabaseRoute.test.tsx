@@ -122,7 +122,7 @@ const freshPostgresqlOverview = {
         statements: [
             {
                 calls: 640,
-                meanExecutionMs: 508.25,
+                meanExecutionMs: 1008.25,
                 rank: 1,
                 rows: 1280,
                 sharedBlocksHit: 9100,
@@ -706,7 +706,9 @@ describe("DatabaseRoute", () => {
                 name: "Maintenance assessment",
             });
             expect(
-                within(maintenanceAssessment).getByText("Bloat assessment").closest("div")
+                within(maintenanceAssessment)
+                    .getByText("Material bloat assessment")
+                    .closest("div")
             ).toHaveClass("bg-primary-900/40");
             expect(within(maintenanceAssessment).getByText("Review")).toHaveClass(
                 "bg-amber-500/15"
@@ -795,7 +797,7 @@ describe("DatabaseRoute", () => {
                 "@max-[66rem]:[&_.dashboard-data-table-row]:grid-cols-2"
             );
             expect(within(statements).getByText("5,280 ms")).toBeVisible();
-            expect(within(statements).getByText("508.25 ms")).toBeVisible();
+            expect(within(statements).getByText("1,008.25 ms")).toBeVisible();
             expect(
                 within(statements).getByRole("columnheader", { name: "Rank" })
             ).toBeVisible();
@@ -857,7 +859,7 @@ describe("DatabaseRoute", () => {
                     .closest("div")
             ).toHaveTextContent("1");
             expect(
-                within(maintenance).getByText("Bloat assessment").closest("div")
+                within(maintenance).getByText("Material bloat assessment").closest("div")
             ).toHaveTextContent("Incomplete");
         } finally {
             view.unmount();
