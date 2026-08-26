@@ -100,16 +100,19 @@ async function openProvisionedDirectory(
             await directory.chown(specification.ownerId, specification.groupId);
         }
         const status = await canonicalStatus(directory, specification.directoryPath);
+        if (!status.isDirectory() || Number(status.uid) !== specification.ownerId) {
+            throw failure();
+        }
+        await directory.chown(specification.ownerId, specification.groupId);
+        await directory.chmod(specification.mode);
+        const verified = await canonicalStatus(directory, specification.directoryPath);
         if (
-            !status.isDirectory() ||
-            Number(status.uid) !== specification.ownerId ||
-            Number(status.gid) !== specification.groupId
+            verified.uid !== BigInt(specification.ownerId) ||
+            verified.gid !== BigInt(specification.groupId) ||
+            (verified.mode & 0o7777n) !== BigInt(specification.mode)
         ) {
             throw failure();
         }
-        await directory.chmod(specification.mode);
-        const verified = await canonicalStatus(directory, specification.directoryPath);
-        if ((verified.mode & 0o7777n) !== BigInt(specification.mode)) throw failure();
         return directory;
     } catch (error) {
         await close(directory);

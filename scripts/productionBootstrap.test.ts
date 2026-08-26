@@ -1013,10 +1013,7 @@ describe("production bootstrap admission", () => {
                 if (invocation.includes(" rev-list ")) {
                     return { exitCode: 0, stdout: `${releaseId}\n` };
                 }
-                if (
-                    invocation ===
-                    "/usr/bin/systemctl cat mira-dashboard-provision@.service"
-                ) {
+                if (invocation === "/usr/bin/systemctl cat mira-p@.service") {
                     return {
                         exitCode: provisioningBoundaryAvailable ? 0 : 1,
                         stdout: "",
@@ -1126,9 +1123,7 @@ describe("production bootstrap admission", () => {
         expect(
             commands.some((command) => command.includes("systemctl daemon-reload"))
         ).toBe(false);
-        expect(commands).toContain(
-            "/usr/bin/systemctl cat mira-dashboard-provision@.service"
-        );
+        expect(commands).toContain("/usr/bin/systemctl cat mira-p@.service");
         expect(manualDeployDelivered).toBe(true);
         expect(preparationCapacityAdmitted).toBe(true);
         expect(prerequisitesInspected).toBe(false);

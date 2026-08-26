@@ -23,7 +23,7 @@ const readinessDeadlineMs = secondsToMilliseconds(30);
 const readinessRetryMs = 250;
 const webUnit = "mira-dashboard-web.service";
 const workerUnit = "mira-dashboard-worker.service";
-const provisioningUnitPrefix = "mira-dashboard-provision@";
+const provisioningUnitPrefix = "mira-p@";
 const provisioningDeadlineMs = secondsToMilliseconds(15 * 60 + 30);
 const maximumSystemdUnitNameBytes = 255;
 const systemctlExecutableDefault = "/usr/bin/systemctl";
@@ -74,6 +74,10 @@ function validateExecutable(executable: string): void {
     ) {
         throw serviceFailure();
     }
+}
+
+function systemdEscapedUnitByteLength(unit: string): number {
+    return Buffer.byteLength(unit.replaceAll("-", String.raw`\x2d`));
 }
 
 async function requireSystemctlSuccess(
@@ -198,7 +202,7 @@ export function createSystemdProductionServiceController(
                 throw serviceFailure();
             }
             const unit = `${provisioningUnitPrefix}${instance}.service`;
-            if (Buffer.byteLength(unit) > maximumSystemdUnitNameBytes) {
+            if (systemdEscapedUnitByteLength(unit) > maximumSystemdUnitNameBytes) {
                 throw serviceFailure();
             }
             await requireSystemctlSuccess(

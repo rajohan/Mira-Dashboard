@@ -38,7 +38,7 @@ import { verifyReleaseArtifactIdentity } from "./delivery/releaseIdentity.ts";
 import { createSystemdProductionServiceController } from "./delivery/systemdProductionServices.ts";
 
 const failureMessage = "Production bootstrap failed";
-const productionProvisioningTemplateUnit = "mira-dashboard-provision@.service";
+const productionProvisioningTemplateUnit = "mira-p@.service";
 const projectRoot = path.resolve(import.meta.dir, "..");
 const projectHome = "/home/ubuntu/projects/mira-dashboard";
 const canonicalRepository = "rajohan/Mira-Dashboard";
