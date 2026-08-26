@@ -121,12 +121,33 @@ describe("Docker job action executors", () => {
             id: availableEvent.id,
             kind: "docker.updates-available",
             linkUrl: "/docker",
-            message: "2 Docker services have updates available.",
+            message: "Docker services have updates available.",
             occurredAtMs: availableEvent.atMs,
             severity: "info",
             source: "docker-updater",
             title: "Docker updates available",
         });
+    });
+
+    test("aggregates mixed run events at the highest severity without a truncated count", () => {
+        const failure = {
+            ...availableEvent,
+            atMs: availableEvent.atMs + 1,
+            id: "018f6f50-6a9e-7000-8000-000000000010",
+            kind: "update-failed" as const,
+        };
+
+        expect(dockerUpdaterEventsNotification([availableEvent, failure])).toEqual({
+            id: failure.id,
+            kind: "docker.run-summary",
+            linkUrl: "/docker",
+            message: "Docker updater events were recorded in this run.",
+            occurredAtMs: failure.atMs,
+            severity: "error",
+            source: "docker-updater",
+            title: "Docker updater report",
+        });
+        expect(dockerUpdaterEventsNotification([scanEvent])).toBeUndefined();
     });
     test("persists claim-fenced overview success without replaying retained events", async () => {
         const previous = overview([previousEvent]);

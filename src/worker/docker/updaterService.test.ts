@@ -40,6 +40,7 @@ interface MutableService {
 }
 
 interface HarnessOptions {
+    readonly abortOnFirstReconcile?: AbortController;
     readonly driftOnDiscoverCall?: number;
     readonly finalGitThrows?: boolean;
     readonly failService?: string;
@@ -50,8 +51,11 @@ interface HarnessOptions {
     readonly registryFailure?: boolean;
     readonly reconcileFails?: boolean;
     readonly rollbackFailsService?: string;
+    readonly runtimeImageDriftAfterRecovery?: boolean;
+    readonly runtimeImageDriftOnDiscoverCall?: number;
     readonly serviceCount?: 1 | 2;
     readonly sourceChangeOnDiscoverCall?: number;
+    readonly sourceChangeDuringReconcile?: boolean;
     readonly throwOnDiscoverCall?: number;
     readonly unconfirmedService?: string;
 }
@@ -127,6 +131,8 @@ function createHarness(options: HarnessOptions = {}) {
     const gitRequests: DockerUpdaterGitSyncRequest[] = [];
     let preflightGitCalls = 0;
     let reconcileCalls = 0;
+    const reconcileSignals: Array<AbortSignal | undefined> = [];
+    const reconcileServices: string[][] = [];
 
     function compose(): DockerComposeDiscoveryResult {
         return {
@@ -141,12 +147,29 @@ function createHarness(options: HarnessOptions = {}) {
         const previousById = new Map(
             (prior?.updaterServices ?? []).map((service) => [service.id, service])
         );
+        const runtimeImageId = (index: number): string => {
+            if (
+                options.runtimeImageDriftAfterRecovery &&
+                reconcileCalls >= 2 &&
+                index === 0
+            ) {
+                return `sha256:${"9".repeat(64)}`;
+            }
+            if (
+                options.runtimeImageDriftOnDiscoverCall !== undefined &&
+                discoverCalls >= options.runtimeImageDriftOnDiscoverCall &&
+                index === 0
+            ) {
+                return `sha256:${"8".repeat(64)}`;
+            }
+            return `sha256:${String(index + 3).repeat(64)}`;
+        };
         const containers = services.map((service, index) => ({
             createdAtMs: 900,
             health: "healthy" as const,
             id: String(index + 1).repeat(64),
             image: service.imageReference,
-            imageId: `sha256:${String(index + 3).repeat(64)}`,
+            imageId: runtimeImageId(index),
             mounts: [],
             name: `media-${service.name}-1`,
             networks: [],
@@ -306,9 +329,15 @@ function createHarness(options: HarnessOptions = {}) {
         generateId: eventIds(),
         git,
         nowMs: () => 2000,
-        reconcileStack() {
+        reconcileStack(services, signal) {
             reconcileCalls += 1;
+            reconcileServices.push([...services]);
+            reconcileSignals.push(signal);
+            if (options.sourceChangeDuringReconcile && reconcileCalls === 1) {
+                revisionVersion += 1;
+            }
             if (options.reconcileFails && reconcileCalls === 1) {
+                options.abortOnFirstReconcile?.abort();
                 return Promise.reject(new Error("raw reconcile diagnostic"));
             }
             return Promise.resolve();
@@ -340,6 +369,8 @@ function createHarness(options: HarnessOptions = {}) {
         gitRequests,
         order,
         reconcileCalls: () => reconcileCalls,
+        reconcileServices,
+        reconcileSignals,
         updateCommands,
         updater,
     };
@@ -353,10 +384,13 @@ describe("Docker updater service", () => {
     test("preserves exact scanned candidates across its own multi-service source changes", async () => {
         const harness = createHarness();
         const initial = harness.currentPayload();
-        const result = await harness.updater.run({
-            expectedSourceRevision: initial.sourceRevision,
-            previous: initial,
-        });
+        const result = await harness.updater.run(
+            {
+                expectedSourceRevision: initial.sourceRevision,
+                previous: initial,
+            },
+            new AbortController().signal
+        );
 
         expect(result).toMatchObject({
             failedCount: 0,
@@ -365,6 +399,7 @@ describe("Docker updater service", () => {
             updatedCount: 2,
         });
         expect(harness.reconcileCalls()).toBe(1);
+        expect(harness.reconcileServices).toEqual([["one", "two"]]);
         expect(harness.order).toEqual([
             "git-head",
             "git-sync:0",
@@ -407,14 +442,17 @@ describe("Docker updater service", () => {
         expect(JSON.stringify(result)).not.toContain("provider diagnostic");
     });
 
-    test("restores the prior sources and reconciles again when the full stack is unhealthy", async () => {
+    test("restores the prior sources and reconciles selected services after an unhealthy result", async () => {
         const harness = createHarness({ reconcileFails: true, serviceCount: 1 });
         const initial = harness.currentPayload();
 
-        const result = await harness.updater.run({
-            expectedSourceRevision: initial.sourceRevision,
-            previous: initial,
-        });
+        const result = await harness.updater.run(
+            {
+                expectedSourceRevision: initial.sourceRevision,
+                previous: initial,
+            },
+            new AbortController().signal
+        );
 
         expect(result).toMatchObject({
             failedCount: 1,
@@ -423,8 +461,102 @@ describe("Docker updater service", () => {
             updatedCount: 0,
         });
         expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.reconcileSignals[0]).toBeInstanceOf(AbortSignal);
+        expect(harness.reconcileSignals[1]).toBeInstanceOf(AbortSignal);
+        expect(harness.reconcileSignals[1]).not.toBe(harness.reconcileSignals[0]);
         expect(harness.order).toContain("rollback:one");
         expect(eventKinds(result)).toContain("update-failed");
+    });
+
+    test("rejects Compose source drift observed across selected reconciliation", async () => {
+        const harness = createHarness({
+            serviceCount: 1,
+            sourceChangeDuringReconcile: true,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.order).toContain("rollback:one");
+        expect(result.outcome).toBe("completed-with-failures");
+        expect(result.updatedCount).toBe(0);
+    });
+
+    test("uses an independently bounded recovery signal after lifecycle cancellation", async () => {
+        const controller = new AbortController();
+        const harness = createHarness({
+            abortOnFirstReconcile: controller,
+            reconcileFails: true,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run(
+            { expectedSourceRevision: initial.sourceRevision, previous: initial },
+            controller.signal
+        );
+
+        expect(controller.signal.aborted).toBe(true);
+        expect(harness.reconcileSignals[1]?.aborted).toBe(false);
+        expect(result.outcome).toBe("completed-with-failures");
+    });
+
+    test("reports recovery as unknown when a restored service runtime image ID drifts", async () => {
+        const harness = createHarness({
+            reconcileFails: true,
+            runtimeImageDriftAfterRecovery: true,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(harness.reconcileCalls()).toBe(2);
+        expect(result.outcome).toBe("unknown-outcome");
+    });
+
+    test("verifies recovery against the runtime image captured by update revalidation", async () => {
+        const harness = createHarness({
+            reconcileFails: true,
+            runtimeImageDriftOnDiscoverCall: 3,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result.outcome).toBe("completed-with-failures");
+    });
+
+    test("does not reconcile unverified source after isolated rollback fails", async () => {
+        const harness = createHarness({
+            reconcileFails: true,
+            rollbackFailsService: "one",
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run(
+            {
+                expectedSourceRevision: initial.sourceRevision,
+                previous: initial,
+            },
+            new AbortController().signal
+        );
+
+        expect(harness.order).toContain("rollback:one");
+        expect(harness.reconcileCalls()).toBe(1);
+        expect(result.outcome).toBe("unknown-outcome");
     });
 
     test("updates only the exact user-confirmed service image pair", async () => {
@@ -751,6 +883,10 @@ describe("Docker updater service", () => {
             "git-sync:1",
             "rollback:two",
             "rollback:one",
+        ]);
+        expect(harness.reconcileServices).toEqual([
+            ["one", "two"],
+            ["one", "two"],
         ]);
         expect(result.payload.updaterServices.map(({ status }) => status)).toEqual([
             { candidateImage: "ghcr.io/example/one:1.1.0", state: "update-available" },

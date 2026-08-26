@@ -721,7 +721,9 @@ export const dockerUpdaterJobActionDefinition = validateJobActionDefinition({
     resourceKeys: Object.freeze(["docker.engine", "docker.mutation", "docker.source"]),
     retrySafe: false,
     scheduleId: dockerUpdaterJobScheduleId,
-    timeoutMs: 35 * 60_000,
+    // The updater owns a bounded 35-minute mutation phase and a separate bounded
+    // recovery phase. Keep both inside one continuously renewed durable claim.
+    timeoutMs: 71 * 60_000,
 });
 
 /** Daily online SQLite snapshot, restore verification, retention, and fixed upkeep. */

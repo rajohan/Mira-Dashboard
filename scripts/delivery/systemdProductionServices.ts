@@ -25,6 +25,7 @@ const webUnit = "mira-dashboard-web.service";
 const workerUnit = "mira-dashboard-worker.service";
 const provisioningUnitPrefix = "mira-p@";
 const provisioningDeadlineMs = secondsToMilliseconds(15 * 60 + 30);
+const workerControlDeadlineMs = secondsToMilliseconds(72 * 60 + 30);
 const maximumSystemdUnitNameBytes = 255;
 const systemctlExecutableDefault = "/usr/bin/systemctl";
 const loopbackReadinessUrlSchema = v.pipe(
@@ -108,7 +109,12 @@ async function stopUnits(
         failed = true;
     }
     try {
-        await requireSystemctlSuccess(execute, executable, ["stop", workerUnit]);
+        await requireSystemctlSuccess(
+            execute,
+            executable,
+            ["stop", workerUnit],
+            workerControlDeadlineMs
+        );
     } catch {
         failed = true;
     }
@@ -234,7 +240,12 @@ export function createSystemdProductionServiceController(
             runtime: InstalledProductionRuntime
         ): Promise<void> {
             await pointProductionProcessesAtRelease(lease, paths, release, runtime);
-            await requireSystemctlSuccess(execute, executable, ["restart", workerUnit]);
+            await requireSystemctlSuccess(
+                execute,
+                executable,
+                ["restart", workerUnit],
+                workerControlDeadlineMs
+            );
             await requireSystemctlSuccess(execute, executable, ["restart", webUnit]);
         },
         stop: () => stopUnits(execute, executable),

@@ -109,8 +109,8 @@ export function dockerUpdaterEventsNotification(
         kind: onlyUpdates ? "docker.updates-available" : "docker.run-summary",
         linkUrl: "/docker",
         message: onlyUpdates
-            ? `${material.length} Docker services have updates available.`
-            : `${material.length} Docker updater events were recorded in this run.`,
+            ? "Docker services have updates available."
+            : "Docker updater events were recorded in this run.",
         occurredAtMs: Math.max(...material.map(({ atMs }) => atMs)),
         severity,
         source: "docker-updater",
