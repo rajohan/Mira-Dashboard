@@ -68,6 +68,12 @@ function rotatedArchivePattern(fileName: string): RegExp {
     );
 }
 
+function sourceArchivePattern(target: ManagedLogFileTarget): RegExp {
+    return target.archiveFileNamePattern === undefined
+        ? rotatedArchivePattern(path.basename(target.filePath))
+        : new RegExp(target.archiveFileNamePattern, "u");
+}
+
 async function provisionExistingArchives(
     directory: FileHandle,
     directoryStatus: BigIntStats,
@@ -76,8 +82,7 @@ async function provisionExistingArchives(
     beforeArchiveOpen?: (fileName: string) => Promise<void> | void,
     afterArchiveOpen?: (fileName: string) => Promise<void> | void
 ): Promise<void> {
-    const sourceName = path.basename(target.filePath);
-    const archivePattern = rotatedArchivePattern(sourceName);
+    const archivePattern = sourceArchivePattern(target);
     const stream = await opendir(descriptorPath(directory));
     let checkedEntries = 0;
     try {
@@ -270,7 +275,8 @@ async function canonicalArchiveStatus(
         if (errorCode(error) === "ENOENT") return undefined;
         throw error;
     }
-    if (canonical !== expectedPath || status.isSymbolicLink()) throw failure();
+    if (status.isSymbolicLink()) throw failure();
+    if (canonical !== expectedPath) return undefined;
     return status;
 }
 

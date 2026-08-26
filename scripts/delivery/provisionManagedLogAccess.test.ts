@@ -6,6 +6,7 @@ import {
     lstat,
     mkdir,
     mkdtemp,
+    rename,
     rm,
     symlink,
     writeFile,
@@ -134,6 +135,41 @@ describe("managed log access provisioning", () => {
         expect(archiveStatus.mode & 0o7777).toBe(0o640);
     });
 
+    test("repairs numeric archives for any externally rotated source", async () => {
+        root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
+        const directory = path.join(root, "logs");
+        const file = path.join(directory, "service.debug.txt");
+        const archive = path.join(directory, "service.debug.0.txt");
+        await mkdir(directory, { mode: 0o755 });
+        await Promise.all([
+            writeFile(file, "log\n", { mode: 0o644 }),
+            writeFile(archive, "archive\n", { mode: 0o600 }),
+        ]);
+        const userId = process.getuid?.() ?? 0;
+        const groupId = process.getgid?.() ?? 0;
+        const baseManifest = manifest(file, userId, groupId);
+
+        await provisionManagedLogAccess(groupId, userId, {
+            manifest: {
+                ...baseManifest,
+                fileTargets: baseManifest.fileTargets.map((target) => ({
+                    ...target,
+                    archiveFileNamePattern: String.raw`^service\.debug\.\d+\.txt$`,
+                    cadenceMs: undefined,
+                    compress: false,
+                    strategy: "external" as const,
+                })),
+            },
+            requireRoot: () => true,
+            temporaryAccessRootPrefix: path.join(root, "access-config-"),
+        });
+
+        const archiveStatus = await lstat(archive);
+        expect(archiveStatus.uid).toBe(userId);
+        expect(archiveStatus.gid).toBe(groupId);
+        expect(archiveStatus.mode & 0o7777).toBe(0o640);
+    });
+
     test("ignores an admitted archive removed by concurrent retention", async () => {
         root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
         const directory = path.join(root, "logs");
@@ -190,6 +226,37 @@ describe("managed log access provisioning", () => {
 
         const fileStatus = await lstat(file);
         expect(fileStatus.mode & 0o7777).toBe(0o660);
+    });
+
+    test("ignores an opened archive renamed by concurrent rotation", async () => {
+        root = await mkdtemp(path.join(os.tmpdir(), "managed-log-access-"));
+        const directory = path.join(root, "logs");
+        const file = path.join(directory, "application.log");
+        const archiveName =
+            "application.log.2026-08-26T06-56-18.967Z.bbcc6203-0cbf-44fb-a633-1e6d122ab3bc.gz";
+        const archive = path.join(directory, archiveName);
+        const renamedArchive = `${archive}.rolled`;
+        await mkdir(directory, { mode: 0o755 });
+        await Promise.all([
+            writeFile(file, "log\n", { mode: 0o644 }),
+            writeFile(archive, "archive\n", { mode: 0o600 }),
+        ]);
+        const userId = process.getuid?.() ?? 0;
+        const groupId = process.getgid?.() ?? 0;
+
+        await provisionManagedLogAccess(groupId, userId, {
+            afterArchiveOpen: async (fileName) => {
+                expect(fileName).toBe(archiveName);
+                await rename(archive, renamedArchive);
+            },
+            manifest: manifest(file, userId, groupId),
+            requireRoot: () => true,
+            temporaryAccessRootPrefix: path.join(root, "access-config-"),
+        });
+
+        expect(await lstat(renamedArchive)).toBeDefined();
+        const sourceStatus = await lstat(file);
+        expect(sourceStatus.mode & 0o7777).toBe(0o660);
     });
 
     test("retries an archive while rotation removes its publication hard link", async () => {

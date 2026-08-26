@@ -13,6 +13,7 @@ import {
     type LogRotationEpochProjectionEntry,
 } from "../../shared/logRotationEpochProjection.ts";
 import { compareStrings } from "../../shared/validation.ts";
+import { linuxRenameNoReplace } from "../files/linuxRenameExchange.ts";
 import {
     managedLogManifest,
     type ManagedArchiveTarget,
@@ -91,8 +92,24 @@ interface OpenedFile {
 }
 
 interface ArchiveEntry {
+    readonly deviceId: number;
     readonly fileName: string;
+    readonly inode: number;
     readonly modifiedAtMs: number;
+}
+
+function numericArchiveGeneration(fileName: string): number {
+    const value = /\.(\d+)(?:\.[^.]+)?$/u.exec(fileName)?.[1];
+    return value === undefined ? Number.MAX_SAFE_INTEGER : Number(value);
+}
+
+function numericArchiveNameAtGeneration(
+    fileName: string,
+    generation: number
+): string | undefined {
+    const match = /^(.*\.)(\d+)(\.[^.]+)$/u.exec(fileName);
+    if (match === null) return undefined;
+    return `${match[1]}${generation}${match[3]}`;
 }
 
 interface RotationLock {
@@ -114,6 +131,9 @@ export interface ManagedLogRotationEngine {
 export interface ManagedLogRotationTestHooks {
     readonly afterCopyTruncateMarkedRotating?: (sourceId: string) => Promise<void> | void;
     readonly afterCopyTruncateSynced?: (sourceId: string) => Promise<void> | void;
+    readonly beforeRetentionDelete?: (fileName: string) => Promise<void> | void;
+    readonly afterRetentionVerified?: (fileName: string) => Promise<void> | void;
+    readonly afterRetentionDetached?: (fileName: string) => Promise<void> | void;
 }
 
 function sanitizedFailure(): Error {
@@ -122,6 +142,43 @@ function sanitizedFailure(): Error {
 
 function isErrorCode(error: unknown, code: string): boolean {
     return (error as NodeJS.ErrnoException | undefined)?.code === code;
+}
+
+function restoreOrPreserveDetachedArchive(
+    directory: OpenedDirectory,
+    detachedName: string,
+    originalName: string,
+    matches: (fileName: string) => boolean,
+    retentionTieBreaker?: ManagedArchiveTarget["retentionTieBreaker"]
+): void {
+    try {
+        linuxRenameNoReplace(directory.handle.fd, detachedName, originalName);
+        return;
+    } catch (error) {
+        if (
+            !isErrorCode(error, "EEXIST") ||
+            retentionTieBreaker !== "numeric-generation-ascending"
+        ) {
+            throw error;
+        }
+    }
+
+    const originalGeneration = numericArchiveGeneration(originalName);
+    if (originalGeneration === Number.MAX_SAFE_INTEGER) throw sanitizedFailure();
+    for (let offset = 1; offset <= archiveEntryMaximum; offset += 1) {
+        const candidate = numericArchiveNameAtGeneration(
+            originalName,
+            originalGeneration + offset
+        );
+        if (candidate === undefined || !matches(candidate)) throw sanitizedFailure();
+        try {
+            linuxRenameNoReplace(directory.handle.fd, detachedName, candidate);
+            return;
+        } catch (error) {
+            if (!isErrorCode(error, "EEXIST")) throw error;
+        }
+    }
+    throw sanitizedFailure();
 }
 
 function ownerIsTrusted(ownerId: number, trustedOwnerIds: readonly number[]): boolean {
@@ -463,7 +520,12 @@ async function trustedArchiveEntries(
         if (!matches(fileName)) continue;
         let handle: FileHandle | undefined;
         try {
-            handle = await open(descriptorChild(directory, fileName), readFlags);
+            try {
+                handle = await open(descriptorChild(directory, fileName), readFlags);
+            } catch (error) {
+                if (isErrorCode(error, "ENOENT")) continue;
+                throw error;
+            }
             const status = await handle.stat();
             if (
                 !fileStatusIsTrusted(status, trustedOwnerIds, trustedWritableGroupId) ||
@@ -471,7 +533,12 @@ async function trustedArchiveEntries(
             ) {
                 throw sanitizedFailure();
             }
-            entries.push({ fileName, modifiedAtMs: Math.trunc(status.mtimeMs) });
+            entries.push({
+                deviceId: status.dev,
+                fileName,
+                inode: status.ino,
+                modifiedAtMs: Math.trunc(status.mtimeMs),
+            });
         } finally {
             await handle?.close().catch(() => {});
         }
@@ -488,7 +555,11 @@ async function applyRetention(
     retentionAgeMs: number,
     nowMs: number,
     dryRun: boolean,
-    trustedWritableGroupId?: number
+    trustedWritableGroupId?: number,
+    beforeDelete?: (fileName: string) => Promise<void> | void,
+    afterVerified?: (fileName: string) => Promise<void> | void,
+    afterDetached?: (fileName: string) => Promise<void> | void,
+    retentionTieBreaker?: ManagedArchiveTarget["retentionTieBreaker"]
 ): Promise<number> {
     const archiveEntries = await trustedArchiveEntries(
         directory,
@@ -497,17 +568,22 @@ async function applyRetention(
         maximumSourceBytes,
         trustedWritableGroupId
     );
-    const entries = archiveEntries.toSorted(
-        (left, right) =>
-            right.modifiedAtMs - left.modifiedAtMs ||
-            right.fileName.localeCompare(left.fileName)
-    );
+    const entries = archiveEntries.toSorted((left, right) => {
+        const modifiedOrder = right.modifiedAtMs - left.modifiedAtMs;
+        if (modifiedOrder !== 0) return modifiedOrder;
+        return retentionTieBreaker === "numeric-generation-ascending"
+            ? numericArchiveGeneration(left.fileName) -
+                  numericArchiveGeneration(right.fileName)
+            : right.fileName.localeCompare(left.fileName);
+    });
     const expired = entries.filter(
         (entry, index) =>
             index >= retentionCount || nowMs - entry.modifiedAtMs > retentionAgeMs
     );
+    let deleted = 0;
     if (!dryRun) {
         for (const entry of expired) {
+            await beforeDelete?.(entry.fileName);
             const verified = await openFileTarget(
                 path.join(directory.path, entry.fileName),
                 trustedOwnerIds,
@@ -517,15 +593,63 @@ async function applyRetention(
             );
             if (verified === undefined) continue;
             try {
+                if (
+                    verified.status.dev !== entry.deviceId ||
+                    verified.status.ino !== entry.inode ||
+                    Math.trunc(verified.status.mtimeMs) !== entry.modifiedAtMs
+                ) {
+                    continue;
+                }
                 await verifyIdentity(verified);
-                await unlink(descriptorChild(directory, entry.fileName));
+                await afterVerified?.(entry.fileName);
+                const detachedName = stageName();
+                try {
+                    linuxRenameNoReplace(
+                        directory.handle.fd,
+                        entry.fileName,
+                        detachedName
+                    );
+                } catch (error) {
+                    if (isErrorCode(error, "ENOENT")) continue;
+                    throw error;
+                }
+                await afterDetached?.(entry.fileName);
+                const detached = await openFileTarget(
+                    path.join(directory.path, detachedName),
+                    trustedOwnerIds,
+                    maximumSourceBytes,
+                    false,
+                    trustedWritableGroupId
+                );
+                if (detached === undefined) throw sanitizedFailure();
+                try {
+                    if (
+                        detached.status.dev !== entry.deviceId ||
+                        detached.status.ino !== entry.inode ||
+                        Math.trunc(detached.status.mtimeMs) !== entry.modifiedAtMs
+                    ) {
+                        restoreOrPreserveDetachedArchive(
+                            directory,
+                            detachedName,
+                            entry.fileName,
+                            matches,
+                            retentionTieBreaker
+                        );
+                        continue;
+                    }
+                    await verifyIdentity(detached);
+                    await unlink(descriptorChild(directory, detachedName));
+                } finally {
+                    await closeOpenedFile(detached);
+                }
+                deleted += 1;
             } finally {
                 await closeOpenedFile(verified);
             }
         }
-        if (expired.length > 0) await directory.handle.sync();
+        if (deleted > 0) await directory.handle.sync();
     }
-    return expired.length;
+    return dryRun ? expired.length : deleted;
 }
 
 async function compressArchive(
@@ -593,6 +717,17 @@ async function processFileTarget(
         };
     }
     try {
+        if (target.strategy === "external") {
+            return {
+                result: {
+                    action: "skipped",
+                    reason: "not-due",
+                    targetId: target.id,
+                },
+                retentionDeleted: 0,
+                rotated: false,
+            };
+        }
         const sizeDue = file.status.size >= target.maximumSizeBytes;
         const cadenceDue =
             target.cadenceMs !== undefined &&
@@ -626,7 +761,9 @@ async function processFileTarget(
             target.retentionAgeMs,
             nowMs,
             dryRun,
-            target.trustedWritableGroupId
+            target.trustedWritableGroupId,
+            testHooks.beforeRetentionDelete,
+            testHooks.afterRetentionVerified
         );
         let reason: ManagedLogTargetResult["reason"] = "not-due";
         if (recoveringCopyTruncate) reason = "recovery";
@@ -648,28 +785,33 @@ async function processFileTarget(
     }
 }
 
-const openClawDailyPattern = /^openclaw-\d{4}-\d{2}-\d{2}\.log(?:\.gz)?$/u;
-const openClawUncompressedPattern = /^openclaw-\d{4}-\d{2}-\d{2}\.log$/u;
-
 async function processArchiveTarget(
     target: ManagedArchiveTarget,
     nowMs: number,
-    dryRun: boolean
+    dryRun: boolean,
+    testHooks: ManagedLogRotationTestHooks
 ): Promise<readonly ManagedLogTargetResult[]> {
     const directory = await openDirectory(target.directoryPath, target.trustedOwnerIds);
     const results: ManagedLogTargetResult[] = [];
+    const fileNamePattern = new RegExp(target.fileNamePattern, "u");
+    const compressibleFileNamePattern =
+        target.compressibleFileNamePattern === undefined
+            ? undefined
+            : new RegExp(target.compressibleFileNamePattern, "u");
     try {
         const entries = await trustedArchiveEntries(
             directory,
-            (fileName) =>
-                target.kind === "openclaw-daily" && openClawDailyPattern.test(fileName),
+            (fileName) => fileNamePattern.test(fileName),
             target.trustedOwnerIds,
-            target.maximumSourceBytes
+            target.maximumSourceBytes,
+            target.trustedWritableGroupId
         );
         if (entries.length > target.maximumEntries) throw sanitizedFailure();
         for (const entry of entries) {
             if (
-                !openClawUncompressedPattern.test(entry.fileName) ||
+                compressibleFileNamePattern === undefined ||
+                !compressibleFileNamePattern.test(entry.fileName) ||
+                target.compressAfterMs === undefined ||
                 nowMs - entry.modifiedAtMs < target.compressAfterMs
             ) {
                 continue;
@@ -679,7 +821,8 @@ async function processArchiveTarget(
                     directory,
                     entry.fileName,
                     target.trustedOwnerIds,
-                    target.maximumSourceBytes
+                    target.maximumSourceBytes,
+                    target.trustedWritableGroupId
                 );
             }
             results.push({
@@ -690,13 +833,18 @@ async function processArchiveTarget(
         }
         const deleted = await applyRetention(
             directory,
-            (fileName) => openClawDailyPattern.test(fileName),
+            (fileName) => fileNamePattern.test(fileName),
             target.trustedOwnerIds,
             target.maximumSourceBytes + 1024 * 1024,
             target.retentionCount,
             target.retentionAgeMs,
             nowMs,
-            dryRun
+            dryRun,
+            target.trustedWritableGroupId,
+            testHooks.beforeRetentionDelete,
+            testHooks.afterRetentionVerified,
+            testHooks.afterRetentionDetached,
+            target.retentionTieBreaker
         );
         for (let index = 0; index < deleted; index += 1) {
             results.push({
@@ -816,7 +964,7 @@ async function readRotationEpochs(
         );
         const allowedTargetIds = new Set(
             manifest.fileTargets
-                .filter(({ strategy }) => strategy === "copytruncate")
+                .filter(({ strategy }) => strategy !== "rename")
                 .map(({ id }) => id)
         );
         if (parsed.entries.some(({ sourceId }) => !allowedTargetIds.has(sourceId))) {
@@ -1077,7 +1225,12 @@ export function createManagedLogRotationEngine(
                     if (runOptions.signal?.aborted === true) throw sanitizedFailure();
                     try {
                         results.push(
-                            ...(await processArchiveTarget(target, startedAtMs, dryRun))
+                            ...(await processArchiveTarget(
+                                target,
+                                startedAtMs,
+                                dryRun,
+                                testHooks
+                            ))
                         );
                     } catch {
                         results.push({
