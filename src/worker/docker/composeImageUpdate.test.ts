@@ -12,6 +12,7 @@ import {
 import {
     DockerComposeImageUpdateError,
     type DockerComposeCommandRunner,
+    reconcileDockerComposeStack,
     updateDockerComposeImage,
 } from "./composeImageUpdate.ts";
 
@@ -107,6 +108,18 @@ afterEach(() => {
     for (const directory of directories.splice(0)) {
         Fs.rmSync(directory, { force: true, recursive: true });
     }
+});
+
+test("full stack reconciliation always tears down before health-waiting startup", async () => {
+    const runCompose = runner();
+
+    await reconcileDockerComposeStack(runCompose);
+
+    expect(runCompose.calls.map(({ arguments_ }) => arguments_)).toEqual([
+        ["down", "--remove-orphans"],
+        ["up", "--detach", "--remove-orphans", "--wait", "--wait-timeout", "600"],
+    ]);
+    expect(runCompose.calls[1]?.deadlineMs).toBe(660_000);
 });
 
 describe("Docker Compose image update", () => {

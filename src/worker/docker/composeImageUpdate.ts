@@ -20,6 +20,8 @@ import {
 
 const composeConfigDeadlineMs = 30_000;
 const composeApplyDeadlineMs = 180_000;
+const composeStackDownDeadlineMs = 180_000;
+const composeStackUpDeadlineMs = 660_000;
 const composeOutputMaximumBytes = 64 * 1024;
 const dockerImageIdPattern = /^sha256:[0-9a-f]{64}$/u;
 
@@ -64,6 +66,33 @@ export type DockerComposeCommandRunner = (
         readonly signal?: AbortSignal;
     }
 ) => Promise<DockerComposeCommandResult>;
+
+export type DockerComposeStackReconciler = (signal?: AbortSignal) => Promise<void>;
+
+export async function reconcileDockerComposeStack(
+    runCompose: DockerComposeCommandRunner,
+    signal?: AbortSignal
+): Promise<void> {
+    const down = await runCompose(dockerComposeWrapper, ["down", "--remove-orphans"], {
+        cwd: dockerComposeTrustRoot,
+        deadlineMs: composeStackDownDeadlineMs,
+        outputMaximumBytes: composeOutputMaximumBytes,
+        ...(signal === undefined ? {} : { signal }),
+    });
+    if (down.exitCode !== 0) throw classifiedFailure("unavailable");
+
+    const up = await runCompose(
+        dockerComposeWrapper,
+        ["up", "--detach", "--remove-orphans", "--wait", "--wait-timeout", "600"],
+        {
+            cwd: dockerComposeTrustRoot,
+            deadlineMs: composeStackUpDeadlineMs,
+            outputMaximumBytes: composeOutputMaximumBytes,
+            ...(signal === undefined ? {} : { signal }),
+        }
+    );
+    if (up.exitCode !== 0) throw classifiedFailure("unavailable");
+}
 
 export type DockerComposeRevalidationPhase = "pre-update" | "post-rollback";
 

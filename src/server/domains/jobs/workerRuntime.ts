@@ -83,7 +83,7 @@ import {
     type JobWorkerSideEffectInput,
 } from "./coordinator.ts";
 import {
-    dockerUpdaterEventNotification,
+    dockerUpdaterEventsNotification,
     type DockerJobExecutionPort,
 } from "./dockerActionExecutors.ts";
 import { createJobRepository, type JobRepository } from "./repository.ts";
@@ -698,14 +698,12 @@ export function createDashboardWorkerRuntime(
                           ...options.docker,
                           async publishEvents(events: readonly DockerUpdaterEvent[]) {
                               if (monitoringCatalog === undefined) return;
-                              for (const event of events) {
-                                  const notification =
-                                      dockerUpdaterEventNotification(event);
-                                  if (notification === undefined) continue;
-                                  await Effect.runPromise(
-                                      monitoringCatalog.upsertNotification(notification)
-                                  );
-                              }
+                              const notification =
+                                  dockerUpdaterEventsNotification(events);
+                              if (notification === undefined) return;
+                              await Effect.runPromise(
+                                  monitoringCatalog.upsertNotification(notification)
+                              );
                           },
                           readPrevious() {
                               const record =

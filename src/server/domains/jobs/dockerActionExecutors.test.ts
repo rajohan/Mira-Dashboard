@@ -22,6 +22,7 @@ import {
     createDockerUpdaterJobExecutor,
     type DockerJobExecutionPort,
     dockerUpdaterEventNotification,
+    dockerUpdaterEventsNotification,
 } from "./dockerActionExecutors.ts";
 
 const sourceRevision = "a".repeat(64);
@@ -109,6 +110,24 @@ function executionContext(
 }
 
 describe("Docker job action executors", () => {
+    test("aggregates multiple available services into one run notification", () => {
+        const second = {
+            ...availableEvent,
+            id: "018f6f50-6a9e-7000-8000-000000000009",
+            serviceId: "c".repeat(64),
+        };
+
+        expect(dockerUpdaterEventsNotification([availableEvent, second])).toEqual({
+            id: availableEvent.id,
+            kind: "docker.updates-available",
+            linkUrl: "/docker",
+            message: "2 Docker services have updates available.",
+            occurredAtMs: availableEvent.atMs,
+            severity: "info",
+            source: "docker-updater",
+            title: "Docker updates available",
+        });
+    });
     test("persists claim-fenced overview success without replaying retained events", async () => {
         const previous = overview([previousEvent]);
         const next = overview([availableEvent, previousEvent]);
@@ -164,17 +183,17 @@ describe("Docker job action executors", () => {
         const port = executionPort({
             publishEvents(events) {
                 published.push([...events]);
-                const event = events[0]!;
-                if (event.id === scanEvent.id) {
+                const containsScan = events.some(({ id }) => id === scanEvent.id);
+                if (containsScan) {
                     scanPublicationAttempt += 1;
                 }
-                if (event.id === scanEvent.id && scanPublicationAttempt === 1) {
+                if (containsScan && scanPublicationAttempt === 1) {
                     delivered.delete(availableEvent.id);
                     return Promise.reject(
                         new Error("transient notification write failure")
                     );
                 }
-                delivered.set(event.id, event);
+                for (const event of events) delivered.set(event.id, event);
                 return Promise.resolve();
             },
             readPrevious: () => previous,
@@ -198,8 +217,11 @@ describe("Docker job action executors", () => {
             outcome: "completed",
             updatedCount: 1,
         });
-        expect(published).toEqual([[availableEvent], [scanEvent], [scanEvent]]);
-        expect([...delivered.values()]).toEqual([scanEvent]);
+        expect(published).toEqual([
+            [availableEvent, scanEvent],
+            [availableEvent, scanEvent],
+        ]);
+        expect([...delivered.values()]).toEqual([availableEvent, scanEvent]);
         expect(attempts.map(({ kind }) => kind)).toEqual(["succeeded"]);
     });
 
@@ -384,33 +406,9 @@ describe("Docker job action executors", () => {
             postSettlementWarnings: ["docker-notification-publication-failed"],
             updatedCount: 0,
         });
-        expect(published).toEqual([[scanEvent], [availableEvent], [availableEvent]]);
-        expect(
-            published
-                .flat()
-                .map((event) => dockerUpdaterEventNotification(event))
-                .filter((notification) => notification !== undefined)
-        ).toEqual([
-            {
-                id: availableEvent.id,
-                kind: "docker.update-available",
-                linkUrl: "/docker",
-                message: availableEvent.summary,
-                occurredAtMs: availableEvent.atMs,
-                severity: "info",
-                source: "docker-updater",
-                title: "Docker update available",
-            },
-            {
-                id: availableEvent.id,
-                kind: "docker.update-available",
-                linkUrl: "/docker",
-                message: availableEvent.summary,
-                occurredAtMs: availableEvent.atMs,
-                severity: "info",
-                source: "docker-updater",
-                title: "Docker update available",
-            },
+        expect(published).toEqual([
+            [scanEvent, availableEvent],
+            [scanEvent, availableEvent],
         ]);
         expect(outputs).toEqual([
             "Docker notification publication failed after bounded retries; the durable Docker job result remains authoritative.",

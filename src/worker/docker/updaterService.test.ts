@@ -48,6 +48,7 @@ interface HarnessOptions {
     readonly preflightGit?: DockerUpdaterGitSyncResult;
     readonly preflightGitSequence?: readonly DockerUpdaterGitSyncResult[];
     readonly registryFailure?: boolean;
+    readonly reconcileFails?: boolean;
     readonly rollbackFailsService?: string;
     readonly serviceCount?: 1 | 2;
     readonly sourceChangeOnDiscoverCall?: number;
@@ -125,6 +126,7 @@ function createHarness(options: HarnessOptions = {}) {
     const gitHeadRequests: DockerUpdaterGitHeadFilesRequest[] = [];
     const gitRequests: DockerUpdaterGitSyncRequest[] = [];
     let preflightGitCalls = 0;
+    let reconcileCalls = 0;
 
     function compose(): DockerComposeDiscoveryResult {
         return {
@@ -304,6 +306,13 @@ function createHarness(options: HarnessOptions = {}) {
         generateId: eventIds(),
         git,
         nowMs: () => 2000,
+        reconcileStack() {
+            reconcileCalls += 1;
+            if (options.reconcileFails && reconcileCalls === 1) {
+                return Promise.reject(new Error("raw reconcile diagnostic"));
+            }
+            return Promise.resolve();
+        },
         scan: {
             lookup({ image }) {
                 if (options.registryFailure) {
@@ -330,6 +339,7 @@ function createHarness(options: HarnessOptions = {}) {
         gitHeadRequests,
         gitRequests,
         order,
+        reconcileCalls: () => reconcileCalls,
         updateCommands,
         updater,
     };
@@ -354,6 +364,7 @@ describe("Docker updater service", () => {
             outcome: "completed",
             updatedCount: 2,
         });
+        expect(harness.reconcileCalls()).toBe(1);
         expect(harness.order).toEqual([
             "git-head",
             "git-sync:0",
@@ -394,6 +405,26 @@ describe("Docker updater service", () => {
         ).toHaveLength(2);
         expect(JSON.stringify(result)).not.toContain(composePath);
         expect(JSON.stringify(result)).not.toContain("provider diagnostic");
+    });
+
+    test("restores the prior sources and reconciles again when the full stack is unhealthy", async () => {
+        const harness = createHarness({ reconcileFails: true, serviceCount: 1 });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 1,
+            git: { status: "no-change" },
+            outcome: "completed-with-failures",
+            updatedCount: 0,
+        });
+        expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.order).toContain("rollback:one");
+        expect(eventKinds(result)).toContain("update-failed");
     });
 
     test("updates only the exact user-confirmed service image pair", async () => {

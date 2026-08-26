@@ -15,7 +15,9 @@ import {
     type DockerComposeCommandRunner,
     DockerComposeImageUpdateError,
     type DockerComposeImageUpdateResult,
+    type DockerComposeStackReconciler,
     type DockerImageReferenceRestorer,
+    reconcileDockerComposeStack,
     updateDockerComposeImage,
 } from "./composeImageUpdate.ts";
 import type {
@@ -85,6 +87,7 @@ export interface DockerUpdaterServiceOptions {
     readonly git: DockerUpdaterGitSync;
     readonly nowMs?: () => number;
     readonly restoreImageReference?: DockerImageReferenceRestorer;
+    readonly reconcileStack?: DockerComposeStackReconciler;
     readonly scan?: DockerUpdaterScanOptions;
     readonly updateImage?: typeof updateDockerComposeImage;
 }
@@ -362,6 +365,9 @@ export function createDockerUpdaterService(
     const nowMs = options.nowMs ?? Date.now;
     const restoreImageReference =
         options.restoreImageReference ?? defaultImageReferenceRestorer;
+    const reconcileStack =
+        options.reconcileStack ??
+        ((signal) => reconcileDockerComposeStack(composeRunner, signal));
     const updateImage = options.updateImage ?? updateDockerComposeImage;
     const scanOptions = Object.freeze({
         ...options.scan,
@@ -709,6 +715,78 @@ export function createDockerUpdaterService(
                         summary: `Update failed for ${selectedService.project}/${selectedService.service}; the prior source was retained.`,
                     })
                 );
+            }
+        }
+
+        if (applied.length > 0) {
+            try {
+                await reconcileStack(signal);
+                discovery = await options.collector.discover(payload, signal);
+                payload = discovery.payload;
+            } catch {
+                let recovered = true;
+                for (const update of applied.toReversed()) {
+                    recovered = (await update.result.rollback()) && recovered;
+                }
+                if (recovered) {
+                    try {
+                        await reconcileStack(signal);
+                        const restored = await options.collector.discover(
+                            preMutationPayload,
+                            signal
+                        );
+                        for (const { selectedService, source } of plannedSources) {
+                            const restoredSource = exactService(
+                                restored.compose.services,
+                                selectedService.project,
+                                selectedService.service
+                            );
+                            if (
+                                restoredSource.composePath !== source.composePath ||
+                                restoredSource.contentSha256 !== source.contentSha256 ||
+                                restoredSource.imageReference !== source.imageReference
+                            ) {
+                                fail();
+                            }
+                        }
+                        payload = restored.payload;
+                    } catch {
+                        recovered = false;
+                    }
+                }
+                if (!recovered) {
+                    return unknownMutationResult({
+                        addedEvents,
+                        affectedServices: successful,
+                        confirmedCurrentIds: new Set(),
+                        failedCount,
+                        generateId,
+                        nowMs,
+                        payload,
+                        updatedCount: 0,
+                    });
+                }
+                const reconcileEvents = successful.map((service) =>
+                    event(generateId, nowMs, {
+                        kind: "update-failed",
+                        serviceId: service.id,
+                        summary: `Update failed for ${service.project}/${service.service}; full stack reconciliation failed and the prior state was restored.`,
+                    })
+                );
+                payload = v.parse(dockerOverviewCachePayloadSchema, {
+                    ...payload,
+                    updaterEvents: events(payload.updaterEvents, [
+                        ...addedEvents,
+                        ...reconcileEvents,
+                    ]),
+                });
+                return Object.freeze({
+                    failedCount: failedCount + successful.length,
+                    git: Object.freeze({ status: "no-change" as const }),
+                    outcome: "completed-with-failures" as const,
+                    payload,
+                    updatedCount: 0,
+                });
             }
         }
 

@@ -61,9 +61,10 @@ export function DockerUpdaterPanel({
     onUpdateService,
     services,
 }: DockerUpdaterPanelProps) {
-    const updateCount = services.filter(
+    const updateServices = services.filter(
         ({ status }) => status.state === "update-available"
-    ).length;
+    );
+    const updateCount = updateServices.length;
     const unavailableCount = services.filter(
         ({ status }) => status.state === "unavailable"
     ).length;
@@ -189,13 +190,13 @@ export function DockerUpdaterPanel({
                             Services
                         </Heading>
                     </div>
-                    {services.length === 0 ? (
+                    {updateServices.length === 0 ? (
                         <Text className="mt-3" tone="muted">
-                            No Compose updater services were discovered.
+                            No services currently have updates available.
                         </Text>
                     ) : (
                         <div className="mt-3 space-y-3">
-                            {services.map((service) => {
+                            {updateServices.map((service) => {
                                 const canUpdate =
                                     service.policy.state === "managed" &&
                                     service.status.state === "update-available";
