@@ -17,7 +17,7 @@ const record = {
     lastSuccessAt: new Date(1000),
     metadataJson: "{}",
     payloadJson: '{"databases":[]}',
-    schemaId: "database.observability.v1",
+    schemaId: "database.observability.v3",
     source: "postgresql.pgbouncer",
     updatedAt: new Date(2000),
 } as const satisfies CacheEntryRecord;
@@ -39,7 +39,7 @@ describe("database observability snapshot repository", () => {
             lastAttemptStatus: "failed",
             lastSuccessAtMs: 1000,
             payload: { databases: [] },
-            schemaId: "database.observability.v1",
+            schemaId: "database.observability.v3",
             source: "postgresql.pgbouncer",
         });
         expect(keys).toEqual(["database.observability"]);
