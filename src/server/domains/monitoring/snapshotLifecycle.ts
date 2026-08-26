@@ -3,7 +3,7 @@ import type {
     NormalizedMonitoringSnapshot,
 } from "./normalization.ts";
 import {
-    insertIncidentNotification,
+    insertMonitoringReportNotification,
     insertRealtimeEvent,
     monitoringRealtimeTopics,
     type MutableSubmissionCounts,
@@ -35,6 +35,7 @@ export function applyMonitoringSnapshotLifecycle(input: {
     expiresAt: Date;
     generateId: () => string;
     outboxOccurredAt: Date;
+    reportId: string;
     snapshot: NormalizedMonitoringSnapshot;
     snapshotOccurredAt: Date;
     unit: MonitoringUnitOfWork;
@@ -47,6 +48,7 @@ export function applyMonitoringSnapshotLifecycle(input: {
         lifecycleIncidents.map((incident) => [incident.fingerprint, incident])
     );
     const observedFingerprints = new Set<string>();
+    const notificationProblems: NormalizedMonitoringProblem[] = [];
 
     for (const problem of input.snapshot.problems) {
         observedFingerprints.add(problem.fingerprint);
@@ -112,20 +114,22 @@ export function applyMonitoringSnapshotLifecycle(input: {
         });
 
         if (existingIncident === undefined || existingIncident.state === "resolved") {
-            insertIncidentNotification({
-                counts: input.counts,
-                expiresAt: input.expiresAt,
-                generateId: input.generateId,
-                incident,
-                occurredAt: input.snapshotOccurredAt,
-                outboxOccurredAt: input.outboxOccurredAt,
-                problem,
-                reportTitle: input.snapshot.report.title,
-                source: input.snapshot.report.source,
-                unit: input.unit,
-            });
+            notificationProblems.push(problem);
         }
     }
+
+    insertMonitoringReportNotification({
+        counts: input.counts,
+        expiresAt: input.expiresAt,
+        generateId: input.generateId,
+        occurredAt: input.snapshotOccurredAt,
+        outboxOccurredAt: input.outboxOccurredAt,
+        problems: notificationProblems,
+        reportId: input.reportId,
+        reportTitle: input.snapshot.report.title,
+        source: input.snapshot.report.source,
+        unit: input.unit,
+    });
 
     for (const incident of lifecycleIncidents) {
         if (

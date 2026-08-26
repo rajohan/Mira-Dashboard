@@ -6,11 +6,7 @@ import {
     monitoringRealtimeTopics,
 } from "../../../contracts/monitoringRealtime.ts";
 import type { NormalizedMonitoringProblem } from "./normalization.ts";
-import type {
-    IncidentRecord,
-    MonitoringUnitOfWork,
-    RealtimeEventInsert,
-} from "./repository.ts";
+import type { MonitoringUnitOfWork, RealtimeEventInsert } from "./repository.ts";
 import { serializeMonitoringJsonObject } from "./serialization.ts";
 
 const monitoringNotificationKind = "monitoring.incident";
@@ -23,10 +19,6 @@ export interface MutableSubmissionCounts {
     reopenedIncidents: number;
     resolvedIncidents: number;
     realtimeEvents: number;
-}
-
-function incidentLink(incidentId: string): string {
-    return `/incidents?incidentId=${encodeURIComponent(incidentId)}`;
 }
 
 function createRealtimeEvent(input: {
@@ -81,29 +73,34 @@ export function insertRealtimeEvent(
     counts.realtimeEvents += 1;
 }
 
-export function insertIncidentNotification(input: {
+export function insertMonitoringReportNotification(input: {
     counts: MutableSubmissionCounts;
     expiresAt: Date;
     generateId: () => string;
-    incident: IncidentRecord;
     occurredAt: Date;
     outboxOccurredAt: Date;
-    problem: NormalizedMonitoringProblem;
+    problems: readonly NormalizedMonitoringProblem[];
+    reportId: string;
     reportTitle: string;
     source: string;
     unit: MonitoringUnitOfWork;
 }): void {
+    if (input.problems.length === 0) return;
+    const severityOrder = { critical: 4, error: 3, warning: 2, info: 1 } as const;
+    const severity = input.problems.toSorted(
+        (left, right) => severityOrder[right.severity] - severityOrder[left.severity]
+    )[0]!.severity;
     const notification = input.unit.insertNotification({
         channel: "dashboard",
         id: input.generateId(),
-        incidentGeneration: input.incident.generation,
-        incidentId: input.incident.id,
+        incidentGeneration: null,
+        incidentId: null,
         kind: monitoringNotificationKind,
-        linkUrl: incidentLink(input.incident.id),
-        message: input.problem.title,
+        linkUrl: `/reports?reportId=${encodeURIComponent(input.reportId)}`,
+        message: `${input.problems.length} ${input.problems.length === 1 ? "problem" : "problems"} detected.`,
         occurredAt: input.occurredAt,
-        reportId: null,
-        severity: input.problem.severity,
+        reportId: input.reportId,
+        severity,
         source: input.source,
         title: input.reportTitle,
     });

@@ -124,6 +124,7 @@ import {
 } from "../worker/files/descriptorWorkspaceFileStructuralWriter.ts";
 import { resolveReviewedWorkerOpenClawFileRoot } from "../worker/files/openClawFileRootConfiguration.ts";
 import { resolveReviewedWorkerWorkspaceFileRoot } from "../worker/files/workspaceFileRootConfiguration.ts";
+import { createWorkspaceGitSync } from "../worker/git/workspaceSync.ts";
 import {
     createFixedSystemLogrotateBroker,
     type FixedSystemLogrotateBroker,
@@ -926,6 +927,7 @@ export async function runDashboardWorkerProcess(
                     ],
                     signal
                 ),
+            syncWorkspace: createWorkspaceGitSync(configuration.workspaceRoot),
             quota: async (signal?: AbortSignal) =>
                 collectQuotaPayload(quotaCredentials, signal, {
                     codex: await resolveCodexQuotaCollectorOptions(

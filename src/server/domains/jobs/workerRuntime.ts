@@ -68,6 +68,7 @@ import {
     hostSystemRestartJobActionDefinition,
     hostSystemUpdateJobActionDefinition,
     hostWorkerRestartJobActionDefinition,
+    gitWorkspaceSyncJobActionKey,
     openClawGatewayRestartJobActionDefinition,
     openClawInstallationUpdateJobActionDefinition,
     openClawSessionsCleanupJobActionDefinition,
@@ -619,6 +620,11 @@ export function createDashboardWorkerRuntime(
                         !overviewProviderJobActionKeys.some(
                             (providerActionKey) => providerActionKey === actionKey
                         )
+                );
+            }
+            if (options.overviewProviders?.syncWorkspace === undefined) {
+                baseActionDefinitions = baseActionDefinitions.filter(
+                    ({ actionKey }) => actionKey !== gitWorkspaceSyncJobActionKey
                 );
             }
             const optionalActionDefinitions: JobExecutableActionDefinition[] = [];

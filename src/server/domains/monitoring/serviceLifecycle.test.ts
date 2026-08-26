@@ -148,7 +148,7 @@ describe("monitoring service", () => {
                 )
             ).toMatchObject({
                 observedIncidents: 0,
-                realtimeEvents: 3,
+                realtimeEvents: 2,
                 resolvedIncidents: 1,
             });
 
@@ -188,7 +188,6 @@ describe("monitoring service", () => {
                 database.orm
                     .select()
                     .from(notifications)
-                    .where(eq(notifications.incidentId, filesystemIncident.id))
                     .all()
                     .map((notification) => ({
                         generation: notification.incidentGeneration,
@@ -199,18 +198,25 @@ describe("monitoring service", () => {
                     }))
             ).toEqual([
                 {
-                    generation: 1,
-                    incidentId: filesystemIncident.id,
-                    linkUrl: `/incidents?incidentId=${filesystemIncident.id}`,
+                    generation: null,
+                    incidentId: null,
+                    linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
                     readAt: manuallyReadAt,
-                    reportId: null,
+                    reportId: expect.any(String),
                 },
                 {
-                    generation: 2,
-                    incidentId: filesystemIncident.id,
-                    linkUrl: `/incidents?incidentId=${filesystemIncident.id}`,
+                    generation: null,
+                    incidentId: null,
+                    linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
                     readAt: null,
-                    reportId: null,
+                    reportId: expect.any(String),
+                },
+                {
+                    generation: null,
+                    incidentId: null,
+                    linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
+                    readAt: null,
+                    reportId: expect.any(String),
                 },
             ]);
 
@@ -219,7 +225,7 @@ describe("monitoring service", () => {
                 monitorRuns: 6,
                 notifications: 3,
                 observations: 6,
-                realtimeEvents: 18,
+                realtimeEvents: 17,
                 reports: 6,
             });
             expect(wakeups).toBe(6);
@@ -269,6 +275,33 @@ describe("monitoring service", () => {
             );
             expect(new Set(rows.map((row) => row.fingerprint)).size).toBe(1);
             expect(database.orm.select().from(notifications).all()).toHaveLength(2);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("creates one report notification for multiple new problems in one run", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = serviceFor(database);
+
+        try {
+            const result = await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 2000,
+                    problems: [problem("filesystem"), problem("backup")],
+                    run: 301,
+                })
+            );
+
+            const rows = database.orm.select().from(notifications).all();
+            expect(rows).toHaveLength(1);
+            expect(rows[0]).toMatchObject({
+                incidentGeneration: null,
+                incidentId: null,
+                message: "2 problems detected.",
+                reportId: result.reportId,
+            });
         } finally {
             database.sqlite.close(true);
         }

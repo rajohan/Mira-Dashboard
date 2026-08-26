@@ -272,6 +272,7 @@ export function createMonitoringService(
                     expiresAt,
                     generateId,
                     outboxOccurredAt,
+                    reportId,
                     snapshot: normalized.snapshot,
                     snapshotOccurredAt,
                     unit,
