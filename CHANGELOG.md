@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.5...v0.3.6) (2026-08-26)
+
+
+### Bug Fixes
+
+* **operations:** restore production dashboard sources ([#466](https://github.com/rajohan/Mira-Dashboard/issues/466)) ([d54bc0b](https://github.com/rajohan/Mira-Dashboard/commit/d54bc0b97c593ab60e9f1982027cb2ac732180c5))
+
 ## [0.3.5](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.4...v0.3.5) (2026-08-25)
 
 
