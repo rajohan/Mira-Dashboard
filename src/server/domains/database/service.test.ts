@@ -74,7 +74,7 @@ const externalPayload = {
         idleConnections: 1,
         maintenance: {
             assessedPhysicalBytes: 0,
-            assessmentComplete: false,
+            assessmentComplete: true,
             estimatedReclaimableBytes: 0,
             estimatedReclaimablePercent: 0,
             highDeadTupleTableCount: 0,

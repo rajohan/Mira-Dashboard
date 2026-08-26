@@ -95,7 +95,7 @@ function postgresqlMaintenanceAttention(
             warning: false,
         });
     }
-    if (maintenance.unassessedTableCount > 0) {
+    if (!maintenance.assessmentComplete && maintenance.unassessedTableCount > 0) {
         messages.push({
             message: `${formatCount(maintenance.unassessedTableCount)} PostgreSQL table${maintenance.unassessedTableCount === 1 ? "" : "s"} (${formatByteCount(maintenance.unassessedPhysicalBytes)}) could not be assessed for reclaimable space.`,
             warning: false,
@@ -119,7 +119,10 @@ function MaintenanceSummary({
     const maintenance = observation.summary.maintenance;
     const rows = [
         ["Status", maintenanceStatusBadge(maintenance.status)],
-        ["Bloat assessment", maintenance.assessmentComplete ? "Complete" : "Incomplete"],
+        [
+            "Material bloat assessment",
+            maintenance.assessmentComplete ? "Complete" : "Incomplete",
+        ],
         [
             "Estimated reclaimable",
             `${formatByteCount(maintenance.estimatedReclaimableBytes)} · ${formatPercent(maintenance.estimatedReclaimablePercent)}`,

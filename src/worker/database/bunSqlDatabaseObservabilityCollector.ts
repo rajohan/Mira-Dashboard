@@ -13,6 +13,8 @@ import {
     databaseObservabilityHighDeadTupleMinimumBytes,
     databaseObservabilityHighDeadTuplePercent,
     databaseObservabilitySlowStatementMeanMs,
+    databaseObservabilitySlowStatementMinimumCalls,
+    databaseObservabilityUnassessedReviewBytes,
     databaseObservabilityStatementMaximum,
     databaseObservabilityTableHealthMaximum,
 } from "../../contracts/database.ts";
@@ -2026,6 +2028,7 @@ export function createBunSqlDatabaseObservabilityCollector(
                 const { perDatabase: _perDatabase, ...pgBouncerSummary } = pgBouncer;
                 const slowStatementCount = statements.filter(
                     (row) =>
+                        row.calls >= databaseObservabilitySlowStatementMinimumCalls &&
                         row.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
                 ).length;
                 const estimatedReclaimablePercent =
@@ -2044,7 +2047,8 @@ export function createBunSqlDatabaseObservabilityCollector(
                 const unavailableDatabaseCount =
                     databases.length - availableDatabaseNames.size;
                 const assessmentComplete =
-                    maintenance.unassessedTableCount === 0 &&
+                    maintenance.unassessedPhysicalBytes <
+                        databaseObservabilityUnassessedReviewBytes &&
                     unavailableDatabaseCount === 0;
                 const requiresMaintenanceReview =
                     requiresBloatReview ||

@@ -328,7 +328,7 @@ describe("Bun SQL database observability collector", () => {
             statements: [{ rank: 1 }],
             summary: {
                 maintenance: {
-                    assessmentComplete: false,
+                    assessmentComplete: true,
                     assessedPhysicalBytes: 64 * 1024 * 1024,
                     estimatedReclaimableBytes: 10 * 1024 * 1024,
                     estimatedReclaimablePercent: 15.625,
@@ -952,6 +952,46 @@ describe("Bun SQL database observability collector", () => {
         expect(policyQuery).toContain('AS "hasRoutineGrantAuthority"');
         expect(policyQuery).toContain("'pg_read_all_stats'");
         expect(factory.events).toContain(`values:mira_dashboard_observability:[20]`);
+    });
+
+    test("reviews only recurring statements above the material latency threshold", async () => {
+        const factory = fixtureFactory({
+            rows(database, sql) {
+                if (
+                    sql.includes(
+                        "FROM mira_dashboard_observability_capabilities.statement_metrics()"
+                    )
+                ) {
+                    return [
+                        {
+                            calls: 25,
+                            mean_execution_ms: 1000,
+                            rows: 25,
+                            shared_blocks_hit: 250,
+                            shared_blocks_read: 25,
+                            total_execution_ms: 25_000,
+                        },
+                        {
+                            calls: 24,
+                            mean_execution_ms: 2000,
+                            rows: 24,
+                            shared_blocks_hit: 240,
+                            shared_blocks_read: 24,
+                            total_execution_ms: 24_000,
+                        },
+                    ];
+                }
+                return fixtureRows(database, sql);
+            },
+        });
+
+        const payload = await createBunSqlDatabaseObservabilityCollector({
+            connectionResolver,
+            sqlClientFactory: factory,
+        }).collect();
+
+        expect(payload.summary.maintenance.slowStatementCount).toBe(1);
+        expect(payload.summary.maintenance.status).toBe("review");
     });
 
     test("rejects a control database outside the fixed capability alias", () => {

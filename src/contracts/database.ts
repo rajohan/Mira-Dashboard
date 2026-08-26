@@ -51,9 +51,14 @@ export const databaseObservabilityHighDeadTupleMinimum = 1000;
 export const databaseObservabilityHighDeadTupleMinimumBytes = 64 * 1024 * 1024;
 /** Minimum dead-tuple share for one table to count as high-dead. */
 export const databaseObservabilityHighDeadTuplePercent = 20;
-/** Mean execution time at which one ranked statement counts as slow. */
-export const databaseObservabilitySlowStatementMeanMs = 500;
+/** Minimum recurring executions required before one statement can require review. */
+export const databaseObservabilitySlowStatementMinimumCalls = 25;
+/** Mean execution time at which one recurring statement requires review. */
+export const databaseObservabilitySlowStatementMeanMs = 1000;
+/** Unassessed table bytes that make the material bloat assessment incomplete. */
+export const databaseObservabilityUnassessedReviewBytes = 64 * 1024 * 1024;
 const databaseObservabilityLegacyV1DatabaseMaximum = 16;
+const databaseObservabilityLegacyV1SlowStatementMeanMs = 500;
 /** Maximum immutable SQLite maintenance snapshots retained and projected. */
 export const sqliteMaintenanceBackupMaximum = 14;
 export const sqliteBackupInventoryMaximum = 32;
@@ -781,6 +786,29 @@ function expectedBloatReview(
     );
 }
 
+function statementRequiresReview(
+    statement: DatabaseObservabilityCachePayloadLike["statements"][number]
+): boolean {
+    return (
+        statement.calls >= databaseObservabilitySlowStatementMinimumCalls &&
+        statement.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
+    );
+}
+
+function legacyV1StatementRequiresReview(
+    statement: DatabaseObservabilityCachePayloadLike["statements"][number]
+): boolean {
+    return statement.meanExecutionMs >= databaseObservabilityLegacyV1SlowStatementMeanMs;
+}
+
+function materialTableAssessmentIsComplete(
+    maintenance: DatabaseObservabilityCachePayloadLike["summary"]["maintenance"]
+): boolean {
+    return (
+        maintenance.unassessedPhysicalBytes < databaseObservabilityUnassessedReviewBytes
+    );
+}
+
 function safeCountTotal(values: readonly number[]): number | undefined {
     let total = 0;
     for (const value of values) {
@@ -810,7 +838,7 @@ function databaseObservabilityLegacyV1CachePayloadIsConsistent(
     );
     const maintenance = payload.summary.maintenance;
     const visibleSlowStatementCount = payload.statements.filter(
-        (row) => row.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
+        legacyV1StatementRequiresReview
     ).length;
     const expectedReclaimablePercent =
         maintenance.assessedPhysicalBytes === 0
@@ -883,7 +911,7 @@ export function databaseObservabilityCachePayloadIsConsistent(
     );
     const maintenance = payload.summary.maintenance;
     const visibleSlowStatementCount = payload.statements.filter(
-        (row) => row.meanExecutionMs >= databaseObservabilitySlowStatementMeanMs
+        statementRequiresReview
     ).length;
     const expectedReclaimablePercent =
         maintenance.assessedPhysicalBytes === 0
@@ -937,7 +965,7 @@ export function databaseObservabilityCachePayloadIsConsistent(
             payload.databases.filter(({ detailsState }) => detailsState === "unavailable")
                 .length &&
         maintenance.assessmentComplete ===
-            (maintenance.unassessedTableCount === 0 &&
+            (materialTableAssessmentIsComplete(maintenance) &&
                 payload.summary.unavailableDatabaseCount === 0) &&
         maintenance.estimatedReclaimableBytes <= maintenance.assessedPhysicalBytes &&
         maintenance.estimatedReclaimablePercent === expectedReclaimablePercent &&

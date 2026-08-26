@@ -141,7 +141,7 @@ const maintenanceOverview = {
         statements: [
             {
                 calls: 640,
-                meanExecutionMs: 508.25,
+                meanExecutionMs: 1008.25,
                 rank: 1,
                 rows: 1280,
                 sharedBlocksHit: 9100,

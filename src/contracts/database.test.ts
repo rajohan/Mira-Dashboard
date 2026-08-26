@@ -151,6 +151,83 @@ describe("database overview contract", () => {
         );
     });
 
+    test("reviews only recurring materially slow statements", () => {
+        const statement = externalPayload.statements[0];
+        const occasionalSlowPayload = {
+            ...externalPayload,
+            statements: [
+                {
+                    ...statement,
+                    calls: 24,
+                    meanExecutionMs: 2000,
+                    totalExecutionMs: 48_000,
+                },
+            ],
+        };
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, occasionalSlowPayload)
+                .success
+        ).toBe(true);
+
+        const recurringSlowPayload = {
+            ...occasionalSlowPayload,
+            statements: [
+                {
+                    ...occasionalSlowPayload.statements[0],
+                    calls: 25,
+                    meanExecutionMs: 1000,
+                },
+            ],
+            summary: {
+                ...occasionalSlowPayload.summary,
+                maintenance: {
+                    ...occasionalSlowPayload.summary.maintenance,
+                    slowStatementCount: 1,
+                    status: "review" as const,
+                },
+            },
+        };
+        expect(
+            v.safeParse(databaseObservabilityCachePayloadSchema, recurringSlowPayload)
+                .success
+        ).toBe(true);
+    });
+
+    test("keeps immaterial unassessed table space healthy and visible", () => {
+        const immaterialUnassessedPayload = {
+            ...externalPayload,
+            summary: {
+                ...externalPayload.summary,
+                maintenance: {
+                    ...externalPayload.summary.maintenance,
+                    assessedPhysicalBytes: 0,
+                    unassessedPhysicalBytes: 4096,
+                    unassessedTableCount: 1,
+                },
+            },
+            tableHealth: [
+                {
+                    assessment: "unavailable" as const,
+                    database: "bitmagnet",
+                    deadTuplePercent: 0,
+                    deadTuples: 0,
+                    lastAutoanalyzeAtMs: 900,
+                    lastAutovacuumAtMs: 800,
+                    liveTuples: 100,
+                    physicalBytes: 4096,
+                    schema: "public",
+                    table: "torrents",
+                },
+            ],
+        };
+        expect(
+            v.safeParse(
+                databaseObservabilityCachePayloadSchema,
+                immaterialUnassessedPayload
+            ).success
+        ).toBe(true);
+    });
+
     test("cross-links restore verification to one exact retained inventory row", () => {
         const verifiedLifecycle = {
             backupInventory: {
