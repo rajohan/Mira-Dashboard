@@ -147,7 +147,7 @@ describe("Docker overview collector", () => {
                 collect: () => Promise.reject(new Error("private engine diagnostic")),
             },
         });
-        await expect(engineFailure.collect()).rejects.toMatchObject({
+        expect(engineFailure.collect()).rejects.toMatchObject({
             message: "Docker overview discovery failed",
             stage: "engine-inventory",
         } satisfies Partial<DockerOverviewDiscoveryError>);
@@ -158,7 +158,7 @@ describe("Docker overview collector", () => {
             },
             engine: { collect: () => Promise.resolve(engineSnapshot()) },
         });
-        await expect(composeFailure.collect()).rejects.toMatchObject({
+        expect(composeFailure.collect()).rejects.toMatchObject({
             message: "Docker overview discovery failed",
             stage: "compose-discovery",
         } satisfies Partial<DockerOverviewDiscoveryError>);
@@ -168,7 +168,7 @@ describe("Docker overview collector", () => {
             engine: { collect: () => Promise.resolve(engineSnapshot()) },
             nowMs: () => Number.NaN,
         });
-        await expect(projectionFailure.collect()).rejects.toMatchObject({
+        expect(projectionFailure.collect()).rejects.toMatchObject({
             message: "Docker overview discovery failed",
             stage: "overview-projection",
         } satisfies Partial<DockerOverviewDiscoveryError>);
