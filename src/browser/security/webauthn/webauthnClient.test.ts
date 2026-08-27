@@ -10,6 +10,7 @@ import type {
 } from "../../../contracts/webauthn.ts";
 import {
     createDashboardWebAuthnClient,
+    createSimpleWebAuthnCeremonyPort,
     type DashboardWebAuthnCeremonyPort,
 } from "./webauthnClient.ts";
 
@@ -73,6 +74,31 @@ const registrationResponse = {
 } satisfies WebAuthnRegistrationResponse;
 
 describe("Dashboard WebAuthn client", () => {
+    test("adapts eagerly loaded SimpleWebAuthn ceremonies without a click-time import", async () => {
+        const calls: unknown[] = [];
+        const ceremonies = createSimpleWebAuthnCeremonyPort({
+            startAuthentication: (input) => {
+                calls.push(input);
+                return Promise.resolve(authenticationResponse);
+            },
+            startRegistration: (input) => {
+                calls.push(input);
+                return Promise.resolve(registrationResponse);
+            },
+        });
+
+        expect(await ceremonies.beginAuthentication(authenticationOptions)).toEqual(
+            authenticationResponse
+        );
+        expect(await ceremonies.beginRegistration(registrationOptions)).toEqual(
+            registrationResponse
+        );
+        expect(calls).toEqual([
+            { optionsJSON: authenticationOptions },
+            { optionsJSON: registrationOptions },
+        ]);
+    });
+
     test("passes exact options to the browser port and validates both responses", async () => {
         const calls: unknown[] = [];
         const ceremonies: DashboardWebAuthnCeremonyPort = Object.freeze({

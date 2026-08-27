@@ -1,3 +1,4 @@
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import * as v from "valibot";
 
 import {
@@ -23,16 +24,32 @@ export interface DashboardWebAuthnCeremonyPort {
     beginRegistration(options: WebAuthnRegistrationOptions): Promise<unknown>;
 }
 
-const simpleWebAuthnCeremonyPort: DashboardWebAuthnCeremonyPort = Object.freeze({
-    async beginAuthentication(options: WebAuthnAuthenticationOptions) {
-        const { startAuthentication } = await import("@simplewebauthn/browser");
-        return startAuthentication({ optionsJSON: options });
-    },
-    async beginRegistration(options: WebAuthnRegistrationOptions) {
-        const { startRegistration } = await import("@simplewebauthn/browser");
-        return startRegistration({ optionsJSON: options });
-    },
-});
+interface SimpleWebAuthnCeremonies {
+    readonly startAuthentication: (input: {
+        readonly optionsJSON: WebAuthnAuthenticationOptions;
+    }) => Promise<unknown>;
+    readonly startRegistration: (input: {
+        readonly optionsJSON: WebAuthnRegistrationOptions;
+    }) => Promise<unknown>;
+}
+
+/**
+ * Creates the eagerly loaded SimpleWebAuthn ceremony adapter.
+ * @returns Browser ceremony port without a click-time module import.
+ */
+export function createSimpleWebAuthnCeremonyPort(
+    ceremonies?: SimpleWebAuthnCeremonies
+): DashboardWebAuthnCeremonyPort {
+    const selected = ceremonies ?? { startAuthentication, startRegistration };
+    return Object.freeze({
+        beginAuthentication: (options: WebAuthnAuthenticationOptions) =>
+            selected.startAuthentication({ optionsJSON: options }),
+        beginRegistration: (options: WebAuthnRegistrationOptions) =>
+            selected.startRegistration({ optionsJSON: options }),
+    });
+}
+
+const simpleWebAuthnCeremonyPort = createSimpleWebAuthnCeremonyPort();
 
 /**
  * Creates the browser-owned WebAuthn adapter.
