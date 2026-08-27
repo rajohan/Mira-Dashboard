@@ -32,6 +32,30 @@ export const documentationReferenceSchema = v.pipe(
 );
 export type DocumentationReference = v.InferOutput<typeof documentationReferenceSchema>;
 
+const openClawVersionSchema = v.pipe(
+    v.string(),
+    v.minLength(1),
+    v.maxLength(128),
+    v.regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u)
+);
+
+/** Sanitized OpenClaw installation/update projection. */
+export const openClawUpdateStatusSchema = v.variant("state", [
+    v.strictObject({ state: v.literal("unavailable") }),
+    v.strictObject({
+        available: v.boolean(),
+        channel: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
+        installedVersion: openClawVersionSchema,
+        latestVersion: openClawVersionSchema,
+        state: v.literal("observed"),
+    }),
+]);
+export type OpenClawUpdateStatus = v.InferOutput<typeof openClawUpdateStatusSchema>;
+export const openClawUpdateCacheKey = "system.openclaw";
+export const openClawUpdateCacheSchemaId = "system.openclaw.v1";
+export const openClawUpdateCacheSource = "openclaw.cli";
+export const openClawUpdateCacheTtlMs = 15 * 60_000;
+
 const systemMetricByteCountSchema = v.pipe(v.number(), v.safeInteger(), v.minValue(0));
 const systemMetricPercentSchema = v.pipe(v.number(), v.minValue(0), v.maxValue(100));
 const systemMetricLoadSchema = v.pipe(v.number(), v.minValue(0), v.maxValue(100_000));

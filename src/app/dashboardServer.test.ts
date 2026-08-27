@@ -1943,6 +1943,7 @@ describe("Dashboard security composition", () => {
                 "cache.moltbook-dashboard",
                 "cache.quotas",
                 "cache.system-host",
+                "cache.system-openclaw",
                 "cache.weather",
                 "database.sqlite-maintenance",
                 "docker.updater",

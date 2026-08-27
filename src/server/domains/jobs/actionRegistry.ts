@@ -36,6 +36,10 @@ import {
 } from "../../../contracts/jobModel.ts";
 import { quotaCacheKey } from "../../../contracts/quota.ts";
 import type { ApplicationCapability } from "../../../contracts/security.ts";
+import {
+    openClawUpdateCacheKey,
+    openClawUpdateCacheTtlMs,
+} from "../../../contracts/system.ts";
 import { weatherCacheKey } from "../../../contracts/weather.ts";
 import { utf8ByteLength } from "../../../shared/encoding.ts";
 import type { JsonObject } from "../../../shared/json.ts";
@@ -109,9 +113,12 @@ export const quotaCacheJobScheduleId = "cache.quotas";
 export const weatherCacheJobActionKey = "cache.refresh.weather";
 /** Durable fixed-location weather refresh schedule. */
 export const weatherCacheJobScheduleId = "cache.weather";
+export const openClawUpdateCacheJobActionKey = "cache.refresh.system-openclaw";
+export const openClawUpdateCacheJobScheduleId = "cache.system-openclaw";
 /** Scheduled action identities requiring the bounded overview provider collectors. */
 export const overviewProviderJobActionKeys = Object.freeze([
     gitWorkspaceCacheJobActionKey,
+    openClawUpdateCacheJobActionKey,
     quotaCacheJobActionKey,
     weatherCacheJobActionKey,
 ]);
@@ -522,6 +529,28 @@ const systemHostCacheDefinition = validateJobActionDefinition({
     resourceKeys: Object.freeze(["cache.system.host"]),
     retrySafe: true,
     scheduleId: "cache.system-host",
+    timeoutMs: 30_000,
+});
+
+export const openClawUpdateCacheJobActionDefinition = validateJobActionDefinition({
+    actionKey: openClawUpdateCacheJobActionKey,
+    actionPayload: Object.freeze({ key: openClawUpdateCacheKey }),
+    attemptLimit: 3,
+    cancellationPolicy: "cooperative",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        intervalMs: openClawUpdateCacheTtlMs,
+        kind: "interval",
+    }),
+    description: "Projects installed and available OpenClaw versions.",
+    displayName: "OpenClaw update status",
+    initialDue: "immediate",
+    manualExposure: "cache-internal",
+    priority: 0,
+    resourceClass: "light",
+    resourceKeys: Object.freeze(["cache.system.openclaw"]),
+    retrySafe: true,
+    scheduleId: openClawUpdateCacheJobScheduleId,
     timeoutMs: 30_000,
 });
 
@@ -1114,6 +1143,7 @@ export const hostWorkerRestartJobActionDefinition = serviceActionDefinition({
 /** Complete reviewed pure-definition registry for this slice. */
 export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
+    openClawUpdateCacheJobActionDefinition,
     moltbookDashboardCacheDefinition,
     gitWorkspaceCacheJobActionDefinition,
     gitWorkspaceSyncJobActionDefinition,

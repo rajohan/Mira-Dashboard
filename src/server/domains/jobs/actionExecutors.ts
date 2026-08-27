@@ -31,6 +31,13 @@ import {
     type QuotaCachePayload,
 } from "../../../contracts/quota.ts";
 import {
+    type OpenClawUpdateStatus,
+    openClawUpdateCacheKey,
+    openClawUpdateCacheSchemaId,
+    openClawUpdateCacheSource,
+    openClawUpdateCacheTtlMs,
+} from "../../../contracts/system.ts";
+import {
     weatherCacheKey,
     weatherCacheSchemaId,
     weatherCacheSource,
@@ -97,6 +104,7 @@ import {
     hostWorkerRestartJobActionKey,
     gitWorkspaceCacheJobActionKey,
     gitWorkspaceSyncJobActionKey,
+    openClawUpdateCacheJobActionKey,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
     openClawGatewayRestartJobActionDefinition,
@@ -391,6 +399,7 @@ export interface DatabaseObservabilityExecutorDependencies {
 
 export interface OverviewProviderCollectors {
     readonly git: (signal?: AbortSignal) => Promise<GitWorkspaceCachePayload>;
+    readonly openClaw: (signal?: AbortSignal) => Promise<OpenClawUpdateStatus>;
     readonly syncWorkspace?: (signal?: AbortSignal) => Promise<{
         readonly changedFileCount: number;
         readonly commit?: string;
@@ -926,6 +935,27 @@ export function createJobWorkerActionResolver(
                       ttlMs: gitWorkspaceCacheTtlMs,
                       validatePayload: (payload) => {
                           v.parse(gitWorkspaceActionPayloadSchema, payload);
+                      },
+                  })
+        ),
+        ...gatedExecutor(
+            openClawUpdateCacheJobActionKey,
+            dependencies.overviewProviders === undefined
+                ? undefined
+                : createOverviewProviderExecutor({
+                      collect: dependencies.overviewProviders.openClaw,
+                      failureCode: "provider/openclaw-update-unavailable",
+                      failureMessage: "OpenClaw update status could not be collected.",
+                      key: openClawUpdateCacheKey,
+                      metadata: { kind: "openclaw-update" },
+                      schemaId: openClawUpdateCacheSchemaId,
+                      source: openClawUpdateCacheSource,
+                      ttlMs: openClawUpdateCacheTtlMs,
+                      validatePayload: (payload) => {
+                          v.parse(
+                              v.strictObject({ key: v.literal(openClawUpdateCacheKey) }),
+                              payload
+                          );
                       },
                   })
         ),
