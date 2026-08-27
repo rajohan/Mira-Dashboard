@@ -140,7 +140,7 @@ describe("Docker overview collector", () => {
         expect(failure).toHaveProperty("name", "AbortError");
     });
 
-    test("classifies every discovery stage without exposing details", async () => {
+    test("classifies every discovery stage without exposing details", () => {
         const engineFailure = createDockerOverviewCollector({
             discoverCompose: composeResult,
             engine: {
