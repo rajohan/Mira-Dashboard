@@ -18,10 +18,16 @@ import {
     backupWalgRunJobActionDefinition,
     type JobExecutableActionDefinition,
 } from "../jobs/actionRegistry.ts";
-import { preflightManualEnqueue } from "../jobs/manualEnqueue.ts";
+import {
+    preflightManualEnqueue,
+    resolveManualScheduleAssociation,
+} from "../jobs/manualEnqueue.ts";
 import type { JobRunRecord } from "../jobs/records.ts";
 import type { JobRepository } from "../jobs/repository.ts";
-import { createJobMutationSideEffects } from "../jobs/sideEffects.ts";
+import {
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "../jobs/sideEffects.ts";
 import type { BackupOperationActor } from "./operationAudit.ts";
 
 export type BackupOperationQueueErrorReason =
@@ -132,7 +138,10 @@ export function createBackupOperationQueue(dependencies: {
     readonly generateId?: () => string;
     readonly nowMs?: () => number;
     readonly requiredWorkerReleaseId?: string;
-    readonly repository: Pick<JobRepository, "enqueueManualRun" | "findRunByIdempotency">;
+    readonly repository: Pick<
+        JobRepository,
+        "enqueueManualRun" | "findRunByIdempotency" | "findSchedule"
+    >;
     readonly wakeEventPump?: () => Promise<void> | void;
 }): BackupOperationQueue {
     const generateId = dependencies.generateId ?? (() => Bun.randomUUIDv7());
@@ -189,6 +198,22 @@ export function createBackupOperationQueue(dependencies: {
             if (requiredWorkerReleaseId === undefined) {
                 throw new BackupOperationQueueError("unavailable");
             }
+            let scheduleAssociation:
+                | ReturnType<typeof resolveManualScheduleAssociation>
+                | undefined;
+            try {
+                scheduleAssociation =
+                    input.operation === "run"
+                        ? resolveManualScheduleAssociation(
+                              dependencies.repository,
+                              input.type === "kopia"
+                                  ? backupKopiaRunJobActionDefinition
+                                  : backupWalgRunJobActionDefinition
+                          )
+                        : undefined;
+            } catch {
+                throw new BackupOperationQueueError("unavailable");
+            }
             const dispatch = await request.authorizeDispatch();
             request.signal?.throwIfAborted();
             const payload = parseBackupOperationJobPayload(dispatch.payload);
@@ -212,12 +237,27 @@ export function createBackupOperationQueue(dependencies: {
                 targetId: runId,
                 targetType: "job-run",
             });
+            const realtimeEvents =
+                scheduleAssociation === undefined
+                    ? sideEffects.realtimeEvents
+                    : Object.freeze([
+                          ...sideEffects.realtimeEvents,
+                          ...createJobRealtimeSideEffects({
+                              occurredAt: at,
+                              realtime: {
+                                  id: scheduleAssociation.scheduledJobId,
+                                  kind: "schedule",
+                                  operation: "updated",
+                              },
+                          }).realtimeEvents,
+                      ]);
             let authorizationFailure: unknown;
             let enqueued: Awaited<ReturnType<JobRepository["enqueueManualRun"]>>;
             try {
                 enqueued = await dependencies.repository.enqueueManualRun(
                     {
                         ...sideEffects,
+                        realtimeEvents,
                         queuedEvent: {
                             attempt: 0,
                             jobRunId: runId,
@@ -259,8 +299,9 @@ export function createBackupOperationQueue(dependencies: {
                             resultJson: null,
                             retrySafe: definition.retrySafe,
                             scheduledForAt: null,
-                            scheduledJobId: null,
-                            scheduledJobVersion: null,
+                            scheduledJobId: scheduleAssociation?.scheduledJobId ?? null,
+                            scheduledJobVersion:
+                                scheduleAssociation?.scheduledJobVersion ?? null,
                             state: "queued",
                             terminalCode: null,
                             terminalMessage: null,

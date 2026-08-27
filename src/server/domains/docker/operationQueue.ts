@@ -13,10 +13,16 @@ import {
     dockerOperationJobActionDefinition,
     dockerUpdaterJobActionDefinition,
 } from "../jobs/actionRegistry.ts";
-import { preflightManualEnqueue } from "../jobs/manualEnqueue.ts";
+import {
+    preflightManualEnqueue,
+    resolveManualScheduleAssociation,
+} from "../jobs/manualEnqueue.ts";
 import type { JobRunRecord } from "../jobs/records.ts";
 import type { JobRepository } from "../jobs/repository.ts";
-import { createJobMutationSideEffects } from "../jobs/sideEffects.ts";
+import {
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "../jobs/sideEffects.ts";
 import {
     type DockerOperationJobPayload,
     parseDockerOperationJobPayload,
@@ -63,7 +69,10 @@ export interface DockerOperationQueueDependencies {
     readonly generateId?: () => string;
     readonly nowMs?: () => number;
     readonly requiredWorkerReleaseId?: string;
-    readonly repository: Pick<JobRepository, "enqueueManualRun" | "findRunByIdempotency">;
+    readonly repository: Pick<
+        JobRepository,
+        "enqueueManualRun" | "findRunByIdempotency" | "findSchedule"
+    >;
     readonly wakeEventPump?: () => Promise<void> | void;
 }
 
@@ -234,6 +243,19 @@ export function createDockerOperationQueue(
             if (requiredWorkerReleaseId === undefined) {
                 throw new DockerOperationQueueError("unavailable");
             }
+            let scheduleAssociation:
+                | ReturnType<typeof resolveManualScheduleAssociation>
+                | undefined;
+            try {
+                scheduleAssociation = usesUpdaterAction(input.operation)
+                    ? resolveManualScheduleAssociation(
+                          dependencies.repository,
+                          dockerUpdaterJobActionDefinition
+                      )
+                    : undefined;
+            } catch {
+                throw new DockerOperationQueueError("unavailable");
+            }
 
             const atMs = nowMs();
             if (!Number.isSafeInteger(atMs) || atMs < 0) {
@@ -260,8 +282,23 @@ export function createDockerOperationQueue(
                 targetId: runId,
                 targetType: "job-run",
             });
+            const realtimeEvents =
+                scheduleAssociation === undefined
+                    ? sideEffects.realtimeEvents
+                    : Object.freeze([
+                          ...sideEffects.realtimeEvents,
+                          ...createJobRealtimeSideEffects({
+                              occurredAt: at,
+                              realtime: {
+                                  id: scheduleAssociation.scheduledJobId,
+                                  kind: "schedule",
+                                  operation: "updated",
+                              },
+                          }).realtimeEvents,
+                      ]);
             const enqueueInput = Object.freeze({
                 ...sideEffects,
+                realtimeEvents,
                 queuedEvent: {
                     attempt: 0,
                     jobRunId: runId,
@@ -303,8 +340,8 @@ export function createDockerOperationQueue(
                     resultJson: null,
                     retrySafe: definition.retrySafe,
                     scheduledForAt: null,
-                    scheduledJobId: null,
-                    scheduledJobVersion: null,
+                    scheduledJobId: scheduleAssociation?.scheduledJobId ?? null,
+                    scheduledJobVersion: scheduleAssociation?.scheduledJobVersion ?? null,
                     state: "queued" as const,
                     terminalCode: null,
                     terminalMessage: null,

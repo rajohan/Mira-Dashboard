@@ -13,10 +13,16 @@ import {
 } from "../../../contracts/logs.ts";
 import { sha256Hex } from "../../shared/crypto.ts";
 import { findJobActionDefinition, logMaintenanceJobActionKey } from "./actionRegistry.ts";
-import { preflightManualEnqueue } from "./manualEnqueue.ts";
+import {
+    preflightManualEnqueue,
+    resolveManualScheduleAssociation,
+} from "./manualEnqueue.ts";
 import { toJobRunResult, toJobRunSummary } from "./records.ts";
 import type { ActionPayloadRunSnapshot, JobRepository } from "./repository.ts";
-import { createJobMutationSideEffects } from "./sideEffects.ts";
+import {
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "./sideEffects.ts";
 
 const queueActor = Object.freeze({
     authenticatorId: null,
@@ -33,7 +39,10 @@ export interface LogMaintenanceJobQueueDependencies {
     readonly nowMs?: () => number;
     readonly repository: Pick<
         JobRepository,
-        "enqueueManualRun" | "findRunByIdempotency" | "readActionPayloadRunSnapshots"
+        | "enqueueManualRun"
+        | "findRunByIdempotency"
+        | "findSchedule"
+        | "readActionPayloadRunSnapshots"
     >;
     readonly wakeEventPump?: () => Promise<void> | void;
 }
@@ -245,6 +254,13 @@ export function createLogMaintenanceJobQueue(
                 if (replay.kind === "replayed") {
                     return Object.freeze({ jobRunId: replay.run.id });
                 }
+                const scheduleAssociation =
+                    parsed.policyId === "docker-managed" && !parsed.dryRun
+                        ? resolveManualScheduleAssociation(
+                              dependencies.repository,
+                              definition
+                          )
+                        : undefined;
                 const availablePolicies = await queueablePolicies(signal);
                 if (!availablePolicies.includes(parsed.policyId)) {
                     throw queueFailure();
@@ -267,8 +283,23 @@ export function createLogMaintenanceJobQueue(
                     targetId: runId,
                     targetType: "job-run",
                 });
+                const realtimeEvents =
+                    scheduleAssociation === undefined
+                        ? sideEffects.realtimeEvents
+                        : Object.freeze([
+                              ...sideEffects.realtimeEvents,
+                              ...createJobRealtimeSideEffects({
+                                  occurredAt: at,
+                                  realtime: {
+                                      id: scheduleAssociation.scheduledJobId,
+                                      kind: "schedule",
+                                      operation: "updated",
+                                  },
+                              }).realtimeEvents,
+                          ]);
                 const result = await dependencies.repository.enqueueManualRun({
                     ...sideEffects,
+                    realtimeEvents,
                     queuedEvent: {
                         attempt: 0,
                         jobRunId: runId,
@@ -311,13 +342,19 @@ export function createLogMaintenanceJobQueue(
                         resultJson: null,
                         retrySafe: definition.retrySafe,
                         scheduledForAt: null,
-                        scheduledJobId: null,
-                        scheduledJobVersion: null,
+                        scheduledJobId: scheduleAssociation?.scheduledJobId ?? null,
+                        scheduledJobVersion:
+                            scheduleAssociation?.scheduledJobVersion ?? null,
                         state: "queued",
                         terminalCode: null,
                         terminalMessage: null,
                         timeoutMs: definition.timeoutMs,
-                        triggerType: "system",
+                        // A real managed-policy request is an operator-triggered
+                        // execution of the owning schedule. The fixed system actor
+                        // remains the durable service provenance until user audit
+                        // identity is part of this queue contract.
+                        triggerType:
+                            scheduleAssociation === undefined ? "system" : "manual",
                         updatedAt: at,
                     },
                 });

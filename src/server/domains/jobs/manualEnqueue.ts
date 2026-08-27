@@ -1,5 +1,36 @@
+import type { JobActionDefinition } from "./actionRegistry.ts";
 import type { JobRunRecord } from "./records.ts";
 import type { JobRepositoryReader } from "./repository.ts";
+
+export interface ManualScheduleAssociation {
+    readonly scheduledJobId: string;
+    readonly scheduledJobVersion: number;
+}
+
+/**
+ * Resolves the current release-owned schedule for a manual domain operation.
+ * Callers must opt in with a scheduled definition; browser input never selects
+ * the owning schedule. The enqueue transaction repeats the execution-metadata
+ * fence so a concurrent reconcile fails closed.
+ * @returns Current schedule identity and optimistic version snapshot.
+ */
+export function resolveManualScheduleAssociation(
+    repository: Pick<JobRepositoryReader, "findSchedule">,
+    definition: JobActionDefinition
+): ManualScheduleAssociation {
+    const relation = repository.findSchedule(definition.scheduleId);
+    if (
+        relation === undefined ||
+        relation.schedule.id !== definition.scheduleId ||
+        relation.schedule.actionKey !== definition.actionKey
+    ) {
+        throw new Error("Manual run schedule association is unavailable");
+    }
+    return Object.freeze({
+        scheduledJobId: relation.schedule.id,
+        scheduledJobVersion: relation.schedule.version,
+    });
+}
 
 export interface ManualEnqueueReplayInput {
     readonly enqueueSha256: string;

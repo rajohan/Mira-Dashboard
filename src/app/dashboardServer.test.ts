@@ -1103,7 +1103,10 @@ describe("Dashboard workspace operations composition", () => {
         let settlementFailures = 0;
         const jobRepository: Pick<
             JobRepository,
-            "enqueueManualRun" | "findRunByIdempotency" | "readActionPayloadRunSnapshots"
+            | "enqueueManualRun"
+            | "findRunByIdempotency"
+            | "findSchedule"
+            | "readActionPayloadRunSnapshots"
         > = {
             enqueueManualRun: () => {
                 repositoryUnsafeCalls += 1;
@@ -1112,6 +1115,10 @@ describe("Dashboard workspace operations composition", () => {
             findRunByIdempotency: () => {
                 repositoryUnsafeCalls += 1;
                 throw new Error("Read-only composition must not replay an enqueue");
+            },
+            findSchedule: () => {
+                repositoryUnsafeCalls += 1;
+                throw new Error("Read-only composition must not resolve a schedule");
             },
             readActionPayloadRunSnapshots: ({ payloadJsons }) => {
                 repositoryReadCalls += 1;

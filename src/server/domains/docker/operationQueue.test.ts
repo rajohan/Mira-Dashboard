@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { captureFailure } from "../../test/support/promise.ts";
 import {
     dockerOperationJobActionKey,
+    dockerUpdaterJobActionDefinition,
     dockerUpdaterJobActionKey,
 } from "../jobs/actionRegistry.ts";
 import type { JobRunRecord } from "../jobs/records.ts";
@@ -57,6 +58,17 @@ function repositoryFixture() {
                 stored.requestedById === id &&
                 stored.idempotencyKey === key
                 ? stored
+                : undefined;
+        },
+        findSchedule(id) {
+            return id === dockerUpdaterJobActionDefinition.scheduleId
+                ? ({
+                      schedule: {
+                          actionKey: dockerUpdaterJobActionDefinition.actionKey,
+                          id,
+                          version: 7,
+                      },
+                  } as never)
                 : undefined;
         },
     };
@@ -201,6 +213,17 @@ describe("Docker operation queue", () => {
             expect(fixture.repository.enqueues[0]?.run.actionKey).toBe(
                 dockerUpdaterJobActionKey
             );
+            expect(fixture.repository.enqueues[0]?.run).toMatchObject({
+                scheduledJobId: dockerUpdaterJobActionDefinition.scheduleId,
+                scheduledJobVersion: 7,
+                triggerType: "manual",
+            });
+            expect(fixture.repository.enqueues[0]?.realtimeEvents).toHaveLength(2);
+            expect(fixture.repository.enqueues[0]?.realtimeEvents[1]).toMatchObject({
+                entityId: dockerUpdaterJobActionDefinition.scheduleId,
+                entityType: "schedule",
+                operation: "updated",
+            });
         }
     });
 
@@ -237,6 +260,8 @@ describe("Docker operation queue", () => {
         expect(fixture.repository.enqueues[0]?.run).toMatchObject({
             actionKey: dockerUpdaterJobActionKey,
             payloadJson: JSON.stringify(payload),
+            scheduledJobId: dockerUpdaterJobActionDefinition.scheduleId,
+            scheduledJobVersion: 7,
         });
         expect(await fixture.queue.enqueue(request)).toEqual(first);
 
@@ -362,6 +387,7 @@ describe("Docker operation queue", () => {
                 enqueueManualRun: () =>
                     Promise.reject(new Error("SECRET docker diagnostic")),
                 findRunByIdempotency: () => {},
+                findSchedule: () => {},
             },
         });
         const failure = await fixture.queue
