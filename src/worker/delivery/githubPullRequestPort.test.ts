@@ -458,31 +458,154 @@ describe("Delivery GitHub pull-request port", () => {
         expect(reviewCalled).toBeFalse();
     });
 
-    test("does not dispatch native merge without an atomic full-prefix head guard", () => {
-        let mergeCalled = false;
+    test("prevalidates every native stack head, polls GitHub, and confirms every merge", async () => {
+        const bottomHead = "c".repeat(40);
+        let merged = false;
         const operations: string[] = [];
+        const pollUuids: string[] = [];
+        const sleeps: number[] = [];
         const port = createDeliveryGitHubPullRequestPort({
             transport: transport("mira-2026", (operation) => {
                 operations.push(operation.kind);
+                if (operation.kind === "graphql") {
+                    if (operation.document.includes("DeliveryStackCapability")) {
+                        return graphQlResponse(operation);
+                    }
+                    const number = Number(operation.variables.number);
+                    const isTop = number === 12;
+                    return {
+                        data: {
+                            repository: {
+                                pullRequest: {
+                                    ...rawPullRequest(merged ? "MERGED" : "OPEN"),
+                                    baseRefName: isTop ? "stack-bottom" : "main",
+                                    headRefName: isTop ? "stack-top" : "stack-bottom",
+                                    headRefOid: isTop ? head : bottomHead,
+                                    mergeCommit:
+                                        merged && isTop ? { oid: mergedMainHead } : null,
+                                    number,
+                                    stack: { baseRefName: "main", number: 90, size: 2 },
+                                    stackEntry: { position: isTop ? 2 : 1 },
+                                },
+                            },
+                        },
+                    };
+                }
+                if (operation.kind === "native-stack-find") {
+                    return [
+                        {
+                            base: { ref: "main" },
+                            id: 90,
+                            number: 90,
+                            open: true,
+                            pull_requests: [
+                                {
+                                    draft: false,
+                                    head: { ref: "stack-bottom", sha: bottomHead },
+                                    merged_at: null,
+                                    number: 11,
+                                    state: "open",
+                                },
+                                {
+                                    draft: false,
+                                    head: { ref: "stack-top", sha: head },
+                                    merged_at: null,
+                                    number: 12,
+                                    state: "open",
+                                },
+                            ],
+                        },
+                    ];
+                }
                 if (operation.kind === "native-stack-merge-start") {
-                    mergeCalled = true;
+                    expect(operation.expectedHeadSha).toBe(head);
+                    return {
+                        details: {
+                            expected_head_sha: head,
+                            merge_action: "default",
+                            merge_method: "squash",
+                            message: "enqueued",
+                            uuid: "merge-1",
+                        },
+                        status: "enqueued",
+                    };
+                }
+                if (operation.kind === "native-stack-merge-poll") {
+                    pollUuids.push(operation.uuid);
+                    merged = true;
+                    return {
+                        details: {
+                            expected_head_sha: head,
+                            merge_action: "default",
+                            merge_method: "squash",
+                            message: "merged",
+                            sha: mergedMainHead,
+                        },
+                        status: "merged",
+                    };
+                }
+                if (operation.kind === "branch-ref") {
+                    return { object: { sha: head, type: "commit" } };
                 }
                 throw new Error(`Unexpected ${operation.kind}`);
             }),
+            sleep: (milliseconds) => {
+                sleeps.push(milliseconds);
+                return Promise.resolve();
+            },
         });
 
         expect(
-            port.mergeNativeStack([{ headSha: head, number: 12 }])
-        ).rejects.toMatchObject({ reason: "capability-unavailable" });
-        expect(mergeCalled).toBeFalse();
-        expect(operations).not.toContain("native-stack-merge-start");
+            await port.mergeNativeStack([
+                { headSha: bottomHead, number: 11 },
+                { headSha: head, number: 12 },
+            ])
+        ).toEqual({
+            mainHeadSha: mergedMainHead,
+            outcome: "partial-success",
+            warning: "branch-retained",
+        });
+        expect(sleeps).toEqual([2000]);
+        expect(pollUuids).toEqual(["merge-1"]);
+        expect(operations).toContain("native-stack-merge-start");
+        expect(operations).toContain("native-stack-merge-poll");
+        expect(operations.filter((operation) => operation === "branch-ref")).toHaveLength(
+            2
+        );
     });
 
-    test("does not dispatch when a lower native stack head could race", () => {
+    test("does not dispatch when native stack membership or a lower head drifted", async () => {
         const bottomHead = "c".repeat(40);
         let mergeCalled = false;
         const port = createDeliveryGitHubPullRequestPort({
             transport: transport("mira-2026", (operation) => {
+                if (operation.kind === "graphql") return graphQlResponse(operation);
+                if (operation.kind === "native-stack-find") {
+                    return [
+                        {
+                            base: { ref: "main" },
+                            id: 90,
+                            number: 90,
+                            open: true,
+                            pull_requests: [
+                                {
+                                    draft: false,
+                                    head: { ref: "bottom", sha: "d".repeat(40) },
+                                    merged_at: null,
+                                    number: 11,
+                                    state: "open",
+                                },
+                                {
+                                    draft: false,
+                                    head: { ref: "top", sha: head },
+                                    merged_at: null,
+                                    number: 12,
+                                    state: "open",
+                                },
+                            ],
+                        },
+                    ];
+                }
                 if (operation.kind === "native-stack-merge-start") {
                     mergeCalled = true;
                 }
@@ -490,12 +613,13 @@ describe("Delivery GitHub pull-request port", () => {
             }),
         });
 
-        expect(
-            port.mergeNativeStack([
+        const error = await port
+            .mergeNativeStack([
                 { headSha: bottomHead, number: 11 },
                 { headSha: head, number: 12 },
             ])
-        ).rejects.toMatchObject({ reason: "capability-unavailable" });
+            .catch((error: unknown) => error);
+        expect(error).toMatchObject({ reason: "conflict" });
         expect(mergeCalled).toBeFalse();
     });
 

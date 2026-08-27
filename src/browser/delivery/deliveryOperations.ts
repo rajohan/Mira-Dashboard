@@ -121,7 +121,7 @@ export function pullRequestOperationPrompt(input: {
             return {
                 confirmLabel: "Queue merge",
                 danger: false,
-                description: `${description} Production is not deployed; deployment is available only after Release Please publishes the exact main release.`,
+                description: `${description} Production is not deployed; deployment becomes available after the exact main commit has a published release.`,
                 input: {
                     checkoutRevision: input.checkout.revision,
                     confirmation: "merge-delivery-pull-request",

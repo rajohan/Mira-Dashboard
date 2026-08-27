@@ -249,6 +249,26 @@ describe("Delivery overview collector", () => {
         ]);
     });
 
+    test("marks releases unavailable when the published release lookup fails", async () => {
+        const baseGithub = github(() => Promise.resolve([pullRequest()]));
+        const results = await createDeliveryOverviewCollector(
+            options({
+                github: {
+                    ...baseGithub,
+                    readLatestPublishedRelease: () =>
+                        Promise.reject(new Error("provider failed")),
+                },
+            })
+        ).collectSections();
+
+        expect(results).toContainEqual({ section: "releases", state: "failed" });
+        const pullRequests = results.find(({ section }) => section === "pull-requests");
+        expect(pullRequests).toEqual(
+            expect.objectContaining({ section: "pull-requests", state: "succeeded" })
+        );
+        expect(JSON.stringify(pullRequests)).not.toContain("action-active");
+    });
+
     test("overlays the exact active Jobs preview lifecycle without hiding other sections", async () => {
         const headSha = "f".repeat(40);
         const collector = createDeliveryOverviewCollector(

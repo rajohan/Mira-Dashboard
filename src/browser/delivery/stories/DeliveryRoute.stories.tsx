@@ -39,8 +39,6 @@ const previewRevision = "e".repeat(64);
 const checkoutRevision = "f".repeat(64);
 const activationRevision = "1".repeat(64);
 const jobRunId = "019fdf70-0000-7000-8000-000000000040";
-const headGuardUnavailableReason =
-    "Merge is unavailable because GitHub cannot atomically bind it to the reviewed pull request head or stack heads.";
 
 function publishedReleaseAuthority(
     releaseId: string,
@@ -79,8 +77,7 @@ const nativeStackActions: DeliveryPullRequest["actions"] = [
     {
         action: "merge",
         actor: "mira",
-        available: false,
-        reason: "head-guard-unavailable",
+        available: true,
         scope: "prefix",
     },
     {
@@ -457,10 +454,8 @@ export const PullRequests: Story = {
             name: /^Merge(?: stack through #\d+| only)$/u,
         });
         await expect(buttons).toHaveLength(3);
-        await expect(buttons[0]).toBeEnabled();
-        for (const button of buttons.slice(1)) {
-            await expect(button).toBeDisabled();
-            await expect(button).toHaveAccessibleDescription(headGuardUnavailableReason);
+        for (const button of buttons) {
+            await expect(button).toBeEnabled();
         }
         await expect(
             pullRequestRegion.queryByRole("button", { name: /Merge.*Deploy/u })

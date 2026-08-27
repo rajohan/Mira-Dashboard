@@ -1112,12 +1112,13 @@ workflow; `rajohan` owns review approval only. Missing reviewer authority disabl
 operation and never falls back to Mira, anonymous GitHub, `GH_TOKEN`, `GITHUB_TOKEN`, `gh`, a
 credential helper, or ambient host configuration. Normal, inferred, and native stack inventory,
 grouping, preview, and review scopes are server-authoritative and bind the complete ordered
-number/head set. GitHub currently exposes neither full-prefix head/membership CAS for native stack
-create/merge nor expected-head CAS for pull request closure. Those three mutation capabilities are
-therefore explicitly `head-guard-unavailable`, dispatch no provider request, and remain represented
-by strict fail-closed procedures rather than reproducing legacy post-effect validation. Ordinary
-exact-head merge, update, and review remain available. Partial and uncertain provider outcomes
-remain explicit and cannot authorize blind replay.
+number/head set. GitHub does not expose full-prefix head/membership CAS for native stack creation
+or expected-head CAS for pull request closure, so those capabilities remain explicitly
+`head-guard-unavailable` and dispatch no provider request. Native stack merge uses fresh ordered
+full-prefix validation, GitHub's request-side precondition for the selected head, bounded async
+polling, and exact-head post-effect verification for every included layer. Ordinary exact-head
+merge, update, and review remain available. Partial and uncertain provider outcomes remain explicit
+and cannot authorize blind replay.
 
 One managed preview slot runs the exact admitted PR/stack heads for at most four hours in a
 transient systemd/Bubblewrap boundary with private networking, read-only source/Git

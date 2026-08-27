@@ -311,7 +311,6 @@ function mergeBlockReason(input: {
             ? readOnlyReason(input.group)
             : "ambiguous-chain";
     }
-    if (input.group.kind === "native-stack") return "head-guard-unavailable";
     if (input.production.actionActive) return "action-active";
     if (input.scopeMembers.some(({ isDraft }) => isDraft)) return "draft";
     if (

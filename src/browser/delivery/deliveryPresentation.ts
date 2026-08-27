@@ -58,7 +58,7 @@ export function deliveryActionReason(
         return `${actionSubjects[action]} requires all latest CI checks to pass.`;
     }
     if (reason === "head-guard-unavailable") {
-        return `${actionSubjects[action]} is unavailable because GitHub cannot atomically bind it to the reviewed pull request head or stack heads.`;
+        return `${actionSubjects[action]} is unavailable because GitHub cannot safely bind it to the reviewed stack heads.`;
     }
     if (reason === "untrusted-author") {
         return `${actionSubjects[action]} is unavailable for this author.`;

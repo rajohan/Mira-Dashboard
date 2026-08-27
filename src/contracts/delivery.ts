@@ -1113,7 +1113,7 @@ export const deliveryProcedureContracts = [
     mutationContract(
         "delivery.approvePullRequest",
         deliveryApprovePullRequestInputSchema,
-        "Queues an exact-head ordinary squash merge, optionally followed by one fenced deployment; native-stack merge remains unavailable without a provider-enforced full-prefix guard."
+        "Queues an exact-head ordinary or native-stack squash merge, optionally followed by one fenced deployment."
     ),
     mutationContract(
         "delivery.startPreview",
