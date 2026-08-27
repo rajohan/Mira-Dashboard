@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.9...v0.4.0) (2026-08-27)
+
+
+### Features
+
+* **operations:** track queued jobs globally ([#481](https://github.com/rajohan/Mira-Dashboard/issues/481)) ([47342c6](https://github.com/rajohan/Mira-Dashboard/commit/47342c60af87555bff22ed8f1e3b1ede652f8791))
+
+
+### Bug Fixes
+
+* **auth:** eliminate WebAuthn prompt delay ([#480](https://github.com/rajohan/Mira-Dashboard/issues/480)) ([66e19c9](https://github.com/rajohan/Mira-Dashboard/commit/66e19c9258d24bb54a0891adb1beda3f85e234f9))
+* **browser:** restore application icons ([#482](https://github.com/rajohan/Mira-Dashboard/issues/482)) ([e478d08](https://github.com/rajohan/Mira-Dashboard/commit/e478d08feec45523d26274dcce2297dbfb1bfe96))
+* **delivery:** restore native stack merge ([#484](https://github.com/rajohan/Mira-Dashboard/issues/484)) ([77e4a42](https://github.com/rajohan/Mira-Dashboard/commit/77e4a42df05762ee94e09e3246bd706a0ad4d683))
+* **git:** sync allowlisted workspace additions ([#477](https://github.com/rajohan/Mira-Dashboard/issues/477)) ([a8ee79b](https://github.com/rajohan/Mira-Dashboard/commit/a8ee79bcd979ebd8c15984fa2f768069357fd3c7))
+* **jobs:** associate manual runs with schedules ([#478](https://github.com/rajohan/Mira-Dashboard/issues/478)) ([6ce4b6e](https://github.com/rajohan/Mira-Dashboard/commit/6ce4b6ed5a81c41c380f7def20aeb0466d414131))
+* **openclaw:** surface available updates ([#479](https://github.com/rajohan/Mira-Dashboard/issues/479)) ([7295aea](https://github.com/rajohan/Mira-Dashboard/commit/7295aea19da7950f4d59c6e914b0191411eef2aa))
+
 ## [0.3.9](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.8...v0.3.9) (2026-08-27)
 
 
