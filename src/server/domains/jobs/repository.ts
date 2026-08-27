@@ -748,7 +748,8 @@ function runMatchesScheduleExecutionSnapshot(
         run.scheduledJobId === schedule.id &&
         run.scheduledJobVersion === schedule.version &&
         run.actionKey === schedule.actionKey &&
-        run.payloadJson === schedule.actionPayloadJson &&
+        (run.triggerType === "manual" ||
+            run.payloadJson === schedule.actionPayloadJson) &&
         run.displayName === schedule.name &&
         run.resourceClass === schedule.resourceClass &&
         run.resourceKeysJson === schedule.resourceKeysJson &&

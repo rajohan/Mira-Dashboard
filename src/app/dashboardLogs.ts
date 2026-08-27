@@ -17,7 +17,10 @@ export interface DashboardLogsOptions {
     readonly database: SQLiteBunDatabase;
     readonly jobRepository: Pick<
         JobRepository,
-        "enqueueManualRun" | "findRunByIdempotency" | "readActionPayloadRunSnapshots"
+        | "enqueueManualRun"
+        | "findRunByIdempotency"
+        | "findSchedule"
+        | "readActionPayloadRunSnapshots"
     >;
     readonly logMaintenanceRoot: string;
     readonly now?: () => Date;

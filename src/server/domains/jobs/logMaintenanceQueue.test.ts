@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    logMaintenanceJobActionKey,
+    logMaintenanceJobScheduleId,
+} from "./actionRegistry.ts";
+import {
     createLogMaintenanceJobQueue,
     LogMaintenanceJobQueueError,
     type LogMaintenanceJobQueueDependencies,
@@ -46,6 +50,17 @@ function repositoryFixture() {
                     run.requestedById === requestedById &&
                     run.idempotencyKey === observedKey
             );
+        },
+        findSchedule(id) {
+            return id === logMaintenanceJobScheduleId
+                ? ({
+                      schedule: {
+                          actionKey: logMaintenanceJobActionKey,
+                          id,
+                          version: 5,
+                      },
+                  } as never)
+                : undefined;
         },
         readActionPayloadRunSnapshots({ actionKey, payloadJsons }) {
             snapshotBatches.push([...payloadJsons]);
@@ -343,6 +358,17 @@ describe("log-maintenance durable queue adapter", () => {
             dryRun: false,
             idempotencyKey: reverseKey,
             policyId: "docker-managed",
+        });
+        expect(fixture.enqueues[0]?.run).toMatchObject({
+            scheduledJobId: logMaintenanceJobScheduleId,
+            scheduledJobVersion: 5,
+            triggerType: "manual",
+        });
+        expect(fixture.enqueues[0]?.realtimeEvents).toHaveLength(2);
+        expect(fixture.enqueues[0]?.realtimeEvents[1]).toMatchObject({
+            entityId: logMaintenanceJobScheduleId,
+            entityType: "schedule",
+            operation: "updated",
         });
         const mismatch = await queue
             .enqueue({
