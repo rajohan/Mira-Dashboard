@@ -14,6 +14,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { Text } from "../ui/Text.tsx";
 import {
     dockerUpdaterPolicyLabel,
+    dockerUpdaterEventVariant,
     dockerUpdaterStatusLabel,
     dockerUpdaterStatusVariant,
     humanizeDockerEventKind,
@@ -27,14 +28,6 @@ interface DockerUpdaterPanelProps {
     readonly onScan: () => void;
     readonly onUpdateService: (service: DockerUpdaterService) => void;
     readonly services: readonly DockerUpdaterService[];
-}
-
-function updaterEventVariant(
-    kind: DockerUpdaterEvent["kind"]
-): "danger" | "default" | "warning" {
-    if (kind.includes("failed") || kind === "update-outcome-unknown") return "danger";
-    if (kind === "update-available") return "warning";
-    return "default";
 }
 
 function updaterEventIsFailure(kind: DockerUpdaterEvent["kind"]): boolean {
@@ -112,7 +105,7 @@ export function DockerUpdaterPanel({
                         Scan for updates
                     </Button>
                     <Button
-                        aria-label="Run automatic Docker updates"
+                        aria-label="Run all available Docker updates"
                         className="w-full lg:w-auto"
                         disabled={controlsDisabled || busy}
                         onClick={onRun}
@@ -311,7 +304,11 @@ export function DockerUpdaterPanel({
                                     key={event.id}
                                 >
                                     <div className="flex flex-wrap items-start justify-between gap-2">
-                                        <Badge variant={updaterEventVariant(event.kind)}>
+                                        <Badge
+                                            variant={dockerUpdaterEventVariant(
+                                                event.kind
+                                            )}
+                                        >
                                             {humanizeDockerEventKind(event.kind)}
                                         </Badge>
                                         <time

@@ -370,9 +370,10 @@ export function createDockerUpdaterJobExecutor(
                             serviceId: manual.serviceId,
                         };
                     } else if (manual === undefined) {
-                        input = { previous };
+                        input = { automaticOnly: true, previous };
                     } else {
                         input = {
+                            automaticOnly: false,
                             expectedSourceRevision: manual.sourceRevision,
                             previous,
                         };

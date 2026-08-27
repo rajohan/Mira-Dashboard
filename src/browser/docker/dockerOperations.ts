@@ -212,7 +212,7 @@ export function updaterOperationPrompt(
         confirmLabel: "Queue updater",
         danger: false,
         description:
-            "Run the configured automatic Docker updater policies at this source revision?",
+            "Update every managed Docker service with an available registry candidate at this source revision?",
         input: {
             confirmation: "run-docker-updates",
             idempotencyKey: createDockerIdempotencyKey(),
