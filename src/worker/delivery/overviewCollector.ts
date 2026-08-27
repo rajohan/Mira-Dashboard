@@ -314,12 +314,16 @@ export function createDeliveryOverviewCollector(
         signal?.throwIfAborted();
         const fallback = fallbackProjectionInput(observedAtMs);
         let projectedProduction: DeliveryProductionAuthoritySnapshot | undefined;
+        let projectedReleaseProduction: DeliveryProductionAuthoritySnapshot | undefined;
+        if (production.state === "succeeded") {
+            projectedProduction = production.value;
+        }
         if (
             production.state === "succeeded" &&
             mainHead.state === "succeeded" &&
             publishedRelease.state === "succeeded"
         ) {
-            projectedProduction = withPublishedCandidate(
+            projectedReleaseProduction = withPublishedCandidate(
                 production.value,
                 publishedRelease.value,
                 mainHead.value
@@ -366,14 +370,14 @@ export function createDeliveryOverviewCollector(
                       state: "failed",
                   });
         const releases =
-            projectedProduction === undefined
+            projectedReleaseProduction === undefined
                 ? Promise.resolve<Settled<DeliveryReleasesCachePayload>>({
                       state: "failed",
                   })
                 : settleCall(() =>
                       projectDeliveryReleases({
                           observedAtMs,
-                          production: projectedProduction,
+                          production: projectedReleaseProduction,
                       })
                   );
 

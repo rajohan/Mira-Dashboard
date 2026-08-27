@@ -262,6 +262,11 @@ describe("Delivery overview collector", () => {
         ).collectSections();
 
         expect(results).toContainEqual({ section: "releases", state: "failed" });
+        const pullRequests = results.find(({ section }) => section === "pull-requests");
+        expect(pullRequests).toEqual(
+            expect.objectContaining({ section: "pull-requests", state: "succeeded" })
+        );
+        expect(JSON.stringify(pullRequests)).not.toContain("action-active");
     });
 
     test("overlays the exact active Jobs preview lifecycle without hiding other sections", async () => {
