@@ -12,7 +12,7 @@ import {
 } from "./checks.ts";
 
 /** Maximum executable action identities advertised by one worker process. */
-export const workerActionKeyMaximum = 32;
+export const workerActionKeyMaximum = 64;
 /** Maximum canonical UTF-8 JSON representation retained in one worker row. */
 export const workerActionKeysMaximumBytes = 4 * 1024;
 

@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import * as v from "valibot";
 
-import { workerActionKeysMaximumBytes } from "../schema/jobChecks.ts";
+import {
+    workerActionKeyMaximum,
+    workerActionKeysMaximumBytes,
+} from "../schema/jobChecks.ts";
 import { incidentObservationInsertSchema } from "./incidentObservations.ts";
 import {
     incidentInsertSchema,
@@ -738,6 +741,28 @@ describe("Drizzle-generated Valibot row schemas", () => {
             stoppedAt: null,
         };
         expect(v.parse(workerInstanceInsertSchema, validWorkerInsert)).toBeDefined();
+        const expandedWorkerActionKeys = Array.from(
+            { length: 33 },
+            (_, index) => `cache.refresh.provider-${String(index).padStart(2, "0")}`
+        );
+        expect(
+            v.parse(workerInstanceInsertSchema, {
+                ...validWorkerInsert,
+                actionKeysJson: JSON.stringify(expandedWorkerActionKeys),
+            })
+        ).toBeDefined();
+        expect(() =>
+            v.parse(workerInstanceInsertSchema, {
+                ...validWorkerInsert,
+                actionKeysJson: JSON.stringify(
+                    Array.from(
+                        { length: workerActionKeyMaximum + 1 },
+                        (_, index) =>
+                            `cache.refresh.provider-${String(index).padStart(2, "0")}`
+                    )
+                ),
+            })
+        ).toThrow("Stored worker action keys are invalid");
         for (const actionKeysJson of [
             '["host.system.update","host.system.restart"]',
             ' ["host.system.restart","host.system.update"]',
