@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 import {
     deliveryGitHubBaseBranch,
+    deliveryGitHubAsyncMergeSchema,
     deliveryGitHubCommitShaSchema,
     deliveryGitHubExpectedHeadSchema,
     deliveryGitHubExpectedHeadsSchema,
@@ -181,6 +182,20 @@ const rawMergeSchema = v.object({
     sha: v.nullish(v.string()),
 });
 const rawUpdateBranchSchema = v.object({ message: v.string(), url: v.string() });
+const rawAsyncMergeSchema = v.object({
+    details: v.object({
+        expected_head_sha: v.optional(deliveryGitHubCommitShaSchema),
+        merge_action: v.optional(v.picklist(["default", "direct_merge", "merge_queue"])),
+        merge_method: v.optional(v.picklist(["merge", "rebase", "squash"])),
+        message: v.pipe(v.string(), v.maxLength(2048)),
+        sha: v.optional(deliveryGitHubCommitShaSchema),
+        uuid: v.optional(v.pipe(v.string(), v.maxLength(256))),
+    }),
+    status: v.picklist(["enqueued", "failed", "merged", "pending"]),
+});
+
+const nativeStackMergePollIntervalMs = 2000;
+const nativeStackMergePollMaximum = 150;
 
 const capabilityQuery = `query DeliveryStackCapability {
   __type(name: "PullRequest") { fields { name } }
@@ -385,6 +400,31 @@ function normalizeStack(input: unknown): DeliveryGitHubStack {
     }
 }
 
+function normalizeAsyncMerge(input: unknown) {
+    try {
+        const raw = v.parse(rawAsyncMergeSchema, input);
+        return v.parse(deliveryGitHubAsyncMergeSchema, {
+            details: {
+                ...(raw.details.expected_head_sha === undefined
+                    ? {}
+                    : { expectedHeadSha: raw.details.expected_head_sha }),
+                ...(raw.details.merge_action === undefined
+                    ? {}
+                    : { mergeAction: raw.details.merge_action }),
+                ...(raw.details.merge_method === undefined
+                    ? {}
+                    : { mergeMethod: raw.details.merge_method }),
+                message: raw.details.message,
+                ...(raw.details.sha === undefined ? {} : { sha: raw.details.sha }),
+                ...(raw.details.uuid === undefined ? {} : { uuid: raw.details.uuid }),
+            },
+            status: raw.status,
+        });
+    } catch {
+        fail("unknown-outcome");
+    }
+}
+
 function exactExpectedHead(
     input: DeliveryGitHubExpectedHead
 ): DeliveryGitHubExpectedHead {
@@ -422,6 +462,7 @@ export type DeliveryGitHubPullRequestPort = DeliveryGitHubPullRequestReadPort &
     DeliveryGitHubPullRequestMutationPort;
 
 export interface DeliveryGitHubPullRequestPortOptions {
+    readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     readonly transport: DeliveryGitHubHttpTransport;
 }
 
@@ -435,6 +476,7 @@ export function createDeliveryGitHubPullRequestPort(
     if (options.transport.actor !== deliveryGitHubMiraLogin) {
         fail("authentication");
     }
+    const sleep = options.sleep ?? ((milliseconds: number) => Bun.sleep(milliseconds));
     async function supportsNativeStacks(signal?: AbortSignal): Promise<boolean> {
         await options.transport.verifyIdentity(signal);
         let parsed: v.InferOutput<typeof capabilityEnvelopeSchema>;
@@ -750,9 +792,115 @@ export function createDeliveryGitHubPullRequestPort(
         const expectedHeads = exactExpectedHeads(input);
         if (expectedHeads.length === 0) fail("invalid-input");
         await options.transport.verifyIdentity(signal);
-        // merge-async binds only the selected PR head. It cannot atomically bind
-        // every lower member that GitHub may merge as part of the current prefix.
-        fail("capability-unavailable");
+        const selected = expectedHeads.at(-1)!;
+        const stack = await findNativeStack(selected.number, signal);
+        if (
+            stack === undefined ||
+            !stack.open ||
+            stack.baseRefName !== deliveryGitHubBaseBranch
+        ) {
+            fail("conflict");
+        }
+        const selectedIndex = stack.pullRequests.findIndex(
+            ({ number }) => number === selected.number
+        );
+        if (selectedIndex === -1) fail("conflict");
+        const prefix = stack.pullRequests
+            .slice(0, selectedIndex + 1)
+            .filter(({ mergedAt }) => mergedAt === undefined);
+        if (
+            prefix.length !== expectedHeads.length ||
+            prefix.some(
+                (member, index) =>
+                    member.number !== expectedHeads[index]?.number ||
+                    member.headSha !== expectedHeads[index]?.headSha ||
+                    member.state !== "open" ||
+                    member.draft
+            )
+        ) {
+            fail("conflict");
+        }
+        const current = await Promise.all(
+            expectedHeads.map(({ number }) => getPullRequest(number, signal))
+        );
+        for (const [index, pullRequest] of current.entries()) {
+            assertExactPullRequest(pullRequest, expectedHeads[index]!);
+            assertPullRequestMergeEligible(pullRequest);
+        }
+
+        let merge;
+        try {
+            merge = normalizeAsyncMerge(
+                await options.transport.requestJson(
+                    {
+                        expectedHeadSha: selected.headSha,
+                        kind: "native-stack-merge-start",
+                        pullRequestNumber: selected.number,
+                    },
+                    signal
+                )
+            );
+        } catch (error) {
+            if (error instanceof DeliveryGitHubError && error.reason === "conflict") {
+                throw error;
+            }
+            fail("unknown-outcome");
+        }
+        if (
+            merge.details.expectedHeadSha !== undefined &&
+            merge.details.expectedHeadSha !== selected.headSha
+        ) {
+            fail("unknown-outcome");
+        }
+        for (let poll = 0; merge.status === "pending"; poll += 1) {
+            if (
+                poll >= nativeStackMergePollMaximum ||
+                merge.details.uuid === undefined ||
+                merge.details.expectedHeadSha !== selected.headSha ||
+                merge.details.mergeAction !== "default" ||
+                merge.details.mergeMethod !== "squash"
+            ) {
+                fail("unknown-outcome");
+            }
+            signal?.throwIfAborted();
+            await sleep(nativeStackMergePollIntervalMs, signal);
+            signal?.throwIfAborted();
+            try {
+                merge = normalizeAsyncMerge(
+                    await options.transport.requestJson(
+                        {
+                            kind: "native-stack-merge-poll",
+                            pullRequestNumber: selected.number,
+                            uuid: merge.details.uuid,
+                        },
+                        signal
+                    )
+                );
+            } catch {
+                fail("unknown-outcome");
+            }
+        }
+        if (merge.status === "failed") fail("conflict");
+        if (merge.status === "enqueued") return Object.freeze({ outcome: "enqueued" });
+        if (merge.status !== "merged" || merge.details.sha === undefined) {
+            fail("unknown-outcome");
+        }
+        const confirmed = await Promise.all(
+            expectedHeads.map(({ number }) =>
+                getPullRequest(number, signal).catch(() => null)
+            )
+        );
+        if (
+            confirmed.some(
+                (pullRequest, index) =>
+                    pullRequest?.state !== "MERGED" ||
+                    pullRequest.headSha !== expectedHeads[index]?.headSha
+            ) ||
+            confirmed.at(-1)?.mergeCommitSha !== merge.details.sha
+        ) {
+            fail("unknown-outcome");
+        }
+        return Object.freeze({ mainHeadSha: merge.details.sha, outcome: "completed" });
     }
 
     async function updatePullRequestBranch(

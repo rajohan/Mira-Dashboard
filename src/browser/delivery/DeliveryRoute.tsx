@@ -256,8 +256,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
     } else if (releases.releases.current === undefined) {
         deployReason = "Bootstrap must activate the first production release.";
     } else if (releases.releases.candidate === undefined) {
-        deployReason =
-            "A published Release Please release is required before deployment.";
+        deployReason = "No new published release is available for deployment.";
     } else if (
         releases.releases.candidate.releaseId !== checkout.checkout.remoteHeadSha
     ) {

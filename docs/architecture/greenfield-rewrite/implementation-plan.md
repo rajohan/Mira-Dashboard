@@ -101,10 +101,11 @@ including restart during streaming.
   Git synchronization uses only the verified `mira-2026` worker credential. Review approval is the
   sole `rajohan` mutation and has a separate, non-fallback worker credential and port. It preserves
   normal, inferred, and native stacked PR inventory, grouping, preview, and review scope. Ordinary
-  merge/update/review use provider-enforced exact-head guards. Native stack create/merge and pull
-  request close dispatch nothing while GitHub lacks full-scope or expected-head CAS; the browser
-  exposes the stable `head-guard-unavailable` reason instead of reproducing legacy post-effect
-  validation. One isolated four-hour global PR preview slot runs without production credentials
+  merge/update/review use provider-enforced exact-head guards. Native stack merge combines ordered
+  full-prefix preflight, GitHub's selected-head request guard, bounded polling, and exact-head
+  post-effect verification. Native stack creation and pull-request closure dispatch nothing while
+  GitHub lacks the required guards; the browser exposes the stable `head-guard-unavailable` reason.
+  One isolated four-hour global PR preview slot runs without production credentials
   or host-network authority. Deploy and paired rollback use one fsynced,
   versioned cross-release operation capsule and immutable transient executor so cutover survives
   stopping its originating worker, process crashes, and host reboot without adding a second queue

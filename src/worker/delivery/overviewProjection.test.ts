@@ -223,7 +223,7 @@ describe("Delivery overview projection", () => {
                 .members[1]!.actions.find(({ action }) => action === "merge")
         ).toMatchObject({
             available: false,
-            reason: "head-guard-unavailable",
+            reason: "checks-blocked",
             scope: "prefix",
         });
     });
@@ -264,8 +264,7 @@ describe("Delivery overview projection", () => {
             reason: "head-guard-unavailable",
         });
         expect(action(nativeTop.number, "merge")).toMatchObject({
-            available: false,
-            reason: "head-guard-unavailable",
+            available: true,
         });
         expect(action(nativeTop.number, "preview-start")).toMatchObject({
             available: true,
@@ -282,7 +281,7 @@ describe("Delivery overview projection", () => {
         });
     });
 
-    test("keeps untrusted native previews and merges fail-closed without blocking ordinary external PRs", () => {
+    test("keeps untrusted native previews blocked without disabling reviewed stack merges", () => {
         const native = pullRequest(1, {
             authorLogin: "external-user",
             stack: { baseRefName: "main", number: 90, position: 2, size: 2 },
@@ -296,8 +295,7 @@ describe("Delivery overview projection", () => {
                 .actions.find(({ action }) => action === "merge");
 
         expect(merge(native.number)).toMatchObject({
-            available: false,
-            reason: "head-guard-unavailable",
+            available: true,
         });
         expect(
             payload.pullRequestGroups

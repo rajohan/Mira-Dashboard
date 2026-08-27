@@ -455,10 +455,12 @@ the token actor as `mira-2026` and owns bounded reads plus provider-guarded ordi
 and exact-main Git operations. The reviewer port verifies `rajohan` and exposes only exact-commit
 review approval. Missing reviewer authority disables that one capability; it never falls back to
 Mira, `GH_TOKEN`, `GITHUB_TOKEN`, anonymous access, a credential helper, or ambient home
-configuration. GitHub's native stack create/merge and pull-request close APIs cannot bind the
-complete admitted head scope, so those capabilities are advertised as `head-guard-unavailable`
-and never dispatch. Neither token enters a Job payload, cache row, operation receipt, process
-argument, log, or browser response.
+configuration. Native stack creation and pull-request closure cannot bind the admitted head scope,
+so those capabilities are advertised as `head-guard-unavailable` and never dispatch. Native stack
+merge instead validates the complete ordered prefix immediately before GitHub's selected-head
+precondition, polls the bounded asynchronous merge, and confirms every exact head afterward.
+Neither token enters a Job payload, cache row, operation receipt, process argument, log, or browser
+response.
 
 Trusted PR preview code runs in one bounded global slot beneath a transient systemd/Bubblewrap
 boundary with a private network namespace, read-only source/Git administration, isolated writable

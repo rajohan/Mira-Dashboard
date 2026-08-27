@@ -250,7 +250,7 @@ describe("Delivery worker runtime", () => {
         expect(cleaned).toEqual([1]);
     });
 
-    test("refuses an asynchronous native stack merge without a full-prefix head guard", async () => {
+    test("queues an asynchronous native stack merge only for the exact full prefix", async () => {
         const bottom = pullRequest(1, {
             stack: { baseRefName: "main", number: 80, position: 1, size: 2 },
         });
@@ -312,15 +312,15 @@ describe("Delivery worker runtime", () => {
                 operation: "merge-pull-request",
                 sourceRevision: current.sourceRevision,
             })
-        ).rejects.toMatchObject({ reason: "conflict" });
+        ).resolves.toEqual({ operation: "merge-pull-request", outcome: "enqueued" });
         expect({ cleanupCalls, mergeCalls, syncCalls }).toEqual({
             cleanupCalls: 0,
-            mergeCalls: 0,
+            mergeCalls: 1,
             syncCalls: 0,
         });
     });
 
-    test("refuses native merge authority even for one remaining open stack layer", () => {
+    test("retains native merge authority for one remaining open stack layer", async () => {
         const remaining = pullRequest(2, {
             stack: { baseRefName: "main", number: 80, position: 2, size: 2 },
         });
@@ -347,11 +347,15 @@ describe("Delivery worker runtime", () => {
             sourceRevision: current.sourceRevision,
         };
 
-        expect(runtime.execute(input)).rejects.toMatchObject({ reason: "conflict" });
-        expect(runtime.execute({ ...input, mergeStack: false })).rejects.toMatchObject({
-            reason: "conflict",
+        expect(await runtime.execute(input)).toEqual({
+            operation: "merge-pull-request",
+            outcome: "enqueued",
         });
-        expect(mergeCalls).toBe(0);
+        const ordinaryConflict = await runtime
+            .execute({ ...input, mergeStack: false })
+            .catch((error: unknown) => error);
+        expect(ordinaryConflict).toMatchObject({ reason: "conflict" });
+        expect(mergeCalls).toBe(1);
     });
 
     test("starts preview with the exact authorized scope and fails closed without production authority", async () => {

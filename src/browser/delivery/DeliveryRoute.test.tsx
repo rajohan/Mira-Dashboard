@@ -714,4 +714,22 @@ describe("DeliveryRoute", () => {
             approvalView.unmount();
         }
     });
+
+    test("describes an absent deployment candidate without naming release tooling", async () => {
+        const { candidate: _candidate, ...withoutCandidate } = releasesResult.releases;
+        const harness = createClient({
+            releases: { ...releasesResult, releases: withoutCandidate },
+        });
+        const view = renderDelivery(harness.client);
+        try {
+            expect(
+                await screen.findByText(
+                    "No new published release is available for deployment."
+                )
+            ).toBeVisible();
+            expect(screen.queryByText(/Release Please/iu)).toBeNull();
+        } finally {
+            view.unmount();
+        }
+    });
 });
