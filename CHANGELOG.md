@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.2...v0.4.3) (2026-08-27)
+
+
+### Bug Fixes
+
+* **docker:** honor manual updater intent ([#490](https://github.com/rajohan/Mira-Dashboard/issues/490)) ([2240d47](https://github.com/rajohan/Mira-Dashboard/commit/2240d479bd35cb2c48bfdbe33ebc0dccb50329dd))
+* **docker:** retain updater verification stage ([#491](https://github.com/rajohan/Mira-Dashboard/issues/491)) ([8a4be06](https://github.com/rajohan/Mira-Dashboard/commit/8a4be067b89b1e343eb2a7caef20f90f827adb7f))
+* **logs:** expose timestamped dashboard streams ([#492](https://github.com/rajohan/Mira-Dashboard/issues/492)) ([4242d8f](https://github.com/rajohan/Mira-Dashboard/commit/4242d8f6970a971aa738aad7dc2371d03795c110))
+
 ## [0.4.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.1...v0.4.2) (2026-08-27)
 
 
