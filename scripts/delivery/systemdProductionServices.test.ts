@@ -529,6 +529,7 @@ describe("production root-systemd service control", () => {
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
         expect(webRuntime).toContain("--no-exit-on-missing-only-secrets");
+        expect(webRuntime).toContain("--silent");
         expect(webRuntime).toContain(
             `--only-secrets ${configurationEnvironmentNamesForRole("web").join(",")}`
         );
@@ -543,6 +544,7 @@ describe("production root-systemd service control", () => {
             "--preserve-env=NODE_ENV,MIRA_DASHBOARD_PROJECT_ROOT,MIRA_DASHBOARD_OPENCLAW_ROOT,MIRA_DASHBOARD_WORKSPACE_ROOT"
         );
         expect(worker).toContain("--no-exit-on-missing-only-secrets");
+        expect(worker).toContain("/usr/local/bin/doppler --silent run");
         expect(worker).toContain(
             `--only-secrets ${configurationEnvironmentNamesForRole("worker").join(",")}`
         );

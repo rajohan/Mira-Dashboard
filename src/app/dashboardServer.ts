@@ -2072,7 +2072,9 @@ if (import.meta.main) {
             releaseRoot,
         });
     } catch {
-        process.stderr.write("Mira Dashboard web startup failed\n");
+        process.stderr.write(
+            `${new Date().toISOString()} Mira Dashboard web startup failed\n`
+        );
         process.exitCode = 1;
     }
 }

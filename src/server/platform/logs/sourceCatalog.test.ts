@@ -34,6 +34,10 @@ describe("named log source catalog", () => {
     test("lists exact host, dashboard, and bounded OpenClaw source identities without paths", async () => {
         const roots = await fixture();
         await Promise.all([
+            writeFile(
+                path.join(roots.dashboard, "web.ndjson"),
+                '{"timestamp":"2026-08-27T20:00:00.000Z"}\n'
+            ),
             writeFile(path.join(roots.dashboard, "web-stdout.log"), "ready\n"),
             writeFile(path.join(roots.host, "auth.log"), "accepted\n"),
             writeFile(path.join(roots.openclaw, "openclaw-2026-08-09.log"), "hello\n"),
@@ -50,6 +54,12 @@ describe("named log source catalog", () => {
         expect(output.observedAtMs).toBe(123);
         expect(output.sources.map(({ id }) => id)).toContain("openclaw.20260809");
         expect(output.sources.map(({ id }) => id)).toContain("host.auth");
+        expect(output.sources.find(({ id }) => id === "dashboard.web")).toMatchObject({
+            availability: "available",
+            group: "dashboard",
+            id: "dashboard.web",
+            label: "Dashboard web",
+        });
         expect(output.sources.find(({ id }) => id === "host.auth")?.availability).toBe(
             "available"
         );

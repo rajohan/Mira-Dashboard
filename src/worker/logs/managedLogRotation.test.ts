@@ -1130,6 +1130,25 @@ describe("managed log rotation engine", () => {
         expect(submaker?.trustedOwnerIds).toContain(ownerId);
     });
 
+    test("rotates the structured Dashboard logs exposed by the browser", () => {
+        expect(
+            managedLogManifest.fileTargets
+                .filter(({ id }) => id === "dashboard.web" || id === "dashboard.worker")
+                .map(({ filePath, id }) => ({ filePath, id }))
+        ).toEqual([
+            {
+                filePath:
+                    "/home/ubuntu/projects/mira-dashboard/production/state/logs/web.ndjson",
+                id: "dashboard.web",
+            },
+            {
+                filePath:
+                    "/home/ubuntu/projects/mira-dashboard/production/state/logs/worker.ndjson",
+                id: "dashboard.worker",
+            },
+        ]);
+    });
+
     test("assigns Prowlarr rotation exclusively to its native rolling policy", () => {
         const prowlarr = managedLogManifest.fileTargets.filter(({ id }) =>
             id.startsWith("docker.prowlarr")

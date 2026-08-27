@@ -1103,7 +1103,9 @@ if (import.meta.main) {
             releaseRoot,
         });
     } catch {
-        process.stderr.write("Mira Dashboard worker startup failed\n");
+        process.stderr.write(
+            `${new Date().toISOString()} Mira Dashboard worker startup failed\n`
+        );
         process.exitCode = 1;
     }
 }

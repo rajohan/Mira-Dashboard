@@ -32,10 +32,12 @@ export interface LogSourceCatalogOptions {
 }
 
 const dashboardSources = [
+    ["dashboard.web", "web.ndjson", "Dashboard web"],
+    ["dashboard.worker", "worker.ndjson", "Dashboard worker"],
     ["dashboard.web.stdout", "web-stdout.log", "Dashboard web output"],
-    ["dashboard.web.stderr", "web-stderr.log", "Dashboard web errors"],
+    ["dashboard.web.stderr", "web-stderr.log", "Dashboard web startup errors"],
     ["dashboard.worker.stdout", "worker-stdout.log", "Dashboard worker output"],
-    ["dashboard.worker.stderr", "worker-stderr.log", "Dashboard worker errors"],
+    ["dashboard.worker.stderr", "worker-stderr.log", "Dashboard worker startup errors"],
 ] as const;
 
 /** Exact host text-log read manifest; no recursive discovery is performed. */
