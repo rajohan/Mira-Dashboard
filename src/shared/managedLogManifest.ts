@@ -1,4 +1,4 @@
-export type ManagedLogRotationStrategy = "copytruncate" | "rename";
+export type ManagedLogRotationStrategy = "copytruncate" | "external" | "rename";
 
 export interface ManagedLogProvisionedDirectory {
     readonly directoryPath: string;
@@ -16,6 +16,7 @@ export interface ManagedLogProvisioningAnchor {
 }
 
 export interface ManagedLogFileTarget {
+    readonly archiveFileNamePattern?: string;
     readonly cadenceMs?: number;
     readonly compress: boolean;
     readonly filePath: string;
@@ -32,15 +33,18 @@ export interface ManagedLogFileTarget {
 }
 
 export interface ManagedArchiveTarget {
-    readonly compressAfterMs: number;
+    readonly compressAfterMs?: number;
+    readonly compressibleFileNamePattern?: string;
     readonly directoryPath: string;
+    readonly fileNamePattern: string;
     readonly id: string;
-    readonly kind: "openclaw-daily";
     readonly maximumEntries: number;
     readonly maximumSourceBytes: number;
     readonly retentionAgeMs: number;
     readonly retentionCount: number;
+    readonly retentionTieBreaker?: "numeric-generation-ascending";
     readonly trustedOwnerIds: readonly number[];
+    readonly trustedWritableGroupId?: number;
 }
 
 export interface ManagedLogManifest {
@@ -54,6 +58,24 @@ const mebibyte = 1024 * 1024;
 const dayMs = 24 * 60 * 60 * 1000;
 const maximumFileTargets = 64;
 const rotationEpochProjectionFileName = "rotation-epochs.json";
+
+function validateFileNamePattern(value: string): void {
+    if (
+        value.length < 3 ||
+        value.length > 512 ||
+        !value.startsWith("^") ||
+        !value.endsWith("$") ||
+        value.includes("\0") ||
+        value.includes("/")
+    ) {
+        throw new TypeError("Managed log manifest is invalid");
+    }
+    try {
+        new RegExp(value, "u");
+    } catch {
+        throw new TypeError("Managed log manifest is invalid");
+    }
+}
 
 function trustedSourceOwnerIds(
     runtimeOwnerId: number,
@@ -72,6 +94,10 @@ function dirname(value: string): string {
 
 function basename(value: string): string {
     return value.slice(value.lastIndexOf("/") + 1);
+}
+
+function escapeRegularExpression(value: string): string {
+    return value.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
 }
 
 function validateManifestPath(value: string): void {
@@ -190,6 +216,32 @@ function managedSharedFile(
     });
 }
 
+function externallyRotatedSharedFile(
+    id: string,
+    filePath: string,
+    trustedOwnerIds: readonly number[],
+    provisionedDirectories: readonly ManagedLogProvisionedDirectory[],
+    maintenanceGroupId: number | undefined,
+    rootAndRuntimeOwnerIds: readonly number[]
+): ManagedLogFileTarget {
+    const extension = filePath.slice(filePath.lastIndexOf("."));
+    const stem = basename(filePath).slice(0, -extension.length);
+    return Object.freeze({
+        ...managedSharedFile(
+            id,
+            filePath,
+            trustedOwnerIds,
+            provisionedDirectories,
+            maintenanceGroupId,
+            rootAndRuntimeOwnerIds
+        ),
+        archiveFileNamePattern: `^${escapeRegularExpression(stem)}\\.\\d+${escapeRegularExpression(extension)}$`,
+        cadenceMs: undefined,
+        compress: false,
+        strategy: "external" as const,
+    });
+}
+
 const dashboardLogsRoot = "/home/ubuntu/projects/mira-dashboard/production/state/logs";
 
 function provisionedDirectory(
@@ -260,14 +312,51 @@ export function createManagedLogManifest(
         archiveTargets: Object.freeze([
             Object.freeze({
                 compressAfterMs: dayMs,
+                compressibleFileNamePattern: String.raw`^openclaw-\d{4}-\d{2}-\d{2}\.log$`,
                 directoryPath: "/tmp/openclaw",
+                fileNamePattern: String.raw`^openclaw-\d{4}-\d{2}-\d{2}\.log(?:\.gz)?$`,
                 id: "openclaw.daily",
-                kind: "openclaw-daily" as const,
                 maximumEntries: 128,
                 maximumSourceBytes: 64 * mebibyte,
                 retentionAgeMs: 30 * dayMs,
                 retentionCount: 30,
                 trustedOwnerIds: rootAndRuntimeOwnerIds,
+            }),
+            Object.freeze({
+                directoryPath: "/opt/docker/data/prowlarr/logs",
+                fileNamePattern: String.raw`^prowlarr\.\d+\.txt$`,
+                id: "docker.prowlarr.native",
+                maximumEntries: 256,
+                maximumSourceBytes: 11 * mebibyte,
+                retentionAgeMs: 14 * dayMs,
+                retentionCount: 7,
+                retentionTieBreaker: "numeric-generation-ascending",
+                trustedOwnerIds: trustedSourceOwnerIds(runtimeOwnerId, 1001),
+                trustedWritableGroupId: maintenanceGroupId ?? 1001,
+            }),
+            Object.freeze({
+                directoryPath: "/opt/docker/data/prowlarr/logs",
+                fileNamePattern: String.raw`^prowlarr\.debug\.\d+\.txt$`,
+                id: "docker.prowlarr.debug.native",
+                maximumEntries: 256,
+                maximumSourceBytes: 11 * mebibyte,
+                retentionAgeMs: 14 * dayMs,
+                retentionCount: 7,
+                retentionTieBreaker: "numeric-generation-ascending",
+                trustedOwnerIds: trustedSourceOwnerIds(runtimeOwnerId, 1001),
+                trustedWritableGroupId: maintenanceGroupId ?? 1001,
+            }),
+            Object.freeze({
+                directoryPath: "/opt/docker/data/prowlarr/logs",
+                fileNamePattern: String.raw`^prowlarr\.trace\.\d+\.txt$`,
+                id: "docker.prowlarr.trace.native",
+                maximumEntries: 256,
+                maximumSourceBytes: 11 * mebibyte,
+                retentionAgeMs: 14 * dayMs,
+                retentionCount: 7,
+                retentionTieBreaker: "numeric-generation-ascending",
+                trustedOwnerIds: trustedSourceOwnerIds(runtimeOwnerId, 1001),
+                trustedWritableGroupId: maintenanceGroupId ?? 1001,
             }),
         ]),
         fileTargets: Object.freeze([
@@ -291,7 +380,7 @@ export function createManagedLogManifest(
                 `${dashboardLogsRoot}/worker-stderr.log`,
                 rootAndRuntimeOwnerIds
             ),
-            managedSharedFile(
+            externallyRotatedSharedFile(
                 "docker.prowlarr.debug",
                 "/opt/docker/data/prowlarr/logs/prowlarr.debug.txt",
                 trustedSourceOwnerIds(runtimeOwnerId, 1001),
@@ -299,7 +388,7 @@ export function createManagedLogManifest(
                 maintenanceGroupId,
                 rootAndRuntimeOwnerIds
             ),
-            managedSharedFile(
+            externallyRotatedSharedFile(
                 "docker.prowlarr.trace",
                 "/opt/docker/data/prowlarr/logs/prowlarr.trace.txt",
                 trustedSourceOwnerIds(runtimeOwnerId, 1001),
@@ -307,7 +396,7 @@ export function createManagedLogManifest(
                 maintenanceGroupId,
                 rootAndRuntimeOwnerIds
             ),
-            managedSharedFile(
+            externallyRotatedSharedFile(
                 "docker.prowlarr",
                 "/opt/docker/data/prowlarr/logs/prowlarr.txt",
                 trustedSourceOwnerIds(runtimeOwnerId, 1001),
@@ -348,6 +437,7 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
     }
     const ids = new Set<string>();
     const paths = new Set<string>();
+    const archiveSelectors = new Set<string>();
     for (const target of [...manifest.fileTargets, ...manifest.archiveTargets]) {
         if (!/^[a-z0-9][a-z0-9.-]{0,127}$/u.test(target.id) || ids.has(target.id)) {
             throw new TypeError("Managed log manifest is invalid");
@@ -356,11 +446,24 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
         const absolutePath =
             "filePath" in target ? target.filePath : target.directoryPath;
         validateManifestPath(absolutePath);
-        if (paths.has(absolutePath))
+        if (paths.has(absolutePath) && "filePath" in target)
             throw new TypeError("Managed log manifest is invalid");
         paths.add(absolutePath);
         if ("filePath" in target) {
             validateProvisioningPolicy(target);
+            if (target.archiveFileNamePattern !== undefined) {
+                validateFileNamePattern(target.archiveFileNamePattern);
+            }
+        } else {
+            validateFileNamePattern(target.fileNamePattern);
+            const selector = `${target.directoryPath}\0${target.fileNamePattern}`;
+            if (archiveSelectors.has(selector)) {
+                throw new TypeError("Managed log manifest is invalid");
+            }
+            archiveSelectors.add(selector);
+            if (target.compressibleFileNamePattern !== undefined) {
+                validateFileNamePattern(target.compressibleFileNamePattern);
+            }
         }
         if (
             target.maximumSourceBytes < 1 ||
@@ -385,6 +488,8 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
                 target.maximumSizeBytes < 1 ||
                 target.maximumSizeBytes > target.maximumSourceBytes ||
                 !Number.isSafeInteger(target.maximumSizeBytes) ||
+                (target.strategy === "external" &&
+                    (target.compress || target.cadenceMs !== undefined)) ||
                 (target.cadenceMs !== undefined &&
                     (!Number.isSafeInteger(target.cadenceMs) || target.cadenceMs < 1))
             ) {
@@ -394,8 +499,21 @@ export function validateManagedLogManifest(manifest: ManagedLogManifest): void {
             target.maximumEntries < 1 ||
             target.maximumEntries > 4096 ||
             !Number.isSafeInteger(target.maximumEntries) ||
-            target.compressAfterMs < 0 ||
-            !Number.isSafeInteger(target.compressAfterMs)
+            (target.compressAfterMs !== undefined &&
+                (target.compressAfterMs < 0 ||
+                    !Number.isSafeInteger(target.compressAfterMs))) ||
+            (target.compressibleFileNamePattern === undefined) !==
+                (target.compressAfterMs === undefined) ||
+            (target.retentionTieBreaker !== undefined &&
+                target.retentionTieBreaker !== "numeric-generation-ascending")
+        ) {
+            throw new TypeError("Managed log manifest is invalid");
+        }
+        if (
+            "directoryPath" in target &&
+            target.trustedWritableGroupId !== undefined &&
+            (!Number.isSafeInteger(target.trustedWritableGroupId) ||
+                target.trustedWritableGroupId < 0)
         ) {
             throw new TypeError("Managed log manifest is invalid");
         }

@@ -7,6 +7,7 @@ import {
     mkdtemp,
     readFile,
     readdir,
+    rename,
     rm,
     symlink,
     utimes,
@@ -770,6 +771,35 @@ describe("managed log rotation engine", () => {
         );
     });
 
+    test("observes an externally rotated source without rotating it", async () => {
+        const base = await fixture();
+        const source = path.join(base.logDirectory, "prowlarr.txt");
+        await writeFile(source, "externally owned\n", { mode: 0o600 });
+        const original = await lstat(source);
+        const manifest = {
+            ...base.manifest,
+            fileTargets: [
+                fileTarget(source, {
+                    cadenceMs: undefined,
+                    compress: false,
+                    id: "docker.prowlarr",
+                    maximumSizeBytes: 1,
+                    strategy: "external",
+                }),
+            ],
+        };
+
+        const summary = await createManagedLogRotationEngine({ manifest }).run();
+
+        expect(summary.ok).toBe(true);
+        expect(summary.results).toEqual([
+            { action: "skipped", reason: "not-due", targetId: "docker.prowlarr" },
+        ]);
+        expect(await readFile(source, "utf8")).toBe("externally owned\n");
+        const observed = await lstat(source);
+        expect(observed.ino).toBe(original.ino);
+    });
+
     test("compresses and retains a bounded archive-only OpenClaw inventory", async () => {
         const base = await fixture();
         const old = new Date("2026-07-01T00:00:00.000Z");
@@ -783,14 +813,16 @@ describe("managed log rotation engine", () => {
         }
         const target: ManagedArchiveTarget = {
             compressAfterMs: 1,
+            compressibleFileNamePattern: String.raw`^openclaw-\d{4}-\d{2}-\d{2}\.log$`,
             directoryPath: base.archiveDirectory,
+            fileNamePattern: String.raw`^openclaw-\d{4}-\d{2}-\d{2}\.log(?:\.gz)?$`,
             id: "openclaw.daily",
-            kind: "openclaw-daily",
             maximumEntries: 10,
             maximumSourceBytes: 1024 * 1024,
             retentionAgeMs: 365 * 24 * 60 * 60 * 1000,
             retentionCount: 2,
             trustedOwnerIds: [ownerId],
+            trustedWritableGroupId: groupId,
         };
         const manifest = { ...base.manifest, archiveTargets: [target] };
         const summary = await createManagedLogRotationEngine({
@@ -808,6 +840,182 @@ describe("managed log rotation engine", () => {
         const retained = await readdir(base.archiveDirectory);
         expect(retained).toHaveLength(2);
         expect(retained.every((name) => name.endsWith(".log.gz"))).toBe(true);
+    });
+
+    test("retains externally rolled numeric archives without renaming or compressing them", async () => {
+        const base = await fixture();
+        const old = new Date("2026-07-01T00:00:00.000Z");
+        for (const fileName of [
+            "service.0.txt",
+            "service.1.txt",
+            "service.2.txt",
+            "service.debug.0.txt",
+            "unrelated.txt",
+        ]) {
+            const filePath = path.join(base.archiveDirectory, fileName);
+            await writeFile(filePath, `${fileName}\n`, { mode: 0o600 });
+            if (fileName.startsWith("service")) await chmod(filePath, 0o660);
+            await utimes(filePath, old, old);
+        }
+        const target: ManagedArchiveTarget = {
+            directoryPath: base.archiveDirectory,
+            fileNamePattern: String.raw`^service\.\d+\.txt$`,
+            id: "external.numeric-archives",
+            maximumEntries: 10,
+            maximumSourceBytes: 1024 * 1024,
+            retentionAgeMs: 365 * 24 * 60 * 60 * 1000,
+            retentionCount: 2,
+            retentionTieBreaker: "numeric-generation-ascending",
+            trustedOwnerIds: [ownerId],
+            trustedWritableGroupId: groupId,
+        };
+        const manifest = { ...base.manifest, archiveTargets: [target] };
+
+        const summary = await createManagedLogRotationEngine({ manifest }).run();
+
+        expect(summary.ok).toBe(true);
+        expect(summary.results).toEqual([
+            {
+                action: "deleted",
+                reason: "retention",
+                targetId: "external.numeric-archives",
+            },
+        ]);
+        const retained = await readdir(base.archiveDirectory);
+        expect(retained).toContain("unrelated.txt");
+        expect(retained.filter((name) => /^service\.\d+\.txt$/u.test(name))).toHaveLength(
+            2
+        );
+        expect(retained).toContain("service.0.txt");
+        expect(retained).toContain("service.1.txt");
+        expect(retained).not.toContain("service.2.txt");
+        expect(retained).toContain("service.debug.0.txt");
+        expect(retained.some((name) => name.endsWith(".gz"))).toBe(false);
+    });
+
+    test("does not delete a fresh archive that replaces an expired enumerated inode", async () => {
+        const base = await fixture();
+        const archive = path.join(base.archiveDirectory, "service.0.txt");
+        await writeFile(archive, "old\n", { mode: 0o660 });
+        const old = new Date("2026-07-01T00:00:00.000Z");
+        await utimes(archive, old, old);
+        const target: ManagedArchiveTarget = {
+            directoryPath: base.archiveDirectory,
+            fileNamePattern: String.raw`^service\.\d+\.txt$`,
+            id: "external.numeric-archives",
+            maximumEntries: 10,
+            maximumSourceBytes: 1024 * 1024,
+            retentionAgeMs: 1,
+            retentionCount: 1,
+            trustedOwnerIds: [ownerId],
+            trustedWritableGroupId: groupId,
+        };
+        let replaced = false;
+        const summary = await createManagedLogRotationEngine({
+            manifest: { ...base.manifest, archiveTargets: [target] },
+            now: () => Date.parse("2026-08-09T12:00:00.000Z"),
+            testHooks: {
+                async afterRetentionVerified(fileName) {
+                    if (replaced) return;
+                    replaced = true;
+                    await rename(
+                        archive,
+                        path.join(base.archiveDirectory, `${fileName}.old`)
+                    );
+                    await writeFile(archive, "fresh\n", { mode: 0o660 });
+                },
+            },
+        }).run();
+
+        expect(summary.ok).toBe(true);
+        expect(summary.results).toEqual([
+            { action: "skipped", reason: "not-due", targetId: target.id },
+        ]);
+        expect(await readFile(archive, "utf8")).toBe("fresh\n");
+    });
+
+    test("tolerates an external rollover that removes an expired archive before detach", async () => {
+        const base = await fixture();
+        const archive = path.join(base.archiveDirectory, "service.0.txt");
+        const rolled = path.join(base.archiveDirectory, "service.0.txt.rolled");
+        await writeFile(archive, "old\n", { mode: 0o660 });
+        const old = new Date("2026-07-01T00:00:00.000Z");
+        await utimes(archive, old, old);
+        const target: ManagedArchiveTarget = {
+            directoryPath: base.archiveDirectory,
+            fileNamePattern: String.raw`^service\.\d+\.txt$`,
+            id: "external.numeric-archives",
+            maximumEntries: 10,
+            maximumSourceBytes: 1024 * 1024,
+            retentionAgeMs: 1,
+            retentionCount: 1,
+            trustedOwnerIds: [ownerId],
+            trustedWritableGroupId: groupId,
+        };
+        const summary = await createManagedLogRotationEngine({
+            manifest: { ...base.manifest, archiveTargets: [target] },
+            now: () => Date.parse("2026-08-09T12:00:00.000Z"),
+            testHooks: {
+                async afterRetentionVerified() {
+                    await rename(archive, rolled);
+                },
+            },
+        }).run();
+
+        expect(summary.ok).toBe(true);
+        expect(summary.results).toEqual([
+            { action: "skipped", reason: "not-due", targetId: target.id },
+        ]);
+        expect(await readFile(rolled, "utf8")).toBe("old\n");
+    });
+
+    test("preserves a detached numeric archive when its original name is occupied", async () => {
+        const base = await fixture();
+        const archive = path.join(base.archiveDirectory, "service.0.txt");
+        await writeFile(archive, "old\n", { mode: 0o660 });
+        const old = new Date("2026-07-01T00:00:00.000Z");
+        await utimes(archive, old, old);
+        const target: ManagedArchiveTarget = {
+            directoryPath: base.archiveDirectory,
+            fileNamePattern: String.raw`^service\.\d+\.txt$`,
+            id: "external.numeric-archives",
+            maximumEntries: 10,
+            maximumSourceBytes: 1024 * 1024,
+            retentionAgeMs: 1,
+            retentionCount: 1,
+            retentionTieBreaker: "numeric-generation-ascending",
+            trustedOwnerIds: [ownerId],
+            trustedWritableGroupId: groupId,
+        };
+        const summary = await createManagedLogRotationEngine({
+            manifest: { ...base.manifest, archiveTargets: [target] },
+            now: () => Date.parse("2026-08-09T12:00:00.000Z"),
+            testHooks: {
+                async afterRetentionVerified(fileName) {
+                    await rename(
+                        archive,
+                        path.join(base.archiveDirectory, `${fileName}.old`)
+                    );
+                    await writeFile(archive, "fresh\n", { mode: 0o660 });
+                },
+                async afterRetentionDetached() {
+                    await writeFile(archive, "newest\n", { mode: 0o660 });
+                },
+            },
+        }).run();
+
+        expect(summary.ok).toBe(true);
+        expect(summary.results).toEqual([
+            { action: "skipped", reason: "not-due", targetId: target.id },
+        ]);
+        expect(await readFile(archive, "utf8")).toBe("newest\n");
+        expect(
+            await readFile(path.join(base.archiveDirectory, "service.1.txt"), "utf8")
+        ).toBe("fresh\n");
+        const archiveNames = await readdir(base.archiveDirectory);
+        expect(
+            archiveNames.some((name) => name.startsWith(".mira-log-maintenance-"))
+        ).toBe(false);
     });
 
     test("fails closed for symlinks, hardlinks, unsafe modes, and oversized sources", async () => {
@@ -920,5 +1128,33 @@ describe("managed log rotation engine", () => {
         expect(submaker?.trustedOwnerIds).toContain(1000);
         expect(submaker?.trustedOwnerIds).toContain(1001);
         expect(submaker?.trustedOwnerIds).toContain(ownerId);
+    });
+
+    test("assigns Prowlarr rotation exclusively to its native rolling policy", () => {
+        const prowlarr = managedLogManifest.fileTargets.filter(({ id }) =>
+            id.startsWith("docker.prowlarr")
+        );
+        expect(prowlarr).toHaveLength(3);
+        expect(
+            prowlarr.every(
+                ({ cadenceMs, compress, strategy }) =>
+                    cadenceMs === undefined && !compress && strategy === "external"
+            )
+        ).toBe(true);
+        expect(
+            managedLogManifest.archiveTargets.filter(({ id }) => id.endsWith(".native"))
+        ).toMatchObject({
+            length: 3,
+        });
+        expect(
+            managedLogManifest.archiveTargets
+                .filter(({ id }) => id.endsWith(".native"))
+                .every(
+                    ({ compressAfterMs, compressibleFileNamePattern, retentionCount }) =>
+                        compressAfterMs === undefined &&
+                        compressibleFileNamePattern === undefined &&
+                        retentionCount === 7
+                )
+        ).toBe(true);
     });
 });
