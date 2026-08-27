@@ -13,6 +13,22 @@ const commandTimeoutMs = 60_000;
 const commitMessage = "chore: sync OpenClaw workspace state";
 const workspacePathspec = ":(literal)workspace";
 const mainBranchRef = "refs/heads/main";
+const workspaceUntrackedSafePaths = Object.freeze([
+    "workspace/AGENTS.md",
+    "workspace/DREAMS.md",
+    "workspace/HEARTBEAT.md",
+    "workspace/IDENTITY.md",
+    "workspace/MEMORY.md",
+    "workspace/SOUL.md",
+    "workspace/TOOLS.md",
+    "workspace/USER.md",
+    "workspace/WORKFLOW_AUTO.md",
+    "workspace/coder/",
+    "workspace/communicator/",
+    "workspace/memory/",
+    "workspace/researcher/",
+    "workspace/wiki/",
+] as const);
 
 const cleanupTimeoutMs = 30_000;
 const gitOperationMarkers = Object.freeze([
@@ -25,12 +41,13 @@ const gitOperationMarkers = Object.freeze([
     "sequencer",
 ]);
 
-async function git(
+async function runGit(
     root: string,
     arguments_: readonly string[],
     parentSignal?: AbortSignal,
-    environment: Readonly<Record<string, string>> = {}
-): Promise<string> {
+    environment: Readonly<Record<string, string>> = {},
+    stdin: Uint8Array | "ignore" = "ignore"
+): Promise<Buffer> {
     const signal =
         parentSignal === undefined
             ? AbortSignal.timeout(commandTimeoutMs)
@@ -46,10 +63,10 @@ async function git(
         },
         signal,
         stderr: "pipe",
-        stdin: "ignore",
+        stdin,
         stdout: "pipe",
     });
-    async function readBounded(stream: ReadableStream<Uint8Array>): Promise<string> {
+    async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
         const reader = stream.getReader();
         const chunks: Uint8Array[] = [];
         let total = 0;
@@ -66,15 +83,15 @@ async function git(
         } finally {
             reader.releaseLock();
         }
-        return Buffer.concat(chunks).toString();
+        return Buffer.concat(chunks);
     }
     let exitCode: number;
-    let stdout: string;
+    let stdout: Buffer;
     try {
         [exitCode, stdout] = await Promise.all([
             process.exited,
             readBounded(process.stdout),
-            readBounded(process.stderr).then(() => ""),
+            readBounded(process.stderr).then(() => Buffer.alloc(0)),
         ]);
     } catch (error) {
         process.kill();
@@ -84,7 +101,18 @@ async function git(
     if (exitCode !== 0) {
         throw new Error("Workspace Git command failed");
     }
-    return stdout.trim();
+    return stdout;
+}
+
+async function git(
+    root: string,
+    arguments_: readonly string[],
+    parentSignal?: AbortSignal,
+    environment: Readonly<Record<string, string>> = {},
+    stdin: Uint8Array | "ignore" = "ignore"
+): Promise<string> {
+    const output = await runGit(root, arguments_, parentSignal, environment, stdin);
+    return output.toString().replace(/[\r\n]+$/u, "");
 }
 
 async function assertNoInProgressGitOperation(
@@ -112,6 +140,139 @@ async function assertMainBranchHead(root: string, signal?: AbortSignal): Promise
     if (symbolicHead !== mainBranchRef) {
         throw new Error("Workspace Git source is not synchronized");
     }
+}
+
+function splitNullTerminatedPaths(output: Uint8Array): Buffer[] {
+    const paths: Buffer[] = [];
+    let start = 0;
+    for (let index = 0; index < output.byteLength; index += 1) {
+        if (output[index] !== 0) continue;
+        if (index > start) paths.push(Buffer.from(output.subarray(start, index)));
+        start = index + 1;
+    }
+    if (start !== output.byteLength) {
+        throw new Error("Workspace Git path output is invalid");
+    }
+    return paths;
+}
+
+interface WorkspaceStatusInventory {
+    readonly addedPaths: readonly Buffer[];
+    readonly changedPaths: readonly Buffer[];
+    readonly pathsRequiringExplicitAdd: readonly Buffer[];
+}
+
+function parseWorkspaceStatus(output: Uint8Array): WorkspaceStatusInventory {
+    const fields = splitNullTerminatedPaths(output);
+    const addedPaths: Buffer[] = [];
+    const changedPaths: Buffer[] = [];
+    const pathsRequiringExplicitAdd: Buffer[] = [];
+    for (let index = 0; index < fields.length; index += 1) {
+        const record = fields[index];
+        if (record === undefined || record.length < 4 || record[2] !== 0x20) {
+            throw new Error("Workspace Git status output is invalid");
+        }
+        const indexStatus = record[0];
+        const worktreeStatus = record[1];
+        const path = record.subarray(3);
+        changedPaths.push(path);
+        if (indexStatus === 0x41 || worktreeStatus === 0x41) {
+            addedPaths.push(path);
+        }
+        if (
+            indexStatus === 0x52 ||
+            indexStatus === 0x43 ||
+            worktreeStatus === 0x52 ||
+            worktreeStatus === 0x43
+        ) {
+            pathsRequiringExplicitAdd.push(path);
+            index += 1;
+            if (fields[index] === undefined) {
+                throw new Error("Workspace Git status output is invalid");
+            }
+        }
+    }
+    return Object.freeze({ addedPaths, changedPaths, pathsRequiringExplicitAdd });
+}
+
+function pathEqualsAscii(path: Uint8Array, expected: string): boolean {
+    return Buffer.from(path).equals(Buffer.from(expected));
+}
+
+function pathStartsWithAscii(path: Uint8Array, expected: string): boolean {
+    const prefix = Buffer.from(expected);
+    return (
+        path.byteLength >= prefix.byteLength &&
+        Buffer.from(path).subarray(0, prefix.byteLength).equals(prefix)
+    );
+}
+
+function workspaceUntrackedPathIsSafe(path: Uint8Array): boolean {
+    return workspaceUntrackedSafePaths.some((safePath) =>
+        safePath.endsWith("/")
+            ? pathStartsWithAscii(path, safePath)
+            : pathEqualsAscii(path, safePath)
+    );
+}
+
+function literalPathspec(path: string): string {
+    return `:(literal)${path}`;
+}
+
+function absolutePath(root: string, path: Uint8Array): Buffer {
+    return Buffer.concat([Buffer.from(`${root}${Path.sep}`), Buffer.from(path)]);
+}
+
+function lstatIfPresent(path: Buffer): Fs.Stats | undefined {
+    try {
+        return Fs.lstatSync(path);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+    }
+}
+
+function assertSafeAdditionTypes(root: string, paths: readonly Buffer[]): void {
+    for (const path of paths) {
+        const candidate = absolutePath(root, path);
+        const status = lstatIfPresent(candidate);
+        if (status === undefined) continue;
+        const exactSafePath = workspaceUntrackedSafePaths.find(
+            (safePath) => !safePath.endsWith("/") && pathEqualsAscii(path, safePath)
+        );
+        if (exactSafePath !== undefined && status.isDirectory()) {
+            throw new Error("Workspace Git exact-file addition is not a file");
+        }
+        if (
+            status.isDirectory() &&
+            lstatIfPresent(Buffer.concat([candidate, Buffer.from(`${Path.sep}.git`)])) !==
+                undefined
+        ) {
+            throw new Error("Workspace Git additions contain an embedded repository");
+        }
+    }
+}
+
+function existingPaths(root: string, paths: readonly Buffer[]): Buffer[] {
+    return paths.filter((path) => lstatIfPresent(absolutePath(root, path)) !== undefined);
+}
+
+function pathspecInput(paths: readonly Buffer[]): Buffer {
+    return Buffer.concat(
+        paths.map((path) =>
+            Buffer.concat([Buffer.from(":(literal)"), path, Buffer.of(0)])
+        )
+    );
+}
+
+function uniquePaths(paths: readonly Buffer[]): Buffer[] {
+    const seen = new Set<string>();
+    return paths.filter((path) => {
+        const key = path.toString("hex");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 }
 
 export function createWorkspaceGitSync(rootPath: string) {
@@ -164,7 +325,7 @@ export function createWorkspaceGitSync(rootPath: string) {
                 const [parents, subject, changedPaths] = await Promise.all([
                     git(canonicalRoot, ["show", "-s", "--format=%P", commit], signal),
                     git(canonicalRoot, ["show", "-s", "--format=%s", commit], signal),
-                    git(
+                    runGit(
                         canonicalRoot,
                         [
                             "diff-tree",
@@ -177,15 +338,13 @@ export function createWorkspaceGitSync(rootPath: string) {
                         signal
                     ),
                 ]);
-                const changedPathInventory = changedPaths
-                    .split("\0")
-                    .filter((changedPath) => changedPath !== "");
+                const changedPathInventory = splitNullTerminatedPaths(changedPaths);
                 if (
                     parents.split(" ").length !== 1 ||
                     subject !== commitMessage ||
                     changedPathInventory.length === 0 ||
                     changedPathInventory.some(
-                        (changedPath) => !changedPath.startsWith("workspace/")
+                        (changedPath) => !pathStartsWithAscii(changedPath, "workspace/")
                     )
                 ) {
                     throw new Error("Workspace Git source is not synchronized");
@@ -195,15 +354,59 @@ export function createWorkspaceGitSync(rootPath: string) {
             recoveredCommit = head;
         }
 
-        const changed = await git(
-            canonicalRoot,
-            ["status", "--porcelain=v1", "--untracked-files=no", "--", workspacePathspec],
-            signal
+        const [trackedChanges, untrackedPaths] = await Promise.all([
+            runGit(
+                canonicalRoot,
+                [
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=no",
+                    "--",
+                    workspacePathspec,
+                ],
+                signal
+            ),
+            runGit(
+                canonicalRoot,
+                [
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--",
+                    ...workspaceUntrackedSafePaths.map((path) => literalPathspec(path)),
+                ],
+                signal
+            ),
+        ]);
+        const trackedInventory = parseWorkspaceStatus(trackedChanges);
+        const safeUntrackedPaths = splitNullTerminatedPaths(untrackedPaths).filter(
+            (path) => workspaceUntrackedPathIsSafe(path)
         );
-        const changedFileCount = changed === "" ? 0 : changed.split("\n").length;
-        if (changedFileCount === 0) {
+        const safeStagedAdditionPaths = existingPaths(
+            canonicalRoot,
+            trackedInventory.addedPaths.filter((path) =>
+                workspaceUntrackedPathIsSafe(path)
+            )
+        );
+        const normalExplicitAddPaths = existingPaths(
+            canonicalRoot,
+            uniquePaths([
+                ...trackedInventory.pathsRequiringExplicitAdd,
+                ...safeUntrackedPaths,
+            ])
+        );
+        const safeExplicitAddPaths = uniquePaths([
+            ...normalExplicitAddPaths,
+            ...safeStagedAdditionPaths,
+        ]);
+        if (
+            trackedInventory.changedPaths.length === 0 &&
+            safeUntrackedPaths.length === 0
+        ) {
             return {
-                changedFileCount,
+                changedFileCount: 0,
                 ...(recoveredCommit === undefined ? {} : { commit: recoveredCommit }),
                 pushed: recoveredCommit !== undefined,
             };
@@ -218,6 +421,7 @@ export function createWorkspaceGitSync(rootPath: string) {
             GIT_INDEX_FILE: Path.join(privateIndexDirectory, "index"),
         });
         try {
+            assertSafeAdditionTypes(canonicalRoot, safeExplicitAddPaths);
             await git(canonicalRoot, ["read-tree", head], signal, indexEnvironment);
             await git(
                 canonicalRoot,
@@ -225,13 +429,42 @@ export function createWorkspaceGitSync(rootPath: string) {
                 signal,
                 indexEnvironment
             );
-            const staged = await git(
+            if (normalExplicitAddPaths.length > 0) {
+                await git(
+                    canonicalRoot,
+                    ["add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                    signal,
+                    indexEnvironment,
+                    pathspecInput(normalExplicitAddPaths)
+                );
+            }
+            if (safeStagedAdditionPaths.length > 0) {
+                await git(
+                    canonicalRoot,
+                    ["add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                    signal,
+                    indexEnvironment,
+                    pathspecInput(safeStagedAdditionPaths)
+                );
+            }
+            const staged = await runGit(
                 canonicalRoot,
-                ["diff", "--cached", "--name-only", "--", workspacePathspec],
+                [
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=no",
+                    "--",
+                    workspacePathspec,
+                ],
                 signal,
                 indexEnvironment
             );
-            if (staged === "") return { changedFileCount: 0, pushed: false };
+            const stagedPaths = uniquePaths(parseWorkspaceStatus(staged).changedPaths);
+            if (stagedPaths.length === 0) {
+                return { changedFileCount: 0, pushed: false };
+            }
+            const changedFileCount = stagedPaths.length;
             const tree = await git(
                 canonicalRoot,
                 ["write-tree"],
