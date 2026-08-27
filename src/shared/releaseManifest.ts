@@ -78,7 +78,7 @@ const releaseArtifactSchema = v.strictObject({
 const releaseMigrationSchema = v.strictObject({
     id: v.pipe(
         boundedToken(128),
-        v.regex(/^\d{14}_[a-z0-9]+(?:-[a-z0-9]+)*$/u, invalidReleaseManifest)
+        v.regex(/^\d{14}_[a-z\d][a-z\d_-]*$/u, invalidReleaseManifest)
     ),
     migrationSha256: lowercaseSha256Schema(invalidReleaseManifest),
     snapshotSha256: lowercaseSha256Schema(invalidReleaseManifest),

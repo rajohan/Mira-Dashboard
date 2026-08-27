@@ -96,6 +96,25 @@ function applicationSchemaObjects(
     return validation.output;
 }
 
+function hasPendingInitializedMigrations(
+    database: Database,
+    migrationCount: number
+): boolean {
+    const history = database
+        .query<{ present: number }, []>(`
+            SELECT 1 AS present
+            FROM sqlite_schema
+            WHERE type = 'table' AND name = 'schema_migrations'
+        `)
+        .get();
+    if (history?.present !== 1) return false;
+
+    const applied = database
+        .query<{ count: number }, []>("SELECT COUNT(*) AS count FROM schema_migrations")
+        .get();
+    return applied === null || applied.count < migrationCount;
+}
+
 function expectedSchemaObjects(
     migrations: readonly VerifiedMigration[]
 ): SchemaObjectRow[] {
@@ -300,6 +319,24 @@ export function applyVerifiedMigrations(
     assertConstraintEnforcement(database);
     const maximumSchemaObjects = maximumExpectedSchemaObjectCount(migrations);
 
+    // SQLite only changes foreign-key enforcement outside a transaction. Existing schemas
+    // with pending table rebuilds therefore suspend FK actions before taking the atomic
+    // writer transaction. Fresh schemas contain no references yet, while current schemas
+    // need no DDL and retain enforcement for validate-only/nested-transaction callers.
+    const suspendForeignKeys = hasPendingInitializedMigrations(
+        database,
+        migrations.length
+    );
+    if (suspendForeignKeys) {
+        database.run("PRAGMA foreign_keys = OFF");
+        const foreignKeysDisabled = database
+            .query<{ foreign_keys: number }, []>("PRAGMA foreign_keys")
+            .get();
+        if (foreignKeysDisabled?.foreign_keys !== 0) {
+            throw new Error("Database foreign key enforcement could not be suspended");
+        }
+    }
+
     const apply = database.transaction(() => {
         const schemaObjects = applicationSchemaObjects(database, maximumSchemaObjects);
         const hasMigrationHistory = schemaObjects.some(
@@ -348,12 +385,16 @@ export function applyVerifiedMigrations(
             throw new Error("Database migration history is incomplete after application");
         }
         assertSchemaMatchesReviewedHistory(database, migrations, finalApplied.length);
-        assertConstraintEnforcement(database);
         assertDatabaseIntegrity(database);
         return pending.length;
     });
 
-    return apply.immediate();
+    try {
+        return apply.immediate();
+    } finally {
+        if (suspendForeignKeys) database.run("PRAGMA foreign_keys = ON");
+        assertConstraintEnforcement(database);
+    }
 }
 
 /**

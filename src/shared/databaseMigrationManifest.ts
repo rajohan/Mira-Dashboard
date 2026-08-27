@@ -6,7 +6,7 @@ export interface MigrationManifestEntry {
 }
 
 /** Public schema target encoded into immutable release display metadata. */
-export const databaseSchemaTarget = 2;
+export const databaseSchemaTarget = 3;
 
 /**
  * Reviewed migration files accepted by runtime and release tooling.
@@ -26,5 +26,12 @@ export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]
             "7acd0e8e5b31b05cf8dded48c785a5609b20e72875bff4cc173734e1061160fd",
         snapshotSha256:
             "9a75556e48c116cd2e01190220d1c02766d2bcbfe7e8e82ea67d577a028857e4",
+    }),
+    Object.freeze({
+        id: "20260827190406_eager_lizard",
+        migrationSha256:
+            "d5e25e720f9731cf7c49780dc6069311cb8fc2fc5c08345143f1b7194d9a6c77",
+        snapshotSha256:
+            "d7ce78f0ace5676aa61eaf6c06b36b33c1be9cbb20e347596686f1ca69428bdf",
     }),
 ]);

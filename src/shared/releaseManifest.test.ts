@@ -94,6 +94,21 @@ describe("release manifest", () => {
         ).toBe("systemd/mira-dashboard-log-maintenance@.service");
     });
 
+    test("accepts generated migration identifiers with underscore words", () => {
+        const candidate = manifest();
+        expect(
+            parseReleaseManifest({
+                ...candidate,
+                migrations: [
+                    {
+                        ...candidate.migrations[0],
+                        id: "20260827190406_eager_lizard",
+                    },
+                ],
+            }).migrations[0]?.id
+        ).toBe("20260827190406_eager_lizard");
+    });
+
     test("rejects unordered identities and path traversal", () => {
         const candidate = manifest();
         expect(() =>

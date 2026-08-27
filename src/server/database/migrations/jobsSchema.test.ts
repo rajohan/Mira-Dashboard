@@ -1886,6 +1886,36 @@ describe("jobs baseline schema", () => {
             insertWorker(database, workerId, 1001);
             insertWorker(database, otherWorkerId, 1002);
             insertWorker(database, lifecycleWorkerId, 1003);
+            const expandedActionKeys = Array.from(
+                { length: 33 },
+                (_, index) => `cache.refresh.provider-${String(index).padStart(2, "0")}`
+            );
+            database.sqlite.run(
+                `INSERT INTO worker_instances (
+                    action_keys_json, capacity, heartbeat_at, id, pid,
+                    release_id, started_at, state
+                ) VALUES (?, 1, 1000, ?, 1004, ?, 1000, 'online')`,
+                [JSON.stringify(expandedActionKeys), uuid(45), releaseId]
+            );
+            expect(() =>
+                database.sqlite.run(
+                    `INSERT INTO worker_instances (
+                        action_keys_json, capacity, heartbeat_at, id, pid,
+                        release_id, started_at, state
+                    ) VALUES (?, 1, 1000, ?, 1005, ?, 1000, 'online')`,
+                    [
+                        JSON.stringify(
+                            Array.from(
+                                { length: 65 },
+                                (_, index) =>
+                                    `cache.refresh.provider-${String(index).padStart(2, "0")}`
+                            )
+                        ),
+                        uuid(46),
+                        releaseId,
+                    ]
+                )
+            ).toThrow();
             expect(() =>
                 database.sqlite.run(
                     `INSERT INTO worker_instances (

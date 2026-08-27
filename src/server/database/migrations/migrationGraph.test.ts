@@ -299,6 +299,94 @@ describe("database migration graph", () => {
         }
     });
 
+    test("preserves worker references while upgrading the worker action-key budget", async () => {
+        const migrations = await loadVerifiedMigrations({
+            directory: migrationsDirectory,
+        });
+        const database = new Database(":memory:", { strict: true });
+        const workerId = "019fdf00-0000-7000-8000-000000000040";
+        const runId = "019fdf00-0000-7000-8000-000000000041";
+        const leaseToken = "019fdf00-0000-7000-8000-000000000042";
+
+        try {
+            database.run("PRAGMA foreign_keys = ON");
+            for (const [index, migration] of migrations.slice(0, -1).entries()) {
+                for (const statement of migration.statements) {
+                    const executable = statement.trim();
+                    if (executable.length > 0) database.run(executable);
+                }
+                database.run(
+                    `INSERT INTO schema_migrations (applied_at, checksum, id, release_id)
+                     VALUES (?, ?, ?, ?)`,
+                    [index + 1, migration.migrationSha256, migration.id, "0".repeat(40)]
+                );
+            }
+            database.run(
+                `INSERT INTO worker_instances (
+                    capacity, heartbeat_at, id, pid, release_id, started_at, state
+                ) VALUES (4, 2000, ?, 1000, ?, 1000, 'online')`,
+                [workerId, "a".repeat(40)]
+            );
+            database.run(
+                `INSERT INTO job_runs (
+                    action_key, attempt_limit, available_at, cancellation_policy,
+                    display_name, enqueue_sha256, id, idempotency_key, payload_json,
+                    priority, queued_at, requested_by_id, requested_by_kind,
+                    resource_class, resource_keys_json, retry_safe, state, timeout_ms,
+                    trigger_type, updated_at
+                ) VALUES (
+                    'system.worker-smoke', 3, 1000, 'cooperative', 'Worker smoke', ?,
+                    ?, ?, '{}', 0, 1000, 'job-scheduler', 'system', 'light', '[]', 1,
+                    'queued', 10000, 'system', 1000
+                )`,
+                ["b".repeat(64), runId, "c".repeat(32)]
+            );
+            database.run(
+                `INSERT INTO job_run_events (
+                    attempt, job_run_id, kind, occurred_at, sequence
+                ) VALUES (0, ?, 'queued', 1000, 1)`,
+                [runId]
+            );
+            database.run(
+                `UPDATE job_runs
+                 SET attempt_count = 1, first_started_at = 2000, heartbeat_at = 2000,
+                     last_attempt_started_at = 2000, lease_expires_at = 5000,
+                     lease_owner_id = ?, lease_token = ?, state = 'running',
+                     state_version = state_version + 1, updated_at = 2000
+                 WHERE id = ?`,
+                [workerId, leaseToken, runId]
+            );
+            database.run(
+                `INSERT INTO job_run_events (
+                    attempt, job_run_id, kind, occurred_at, sequence, worker_instance_id
+                ) VALUES (1, ?, 'claimed', 2000, 2, ?)`,
+                [runId, workerId]
+            );
+
+            expect(
+                applyVerifiedMigrations(database, migrations, {
+                    appliedAt: new Date(3),
+                    releaseId: "1".repeat(40),
+                })
+            ).toBe(1);
+            expect(
+                database
+                    .query<{ worker_instance_id: string }, [string]>(
+                        `SELECT worker_instance_id
+                         FROM job_run_events
+                         WHERE job_run_id = ? AND sequence = 2`
+                    )
+                    .get(runId)
+            ).toEqual({ worker_instance_id: workerId });
+            expect(database.query("PRAGMA foreign_key_check").all()).toEqual([]);
+            expect(database.query("PRAGMA foreign_keys").get()).toEqual({
+                foreign_keys: 1,
+            });
+        } finally {
+            database.close(true);
+        }
+    });
+
     test("rejects checksum drift in applied migration history", async () => {
         const migrations = await loadVerifiedMigrations({
             directory: migrationsDirectory,
