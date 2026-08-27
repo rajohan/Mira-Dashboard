@@ -81,6 +81,19 @@ describe("Dashboard browser artifact", () => {
         expect(result.compressedFileCount).toBeGreaterThan(0);
         expect(metrics.formatVersion).toBe(1);
         expect(html).toContain("<title>Mira Dashboard</title>");
+        expect(html).toMatch(/<meta name="theme-color" content="#0f172a"\s*\/?>/u);
+        expect(html).toMatch(
+            /<link rel="icon" href="\/assets\/favicon-[a-z\d]{8}\.png" sizes="96x96" type="image\/png"\s*\/?>/u
+        );
+        expect(html).toMatch(
+            /<link rel="apple-touch-icon" href="\/assets\/apple-touch-icon-[a-z\d]{8}\.png" sizes="180x180"\s*\/?>/u
+        );
+        expect(
+            files.some((file) => /^assets\/favicon-[a-z\d]{8}\.png$/u.test(file))
+        ).toBeTrue();
+        expect(
+            files.some((file) => /^assets\/apple-touch-icon-[a-z\d]{8}\.png$/u.test(file))
+        ).toBeTrue();
         expect(css).toContain("::-webkit-search-cancel-button{-webkit-appearance:none}");
         expect(css).toContain("::-webkit-search-cancel-button{appearance:none}");
         expect(css).toContain("infinite loading-state-second-dot}");
