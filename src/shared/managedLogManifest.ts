@@ -361,16 +361,6 @@ export function createManagedLogManifest(
         ]),
         fileTargets: Object.freeze([
             managedFile(
-                "dashboard.web",
-                `${dashboardLogsRoot}/web.ndjson`,
-                rootAndRuntimeOwnerIds
-            ),
-            managedFile(
-                "dashboard.worker",
-                `${dashboardLogsRoot}/worker.ndjson`,
-                rootAndRuntimeOwnerIds
-            ),
-            managedFile(
                 "dashboard.web.stdout",
                 `${dashboardLogsRoot}/web-stdout.log`,
                 rootAndRuntimeOwnerIds
