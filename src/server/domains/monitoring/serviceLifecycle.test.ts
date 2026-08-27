@@ -7,8 +7,11 @@ import * as v from "valibot";
 import { monitoringChangePayloadSchema } from "../../../contracts/monitoring.ts";
 import { incidentObservations } from "../../database/schema/incidentObservations.ts";
 import { incidents } from "../../database/schema/incidents.ts";
+import { notificationIncidentLinks } from "../../database/schema/notificationIncidentLinks.ts";
 import { notifications } from "../../database/schema/notifications.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
+import { createMonitoringRepository } from "./repository.ts";
 import {
     allRowCounts,
     oneDayMs,
@@ -188,7 +191,6 @@ describe("monitoring service", () => {
                 database.orm
                     .select()
                     .from(notifications)
-                    .where(eq(notifications.incidentId, filesystemIncident.id))
                     .all()
                     .map((notification) => ({
                         generation: notification.incidentGeneration,
@@ -199,18 +201,25 @@ describe("monitoring service", () => {
                     }))
             ).toEqual([
                 {
-                    generation: 1,
-                    incidentId: filesystemIncident.id,
-                    linkUrl: `/incidents?incidentId=${filesystemIncident.id}`,
+                    generation: null,
+                    incidentId: null,
+                    linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
                     readAt: manuallyReadAt,
-                    reportId: null,
+                    reportId: expect.any(String),
                 },
                 {
-                    generation: 2,
-                    incidentId: filesystemIncident.id,
-                    linkUrl: `/incidents?incidentId=${filesystemIncident.id}`,
+                    generation: null,
+                    incidentId: null,
+                    linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
+                    readAt: toDate(6000),
+                    reportId: expect.any(String),
+                },
+                {
+                    generation: null,
+                    incidentId: null,
+                    linkUrl: expect.stringMatching(/^\/reports\?reportId=/u),
                     readAt: null,
-                    reportId: null,
+                    reportId: expect.any(String),
                 },
             ]);
 
@@ -269,6 +278,165 @@ describe("monitoring service", () => {
             );
             expect(new Set(rows.map((row) => row.fingerprint)).size).toBe(1);
             expect(database.orm.select().from(notifications).all()).toHaveLength(2);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("creates one report notification for multiple new problems in one run", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = serviceFor(database);
+
+        try {
+            const result = await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 2000,
+                    problems: [problem("filesystem"), problem("backup")],
+                    run: 301,
+                })
+            );
+
+            const rows = database.orm.select().from(notifications).all();
+            expect(rows).toHaveLength(1);
+            expect(rows[0]).toMatchObject({
+                incidentGeneration: null,
+                incidentId: null,
+                message: "2 problems detected.",
+                reportId: result.reportId,
+            });
+
+            await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 3000,
+                    problems: [problem("filesystem")],
+                    run: 302,
+                })
+            );
+            expect(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .where(eq(notifications.id, rows[0]!.id))
+                    .get()?.readAt
+            ).toBeNull();
+
+            await submitSnapshot(
+                service,
+                snapshot({ completedAtMs: 4000, problems: [], run: 303 })
+            );
+            expect(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .where(eq(notifications.id, rows[0]!.id))
+                    .get()?.readAt
+            ).toEqual(toDate(4000));
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("reads an aggregate only after its exact incident generations resolve", async () => {
+        const database = await openFreshMigratedDatabase();
+        const service = serviceFor(database);
+
+        try {
+            const first = await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 2000,
+                    problems: [problem("filesystem")],
+                    run: 401,
+                })
+            );
+            const second = await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 3000,
+                    problems: [problem("filesystem"), problem("backup")],
+                    run: 402,
+                })
+            );
+            const unrelatedId = Bun.randomUUIDv7();
+            database.orm
+                .insert(notifications)
+                .values({
+                    channel: "dashboard",
+                    id: unrelatedId,
+                    incidentGeneration: null,
+                    incidentId: null,
+                    kind: "unrelated.report-notification",
+                    linkUrl: null,
+                    message: "Unrelated",
+                    occurredAt: toDate(3000),
+                    readAt: null,
+                    reportId: second.reportId,
+                    severity: "info",
+                    source: "test",
+                    title: "Unrelated",
+                })
+                .run();
+
+            const incidentLinks = database.orm
+                .select()
+                .from(notificationIncidentLinks)
+                .all();
+            expect(incidentLinks).toHaveLength(2);
+            const repository = createMonitoringRepository(
+                database.orm,
+                testImmediateDatabaseWriteAdmission
+            );
+            for (const link of incidentLinks) {
+                const filtered = repository.listNotifications({
+                    filters: {
+                        incidentId: link.incidentId,
+                        readState: "all",
+                    },
+                    limit: 10,
+                });
+                expect(filtered.map(({ id }) => id)).toContain(link.notificationId);
+                expect(
+                    repository.findIncidentNotification(
+                        link.incidentId,
+                        link.incidentGeneration
+                    )?.id
+                ).toBe(link.notificationId);
+            }
+            await submitSnapshot(
+                service,
+                snapshot({
+                    completedAtMs: 4000,
+                    problems: [problem("filesystem")],
+                    run: 403,
+                })
+            );
+
+            const notificationsByReport = new Map(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .all()
+                    .map((notification) => [
+                        `${String(notification.reportId)}:${notification.kind}`,
+                        notification,
+                    ])
+            );
+            expect(
+                notificationsByReport.get(`${first.reportId}:monitoring.incident`)?.readAt
+            ).toBeNull();
+            expect(
+                notificationsByReport.get(`${second.reportId}:monitoring.incident`)
+                    ?.readAt
+            ).toEqual(toDate(4000));
+            expect(
+                database.orm
+                    .select()
+                    .from(notifications)
+                    .where(eq(notifications.id, unrelatedId))
+                    .get()?.readAt
+            ).toBeNull();
         } finally {
             database.sqlite.close(true);
         }

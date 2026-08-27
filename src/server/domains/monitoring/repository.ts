@@ -4,6 +4,7 @@ import {
     count,
     desc,
     eq,
+    exists,
     inArray,
     isNotNull,
     isNull,
@@ -28,6 +29,7 @@ import type { ImmediateDatabaseWriteAdmission } from "../../database/immediateWr
 import { incidentObservations } from "../../database/schema/incidentObservations.ts";
 import { incidents } from "../../database/schema/incidents.ts";
 import { monitorRuns } from "../../database/schema/monitorRuns.ts";
+import { notificationIncidentLinks } from "../../database/schema/notificationIncidentLinks.ts";
 import { notifications } from "../../database/schema/notifications.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
 import { reports } from "../../database/schema/reports.ts";
@@ -107,6 +109,11 @@ export interface MonitoringUnitOfWork extends MonitoringReader {
     insertIncident(input: IncidentInsert): IncidentRecord;
     insertMonitorRun(input: MonitorRunInsert): MonitorRunRecord;
     insertNotification(input: NotificationInsert): NotificationRecord;
+    insertNotificationIncidentLink(input: {
+        incidentGeneration: number;
+        incidentId: string;
+        notificationId: string;
+    }): void;
     insertObservation(input: IncidentObservationInsert): number;
     insertRealtimeEvent(input: RealtimeEventInsert): number;
     insertReport(input: ReportInsert): ReportRecord;
@@ -120,6 +127,11 @@ export interface MonitoringUnitOfWork extends MonitoringReader {
         incidentGeneration: number,
         readAt: Date
     ): NotificationRecord | undefined;
+    markResolvedReportNotificationsRead(
+        incidentId: string,
+        incidentGeneration: number,
+        readAt: Date
+    ): NotificationRecord[];
     markNotificationsRead(ids: readonly string[], readAt: Date): NotificationRecord[];
     updateIncident(id: string, input: IncidentUpdate): IncidentRecord;
 }
@@ -215,6 +227,7 @@ function notificationCursorBoundary(input: ListNotificationsInput): SQL | undefi
 }
 
 function notificationFilterConditions(
+    database: MonitoringPersistenceDatabase,
     filters: ListNotificationsInput["filters"] | BulkNotificationInput["filters"],
     readState?: "read" | "unread"
 ): SQL[] {
@@ -235,7 +248,31 @@ function notificationFilterConditions(
     return [
         ...(filters.incidentId === undefined
             ? []
-            : [eq(notifications.incidentId, filters.incidentId)]),
+            : [
+                  or(
+                      eq(notifications.incidentId, filters.incidentId),
+                      exists(
+                          database
+                              .select({
+                                  notificationId:
+                                      notificationIncidentLinks.notificationId,
+                              })
+                              .from(notificationIncidentLinks)
+                              .where(
+                                  and(
+                                      eq(
+                                          notificationIncidentLinks.notificationId,
+                                          notifications.id
+                                      ),
+                                      eq(
+                                          notificationIncidentLinks.incidentId,
+                                          filters.incidentId
+                                      )
+                                  )
+                              )
+                      )
+                  )!,
+              ]),
         ...(filters.kinds === undefined
             ? []
             : [inArray(notifications.kind, [...filters.kinds])]),
@@ -305,9 +342,31 @@ class DrizzleMonitoringReader implements MonitoringReader {
             .select()
             .from(notifications)
             .where(
-                and(
-                    eq(notifications.incidentId, incidentId),
-                    eq(notifications.incidentGeneration, incidentGeneration)
+                or(
+                    and(
+                        eq(notifications.incidentId, incidentId),
+                        eq(notifications.incidentGeneration, incidentGeneration)
+                    ),
+                    exists(
+                        this.database
+                            .select({
+                                notificationId: notificationIncidentLinks.notificationId,
+                            })
+                            .from(notificationIncidentLinks)
+                            .where(
+                                and(
+                                    eq(
+                                        notificationIncidentLinks.notificationId,
+                                        notifications.id
+                                    ),
+                                    eq(notificationIncidentLinks.incidentId, incidentId),
+                                    eq(
+                                        notificationIncidentLinks.incidentGeneration,
+                                        incidentGeneration
+                                    )
+                                )
+                            )
+                    )
                 )
             )
             .get();
@@ -348,7 +407,7 @@ class DrizzleMonitoringReader implements MonitoringReader {
             .where(
                 and(
                     notificationCursorBoundary(input),
-                    ...notificationFilterConditions(input.filters)
+                    ...notificationFilterConditions(this.database, input.filters)
                 )
             )
             .orderBy(desc(notifications.occurredAt), desc(notifications.id))
@@ -498,6 +557,20 @@ class DrizzleMonitoringUnitOfWork
         return v.parse(notificationSelectSchema, requiredRow(row, "notification insert"));
     }
 
+    insertNotificationIncidentLink(input: {
+        incidentGeneration: number;
+        incidentId: string;
+        notificationId: string;
+    }): void {
+        if (
+            !Number.isSafeInteger(input.incidentGeneration) ||
+            input.incidentGeneration < 1
+        ) {
+            throw new TypeError("Monitoring notification incident link is invalid");
+        }
+        this.#transaction.insert(notificationIncidentLinks).values(input).run();
+    }
+
     insertObservation(input: IncidentObservationInsert): number {
         const row = this.#transaction
             .insert(incidentObservations)
@@ -540,7 +613,11 @@ class DrizzleMonitoringUnitOfWork
         return this.#transaction
             .select()
             .from(notifications)
-            .where(and(...notificationFilterConditions(filters, readState)))
+            .where(
+                and(
+                    ...notificationFilterConditions(this.#transaction, filters, readState)
+                )
+            )
             .orderBy(desc(notifications.occurredAt), desc(notifications.id))
             .limit(limit)
             .all()
@@ -566,6 +643,75 @@ class DrizzleMonitoringUnitOfWork
             .returning()
             .get();
         return row === undefined ? undefined : v.parse(notificationSelectSchema, row);
+    }
+
+    markResolvedReportNotificationsRead(
+        incidentId: string,
+        incidentGeneration: number,
+        readAt: Date
+    ): NotificationRecord[] {
+        const candidates = this.#transaction
+            .select({ notificationId: notifications.id })
+            .from(notifications)
+            .innerJoin(
+                notificationIncidentLinks,
+                eq(notificationIncidentLinks.notificationId, notifications.id)
+            )
+            .where(
+                and(
+                    eq(notificationIncidentLinks.incidentId, incidentId),
+                    eq(notificationIncidentLinks.incidentGeneration, incidentGeneration),
+                    isNull(notifications.incidentId),
+                    isNull(notifications.readAt)
+                )
+            )
+            .all();
+        const update = v.parse(notificationUpdateSchema, { readAt });
+        const updated: NotificationRecord[] = [];
+        const visited = new Set<string>();
+        for (const candidate of candidates) {
+            if (visited.has(candidate.notificationId)) continue;
+            visited.add(candidate.notificationId);
+            const activeObservation = this.#transaction
+                .select({ incidentId: notificationIncidentLinks.incidentId })
+                .from(notificationIncidentLinks)
+                .innerJoin(
+                    incidents,
+                    and(
+                        eq(incidents.id, notificationIncidentLinks.incidentId),
+                        eq(
+                            incidents.generation,
+                            notificationIncidentLinks.incidentGeneration
+                        )
+                    )
+                )
+                .where(
+                    and(
+                        eq(
+                            notificationIncidentLinks.notificationId,
+                            candidate.notificationId
+                        ),
+                        eq(incidents.state, "active")
+                    )
+                )
+                .get();
+            if (activeObservation !== undefined) continue;
+            const row = this.#transaction
+                .update(notifications)
+                .set(update)
+                .where(
+                    and(
+                        eq(notifications.id, candidate.notificationId),
+                        isNull(notifications.readAt)
+                    )
+                )
+                .returning()
+                .get();
+            if (row !== undefined) {
+                updated.push(v.parse(notificationSelectSchema, row));
+            }
+        }
+        return updated;
     }
 
     markNotificationsRead(ids: readonly string[], readAt: Date): NotificationRecord[] {

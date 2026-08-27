@@ -21,6 +21,7 @@
         "src/test/integration/transport/topology/httpsReverseProxy.test.ts": 2372,
         "src/test/integration/openclaw/sourceAudit.test.ts": 2311,
         "src/worker/docker/workerDockerBroker.test.ts": 2026,
+        "src/worker/git/workspaceSync.test.ts": 2000,
         "src/test/integration/build/frontendBuildScenario.test.ts": 1978,
         "scripts/delivery/installHostOperationsProvisioning.test.ts": 1905,
         "src/app/dashboardServer.test.ts": 1758,

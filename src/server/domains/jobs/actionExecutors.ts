@@ -49,6 +49,7 @@ import {
     OpenClawServiceActionsExecutionError,
     type OpenClawServiceActionsExecutionPort,
 } from "../../../shared/openClawServiceActions.ts";
+import { WorkspaceGitSyncOutcomeUnknownError } from "../../../shared/workspaceGitSync.ts";
 import type { BackupActivityRepository } from "../backups/activityRepository.ts";
 import { collectSystemHostPayload } from "../cache/systemHostProvider.ts";
 import { parseWorkspaceFileJobPayload } from "../files/jobPayload.ts";
@@ -95,6 +96,7 @@ import {
     hostWorkerRestartJobActionDefinition,
     hostWorkerRestartJobActionKey,
     gitWorkspaceCacheJobActionKey,
+    gitWorkspaceSyncJobActionKey,
     jobActionDefinitions,
     logMaintenanceJobActionKey,
     openClawGatewayRestartJobActionDefinition,
@@ -389,6 +391,11 @@ export interface DatabaseObservabilityExecutorDependencies {
 
 export interface OverviewProviderCollectors {
     readonly git: (signal?: AbortSignal) => Promise<GitWorkspaceCachePayload>;
+    readonly syncWorkspace?: (signal?: AbortSignal) => Promise<{
+        readonly changedFileCount: number;
+        readonly commit?: string;
+        readonly pushed: boolean;
+    }>;
     readonly quota: (signal?: AbortSignal) => Promise<QuotaCachePayload>;
     readonly weather: (signal?: AbortSignal) => Promise<WeatherCachePayload>;
 }
@@ -809,6 +816,11 @@ export function createJobWorkerActionResolver(
             ({ actionKey }) => !overviewProviderJobActionKeys.includes(actionKey)
         );
     }
+    if (dependencies.overviewProviders?.syncWorkspace === undefined) {
+        domainDefinitions = domainDefinitions.filter(
+            ({ actionKey }) => actionKey !== gitWorkspaceSyncJobActionKey
+        );
+    }
     const definitions =
         dependencies.actionDefinitions ??
         Object.freeze([
@@ -916,6 +928,24 @@ export function createJobWorkerActionResolver(
                           v.parse(gitWorkspaceActionPayloadSchema, payload);
                       },
                   })
+        ),
+        ...gatedExecutor(
+            gitWorkspaceSyncJobActionKey,
+            dependencies.overviewProviders?.syncWorkspace === undefined
+                ? undefined
+                : (_context, payload) =>
+                      Effect.tryPromise({
+                          catch: (error) =>
+                              error instanceof WorkspaceGitSyncOutcomeUnknownError
+                                  ? new JobActionOutcomeUnknownError()
+                                  : new Error("OpenClaw workspace sync failed"),
+                          try: async (signal) => {
+                              v.parse(emptyPayloadSchema, payload);
+                              return await dependencies.overviewProviders!.syncWorkspace!(
+                                  signal
+                              );
+                          },
+                      })
         ),
         ...gatedExecutor(
             quotaCacheJobActionKey,

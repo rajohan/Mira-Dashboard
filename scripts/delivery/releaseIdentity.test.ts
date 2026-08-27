@@ -4,7 +4,9 @@ import { cp, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { databaseSchemaTarget } from "../../src/shared/databaseMigrationManifest.ts";
 import { serializeReleaseManifest } from "../../src/shared/releaseManifest.ts";
+import { compareStrings } from "../../src/shared/validation.ts";
 import type { BuildSourceIdentity } from "../buildSourceIdentity.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
 import { inventoryReleaseArtifactTree } from "./releaseArtifactInventory.ts";
@@ -188,7 +190,7 @@ describe("release identity", () => {
         expect(created.display).toEqual({
             builtAtMs: 1_800_000_000_000,
             commitTitle: "Test release",
-            schemaTarget: 1,
+            schemaTarget: databaseSchemaTarget,
         });
         expect(created.runtime).toEqual(runtimeIdentity);
         expect(created.packages).toEqual([
@@ -331,16 +333,19 @@ describe("release identity", () => {
             serializeReleaseManifest({
                 ...persisted,
                 artifacts,
-                migrations: [...persisted.migrations, releaseOwnedMigration],
+                migrations: [...persisted.migrations, releaseOwnedMigration].toSorted(
+                    (left, right) => compareStrings(left.id, right.id)
+                ),
             })
         );
 
         const reconstructed = await verifyReleaseArtifactIdentity(fixture.releaseRoot);
 
-        expect(reconstructed.migrations).toEqual([
-            ...persisted.migrations,
-            releaseOwnedMigration,
-        ]);
+        expect(reconstructed.migrations).toEqual(
+            [...persisted.migrations, releaseOwnedMigration].toSorted((left, right) =>
+                compareStrings(left.id, right.id)
+            )
+        );
     });
 
     test("rejects dirty source, staged metadata drift and migration mismatch", async () => {

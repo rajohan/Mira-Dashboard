@@ -97,6 +97,10 @@ export const deliveryOverviewCacheJobScheduleId = "cache.delivery-overview";
 export const gitWorkspaceCacheJobActionKey = "cache.refresh.git-workspace";
 /** Durable minute-level managed-repository status schedule. */
 export const gitWorkspaceCacheJobScheduleId = "cache.git-workspace";
+/** Worker-only daily tracked-file synchronization for the OpenClaw workspace. */
+export const gitWorkspaceSyncJobActionKey = "git.openclaw.workspace-sync";
+/** Durable daily OpenClaw workspace synchronization schedule. */
+export const gitWorkspaceSyncJobScheduleId = "git.openclaw.workspace-sync";
 /** Worker-only normalized provider quota refresh identity. */
 export const quotaCacheJobActionKey = "cache.refresh.quotas";
 /** Durable quota refresh schedule. */
@@ -586,6 +590,29 @@ export const gitWorkspaceCacheJobActionDefinition = overviewCacheDefinition({
     resourceKeys: Object.freeze(["git.managed-workspaces"]),
     scheduleId: gitWorkspaceCacheJobScheduleId,
     timeoutMs: 20_000,
+});
+
+export const gitWorkspaceSyncJobActionDefinition = validateJobActionDefinition({
+    actionKey: gitWorkspaceSyncJobActionKey,
+    actionPayload: Object.freeze({}),
+    attemptLimit: 1,
+    cancellationPolicy: "never",
+    defaultEnabled: true,
+    defaultSchedule: Object.freeze({
+        kind: "daily",
+        timeOfDay: "05:20",
+        timeZone: "Europe/Oslo",
+    }),
+    description: "Commits and pushes tracked OpenClaw workspace changes.",
+    displayName: "OpenClaw workspace sync",
+    initialDue: "next-occurrence",
+    manualExposure: "none",
+    priority: 0,
+    resourceClass: "light",
+    resourceKeys: Object.freeze(["git.managed-workspaces"]),
+    retrySafe: false,
+    scheduleId: gitWorkspaceSyncJobScheduleId,
+    timeoutMs: 10 * 60_000,
 });
 
 export const quotaCacheJobActionDefinition = overviewCacheDefinition({
@@ -1089,6 +1116,7 @@ export const jobActionDefinitions = Object.freeze([
     systemHostCacheDefinition,
     moltbookDashboardCacheDefinition,
     gitWorkspaceCacheJobActionDefinition,
+    gitWorkspaceSyncJobActionDefinition,
     quotaCacheJobActionDefinition,
     weatherCacheJobActionDefinition,
     databaseObservabilityCacheDefinition,

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 
+import { migrationManifest } from "../../../shared/databaseMigrationManifest.ts";
 import {
     migrationsDirectory,
     openFreshMigratedDatabase,
@@ -54,6 +55,7 @@ const expectedTables: string[] = [
     "job_runs",
     "job_worker_control",
     "monitor_runs",
+    "notification_incident_links",
     "notifications",
     "realtime_events",
     "reports",
@@ -96,7 +98,7 @@ describe("database migration graph", () => {
         expect(maximumExpectedSchemaObjectCount(migrations)).toBe(3);
     });
 
-    test("contains one reviewed baseline applicable to an empty database", async () => {
+    test("applies the reviewed migration graph to an empty database", async () => {
         const migrations = await loadVerifiedMigrations({
             directory: migrationsDirectory,
         });
@@ -105,7 +107,7 @@ describe("database migration graph", () => {
             throw new Error("Expected one fresh-database foundation migration");
         }
 
-        expect(migrations).toHaveLength(1);
+        expect(migrations).toHaveLength(migrationManifest.length);
         expect(foundationMigration.id).toEndWith("_dashboard-foundation");
         expect(foundationMigration.migrationSha256).toMatch(/^[a-f\d]{64}$/u);
         expect(foundationMigration.snapshotSha256).toMatch(/^[a-f\d]{64}$/u);
@@ -116,7 +118,7 @@ describe("database migration graph", () => {
                 applyVerifiedMigrations(emptyDatabase, migrations, {
                     releaseId: "0".repeat(40),
                 })
-            ).toBe(1);
+            ).toBe(migrationManifest.length);
         } finally {
             emptyDatabase.close(true);
         }
@@ -276,13 +278,13 @@ describe("database migration graph", () => {
                         ORDER BY id
                     `)
                     .all()
-            ).toEqual([
-                {
-                    checksum: foundationMigration.migrationSha256,
-                    id: foundationMigration.id,
+            ).toEqual(
+                migrations.map((migration) => ({
+                    checksum: migration.migrationSha256,
+                    id: migration.id,
                     release_id: "0".repeat(40),
-                },
-            ]);
+                }))
+            );
             expect(
                 applyVerifiedMigrations(database.sqlite, migrations, {
                     releaseId: "1".repeat(40),

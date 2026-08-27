@@ -23,6 +23,7 @@ import { Effect, ManagedRuntime } from "effect";
 import { withDeploymentLease } from "../../../../scripts/delivery/deploymentLease.ts";
 import { prepareProtectedProductionStatePath } from "../../../../scripts/delivery/productionStateFilesystem.ts";
 import { rejectionError } from "../../../../scripts/testSupport/rejection.ts";
+import { migrationManifest } from "../../../shared/databaseMigrationManifest.ts";
 import {
     parseDatabaseSnapshotManifest,
     serializeDatabaseSnapshotManifest,
@@ -812,7 +813,7 @@ describe("verified database snapshots", () => {
         expect(snapshotFileStatus.mode & 0o777).toBe(0o400);
         expect(result.manifest.releaseId).toBe(releaseId);
         expect(result.manifest.database.bytes).toBeGreaterThan(0);
-        expect(result.manifest.migrations).toHaveLength(1);
+        expect(result.manifest.migrations).toHaveLength(migrationManifest.length);
         const manifestPath = path.join(
             result.snapshotDirectory,
             "snapshot-manifest.json"
@@ -834,7 +835,7 @@ describe("verified database snapshots", () => {
                         FROM schema_migrations
                     `)
                     .get()
-            ).toEqual({ count: 1, releaseId });
+            ).toEqual({ count: migrationManifest.length, releaseId });
         } finally {
             snapshot.close(true);
         }

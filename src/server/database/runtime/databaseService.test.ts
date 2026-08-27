@@ -7,6 +7,7 @@ import path from "node:path";
 import { Effect, Fiber, ManagedRuntime } from "effect";
 import { TestClock } from "effect/testing";
 
+import { migrationManifest } from "../../../shared/databaseMigrationManifest.ts";
 import { applyVerifiedMigrations } from "../migrations/applyVerifiedMigrations.ts";
 import { loadVerifiedMigrations } from "../migrations/loadVerifiedMigrations.ts";
 import {
@@ -118,7 +119,7 @@ describe("database runtime service", () => {
                     FROM schema_migrations
                 `)
                 .get()
-        ).toEqual({ count: 1, releaseId });
+        ).toEqual({ count: migrationManifest.length, releaseId });
         database.close(true);
 
         await migrateCandidate(stateDirectory, "1".repeat(40));
@@ -130,7 +131,7 @@ describe("database runtime service", () => {
                     FROM schema_migrations
                 `)
                 .get()
-        ).toEqual({ count: 1, releaseId });
+        ).toEqual({ count: migrationManifest.length, releaseId });
         database.close(true);
     });
 
@@ -158,7 +159,7 @@ describe("database runtime service", () => {
         const { runtime, service } = await buildRuntime(options(stateDirectory));
 
         expect(service.diagnostics).toEqual({
-            appliedMigrations: 1,
+            appliedMigrations: migrationManifest.length,
             connection: {
                 busyTimeoutMs: 0,
                 checksEnforced: true,
@@ -169,7 +170,7 @@ describe("database runtime service", () => {
                 walAutoCheckpointPages: 1000,
             },
             databaseFileName: "mira-dashboard.db",
-            migrationCount: 1,
+            migrationCount: migrationManifest.length,
             startupMode: "initialize-empty",
         });
         expect(service.orm.$client).toBeInstanceOf(Database);
@@ -230,7 +231,7 @@ describe("database runtime service", () => {
                     "SELECT COUNT(*) AS count FROM schema_migrations"
                 )
                 .get()
-        ).toEqual({ count: 1 });
+        ).toEqual({ count: migrationManifest.length });
     });
 
     test("fails live storage observation closed after permission drift", async () => {
@@ -280,14 +281,14 @@ describe("database runtime service", () => {
                 first.service.diagnostics.appliedMigrations,
                 second.service.diagnostics.appliedMigrations,
             ].toSorted((left, right) => left - right)
-        ).toEqual([0, 1]);
+        ).toEqual([0, migrationManifest.length]);
         expect(
             first.service.orm.$client
                 .query<{ count: number }, []>(
                     "SELECT COUNT(*) AS count FROM schema_migrations"
                 )
                 .get()
-        ).toEqual({ count: 1 });
+        ).toEqual({ count: migrationManifest.length });
         expect(first.service.orm.$client.filename).toBe(
             second.service.orm.$client.filename
         );

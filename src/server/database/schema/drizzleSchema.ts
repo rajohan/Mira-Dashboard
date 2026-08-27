@@ -27,6 +27,7 @@ export { jobRuns } from "./jobRuns.ts";
 export { jobWorkerControl } from "./jobWorkerControl.ts";
 export { monitorRuns } from "./monitorRuns.ts";
 export { notifications } from "./notifications.ts";
+export { notificationIncidentLinks } from "./notificationIncidentLinks.ts";
 export { realtimeEvents } from "./realtime.ts";
 export { resourceLeases } from "./resourceLeases.ts";
 export { reports } from "./reports.ts";
