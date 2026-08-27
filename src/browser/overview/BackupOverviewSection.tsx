@@ -19,6 +19,7 @@ import { useRunScheduleMutation } from "../jobs/jobMutations.ts";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -819,6 +820,7 @@ export function BackupOverviewSection() {
     const client = useDashboardTrpcClient();
     const queryClient = useQueryClient();
     const boundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const [mutationBusy, setMutationBusy] = useState<"kopia" | "walg">();
     const [mutationError, setMutationError] = useState<string>();
     const [queued, setQueued] = useState<BackupRequestOperationResult>();
@@ -909,6 +911,20 @@ export function BackupOverviewSection() {
             const recoveryCleared =
                 identity !== undefined &&
                 clearBackupRecovery({ identity, operation, type });
+            operationTracker.track({
+                jobRunId: result.jobRunId,
+                label: `${type === "kopia" ? "Kopia" : "WAL-G"}: ${operation}`,
+                onTerminal: async () => {
+                    await Promise.all([
+                        queryClient.invalidateQueries({
+                            queryKey: backupKopiaStatusQueryKey,
+                        }),
+                        queryClient.invalidateQueries({
+                            queryKey: backupWalgStatusQueryKey,
+                        }),
+                    ]);
+                },
+            });
             setQueued(result);
             if (!recoveryCleared) {
                 setMutationError(

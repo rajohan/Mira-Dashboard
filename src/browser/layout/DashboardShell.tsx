@@ -7,6 +7,7 @@ import { dashboardVersion } from "../../shared/dashboardVersion.ts";
 import { cn } from "../lib/classNames.ts";
 import type { DashboardAuthenticatedPath } from "../lib/dashboardRoutes.ts";
 import { MonitoringRouteLayout } from "../monitoring/MonitoringRouteLayout.tsx";
+import { GlobalOperationsTray } from "../operations/GlobalOperationsTray.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconOnlyButton } from "../ui/IconOnlyButton.tsx";
 import { interactiveTapClassName } from "../ui/interactionStyles.ts";
@@ -203,6 +204,7 @@ export function DashboardShell() {
                     </div>
                 </main>
             </div>
+            <GlobalOperationsTray />
         </div>
     );
 }

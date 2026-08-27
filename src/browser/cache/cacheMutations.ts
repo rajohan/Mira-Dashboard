@@ -9,6 +9,7 @@ import { authenticatedBrowserCacheGeneration } from "../auth/authQueries.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { patchJobRunInCachedQueries } from "../jobs/jobMutations.ts";
 import { refreshJobAndScheduleQueries } from "../jobs/jobQueries.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { cacheBrowserFailureMessage } from "./cachePresentation.ts";
 import { refreshCacheQueriesForEntry } from "./cacheQueries.ts";
 
@@ -66,6 +67,7 @@ export function useRefreshCacheEntryMutation(
 ) {
     const client = useDashboardTrpcClient();
     const boundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const mutation = useMutation<
         DashboardProcedureOutput<"cache.refreshEntry">,
         Error,
@@ -93,6 +95,12 @@ export function useRefreshCacheEntryMutation(
             if (!boundary.completionIsCurrent()) return;
             cacheRefreshKeysForCurrentCache(boundary.queryClient).delete(input.key);
             patchJobRunInCachedQueries(boundary.queryClient, run, true);
+            operationTracker.track({
+                jobRunId: run.id,
+                label: `Cache refresh: ${input.key}`,
+                onTerminal: () =>
+                    refreshCacheRunProjections(boundary.queryClient, input.key),
+            });
         },
     });
     return {

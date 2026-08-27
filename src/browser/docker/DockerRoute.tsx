@@ -1,13 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-    Boxes,
-    ExternalLink,
-    HeartPulse,
-    Layers3,
-    Package,
-    ServerOff,
-    X,
-} from "lucide-react";
+import { Boxes, HeartPulse, Layers3, Package, ServerOff } from "lucide-react";
 import { useState } from "react";
 
 import type {
@@ -15,7 +7,6 @@ import type {
     DockerOverview,
     DockerPreparePruneResult,
     DockerRequestOperationInput,
-    DockerRequestOperationResult,
 } from "../../contracts/docker.ts";
 import {
     classifyDashboardBrowserFailure,
@@ -24,17 +15,14 @@ import {
 } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
-import { ActionLink } from "../ui/ActionLink.tsx";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
-import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Heading } from "../ui/Heading.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { MetricCard } from "../ui/MetricCard.tsx";
 import { PageState } from "../ui/PageState.tsx";
-import { Text } from "../ui/Text.tsx";
 import type { DockerClient } from "./dockerClient.ts";
 import { DockerContainersTable } from "./DockerContainersTable.tsx";
 import {
@@ -152,47 +140,6 @@ function DockerSummary({ overview }: DockerSummaryProps) {
     );
 }
 
-interface DockerQueuedResultProps {
-    readonly onDismiss: () => void;
-    readonly result: DockerRequestOperationResult;
-}
-
-function DockerQueuedResult({ onDismiss, result }: DockerQueuedResultProps) {
-    return (
-        <Card aria-labelledby="docker-operation-result-heading">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                    <Heading id="docker-operation-result-heading" level={2}>
-                        Docker operation queued
-                    </Heading>
-                    <Text className="mt-1" tone="muted">
-                        The API confirmed {result.operation}. No runtime success is
-                        assumed.
-                    </Text>
-                    <code className="text-primary-400 mt-2 block text-xs wrap-anywhere">
-                        {result.jobRunId}
-                    </code>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    <ActionLink
-                        search={{ runId: result.jobRunId }}
-                        size="sm"
-                        to="/jobs"
-                        variant="primary"
-                    >
-                        <Icon icon={ExternalLink} size="sm" />
-                        View job
-                    </ActionLink>
-                    <Button onClick={onDismiss} size="sm" variant="ghost">
-                        <Icon icon={X} size="sm" />
-                        Dismiss
-                    </Button>
-                </div>
-            </div>
-        </Card>
-    );
-}
-
 interface DockerRouteProps {
     readonly client: DockerClient;
 }
@@ -200,6 +147,7 @@ interface DockerRouteProps {
 /** @returns Complete fresh-gated Docker observability and exact control page. */
 export function DockerRoute({ client }: DockerRouteProps) {
     const mutationBoundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const overviewQuery = useQuery(dockerOverviewQueryOptions(client));
     const overview = overviewQuery.data;
     const controlsAvailable = overview?.state === "fresh" && overviewQuery.error === null;
@@ -207,7 +155,6 @@ export function DockerRoute({ client }: DockerRouteProps) {
     const [displayedOperation, setDisplayedOperation] = useState<DockerOperationPrompt>();
     const [operationBusy, setOperationBusy] = useState(false);
     const [operationError, setOperationError] = useState<string>();
-    const [queuedResult, setQueuedResult] = useState<DockerRequestOperationResult>();
     const [prunePreview, setPrunePreview] = useState<DockerPrunePreview>();
     const [preparingPrune, setPreparingPrune] = useState<"images" | "volumes">();
     const [detailsContainerId, setDetailsContainerId] = useState<string>();
@@ -259,7 +206,6 @@ export function DockerRoute({ client }: DockerRouteProps) {
 
     function showPrompt(prompt: DockerOperationPrompt): void {
         setOperationError(undefined);
-        setQueuedResult(undefined);
         setDisplayedOperation(prompt);
         setPendingOperation(prompt);
     }
@@ -277,13 +223,18 @@ export function DockerRoute({ client }: DockerRouteProps) {
         }
         setOperationBusy(true);
         setOperationError(undefined);
-        setQueuedResult(undefined);
         try {
             const result = await mutationBoundary.run((signal) =>
                 client.mutation("docker.requestOperation", input, { signal })
             );
             if (!mutationBoundary.completionIsCurrent()) return false;
-            setQueuedResult(result);
+            operationTracker.track({
+                jobRunId: result.jobRunId,
+                label: `Docker: ${result.operation}`,
+                onTerminal: async () => {
+                    await overviewQuery.refetch();
+                },
+            });
             void overviewQuery.refetch();
             return true;
         } catch (error) {
@@ -309,7 +260,6 @@ export function DockerRoute({ client }: DockerRouteProps) {
         if (freshRevision === undefined || preparingPrune !== undefined) return;
         setPreparingPrune(target);
         setOperationError(undefined);
-        setQueuedResult(undefined);
         try {
             const result = await mutationBoundary.run((signal) =>
                 client.query(
@@ -409,12 +359,6 @@ export function DockerRoute({ client }: DockerRouteProps) {
                                     onDismiss={() => setOperationError(undefined)}
                                 />
                             )}
-                        {queuedResult !== undefined && (
-                            <DockerQueuedResult
-                                onDismiss={() => setQueuedResult(undefined)}
-                                result={queuedResult}
-                            />
-                        )}
                         {overview.state === "unavailable" ? (
                             <EmptyState
                                 action={

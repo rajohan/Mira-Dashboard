@@ -23,6 +23,7 @@ import {
     jobRealtimeRefreshDelayMs,
 } from "../jobs/useJobRealtimeInvalidation.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Card } from "../ui/Card.tsx";
 import { PageState } from "../ui/PageState.tsx";
@@ -77,6 +78,7 @@ function useServiceActionsRealtimeInvalidation(): void {
 function useServiceActionRequest() {
     const client = useDashboardTrpcClient();
     const boundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const [error, setError] = useState<string>();
     const [notice, setNotice] = useState<string>();
     const mutation = useMutation<
@@ -119,6 +121,11 @@ function useServiceActionRequest() {
         },
         onSuccess: async (result, actionId) => {
             if (!boundary.completionIsCurrent()) return;
+            operationTracker.track({
+                jobRunId: result.jobRunId,
+                label: serviceActionPresentations[actionId].actionLabel,
+                onTerminal: () => refreshServiceActionsStatus(boundary.queryClient),
+            });
             const identity = authenticatedServiceActionIdentity(boundary.queryClient);
             const recoveryCleared =
                 identity !== undefined && clearServiceActionRecovery(identity, actionId);

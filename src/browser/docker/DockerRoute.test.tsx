@@ -17,6 +17,7 @@ import type {
     DockerRequestOperationResult,
 } from "../../contracts/docker.ts";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
+import { OperationTrackerContext } from "../operations/operationTrackerContextValue.ts";
 import { parseTerminalRouteSearch } from "../terminal/terminalRouteSearch.ts";
 import type { DockerClient } from "./dockerClient.ts";
 import { dockerOverviewQueryKey } from "./dockerQueries.ts";
@@ -345,13 +346,25 @@ function renderDocker(client: DockerClient) {
         history: createMemoryHistory({ initialEntries: ["/docker"] }),
         routeTree: rootRoute.addChildren([dockerRoute, jobsRoute, terminalRoute]),
     });
+    const trackOperation = jest.fn();
+    const dismissOperation = jest.fn();
     const view = render(
         <QueryClientProvider client={queryClient}>
-            <RouterProvider router={router} />
+            <OperationTrackerContext
+                value={{
+                    dismiss: dismissOperation,
+                    operations: [],
+                    settle: jest.fn(),
+                    track: trackOperation,
+                }}
+            >
+                <RouterProvider router={router} />
+            </OperationTrackerContext>
         </QueryClientProvider>
     );
     return {
         queryClient,
+        trackOperation,
         unmount(): void {
             view.unmount();
             queryClient.clear();
@@ -951,11 +964,13 @@ describe("DockerRoute", () => {
                 pending.resolve(queuedResult);
                 await pending.promise;
             });
-            expect(
-                await screen.findByRole("heading", {
-                    name: "Docker operation queued",
+            await waitFor(() =>
+                expect(view.trackOperation).toHaveBeenCalledWith({
+                    jobRunId: queuedJobId,
+                    label: "Docker: container-stop",
+                    onTerminal: expect.any(Function),
                 })
-            ).toBeVisible();
+            );
             expect(mutation).toHaveBeenCalledWith(
                 "docker.requestOperation",
                 {
@@ -967,11 +982,6 @@ describe("DockerRoute", () => {
                 },
                 expect.objectContaining({ signal: expect.any(AbortSignal) })
             );
-            expect(screen.getByRole("link", { name: "View job" })).toHaveAttribute(
-                "href",
-                "/jobs?runId=" + queuedJobId
-            );
-            expect(screen.getByText(/No runtime success is assumed/u)).toBeVisible();
             await waitForDialogExit();
             await waitFor(() => {
                 expect(
@@ -1033,11 +1043,13 @@ describe("DockerRoute", () => {
                 pending.resolve(result);
                 await pending.promise;
             });
-            expect(
-                await screen.findByRole("heading", {
-                    name: "Docker operation queued",
+            await waitFor(() =>
+                expect(view.trackOperation).toHaveBeenCalledWith({
+                    jobRunId: queuedJobId,
+                    label: "Docker: updater-update-service",
+                    onTerminal: expect.any(Function),
                 })
-            ).toBeVisible();
+            );
             await waitForDialogExit();
             await waitFor(() => {
                 expect(harness.overviewReadCount).toBeGreaterThan(
@@ -1112,6 +1124,9 @@ describe("DockerRoute", () => {
 
     test("previews exact prune candidates before queueing the one-time ticket", async () => {
         const harness = createClient({
+            mutation: jest.fn(() =>
+                Promise.resolve({ ...queuedResult, operation: "prune-execute" as const })
+            ) as unknown as DockerClient["mutation"],
             overviewAfterFirstRead: refreshedOverview,
         });
         const view = renderDocker(harness.client);
@@ -1148,11 +1163,13 @@ describe("DockerRoute", () => {
                 },
                 expect.objectContaining({ signal: expect.any(AbortSignal) })
             );
-            expect(
-                await screen.findByRole("heading", {
-                    name: "Docker operation queued",
+            await waitFor(() =>
+                expect(view.trackOperation).toHaveBeenCalledWith({
+                    jobRunId: queuedJobId,
+                    label: "Docker: prune-execute",
+                    onTerminal: expect.any(Function),
                 })
-            ).toBeVisible();
+            );
             await waitForDialogExit();
             await waitFor(() => {
                 expect(harness.overviewReadCount).toBeGreaterThan(

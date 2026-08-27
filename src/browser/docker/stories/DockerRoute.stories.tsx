@@ -7,6 +7,7 @@ import type {
     DockerPreparePruneResult,
     DockerRequestOperationResult,
 } from "../../../contracts/docker.ts";
+import type { JobRunDetail } from "../../../contracts/jobs.ts";
 import { DashboardPageStory } from "../../storySupport/dashboardPageStoryHarness.tsx";
 import {
     dashboardStoryFailure,
@@ -219,6 +220,30 @@ const queuedResult = {
     queued: true,
 } as const satisfies DockerRequestOperationResult;
 
+const queuedRun = {
+    events: [],
+    run: {
+        actionKey: "docker.updater",
+        attemptCount: 0,
+        attemptLimit: 1,
+        availableAtMs: observedAtMs,
+        cancellationPolicy: "cooperative",
+        displayName: "Scan Docker services for updates",
+        eventCount: 1,
+        id: queuedJobId,
+        priority: 0,
+        queuedAtMs: observedAtMs,
+        resourceClass: "host-heavy",
+        resourceKeys: ["docker.engine"],
+        retrySafe: true,
+        state: "queued",
+        stateVersion: 1,
+        timeoutMs: 300_000,
+        triggerType: "manual",
+        updatedAtMs: observedAtMs,
+    },
+} as const satisfies JobRunDetail;
+
 const notifications = {
     notifications: [],
     readCount: 0,
@@ -240,6 +265,7 @@ function dockerFixtures(
             "docker.getContainerLogs": dashboardStoryValue(logsResult),
             "docker.overview": options.overview ?? dashboardStoryValue(freshOverview),
             "docker.preparePrune": dashboardStoryValue(prunePreview),
+            "jobs.getRun": dashboardStoryValue(queuedRun),
             "notifications.list": dashboardStoryValue(notifications),
         },
     };
@@ -650,9 +676,11 @@ export const Queued: Story = {
         );
         const page = within(canvasElement.ownerDocument.body);
         await userEvent.click(await page.findByRole("button", { name: "Queue scan" }));
-        await expect(
-            await canvas.findByRole("heading", { name: "Docker operation queued" })
-        ).toBeVisible();
+        const operations = await page.findByRole("complementary", {
+            name: "Recent operations",
+        });
+        await expect(within(operations).getByText("Docker: updater-scan")).toBeVisible();
+        await expect(await within(operations).findByText("queued")).toBeVisible();
     },
 };
 

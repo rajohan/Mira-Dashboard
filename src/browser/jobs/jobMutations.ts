@@ -24,6 +24,7 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { classifyDashboardBrowserFailure } from "../api/trpcError.ts";
 import { authenticatedBrowserCacheGeneration } from "../auth/authQueries.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import {
     jobRunDetailQueryKey,
     jobRunEventGapQueryKey,
@@ -749,6 +750,7 @@ export function useRunScheduleMutation(
 ) {
     const client = useDashboardTrpcClient();
     const boundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const mutation = useMutation<
         DashboardProcedureOutput<"schedules.run">,
         Error,
@@ -780,6 +782,11 @@ export function useRunScheduleMutation(
         },
         onSuccess: (run, input) => {
             if (!boundary.completionIsCurrent()) return;
+            operationTracker.track({
+                jobRunId: run.id,
+                label: run.displayName,
+                onTerminal: () => refreshJobAndScheduleQueries(boundary.queryClient),
+            });
             scheduleRunKeysForCurrentCache(boundary.queryClient).delete(input.id);
             patchJobRunInCachedQueries(boundary.queryClient, run, true);
         },

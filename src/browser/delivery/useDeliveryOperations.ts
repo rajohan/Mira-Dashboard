@@ -5,6 +5,7 @@ import type {
     DeliveryRequestOperationResult,
 } from "../../contracts/delivery.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import {
     type DeliveryAuthoritySnapshot,
@@ -56,6 +57,7 @@ export function useDeliveryOperations(
     currentAuthority: DeliveryAuthoritySnapshot
 ) {
     const mutationBoundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const [pending, setPending] = useState<DeliveryOperationPrompt>();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string>();
@@ -89,6 +91,11 @@ export function useDeliveryOperations(
                 queueDeliveryOperation(client, pending.input, signal)
             );
             if (!mutationBoundary.completionIsCurrent()) return;
+            operationTracker.track({
+                jobRunId: queued.jobRunId,
+                label: `Delivery: ${queued.operation}`,
+                onTerminal: () => refreshDeliveryQueries(mutationBoundary.queryClient),
+            });
             setResult(queued);
             setPending(undefined);
             await refreshDeliveryQueries(mutationBoundary.queryClient);

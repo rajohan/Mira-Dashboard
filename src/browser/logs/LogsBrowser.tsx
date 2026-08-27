@@ -13,6 +13,7 @@ import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { useRealtimeQueryInvalidation } from "../api/useRealtimeQueryInvalidation.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { jobRunDetailQueryOptions } from "../jobs/jobQueries.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { logClient } from "./logClient.ts";
 import { logFailureMessage } from "./logPresentation.ts";
 import {
@@ -43,6 +44,7 @@ export function LogsBrowser() {
     const client = logClient(dashboardClient);
     const queryClient = useQueryClient();
     const mutationBoundary = useAuthenticatedMutationBoundary();
+    const operationTracker = useOperationTracker();
     const sourcesQuery = useQuery(logSourcesQueryOptions(client));
     const maintenanceQuery = useQuery(logMaintenanceQueryOptions(client));
     const [maintenanceAuthorityNowMs, setMaintenanceAuthorityNowMs] = useState(() =>
@@ -125,6 +127,12 @@ export function LogsBrowser() {
             )
         );
         if (mutationBoundary.completionIsCurrent()) {
+            operationTracker.track({
+                jobRunId: result.jobRunId,
+                label: dryRun ? "Log maintenance preview" : "Log maintenance",
+                onTerminal: () =>
+                    refreshLogMaintenanceQueries(queryClient, result.jobRunId),
+            });
             const currentMaintenanceState =
                 queryClient.getQueryState<LogMaintenanceStatusOutput>(
                     logMaintenanceQueryKey
