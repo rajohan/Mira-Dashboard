@@ -46,17 +46,212 @@ afterEach(() => {
 });
 
 describe("OpenClaw workspace Git sync", () => {
-    test("commits and pushes tracked changes without admitting untracked files", async () => {
+    test("commits tracked changes and allowlisted new memory without admitting other files", async () => {
         const { origin, repository, workspace } = fixture();
         Fs.writeFileSync(Path.join(workspace, "tracked.md"), "updated\n");
         Fs.writeFileSync(Path.join(workspace, "untracked.md"), "private\n");
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        Fs.writeFileSync(Path.join(workspace, "memory", "2026-08-27.md"), "daily\n");
+
+        const result = await createWorkspaceGitSync(repository)();
+
+        expect(result).toMatchObject({ changedFileCount: 2, pushed: true });
+        expect(run(origin, ["show", "main:workspace/tracked.md"])).toBe("updated");
+        expect(run(origin, ["show", "main:workspace/memory/2026-08-27.md"])).toBe(
+            "daily"
+        );
+        expect(run(repository, ["status", "--porcelain=v1"])).toBe(
+            "?? workspace/untracked.md"
+        );
+    });
+
+    test("admits nested allowlisted workspace state but rejects neighboring prefixes", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.mkdirSync(Path.join(workspace, "memory", "dreaming"), { recursive: true });
+        Fs.mkdirSync(Path.join(workspace, "memory-private"));
+        Fs.mkdirSync(Path.join(workspace, "wiki"));
+        Fs.writeFileSync(
+            Path.join(workspace, "memory", "dreaming", "today.md"),
+            "dream\n"
+        );
+        Fs.writeFileSync(
+            Path.join(workspace, "memory-private", "secret.md"),
+            "private\n"
+        );
+        Fs.writeFileSync(Path.join(workspace, "wiki", "project.md"), "wiki\n");
+
+        const result = await createWorkspaceGitSync(repository)();
+
+        expect(result).toMatchObject({ changedFileCount: 2, pushed: true });
+        expect(run(origin, ["show", "main:workspace/memory/dreaming/today.md"])).toBe(
+            "dream"
+        );
+        expect(run(origin, ["show", "main:workspace/wiki/project.md"])).toBe("wiki");
+        expect(run(repository, ["status", "--porcelain=v1"])).toBe(
+            "?? workspace/memory-private/"
+        );
+    });
+
+    test("ignores oversized untracked inventories outside the allowlist", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.writeFileSync(Path.join(workspace, "tracked.md"), "updated\n");
+        const privateDirectory = Path.join(workspace, "private");
+        Fs.mkdirSync(privateDirectory);
+        for (let index = 0; index < 900; index += 1) {
+            Fs.writeFileSync(
+                Path.join(
+                    privateDirectory,
+                    `${String(index).padStart(4, "0")}-${"x".repeat(80)}.md`
+                ),
+                "private\n"
+            );
+        }
 
         const result = await createWorkspaceGitSync(repository)();
 
         expect(result).toMatchObject({ changedFileCount: 1, pushed: true });
         expect(run(origin, ["show", "main:workspace/tracked.md"])).toBe("updated");
-        expect(run(repository, ["status", "--porcelain=v1"])).toBe(
-            "?? workspace/untracked.md"
+    });
+
+    test("counts and publishes a tracked rename as one changed file", async () => {
+        const { origin, repository } = fixture();
+        run(repository, ["mv", "workspace/tracked.md", "workspace/renamed.md"]);
+
+        const result = await createWorkspaceGitSync(repository)();
+
+        expect(result).toMatchObject({ changedFileCount: 1, pushed: true });
+        expect(run(origin, ["show", "main:workspace/renamed.md"])).toBe("initial");
+    });
+
+    test("publishes an allowlisted addition already staged in the shared index", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        Fs.writeFileSync(Path.join(workspace, "memory", "staged.md"), "staged\n");
+        run(repository, ["add", "workspace/memory/staged.md"]);
+
+        const result = await createWorkspaceGitSync(repository)();
+
+        expect(result).toMatchObject({ changedFileCount: 1, pushed: true });
+        expect(run(origin, ["show", "main:workspace/memory/staged.md"])).toBe("staged");
+    });
+
+    test("ignores an allowlisted staged addition deleted from the worktree", async () => {
+        const { repository, workspace } = fixture();
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        const stagedPath = Path.join(workspace, "memory", "deleted.md");
+        Fs.writeFileSync(stagedPath, "staged\n");
+        run(repository, ["add", "workspace/memory/deleted.md"]);
+        Fs.rmSync(stagedPath);
+
+        expect(await createWorkspaceGitSync(repository)()).toEqual({
+            changedFileCount: 0,
+            pushed: false,
+        });
+    });
+
+    test("publishes an ignored allowlisted addition already force-staged", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.writeFileSync(Path.join(repository, ".gitignore"), "workspace/memory/\n");
+        run(repository, ["add", ".gitignore"]);
+        run(repository, ["commit", "-m", "ignore memory fixture"]);
+        run(repository, ["push", "origin", "main"]);
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        Fs.writeFileSync(Path.join(workspace, "memory", "forced.md"), "forced\n");
+        run(repository, ["add", "--force", "workspace/memory/forced.md"]);
+
+        expect(await createWorkspaceGitSync(repository)()).toMatchObject({
+            changedFileCount: 1,
+            pushed: true,
+        });
+        expect(run(origin, ["show", "main:workspace/memory/forced.md"])).toBe("forced");
+    });
+
+    test("preserves non-UTF-8 bytes in allowlisted pathnames", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        const relativePath = Buffer.concat([
+            Buffer.from("workspace/memory/raw-"),
+            Buffer.of(0xff),
+            Buffer.from(".md"),
+        ]);
+        Fs.writeFileSync(
+            Buffer.concat([Buffer.from(`${repository}${Path.sep}`), relativePath]),
+            "raw\n"
+        );
+
+        expect(await createWorkspaceGitSync(repository)()).toMatchObject({
+            changedFileCount: 1,
+            pushed: true,
+        });
+        const tree = Bun.spawnSync(
+            ["/usr/bin/git", "ls-tree", "-r", "-z", "--name-only", "main"],
+            { cwd: origin, stderr: "pipe", stdout: "pipe" }
+        ).stdout;
+        expect(Buffer.from(tree).includes(relativePath)).toBeTrue();
+    });
+
+    test("counts a tracked index removal and recreated allowlisted path once", async () => {
+        const { repository, workspace } = fixture();
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        Fs.writeFileSync(Path.join(workspace, "memory", "recreated.md"), "initial\n");
+        run(repository, ["add", "workspace/memory/recreated.md"]);
+        run(repository, ["commit", "-m", "add recreated fixture"]);
+        run(repository, ["push", "origin", "main"]);
+        run(repository, ["rm", "--cached", "workspace/memory/recreated.md"]);
+        Fs.writeFileSync(Path.join(workspace, "memory", "recreated.md"), "updated\n");
+
+        expect(await createWorkspaceGitSync(repository)()).toMatchObject({
+            changedFileCount: 1,
+            pushed: true,
+        });
+    });
+
+    test("publishes dangling symlinks in allowlisted directories", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.mkdirSync(Path.join(workspace, "memory"));
+        Fs.symlinkSync("missing-target", Path.join(workspace, "memory", "dangling"));
+
+        expect(await createWorkspaceGitSync(repository)()).toMatchObject({
+            changedFileCount: 1,
+            pushed: true,
+        });
+        expect(run(origin, ["show", "main:workspace/memory/dangling"])).toBe(
+            "missing-target"
+        );
+    });
+
+    test("rejects a directory replacing an exact-file allowlist entry", async () => {
+        const { repository, workspace } = fixture();
+        Fs.writeFileSync(Path.join(workspace, "AGENTS.md"), "staged\n");
+        run(repository, ["add", "workspace/AGENTS.md"]);
+        Fs.rmSync(Path.join(workspace, "AGENTS.md"));
+        Fs.mkdirSync(Path.join(workspace, "AGENTS.md"));
+        Fs.writeFileSync(Path.join(workspace, "AGENTS.md", "secret"), "private\n");
+
+        const failure = await createWorkspaceGitSync(repository)().catch(
+            (error: unknown) => error
+        );
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toBe(
+            "Workspace Git exact-file addition is not a file"
+        );
+    });
+
+    test("rejects embedded repositories in allowlisted directories", async () => {
+        const { repository, workspace } = fixture();
+        const embedded = Path.join(workspace, "coder", "nested");
+        Fs.mkdirSync(embedded, { recursive: true });
+        run(embedded, ["init", "--initial-branch=main"]);
+        Fs.writeFileSync(Path.join(embedded, "work.md"), "nested\n");
+
+        const failure = await createWorkspaceGitSync(repository)().catch(
+            (error: unknown) => error
+        );
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toBe(
+            "Workspace Git additions contain an embedded repository"
         );
     });
 
