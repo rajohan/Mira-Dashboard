@@ -34,6 +34,21 @@ export interface DockerOverviewDiscovery {
     readonly payload: DockerOverviewCachePayload;
 }
 
+export type DockerOverviewDiscoveryStage =
+    | "compose-discovery"
+    | "engine-inventory"
+    | "overview-projection";
+
+export class DockerOverviewDiscoveryError extends Error {
+    public readonly stage: DockerOverviewDiscoveryStage;
+
+    public constructor(stage: DockerOverviewDiscoveryStage, cause: unknown) {
+        super("Docker overview discovery failed", { cause });
+        this.name = "DockerOverviewDiscoveryError";
+        this.stage = stage;
+    }
+}
+
 export interface DockerOverviewCollectorOptions {
     readonly discoverCompose?: (
         identities: readonly DockerEngineComposeIdentity[]
@@ -65,17 +80,35 @@ export function createDockerOverviewCollector(
         signal?: AbortSignal
     ): Promise<DockerOverviewDiscovery> => {
         signal?.throwIfAborted();
-        const engineSnapshot = await engine.collect(signal);
+        let engineSnapshot: Awaited<ReturnType<typeof engine.collect>>;
+        try {
+            engineSnapshot = await engine.collect(signal);
+        } catch (error) {
+            signal?.throwIfAborted();
+            throw new DockerOverviewDiscoveryError("engine-inventory", error);
+        }
         signal?.throwIfAborted();
-        const compose = discoverCompose(dockerEngineComposeIdentities(engineSnapshot));
+        let compose: DockerComposeDiscoveryResult;
+        try {
+            compose = discoverCompose(dockerEngineComposeIdentities(engineSnapshot));
+        } catch (error) {
+            signal?.throwIfAborted();
+            throw new DockerOverviewDiscoveryError("compose-discovery", error);
+        }
         signal?.throwIfAborted();
-        const retained = previousPayload(previous);
-        const payload = projectDockerOverview({
-            compose,
-            engine: engineSnapshot,
-            observedAtMs: nowMs(),
-            ...(retained === undefined ? {} : { previous: retained }),
-        });
+        let payload: DockerOverviewCachePayload;
+        try {
+            const retained = previousPayload(previous);
+            payload = projectDockerOverview({
+                compose,
+                engine: engineSnapshot,
+                observedAtMs: nowMs(),
+                ...(retained === undefined ? {} : { previous: retained }),
+            });
+        } catch (error) {
+            signal?.throwIfAborted();
+            throw new DockerOverviewDiscoveryError("overview-projection", error);
+        }
         return Object.freeze({ compose, payload });
     };
     return Object.freeze({

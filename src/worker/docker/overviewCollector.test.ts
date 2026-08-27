@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import type { DockerComposeDiscoveryResult } from "./composeDiscovery.ts";
 import type { DockerEngineInventorySnapshot } from "./engineInventory.ts";
-import { createDockerOverviewCollector } from "./overviewCollector.ts";
+import {
+    createDockerOverviewCollector,
+    DockerOverviewDiscoveryError,
+} from "./overviewCollector.ts";
 import { parseDockerImageReference } from "./tagPolicy.ts";
 
 const containerId = "a".repeat(64);
@@ -135,5 +138,39 @@ describe("Docker overview collector", () => {
             (error: unknown) => error
         );
         expect(failure).toHaveProperty("name", "AbortError");
+    });
+
+    test("classifies every discovery stage without exposing details", async () => {
+        const engineFailure = createDockerOverviewCollector({
+            discoverCompose: composeResult,
+            engine: {
+                collect: () => Promise.reject(new Error("private engine diagnostic")),
+            },
+        });
+        await expect(engineFailure.collect()).rejects.toMatchObject({
+            message: "Docker overview discovery failed",
+            stage: "engine-inventory",
+        } satisfies Partial<DockerOverviewDiscoveryError>);
+
+        const composeFailure = createDockerOverviewCollector({
+            discoverCompose: () => {
+                throw new Error("private Compose diagnostic");
+            },
+            engine: { collect: () => Promise.resolve(engineSnapshot()) },
+        });
+        await expect(composeFailure.collect()).rejects.toMatchObject({
+            message: "Docker overview discovery failed",
+            stage: "compose-discovery",
+        } satisfies Partial<DockerOverviewDiscoveryError>);
+
+        const projectionFailure = createDockerOverviewCollector({
+            discoverCompose: composeResult,
+            engine: { collect: () => Promise.resolve(engineSnapshot()) },
+            nowMs: () => Number.NaN,
+        });
+        await expect(projectionFailure.collect()).rejects.toMatchObject({
+            message: "Docker overview discovery failed",
+            stage: "overview-projection",
+        } satisfies Partial<DockerOverviewDiscoveryError>);
     });
 });

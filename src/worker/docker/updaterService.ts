@@ -27,7 +27,10 @@ import type {
     DockerUpdaterGitSyncResult,
     DockerUpdaterGitSyncUnavailableReason,
 } from "./gitSync.ts";
-import type { DockerOverviewCollector } from "./overviewCollector.ts";
+import {
+    DockerOverviewDiscoveryError,
+    type DockerOverviewCollector,
+} from "./overviewCollector.ts";
 import { scanDockerUpdates, type DockerUpdaterScanOptions } from "./updaterScan.ts";
 
 const composeEnvironment = Object.freeze({
@@ -103,6 +106,14 @@ function fail(cause?: unknown): never {
 
 function sourceConflict(): never {
     throw new DockerUpdaterSourceConflictError();
+}
+
+function verificationFailureSummary(error: unknown, project: string, service: string) {
+    const stage =
+        error instanceof DockerOverviewDiscoveryError
+            ? ` during ${error.stage.replaceAll("-", " ")}`
+            : "";
+    return `Update verification failed${stage} for ${project}/${service}; the prior state was restored.`;
 }
 
 async function readBounded(
@@ -799,7 +810,11 @@ export function createDockerUpdaterService(
                                 event(generateId, nowMs, {
                                     kind: "update-failed",
                                     serviceId: service.id,
-                                    summary: `Update verification failed for ${service.project}/${service.service}; the prior state was restored.`,
+                                    summary: verificationFailureSummary(
+                                        error,
+                                        service.project,
+                                        service.service
+                                    ),
                                 })
                             );
                             return Object.freeze({
