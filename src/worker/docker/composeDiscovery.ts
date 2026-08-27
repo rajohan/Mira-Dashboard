@@ -59,6 +59,7 @@ export interface DockerComposeDiscoveredService {
 
 export interface DockerComposeDiscoveryResult {
     readonly composeFiles: readonly string[];
+    readonly settlementRevision: string;
     readonly services: readonly DockerComposeDiscoveredService[];
     readonly sourceRevision: string;
 }
@@ -426,7 +427,8 @@ function composeSourceRevision(
     graph: readonly LoadedComposeFile[],
     identities: readonly DockerEngineComposeIdentity[],
     services: readonly DockerComposeDiscoveredService[],
-    rootComposePath: string
+    rootComposePath: string,
+    includeInode: boolean
 ): string {
     const projection = Object.freeze({
         files: graph
@@ -435,7 +437,7 @@ function composeSourceRevision(
                     contentSha256,
                     device: device.toString(10),
                     group: group.toString(10),
-                    inode: inode.toString(10),
+                    ...(includeInode ? { inode: inode.toString(10) } : {}),
                     mode: mode.toString(10),
                     owner: owner.toString(10),
                     path,
@@ -645,12 +647,20 @@ export function discoverDockerComposeServices(
         const frozenServices = Object.freeze(services);
         return Object.freeze({
             composeFiles,
+            settlementRevision: composeSourceRevision(
+                graph,
+                relevantIdentities,
+                frozenServices,
+                rootComposePath,
+                false
+            ),
             services: frozenServices,
             sourceRevision: composeSourceRevision(
                 graph,
                 relevantIdentities,
                 frozenServices,
-                rootComposePath
+                rootComposePath,
+                true
             ),
         });
     } catch (error) {

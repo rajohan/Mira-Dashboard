@@ -108,7 +108,31 @@ describe("Docker Compose discovery", () => {
             "unrelated.secret-shaped-label"
         );
         expect(result.services[0]?.contentSha256).toMatch(/^[0-9a-f]{64}$/u);
+        expect(result.settlementRevision).toMatch(/^[0-9a-f]{64}$/u);
         expect(result.sourceRevision).toMatch(/^[0-9a-f]{64}$/u);
+    });
+
+    test("keeps settlement authority stable across an inode-only replacement", () => {
+        const { appCompose, root, rootCompose } = fixture();
+        const rootBytes = "include:\n  - apps/sample/compose.yaml\n";
+        const appBytes = "services:\n  dynamic-service:\n    image: redis:8.10.0\n";
+        Fs.writeFileSync(rootCompose, rootBytes);
+        Fs.writeFileSync(appCompose, appBytes);
+        const first = discoverDockerComposeServices([identity(rootCompose)], {
+            rootComposePath: rootCompose,
+            trustRoot: root,
+        });
+
+        const replacement = `${appCompose}.replacement`;
+        Fs.writeFileSync(replacement, appBytes);
+        Fs.renameSync(replacement, appCompose);
+        const second = discoverDockerComposeServices([identity(rootCompose)], {
+            rootComposePath: rootCompose,
+            trustRoot: root,
+        });
+
+        expect(second.sourceRevision).not.toBe(first.sourceRevision);
+        expect(second.settlementRevision).toBe(first.settlementRevision);
     });
 
     test("removes backup authority when projected labels are duplicated", () => {

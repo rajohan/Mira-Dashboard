@@ -41,6 +41,7 @@ export const dockerEngineInventoryComposeLabelNames = Object.freeze([
     "com.docker.compose.project.working_dir",
     "com.docker.compose.config-hash",
     "com.docker.compose.container-number",
+    "com.docker.compose.oneoff",
 ] as const);
 
 export const dockerEngineInventoryUpdaterLabelNames = Object.freeze([

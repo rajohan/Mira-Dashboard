@@ -220,9 +220,19 @@ function containerHealth(value: string | null): DockerContainer["health"] {
     }
 }
 
+function composeOneOff(container: DockerEngineInventoryAvailableContainer): boolean {
+    const value = container.labels["com.docker.compose.oneoff"];
+    if (value === undefined || value === "0" || value.toLowerCase() === "false") {
+        return false;
+    }
+    if (value === "1" || value.toLowerCase() === "true") return true;
+    return fail();
+}
+
 function composeIdentity(
     container: DockerEngineInventoryAvailableContainer
 ): DockerEngineComposeIdentity | undefined {
+    if (composeOneOff(container)) return undefined;
     const project = container.labels["com.docker.compose.project"];
     const service = container.labels["com.docker.compose.service"];
     const configFiles = container.labels["com.docker.compose.project.config_files"];
@@ -282,8 +292,9 @@ function containers(snapshot: DockerEngineInventorySnapshot): DockerContainer[] 
     const statsById = new Map(snapshot.stats.map((row) => [row.id, row]));
     return snapshot.containers.map((raw): DockerContainer => {
         if (raw.availability !== "available") return fail();
-        const project = raw.labels["com.docker.compose.project"];
-        const service = raw.labels["com.docker.compose.service"];
+        const isOneOff = composeOneOff(raw);
+        const project = isOneOff ? undefined : raw.labels["com.docker.compose.project"];
+        const service = isOneOff ? undefined : raw.labels["com.docker.compose.service"];
         if ((project === undefined) !== (service === undefined)) fail();
         const statsRow = statsById.get(raw.id);
         // Docker retains the previous stop timestamp after a container is started
@@ -450,8 +461,8 @@ function updaterPoliciesMatch(
 
 function updaterServices(
     compose: DockerComposeDiscoveryResult,
-    previous: DockerOverviewCachePayload | undefined,
-    currentSourceRevision: string
+    containers: readonly DockerContainer[],
+    previous: DockerOverviewCachePayload | undefined
 ): readonly DockerUpdaterService[] {
     const previousById = new Map(
         (previous?.updaterServices ?? []).map((service) => [service.id, service])
@@ -462,6 +473,21 @@ function updaterServices(
                 const id = serviceId(service);
                 const prior = previousById.get(id);
                 const policy = updaterPolicy(service);
+                const runtime = containers.filter(
+                    (container) =>
+                        container.project === service.project &&
+                        container.service === service.service
+                );
+                const runtimeImageIds = new Set(runtime.map(({ imageId }) => imageId));
+                const runtimeEligible =
+                    runtime.length > 0 &&
+                    runtimeImageIds.size === 1 &&
+                    runtime.every(
+                        ({ health, state }) =>
+                            state === "running" &&
+                            health !== "starting" &&
+                            health !== "unhealthy"
+                    );
                 return Object.freeze({
                     currentImage: service.imageReference,
                     id,
@@ -469,9 +495,11 @@ function updaterServices(
                     project: service.project,
                     service: service.service,
                     status:
-                        previous?.sourceRevision === currentSourceRevision &&
+                        previous?.updaterSourceRevision === compose.settlementRevision &&
                         prior?.currentImage === service.imageReference &&
-                        updaterPoliciesMatch(prior.policy, policy)
+                        updaterPoliciesMatch(prior.policy, policy) &&
+                        prior !== undefined &&
+                        runtimeEligible
                             ? prior.status
                             : Object.freeze({ state: "not-checked" }),
                 });
@@ -502,7 +530,9 @@ function sourceRevision(
 
 /**
  * Converts one all-or-nothing Engine/Compose discovery into the strict public cache payload.
- * Previous updater state is retained only for an unchanged dynamically discovered service.
+ * Previous updater state is retained only for an unchanged dynamically discovered
+ * service. Unrelated Engine churn, including container recreation during a worker or
+ * host restart, must not revoke an already verified registry candidate.
  * @param input Current Engine/Compose state, observation clock, and optional prior payload.
  * @returns Strict bounded cache payload without raw Docker or Compose authority.
  */
@@ -521,10 +551,11 @@ export function projectDockerOverview(input: {
         observedAtMs: input.observedAtMs,
         sourceRevision: currentSourceRevision,
         updaterEvents: updaterEvents(input.previous),
+        updaterSourceRevision: input.compose.settlementRevision,
         updaterServices: updaterServices(
             input.compose,
-            input.previous,
-            currentSourceRevision
+            projectedContainers,
+            input.previous
         ),
         volumes: volumes(input.engine, projectedContainers),
     });

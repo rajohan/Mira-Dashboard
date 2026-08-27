@@ -118,6 +118,7 @@ function compose(
 ): DockerComposeDiscoveryResult {
     return Object.freeze({
         composeFiles: Object.freeze([rootCompose]),
+        settlementRevision: "c".repeat(64),
         services: Object.freeze([...services]),
         sourceRevision: "d".repeat(64),
     });

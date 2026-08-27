@@ -116,11 +116,15 @@ function discoveredService(
         labels: {
             "mira.updater.autoUpdate": "true",
             "mira.updater.enabled": "true",
+            "mira.updater.tagPattern": String.raw`^1\.\d+\.\d+$`,
         },
         pinMode: "tag",
         project: "media",
         service: "app",
-        tagPolicy: { matchType: "exact", pattern: "1.0.0" },
+        tagPolicy: {
+            matchType: "regex",
+            pattern: String.raw`^1\.\d+\.\d+$`,
+        },
         ...overrides,
     };
 }
@@ -130,6 +134,7 @@ function composeResult(
 ): DockerComposeDiscoveryResult {
     return {
         composeFiles: ["/opt/docker/apps/app/compose.yaml", "/opt/docker/compose.yaml"],
+        settlementRevision: "e".repeat(64),
         services,
         sourceRevision: "f".repeat(64),
     };
@@ -356,6 +361,36 @@ describe("Docker overview projection", () => {
         expect(payload.containers[0]?.finishedAtMs).toBeUndefined();
     });
 
+    test("excludes Compose one-offs from service identity and updater eligibility", () => {
+        const engine = engineSnapshot();
+        const oneOffEngine = {
+            ...engine,
+            containers: engine.containers.map((container) =>
+                container.availability === "available"
+                    ? {
+                          ...container,
+                          labels: {
+                              ...container.labels,
+                              "com.docker.compose.oneoff": "True",
+                          },
+                      }
+                    : container
+            ),
+        };
+
+        expect(dockerEngineComposeIdentities(oneOffEngine)).toEqual([]);
+        const payload = projectDockerOverview({
+            compose: composeResult(),
+            engine: oneOffEngine,
+            observedAtMs: Date.parse("2026-08-13T04:01:30Z"),
+        });
+        expect(payload.containers[0]?.project).toBeUndefined();
+        expect(payload.containers[0]?.service).toBeUndefined();
+        expect(payload.updaterServices[0]?.status).toEqual({
+            state: "not-checked",
+        });
+    });
+
     test("fails closed when a container disappears during collection", () => {
         const engine = engineSnapshot({
             containers: [{ availability: "disappeared", id: containerId }],
@@ -372,7 +407,7 @@ describe("Docker overview projection", () => {
         ).toThrow("Docker overview projection failed");
     });
 
-    test("retains updater state only while source, image, and effective policy are unchanged", () => {
+    test("retains updater state across Engine churn while image and effective policy are unchanged", () => {
         const first = projectDockerOverview({
             compose: composeResult(),
             engine: engineSnapshot(),
@@ -402,6 +437,37 @@ describe("Docker overview projection", () => {
             state: "update-available",
         });
 
+        const restartedRuntime = projectDockerOverview({
+            compose: composeResult(),
+            engine: engineSnapshot({ sourceRevision: "9".repeat(64) }),
+            observedAtMs: Date.parse("2026-08-13T04:02:30Z"),
+            previous,
+        });
+        expect(restartedRuntime.sourceRevision).not.toBe(previous.sourceRevision);
+        expect(restartedRuntime.updaterServices[0]?.status).toEqual({
+            candidateImage: "example/app:1.1.0",
+            state: "update-available",
+        });
+
+        const healthyEngine = engineSnapshot();
+        const unhealthyRuntime = projectDockerOverview({
+            compose: composeResult(),
+            engine: {
+                ...healthyEngine,
+                containers: healthyEngine.containers.map((container) =>
+                    container.availability === "available"
+                        ? { ...container, health: "unhealthy" }
+                        : container
+                ),
+                sourceRevision: "8".repeat(64),
+            },
+            observedAtMs: Date.parse("2026-08-13T04:02:45Z"),
+            previous,
+        });
+        expect(unhealthyRuntime.updaterServices[0]?.status).toEqual({
+            state: "not-checked",
+        });
+
         const changedService = discoveredService({
             imageReference: "example/app:1.1.0",
         });
@@ -413,29 +479,32 @@ describe("Docker overview projection", () => {
         });
         expect(changed.updaterServices[0]?.status).toEqual({ state: "not-checked" });
 
-        const changedPolicy = projectDockerOverview({
+        const changedTagPolicy = projectDockerOverview({
             compose: {
                 ...composeResult([
                     discoveredService({
                         labels: {
                             "mira.updater.autoUpdate": "true",
                             "mira.updater.enabled": "true",
-                            "mira.updater.tagPattern": String.raw`^1\.\d+\.\d+$`,
+                            "mira.updater.tagPattern": String.raw`^2\.\d+\.\d+$`,
                         },
                         tagPolicy: {
                             matchType: "regex",
-                            pattern: String.raw`^1\.\d+\.\d+$`,
+                            pattern: String.raw`^2\.\d+\.\d+$`,
                         },
                     }),
                 ]),
+                settlementRevision: "2".repeat(64),
                 sourceRevision: "1".repeat(64),
             },
             engine: engineSnapshot(),
             observedAtMs: Date.parse("2026-08-13T04:04:00Z"),
             previous,
         });
-        expect(changedPolicy.updaterServices[0]?.currentImage).toBe("example/app:1.0.0");
-        expect(changedPolicy.updaterServices[0]?.status).toEqual({
+        expect(changedTagPolicy.updaterServices[0]?.currentImage).toBe(
+            "example/app:1.0.0"
+        );
+        expect(changedTagPolicy.updaterServices[0]?.status).toEqual({
             state: "not-checked",
         });
     });
@@ -462,6 +531,39 @@ describe("Docker overview projection", () => {
         });
 
         expect(changed.sourceRevision).not.toBe(first.sourceRevision);
+    });
+
+    test("retains a verified candidate across an inode-only Compose replacement", () => {
+        const first = projectDockerOverview({
+            compose: composeResult(),
+            engine: engineSnapshot(),
+            observedAtMs: Date.now(),
+        });
+        const previous: DockerOverviewCachePayload = {
+            ...first,
+            updaterServices: [
+                {
+                    ...first.updaterServices[0]!,
+                    status: {
+                        candidateImage: "example/app:1.1.0",
+                        state: "update-available",
+                    },
+                },
+            ],
+        };
+
+        const replaced = projectDockerOverview({
+            compose: { ...composeResult(), sourceRevision: "1".repeat(64) },
+            engine: engineSnapshot(),
+            observedAtMs: Date.now(),
+            previous,
+        });
+
+        expect(replaced.sourceRevision).not.toBe(previous.sourceRevision);
+        expect(replaced.updaterServices[0]?.status).toEqual({
+            candidateImage: "example/app:1.1.0",
+            state: "update-available",
+        });
     });
 
     test("keeps explicit false opt-in inventory-only", () => {

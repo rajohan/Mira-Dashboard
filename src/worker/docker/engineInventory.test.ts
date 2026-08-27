@@ -39,6 +39,7 @@ function labels(
     return {
         "com.docker.compose.config-hash": null,
         "com.docker.compose.container-number": null,
+        "com.docker.compose.oneoff": null,
         "com.docker.compose.project": null,
         "com.docker.compose.project.config_files": null,
         "com.docker.compose.project.working_dir": null,
