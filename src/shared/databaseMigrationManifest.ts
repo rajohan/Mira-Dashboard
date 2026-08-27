@@ -28,7 +28,7 @@ export const migrationManifest = Object.freeze<readonly MigrationManifestEntry[]
             "9a75556e48c116cd2e01190220d1c02766d2bcbfe7e8e82ea67d577a028857e4",
     }),
     Object.freeze({
-        id: "20260827190406_eager_lizard",
+        id: "20260827190406_eager-lizard",
         migrationSha256:
             "d5e25e720f9731cf7c49780dc6069311cb8fc2fc5c08345143f1b7194d9a6c77",
         snapshotSha256:
