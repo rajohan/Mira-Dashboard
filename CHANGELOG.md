@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.0...v0.4.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **jobs:** expand worker action inventory budget ([#486](https://github.com/rajohan/Mira-Dashboard/issues/486)) ([dd85928](https://github.com/rajohan/Mira-Dashboard/commit/dd859288ef27793eacf9f83b7a6deca1e36bbe7f))
+
 ## [0.4.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.9...v0.4.0) (2026-08-27)
 
 
