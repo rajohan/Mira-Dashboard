@@ -114,7 +114,12 @@ describe("global operations tray", () => {
                 screen.getByRole("button", { name: "Dismiss Scan for updates" })
             );
             expect(dismiss).toHaveBeenCalledWith("run-1");
-            const queryCountBeforeRealtimeEvent = query.mock.calls.length;
+            const runQueryCountBeforeRealtimeEvent = query.mock.calls.filter(
+                ([, input]) => input.id === "run-1"
+            ).length;
+            const missingQueryCountBeforeRealtimeEvent = query.mock.calls.filter(
+                ([, input]) => input.id === "missing-run"
+            ).length;
             act(() => {
                 realtimeClient.emit({
                     data: {
@@ -132,10 +137,14 @@ describe("global operations tray", () => {
                 });
             });
             await waitFor(() =>
-                expect(query.mock.calls.length).toBeGreaterThan(
-                    queryCountBeforeRealtimeEvent
-                )
+                expect(
+                    query.mock.calls.filter(([, input]) => input.id === "missing-run")
+                        .length
+                ).toBeGreaterThan(missingQueryCountBeforeRealtimeEvent)
             );
+            expect(
+                query.mock.calls.filter(([, input]) => input.id === "run-1").length
+            ).toBe(runQueryCountBeforeRealtimeEvent);
         } finally {
             view.unmount();
             queryClient.clear();

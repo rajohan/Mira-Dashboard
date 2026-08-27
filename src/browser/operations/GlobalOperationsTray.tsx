@@ -23,7 +23,13 @@ const terminalStates = new Set(["cancelled", "failed", "succeeded", "timed-out"]
 const operationRunQueryRoot = ["operations", "runs"] as const;
 
 async function refreshTrackedOperationRuns(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: operationRunQueryRoot });
+    await queryClient.invalidateQueries({
+        predicate: (query) => {
+            const detail = query.state.data as JobRunDetail | undefined;
+            return !terminalStates.has(detail?.run.state ?? "");
+        },
+        queryKey: operationRunQueryRoot,
+    });
 }
 
 function operationBadgePresentation(lookupFailed: boolean, state?: JobRunState) {
