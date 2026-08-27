@@ -6,6 +6,7 @@ import {
     lstatSync,
     openSync,
     realpathSync,
+    renameSync,
     writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -34,10 +35,12 @@ export interface ProjectFileLogDestination {
 /** Synchronous deterministic mutation boundary used only by adversarial tests. */
 export interface ProjectFileLogDestinationTestHooks {
     readonly afterDirectoryOpen?: () => void;
+    readonly maximumPrimaryBytes?: number;
 }
 
 interface OpenedLogFile {
-    readonly descriptor: number;
+    descriptor: number;
+    readonly filename: string;
     readonly maximumBytes: number;
     writtenBytes: number;
 }
@@ -111,11 +114,43 @@ function openLogFile(
         ) {
             throw invalidProjectLogDestination();
         }
-        return { descriptor, maximumBytes, writtenBytes: status.size };
+        return { descriptor, filename, maximumBytes, writtenBytes: status.size };
     } catch (error) {
         closeSync(descriptor);
         throw error;
     }
+}
+
+function rotatePrimaryLog(
+    file: OpenedLogFile,
+    directoryDescriptor: number,
+    canonicalDirectory: string,
+    userId: number
+): void {
+    fsyncSync(file.descriptor);
+    const previousFilename = `${path.parse(file.filename).name}.previous.ndjson`;
+    const primaryPath = path.join(`/proc/self/fd/${directoryDescriptor}`, file.filename);
+    const previousPath = path.join(
+        `/proc/self/fd/${directoryDescriptor}`,
+        previousFilename
+    );
+    renameSync(primaryPath, previousPath);
+    let replacement: OpenedLogFile;
+    try {
+        replacement = openLogFile(
+            directoryDescriptor,
+            canonicalDirectory,
+            file.filename,
+            userId,
+            file.maximumBytes
+        );
+    } catch (error) {
+        renameSync(previousPath, primaryPath);
+        throw error;
+    }
+    closeSync(file.descriptor);
+    file.descriptor = replacement.descriptor;
+    file.writtenBytes = replacement.writtenBytes;
 }
 
 /**
@@ -139,13 +174,18 @@ export function createProjectFileLogDestination(
         throw invalidProjectLogDestination();
     }
     const userId = currentUserId();
+    const primaryMaximumBytes = testHooks.maximumPrimaryBytes ?? maximumPrimaryLogBytes;
+    if (!Number.isSafeInteger(primaryMaximumBytes) || primaryMaximumBytes <= 0) {
+        throw invalidProjectLogDestination();
+    }
     let directoryDescriptor: number | undefined;
+    let canonicalDirectory = "";
     let primary: OpenedLogFile | undefined;
     let fallback: OpenedLogFile | undefined;
     try {
         directoryDescriptor = openSync(logsDirectory, directoryFlags);
         const held = fstatSync(directoryDescriptor);
-        const canonicalDirectory = realpathSync(`/proc/self/fd/${directoryDescriptor}`);
+        canonicalDirectory = realpathSync(`/proc/self/fd/${directoryDescriptor}`);
         testHooks.afterDirectoryOpen?.();
         const after = lstatSync(logsDirectory);
         if (
@@ -165,7 +205,7 @@ export function createProjectFileLogDestination(
             canonicalDirectory,
             `${processRole}.ndjson`,
             userId,
-            maximumPrimaryLogBytes
+            primaryMaximumBytes
         );
         fallback = openLogFile(
             directoryDescriptor,
@@ -209,6 +249,18 @@ export function createProjectFileLogDestination(
             },
             write(line: string, _level: StructuredLogLevel): undefined {
                 if (closed) throw invalidProjectLogDestination();
+                const lineBytes = Buffer.byteLength(line, "utf8");
+                if (
+                    primary.writtenBytes > 0 &&
+                    primary.writtenBytes + lineBytes > primary.maximumBytes
+                ) {
+                    rotatePrimaryLog(
+                        primary,
+                        directoryDescriptor,
+                        canonicalDirectory,
+                        userId
+                    );
+                }
                 writeAll(primary, line);
                 return undefined;
             },

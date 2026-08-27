@@ -4,6 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/pro
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { formatStartupFailure } from "../../../shared/startupFailure.ts";
 import { createProjectFileLogDestination } from "./projectFileLogSink.ts";
 
 const temporaryDirectories: string[] = [];
@@ -26,6 +27,17 @@ async function logsDirectory(): Promise<string> {
 }
 
 describe("project-local log destination", () => {
+    test.each(["web", "worker"] as const)(
+        "timestamps the %s process fallback before the file sink is available",
+        (processRole) => {
+            expect(
+                formatStartupFailure(processRole, new Date("2026-08-27T20:00:00.000Z"))
+            ).toBe(
+                `2026-08-27T20:00:00.000Z Mira Dashboard ${processRole} startup failed\n`
+            );
+        }
+    );
+
     test("writes primary and fallback logs with private bounded files", async () => {
         const logs = await logsDirectory();
         const destination = createProjectFileLogDestination(logs, "web");
@@ -76,5 +88,23 @@ describe("project-local log destination", () => {
             })
         ).toThrow("Project-local log destination is invalid");
         expect(replaced).toBe(true);
+    });
+
+    test("rotates its own structured stream before exhausting the byte budget", async () => {
+        const logs = await logsDirectory();
+        const destination = createProjectFileLogDestination(logs, "worker", {
+            maximumPrimaryBytes: 12,
+        });
+
+        destination.sink.write("first\n", "info");
+        destination.sink.write("second\n", "warn");
+        destination.sink.flush?.();
+
+        expect(await readFile(path.join(logs, "worker.previous.ndjson"), "utf8")).toBe(
+            "first\n"
+        );
+        expect(await readFile(path.join(logs, "worker.ndjson"), "utf8")).toBe("second\n");
+        const currentStatus = await lstat(path.join(logs, "worker.ndjson"));
+        expect(Number(currentStatus.mode & 0o7777)).toBe(0o600);
     });
 });

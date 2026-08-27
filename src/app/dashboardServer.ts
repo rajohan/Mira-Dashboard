@@ -242,6 +242,7 @@ import {
     type FrontendAssetHandler,
 } from "../server/rawHttp/frontendAssets.ts";
 import { parseBrowserOrigin } from "../server/rawHttp/requestSecurity.ts";
+import { formatStartupFailure } from "../shared/startupFailure.ts";
 import {
     startDashboardChatRuntimeMaintenance,
     type DashboardChatRuntimeMaintenance,
@@ -2072,9 +2073,7 @@ if (import.meta.main) {
             releaseRoot,
         });
     } catch {
-        process.stderr.write(
-            `${new Date().toISOString()} Mira Dashboard web startup failed\n`
-        );
+        process.stderr.write(formatStartupFailure("web"));
         process.exitCode = 1;
     }
 }
