@@ -45,6 +45,7 @@ import {
     type GitWorkspaceCachePayload,
 } from "../contracts/gitWorkspace.ts";
 import { quotaCachePayloadSchema, type QuotaCachePayload } from "../contracts/quota.ts";
+import type { OpenClawUpdateStatus } from "../contracts/system.ts";
 import {
     weatherCachePayloadSchema,
     type WeatherCachePayload,
@@ -96,6 +97,7 @@ interface DevelopmentDeliveryCompositionAuthority {
 
 interface DevelopmentOverviewProviderCollectors {
     readonly git: (signal?: AbortSignal) => Promise<GitWorkspaceCachePayload>;
+    readonly openClaw: (signal?: AbortSignal) => Promise<OpenClawUpdateStatus>;
     readonly quota: (signal?: AbortSignal) => Promise<QuotaCachePayload>;
     readonly weather: (signal?: AbortSignal) => Promise<WeatherCachePayload>;
 }
@@ -424,6 +426,17 @@ function overviewProviders(nowMs: () => number): DevelopmentOverviewProviderColl
             signal?.throwIfAborted();
             return Promise.resolve({ changedFileCount: 0, pushed: false });
         },
+        openClaw: (signal?: AbortSignal) =>
+            Promise.resolve().then(() => {
+                signal?.throwIfAborted();
+                return {
+                    available: true,
+                    channel: "beta",
+                    installedVersion: "2026.8.1-beta.2",
+                    latestVersion: "2026.8.1-beta.3",
+                    state: "observed" as const,
+                };
+            }),
         quota: (signal?: AbortSignal): Promise<QuotaCachePayload> =>
             Promise.resolve().then(() => {
                 signal?.throwIfAborted();

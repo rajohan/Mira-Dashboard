@@ -148,6 +148,7 @@ import {
 import { createFixedOpenClawGatewayLifecycle } from "../worker/openClaw/gatewayLifecycle.ts";
 import { resolveCodexQuotaCollectorOptions } from "../worker/overview/codexQuotaCollector.ts";
 import { collectGitWorkspacePayload } from "../worker/overview/gitWorkspaceCollector.ts";
+import { collectOpenClawUpdateStatus } from "../worker/overview/openClawUpdateCollector.ts";
 import { collectQuotaPayload } from "../worker/overview/quotaCollector.ts";
 import { collectWeatherPayload } from "../worker/overview/weatherCollector.ts";
 import { type DashboardWorkerRuntime } from "../worker/runtime.ts";
@@ -932,6 +933,10 @@ export async function runDashboardWorkerProcess(
             syncWorkspace: dependencies.createWorkspaceGitSync(
                 configuration.openClawRoot
             ),
+            openClaw: (signal?: AbortSignal) =>
+                collectOpenClawUpdateStatus(signal, {
+                    openClawRoot: openClawRoot.path,
+                }),
             quota: async (signal?: AbortSignal) =>
                 collectQuotaPayload(quotaCredentials, signal, {
                     codex: await resolveCodexQuotaCollectorOptions(

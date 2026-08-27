@@ -3,7 +3,12 @@ import { describe, expect, jest, test } from "bun:test";
 import { QueryObserver } from "@tanstack/react-query";
 import type { TRPCRequestOptions } from "@trpc/client";
 
-import type { SystemMetrics } from "../../contracts/system.ts";
+import {
+    type SystemMetrics,
+    openClawUpdateCacheKey,
+    openClawUpdateCacheSchemaId,
+    openClawUpdateCacheSource,
+} from "../../contracts/system.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -11,6 +16,7 @@ import {
 } from "../api/trpcClient.ts";
 import { unavailableSystemApplicationMetrics } from "../test/systemMetrics.ts";
 import {
+    openClawUpdateStatusQueryOptions,
     systemMetricsQueryKey,
     systemMetricsQueryOptions,
     systemMetricsRefreshIntervalMs,
@@ -101,6 +107,49 @@ class HangingSystemMetricsTransport implements DashboardTrpcTransport {
 }
 
 describe("system metrics query", () => {
+    test("returns null instead of invalid undefined query data for a stale update cache entry", async () => {
+        const transport: DashboardTrpcTransport = {
+            mutation: (path) =>
+                Promise.reject(new TypeError(`Unexpected mutation: ${path}`)),
+            query: () =>
+                Promise.resolve({
+                    consecutiveFailures: 0,
+                    expiresAtMs: 1_800_000_000_000,
+                    freshness: "stale",
+                    key: openClawUpdateCacheKey,
+                    lastAttemptAtMs: 1_799_999_999_000,
+                    lastAttemptDurationMs: 25,
+                    lastAttemptNumber: 1,
+                    lastAttemptRunId: "019fc968-1a9b-7765-8f1b-d5b863b0e7b4",
+                    lastAttemptStatus: "succeeded",
+                    lastSuccessAtMs: 1_799_999_999_000,
+                    manualRunAvailable: true,
+                    metadata: {},
+                    payload: {
+                        available: false,
+                        channel: "beta",
+                        installedVersion: "2026.8.1-beta.2",
+                        latestVersion: "2026.8.1-beta.2",
+                        state: "observed",
+                    },
+                    schemaId: openClawUpdateCacheSchemaId,
+                    source: openClawUpdateCacheSource,
+                    updatedAtMs: 1_799_999_999_000,
+                }),
+        };
+        const queryClient = createDashboardQueryClient();
+        const client = createDashboardTrpcClient(transport);
+
+        try {
+            const result = await queryClient.fetchQuery(
+                openClawUpdateStatusQueryOptions(client)
+            );
+            expect(result).toBeNull();
+        } finally {
+            queryClient.clear();
+        }
+    });
+
     test("polls every five seconds and retains explicit server freshness", async () => {
         jest.useFakeTimers();
         const staleMetrics = {

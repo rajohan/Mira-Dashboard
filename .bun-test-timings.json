@@ -53,6 +53,7 @@
         "src/worker/logs/managedLogRotation.test.ts": 571,
         "src/server/platform/logs/safeLogReader.test.ts": 542,
         "scripts/generateDocs.test.ts": 541,
+        "src/worker/overview/openClawUpdateCollector.test.ts": 300,
         "src/worker/overview/overviewCollectors.test.ts": 521,
         "scripts/lintStorybook.test.ts": 507,
         "src/server/domains/security/authenticationLifecycle.bootstrap.test.ts": 494,

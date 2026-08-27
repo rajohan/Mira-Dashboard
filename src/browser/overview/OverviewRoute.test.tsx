@@ -37,7 +37,14 @@ import type {
 import type { ListNotificationsResult } from "../../contracts/notifications.ts";
 import type { ListReportsResult } from "../../contracts/reports.ts";
 import type { GetServiceActionsStatusResult } from "../../contracts/serviceActions.ts";
-import type { SystemMetrics } from "../../contracts/system.ts";
+import {
+    type OpenClawUpdateStatus,
+    type SystemMetrics,
+    openClawUpdateCacheKey,
+    openClawUpdateCacheSchemaId,
+    openClawUpdateCacheSource,
+    openClawUpdateCacheTtlMs,
+} from "../../contracts/system.ts";
 import type { TaskSummary } from "../../contracts/taskModel.ts";
 import type { ListTasksResult } from "../../contracts/tasks.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
@@ -904,6 +911,7 @@ interface OverviewTransportOptions {
     readonly jobOutputs?: readonly (ListJobRunsResult | Error)[];
     readonly kopiaBackupStatusOutput?: KopiaBackupStatus;
     readonly logMaintenanceOutputs?: readonly (LogMaintenanceStatusOutput | Error)[];
+    readonly openClawUpdateStatus?: OpenClawUpdateStatus;
     readonly refreshOutputs?: readonly (JobRunSummary | Error)[];
     readonly reportOutputs?: readonly (ListReportsResult | Error)[];
     readonly systemMetricsOutputs?: readonly (SystemMetrics | Error)[];
@@ -931,6 +939,7 @@ class OverviewTransport implements DashboardTrpcTransport {
     readonly #jobOutputs: readonly (ListJobRunsResult | Error)[];
     readonly #kopiaBackupStatusOutput: KopiaBackupStatus;
     readonly #logMaintenanceOutputs: readonly (LogMaintenanceStatusOutput | Error)[];
+    readonly #openClawUpdateStatus: OpenClawUpdateStatus;
     readonly #refreshOutputs: readonly (JobRunSummary | Error)[];
     readonly #reportOutputs: readonly (ListReportsResult | Error)[];
     readonly #systemMetricsOutputs: readonly (SystemMetrics | Error)[];
@@ -948,6 +957,13 @@ class OverviewTransport implements DashboardTrpcTransport {
         this.#kopiaBackupStatusOutput =
             options.kopiaBackupStatusOutput ?? kopiaBackupStatus;
         this.#logMaintenanceOutputs = options.logMaintenanceOutputs ?? [logMaintenance];
+        this.#openClawUpdateStatus = options.openClawUpdateStatus ?? {
+            available: false,
+            channel: "beta",
+            installedVersion: "2026.8.1-beta.2",
+            latestVersion: "2026.8.1-beta.2",
+            state: "observed",
+        };
         this.#refreshOutputs = options.refreshOutputs ?? [queuedRefresh];
         this.#reportOutputs = options.reportOutputs ?? [reportPage];
         this.#systemMetricsOutputs = options.systemMetricsOutputs ?? [systemMetrics];
@@ -999,6 +1015,16 @@ class OverviewTransport implements DashboardTrpcTransport {
             case "cache.getEntry": {
                 const key = (input as { readonly key?: unknown } | undefined)?.key;
                 if (typeof key === "string") {
+                    if (key === openClawUpdateCacheKey) {
+                        return Promise.resolve({
+                            ...hostEntry,
+                            expiresAtMs: timestampMs + openClawUpdateCacheTtlMs,
+                            key,
+                            payload: this.#openClawUpdateStatus,
+                            schemaId: openClawUpdateCacheSchemaId,
+                            source: openClawUpdateCacheSource,
+                        });
+                    }
                     const providerEntry = overviewProviderEntries.get(key);
                     if (providerEntry !== undefined)
                         return Promise.resolve(providerEntry);
@@ -1091,6 +1117,26 @@ async function renderOverview(transport: OverviewTransport) {
 }
 
 describe("Dashboard operational overview foundation", () => {
+    test("surfaces an available OpenClaw release on the dashboard", async () => {
+        await renderOverview(
+            new OverviewTransport({
+                openClawUpdateStatus: {
+                    available: true,
+                    channel: "beta",
+                    installedVersion: "2026.8.1-beta.2",
+                    latestVersion: "2026.8.1-beta.3",
+                    state: "observed",
+                },
+            })
+        );
+
+        expect(
+            await screen.findByText(
+                "OpenClaw 2026.8.1-beta.3 is available. Installed: 2026.8.1-beta.2 (beta channel)."
+            )
+        ).toBeTruthy();
+    });
+
     test("shows an OpenRouter account balance without monthly usage", async () => {
         const providers = quotaEntry.payload.providers.map((provider) => {
             if (provider.id !== "openrouter") return provider;

@@ -18,12 +18,16 @@ import { OverviewReportsSection } from "./OverviewReportsSection.tsx";
 import { OverviewTasksSection } from "./OverviewTasksSection.tsx";
 import { SystemMetricsCards } from "./SystemMetricsCards.tsx";
 import { systemMetricsFailureMessage } from "./systemMetricsPresentation.ts";
-import { systemMetricsQueryOptions } from "./systemMetricsQueries.ts";
+import {
+    openClawUpdateStatusQueryOptions,
+    systemMetricsQueryOptions,
+} from "./systemMetricsQueries.ts";
 
 /** @returns Five-second read-only metrics overview retaining validated query data. */
 export function SystemMetricsSection() {
     const client = useDashboardTrpcClient();
     const query = useQuery(systemMetricsQueryOptions(client));
+    const openClawUpdate = useQuery(openClawUpdateStatusQueryOptions(client));
     let content: ReactNode;
 
     if (query.isPending && query.data === undefined) {
@@ -54,6 +58,15 @@ export function SystemMetricsSection() {
             <h2 className="sr-only" id="host-metrics-heading">
                 Host metrics
             </h2>
+            {openClawUpdate.data?.state === "observed" &&
+                openClawUpdate.data.available && (
+                    <Alert
+                        className="mb-4"
+                        focusOnError={false}
+                        message={`OpenClaw ${openClawUpdate.data.latestVersion} is available. Installed: ${openClawUpdate.data.installedVersion} (${openClawUpdate.data.channel} channel).`}
+                        variant="warning"
+                    />
+                )}
             {query.error !== null && query.data !== undefined && (
                 <Alert
                     className="mt-4"

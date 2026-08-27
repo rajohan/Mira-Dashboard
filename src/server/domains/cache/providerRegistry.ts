@@ -56,6 +56,13 @@ import {
 } from "../../../contracts/quota.ts";
 import type { ApplicationCapability } from "../../../contracts/security.ts";
 import {
+    openClawUpdateCacheKey,
+    openClawUpdateCacheSchemaId,
+    openClawUpdateCacheSource,
+    openClawUpdateCacheTtlMs,
+    openClawUpdateStatusSchema,
+} from "../../../contracts/system.ts";
+import {
     weatherCacheKey,
     weatherCachePayloadSchema,
     weatherCacheSchemaId,
@@ -78,6 +85,8 @@ import {
     gitWorkspaceCacheJobScheduleId,
     moltbookDashboardCacheJobActionKey,
     moltbookDashboardCacheJobScheduleId,
+    openClawUpdateCacheJobActionKey,
+    openClawUpdateCacheJobScheduleId,
     backupStatusJobActionKey,
     backupStatusJobScheduleId,
     quotaCacheJobActionKey,
@@ -149,6 +158,18 @@ const systemHostProvider = validateCacheProviderDefinition({
     schemaId: "system.host.v1",
     source: "system.host",
     ttlMs: 86_400_000,
+});
+
+const openClawUpdateProvider = validateCacheProviderDefinition({
+    actionKey: openClawUpdateCacheJobActionKey,
+    key: openClawUpdateCacheKey,
+    manualRefresh: false,
+    payloadSchema: openClawUpdateStatusSchema,
+    payloadMaximumBytes: cacheEntryPayloadMaximumBytes,
+    scheduleId: openClawUpdateCacheJobScheduleId,
+    schemaId: openClawUpdateCacheSchemaId,
+    source: openClawUpdateCacheSource,
+    ttlMs: openClawUpdateCacheTtlMs,
 });
 
 const moltbookDashboardProvider = validateCacheProviderDefinition({
@@ -278,6 +299,7 @@ const deliveryOverviewProviders = deliveryOverviewSectionIds.map((section) =>
 /** Complete local-only provider directory for the implemented cache slice. */
 export const cacheProviderDefinitions = Object.freeze([
     systemHostProvider,
+    openClawUpdateProvider,
     moltbookDashboardProvider,
     ...overviewProviders,
     databaseObservabilityProvider,
