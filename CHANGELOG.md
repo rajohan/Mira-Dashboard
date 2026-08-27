@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.1...v0.4.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **delivery:** preserve migration id compatibility ([#488](https://github.com/rajohan/Mira-Dashboard/issues/488)) ([867529c](https://github.com/rajohan/Mira-Dashboard/commit/867529c5f8beb24496baea34dc7633ffdf2f5547))
+
 ## [0.4.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.0...v0.4.1) (2026-08-27)
 
 
