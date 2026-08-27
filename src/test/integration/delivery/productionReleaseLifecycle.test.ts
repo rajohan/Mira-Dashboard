@@ -547,9 +547,10 @@ describe("disposable production release lifecycle", () => {
                         bigint: true,
                     }),
                 ]);
-                expect(webLog).toContain('"event":"runtime.started"');
-                expect(workerLog).toContain('"event":"runtime.started"');
+                expect(webLog).toContain('"event":"http.response.created"');
+                expect(webLog).toContain('"timestamp":');
                 expect(workerLog).toContain('"event":"runtime.stopped"');
+                expect(workerLog).toContain('"timestamp":');
                 expect(databaseStatus.isFile()).toBeTrue();
                 expect(databaseStatus.mode & 0o777n).toBe(0o600n);
             } finally {

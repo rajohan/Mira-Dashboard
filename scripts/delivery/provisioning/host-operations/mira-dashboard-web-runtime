@@ -131,6 +131,7 @@ exec /usr/bin/env -i \
     MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw \
     MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace \
     /usr/local/bin/doppler \
+    --silent \
     --config-dir=/home/ubuntu/.doppler \
     --no-read-env \
     run \

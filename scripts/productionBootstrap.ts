@@ -1122,6 +1122,7 @@ export async function verifyProductionBootstrapPrerequisites(
             "MIRA_DASHBOARD_OPENCLAW_ROOT=/home/ubuntu/.openclaw",
             "MIRA_DASHBOARD_WORKSPACE_ROOT=/home/ubuntu/.openclaw/workspace",
             "/usr/local/bin/doppler",
+            "--silent",
             "run",
             "--config=prd",
             "--project=rajohan",

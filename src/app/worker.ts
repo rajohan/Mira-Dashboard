@@ -67,6 +67,7 @@ import type { DatabaseObservabilityReconciliationPort } from "../shared/database
 import type { LinuxBootIdentity } from "../shared/linuxBootIdentity.ts";
 import type { OpenClawGatewayLifecycleExecutionPort } from "../shared/openClawGatewayLifecycle.ts";
 import type { OpenClawServiceActionsExecutionPort } from "../shared/openClawServiceActions.ts";
+import { formatStartupFailure } from "../shared/startupFailure.ts";
 import { createDockerBackupJobExecutionPort } from "../worker/backups/dockerBackupProvider.ts";
 import {
     createBunSqlDatabaseObservabilityCollector,
@@ -1103,7 +1104,7 @@ if (import.meta.main) {
             releaseRoot,
         });
     } catch {
-        process.stderr.write("Mira Dashboard worker startup failed\n");
+        process.stderr.write(formatStartupFailure("worker"));
         process.exitCode = 1;
     }
 }
