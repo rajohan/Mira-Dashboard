@@ -20,6 +20,7 @@ import {
 
 const composeConfigDeadlineMs = 30_000;
 const composeApplyDeadlineMs = 180_000;
+const composeStackUpDeadlineMs = 660_000;
 const composeOutputMaximumBytes = 64 * 1024;
 const dockerImageIdPattern = /^sha256:[0-9a-f]{64}$/u;
 
@@ -65,6 +66,44 @@ export type DockerComposeCommandRunner = (
     }
 ) => Promise<DockerComposeCommandResult>;
 
+export type DockerComposeStackReconciler = (
+    services: readonly string[],
+    signal?: AbortSignal
+) => Promise<void>;
+
+export async function reconcileDockerComposeStack(
+    runCompose: DockerComposeCommandRunner,
+    services: readonly string[],
+    signal?: AbortSignal
+): Promise<void> {
+    const uniqueServices = [...new Set(services)];
+    if (uniqueServices.length === 0 || uniqueServices.length !== services.length) {
+        throw classifiedFailure("invalid-target");
+    }
+
+    const up = await runCompose(
+        dockerComposeWrapper,
+        [
+            ...fixedComposeArguments,
+            "up",
+            "--detach",
+            "--pull",
+            "never",
+            "--wait",
+            "--wait-timeout",
+            "600",
+            ...uniqueServices,
+        ],
+        {
+            cwd: dockerComposeTrustRoot,
+            deadlineMs: composeStackUpDeadlineMs,
+            outputMaximumBytes: composeOutputMaximumBytes,
+            ...(signal === undefined ? {} : { signal }),
+        }
+    );
+    if (up.exitCode !== 0) throw classifiedFailure("unavailable");
+}
+
 export type DockerComposeRevalidationPhase = "pre-update" | "post-rollback";
 
 export interface DockerComposeRevalidatedTarget {
@@ -103,7 +142,7 @@ export interface DockerComposeImageUpdaterOptions {
 export interface DockerComposeImageUpdateResult {
     readonly fromImageReference: string;
     readonly project: string;
-    readonly rollback: () => Promise<boolean>;
+    readonly rollback: (signal?: AbortSignal) => Promise<boolean>;
     readonly service: string;
     readonly settle: () => void;
     readonly status: "updated";
@@ -607,6 +646,7 @@ async function rollbackUpdate(input: {
     readonly trustRoot: string;
     readonly updatedSha256: string;
     readonly renameExchange: LinuxRenameExchange;
+    readonly signal?: AbortSignal;
 }): Promise<boolean> {
     try {
         exchangeSiblings(input.stagePath, input.composePath, input.renameExchange);
@@ -615,7 +655,7 @@ async function rollbackUpdate(input: {
             exchangeSiblings(input.stagePath, input.composePath, input.renameExchange);
             return false;
         }
-        await validateCompose(input.runCompose);
+        await validateCompose(input.runCompose, input.signal);
         if (input.applyWasAttempted) {
             const originalImage = parseDockerImageReference(
                 input.command.expectedImageReference
@@ -624,13 +664,20 @@ async function rollbackUpdate(input: {
             if (originalImage.digest === undefined) {
                 await input.restoreImageReference(
                     input.expectedRuntimeImageId,
-                    input.command.expectedImageReference
+                    input.command.expectedImageReference,
+                    input.signal
                 );
             }
-            await applyService(input.runCompose, input.service, "never", true);
+            await applyService(
+                input.runCompose,
+                input.service,
+                "never",
+                true,
+                input.signal
+            );
         }
         const restoredSource = openComposeSource(input.trustRoot, input.composePath);
-        const restored = await input.revalidateTarget("post-rollback");
+        const restored = await input.revalidateTarget("post-rollback", input.signal);
         if (
             restoredSource.contentSha256 !== input.original.contentSha256 ||
             !targetMatchesCommand(restored.target, input.command, input.composePath) ||
@@ -666,7 +713,7 @@ function appliedUpdateSettlement(input: {
 }): Pick<DockerComposeImageUpdateResult, "rollback" | "settle"> {
     let material: typeof input | undefined = input;
     return Object.freeze({
-        async rollback(): Promise<boolean> {
+        async rollback(signal?: AbortSignal): Promise<boolean> {
             const current = material;
             if (current === undefined) return false;
             material = undefined;
@@ -694,6 +741,7 @@ function appliedUpdateSettlement(input: {
                 trustRoot: current.trustRoot,
                 updatedSha256: current.updatedSha256,
                 renameExchange: current.renameExchange,
+                ...(signal === undefined ? {} : { signal }),
             });
         },
         settle(): void {

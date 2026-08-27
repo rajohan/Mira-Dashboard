@@ -92,6 +92,32 @@ export function dockerUpdaterEventNotification(
     };
 }
 
+export function dockerUpdaterEventsNotification(
+    events: readonly DockerUpdaterEvent[]
+): UpsertNotificationInput | undefined {
+    const material = events.filter(({ kind }) => kind !== "scan-completed");
+    if (material.length === 0) return undefined;
+    if (material.length === 1) return dockerUpdaterEventNotification(material[0]!);
+    const notifications = material.map((event) => dockerUpdaterEventNotification(event)!);
+    const severityOrder = { critical: 4, error: 3, warning: 2, info: 1 } as const;
+    const severity = notifications.toSorted(
+        (left, right) => severityOrder[right.severity] - severityOrder[left.severity]
+    )[0]!.severity;
+    const onlyUpdates = material.every(({ kind }) => kind === "update-available");
+    return {
+        id: material.toSorted((left, right) => right.atMs - left.atMs)[0]!.id,
+        kind: onlyUpdates ? "docker.updates-available" : "docker.run-summary",
+        linkUrl: "/docker",
+        message: onlyUpdates
+            ? "Docker services have updates available."
+            : "Docker updater events were recorded in this run.",
+        occurredAtMs: Math.max(...material.map(({ atMs }) => atMs)),
+        severity,
+        source: "docker-updater",
+        title: onlyUpdates ? "Docker updates available" : "Docker updater report",
+    };
+}
+
 function parsedPrevious(
     port: DockerJobExecutionPort
 ): DockerOverviewCachePayload | undefined {
@@ -147,18 +173,17 @@ async function publishEvents(
     events: readonly DockerUpdaterEvent[]
 ): Promise<DockerPostSettlementWarning | undefined> {
     if (events.length === 0 || port.publishEvents === undefined) return undefined;
-    for (const event of events) {
-        let published = false;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-                await port.publishEvents([event]);
-                published = true;
-                break;
-            } catch {
-                // Retry only this unconfirmed event, never an earlier accepted event.
-            }
+    let published = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            await port.publishEvents(events);
+            published = true;
+            break;
+        } catch {
+            // Retry the one run-level publication when its outcome is unconfirmed.
         }
-        if (published) continue;
+    }
+    if (!published) {
         await writePostSettlementWarning(
             context,
             "Docker notification publication failed after bounded retries; the durable Docker job result remains authoritative."

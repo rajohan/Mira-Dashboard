@@ -422,6 +422,9 @@ describe("DockerRoute", () => {
                 "docker-updater-services-heading",
                 "Services"
             );
+            expect(screen.getByRole("region", { name: "example api" })).toBeVisible();
+            expect(screen.queryByRole("region", { name: "example web" })).toBeNull();
+            expect(screen.queryByRole("region", { name: "example worker" })).toBeNull();
             expectDecorativeAccentHeadingIcon("docker-containers-heading", "Containers");
             expectDecorativeAccentHeadingIcon("docker-images-heading", "Images");
             expectDecorativeAccentHeadingIcon("docker-volumes-heading", "Volumes");
@@ -540,11 +543,6 @@ describe("DockerRoute", () => {
             expect(within(notifySummary!).getByText("2")).toBeVisible();
             expect(within(failureSummary!).getByText("1")).toBeVisible();
             expect(screen.getByText("Update available")).toBeVisible();
-            expect(screen.getAllByText("Current", { selector: "span" })).not.toHaveLength(
-                0
-            );
-            expect(screen.getAllByText("Registry unavailable")).not.toHaveLength(0);
-            expect(screen.getByText(/Inventory only · not opted in/u)).toBeVisible();
             expect(screen.getByText("A newer API image is available.")).toBeVisible();
             expect(within(table).getByText("127.0.0.1:3100 → 3000/tcp")).toBeVisible();
             expect(screen.getAllByText("example/api:1.0.0")).not.toHaveLength(0);

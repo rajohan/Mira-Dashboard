@@ -215,10 +215,12 @@ describe("production root-systemd service control", () => {
                 ["stop", "mira-dashboard-worker.service"],
             ]);
             expect(deadlines[0]).toBe(930_000);
+            expect(deadlines[1]).toBe(4_350_000);
             expect(deadlines[9]).toBe(930_000);
+            expect(deadlines[11]).toBe(4_350_000);
             expect(
                 deadlines
-                    .filter((_deadline, index) => index !== 0 && index !== 9)
+                    .filter((_deadline, index) => ![0, 1, 9, 11].includes(index))
                     .every((deadline) => deadline === undefined)
             ).toBe(true);
             expect(requests).toHaveLength(1);

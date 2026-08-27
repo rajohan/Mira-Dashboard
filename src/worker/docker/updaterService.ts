@@ -15,7 +15,9 @@ import {
     type DockerComposeCommandRunner,
     DockerComposeImageUpdateError,
     type DockerComposeImageUpdateResult,
+    type DockerComposeStackReconciler,
     type DockerImageReferenceRestorer,
+    reconcileDockerComposeStack,
     updateDockerComposeImage,
 } from "./composeImageUpdate.ts";
 import type {
@@ -37,6 +39,8 @@ const composeEnvironment = Object.freeze({
 const dockerExecutable = "/usr/bin/docker" as const;
 const dockerImageTagDeadlineMs = 30_000;
 const dockerImageTagOutputMaximumBytes = 64 * 1024;
+const dockerOperationDeadlineMs = 35 * 60_000;
+const dockerRecoveryDeadlineMs = 35 * 60_000;
 
 export type DockerUpdaterRunOutcome =
     | "completed"
@@ -85,6 +89,7 @@ export interface DockerUpdaterServiceOptions {
     readonly git: DockerUpdaterGitSync;
     readonly nowMs?: () => number;
     readonly restoreImageReference?: DockerImageReferenceRestorer;
+    readonly reconcileStack?: DockerComposeStackReconciler;
     readonly scan?: DockerUpdaterScanOptions;
     readonly updateImage?: typeof updateDockerComposeImage;
 }
@@ -362,6 +367,10 @@ export function createDockerUpdaterService(
     const nowMs = options.nowMs ?? Date.now;
     const restoreImageReference =
         options.restoreImageReference ?? defaultImageReferenceRestorer;
+    const reconcileStack =
+        options.reconcileStack ??
+        ((services, signal) =>
+            reconcileDockerComposeStack(composeRunner, services, signal));
     const updateImage = options.updateImage ?? updateDockerComposeImage;
     const scanOptions = Object.freeze({
         ...options.scan,
@@ -383,11 +392,32 @@ export function createDockerUpdaterService(
         return result.payload;
     }
 
+    async function reconcileVerifiedStack(
+        previous: DockerOverviewCachePayload,
+        expectedSourceRevision: string,
+        services: readonly string[],
+        signal: AbortSignal
+    ) {
+        const before = await options.collector.discover(previous, signal);
+        if (before.payload.sourceRevision !== expectedSourceRevision) sourceConflict();
+        await reconcileStack(services, signal);
+        const after = await options.collector.discover(before.payload, signal);
+        if (after.payload.sourceRevision !== expectedSourceRevision) sourceConflict();
+        return after;
+    }
+
     async function run(
         input: DockerJobUpdaterInput,
         signal?: AbortSignal
     ): Promise<DockerUpdaterRunResult> {
-        let discovery = await options.collector.discover(input.previous, signal);
+        const operationSignal =
+            signal === undefined
+                ? AbortSignal.timeout(dockerOperationDeadlineMs)
+                : AbortSignal.any([
+                      signal,
+                      AbortSignal.timeout(dockerOperationDeadlineMs),
+                  ]);
+        let discovery = await options.collector.discover(input.previous, operationSignal);
         if (
             input.expectedSourceRevision !== undefined &&
             discovery.payload.sourceRevision !== input.expectedSourceRevision
@@ -397,7 +427,7 @@ export function createDockerUpdaterService(
         const scanResult = await scanDockerUpdates(
             discovery.compose,
             discovery.payload,
-            signal,
+            operationSignal,
             scanOptions
         );
         let payload = scanResult.payload;
@@ -420,7 +450,7 @@ export function createDockerUpdaterService(
         }
         let expectedRepositoryHead: string;
         try {
-            expectedRepositoryHead = await options.git.readHead(signal);
+            expectedRepositoryHead = await options.git.readHead(operationSignal);
         } catch {
             const git = Object.freeze({
                 composePaths: Object.freeze([]),
@@ -447,7 +477,7 @@ export function createDockerUpdaterService(
         }
         const gitPreflight = await options.git.sync(
             { changes: [], expectedRepositoryHead },
-            signal
+            operationSignal
         );
         if (gitPreflight.status !== "no-change" && gitPreflight.status !== "pushed") {
             const outcome = gitOutcome(gitPreflight);
@@ -495,7 +525,10 @@ export function createDockerUpdaterService(
                 updatedCount: 0,
             });
         }
-        const preflightDiscovery = await options.collector.discover(payload, signal);
+        const preflightDiscovery = await options.collector.discover(
+            payload,
+            operationSignal
+        );
         if (
             preflightDiscovery.payload.sourceRevision !== discovery.payload.sourceRevision
         ) {
@@ -503,6 +536,7 @@ export function createDockerUpdaterService(
         }
         discovery = preflightDiscovery;
         const preMutationPayload = payload;
+        const revalidatedRuntimeImageIds = new Map<string, string>();
         const plannedSources = selected.map((selectedService) => {
             const source = exactService(
                 discovery.compose.services,
@@ -515,7 +549,15 @@ export function createDockerUpdaterService(
             ) {
                 fail();
             }
-            return Object.freeze({ selectedService, source });
+            return Object.freeze({
+                runtimeImageId: exactRunningServiceImageId(
+                    preMutationPayload,
+                    selectedService.project,
+                    selectedService.service
+                ),
+                selectedService,
+                source,
+            });
         });
         const plannedFilesByPath = new Map<string, DockerUpdaterGitHeadFile>();
         for (const { source } of plannedSources) {
@@ -542,7 +584,7 @@ export function createDockerUpdaterService(
                         compareStrings(left.composePath, right.composePath)
                     ),
                 },
-                signal
+                operationSignal
             );
         } catch {
             const git = Object.freeze({
@@ -577,7 +619,7 @@ export function createDockerUpdaterService(
         const addedEvents: DockerUpdaterEvent[] = [];
         let failedCount = 0;
         for (const selectedService of selected) {
-            signal?.throwIfAborted();
+            operationSignal.throwIfAborted();
             if (selectedService.status.state !== "update-available") fail();
             const source = exactService(
                 discovery.compose.services,
@@ -620,12 +662,19 @@ export function createDockerUpdaterService(
                             ) {
                                 throw new DockerComposeImageUpdateError("conflict");
                             }
+                            const runtimeImageId = exactRunningServiceImageId(
+                                current.payload,
+                                source.project,
+                                source.service
+                            );
+                            if (phase === "pre-update") {
+                                revalidatedRuntimeImageIds.set(
+                                    selectedService.id,
+                                    runtimeImageId
+                                );
+                            }
                             return Object.freeze({
-                                runtimeImageId: exactRunningServiceImageId(
-                                    current.payload,
-                                    source.project,
-                                    source.service
-                                ),
+                                runtimeImageId,
                                 target: exactService(
                                     current.compose.services,
                                     source.project,
@@ -636,10 +685,10 @@ export function createDockerUpdaterService(
                         runCompose: composeRunner,
                         restoreImageReference,
                     },
-                    signal
+                    operationSignal
                 );
                 updateSucceeded = true;
-                discovery = await options.collector.discover(payload, signal);
+                discovery = await options.collector.discover(payload, operationSignal);
                 payload = discovery.payload;
                 const after = exactService(
                     discovery.compose.services,
@@ -684,7 +733,10 @@ export function createDockerUpdaterService(
                         updatedCount: updateResult === undefined ? successful.length : 0,
                     });
                 }
-                const recovered = await options.collector.discover(payload, signal);
+                const recovered = await options.collector.discover(
+                    payload,
+                    operationSignal
+                );
                 if (error.reason === "conflict") {
                     sourceConflict();
                 }
@@ -712,6 +764,94 @@ export function createDockerUpdaterService(
             }
         }
 
+        if (applied.length > 0) {
+            try {
+                discovery = await reconcileVerifiedStack(
+                    payload,
+                    payload.sourceRevision,
+                    successful.map(({ service }) => service),
+                    operationSignal
+                );
+                payload = discovery.payload;
+            } catch {
+                const recoverySignal = AbortSignal.timeout(dockerRecoveryDeadlineMs);
+                let recovered = true;
+                for (const update of applied.toReversed()) {
+                    recovered =
+                        (await update.result.rollback(recoverySignal)) && recovered;
+                }
+                try {
+                    const restored = await reconcileVerifiedStack(
+                        preMutationPayload,
+                        preMutationPayload.sourceRevision,
+                        successful.map(({ service }) => service),
+                        recoverySignal
+                    );
+                    for (const {
+                        runtimeImageId,
+                        selectedService,
+                        source,
+                    } of plannedSources) {
+                        const restoredSource = exactService(
+                            restored.compose.services,
+                            selectedService.project,
+                            selectedService.service
+                        );
+                        if (
+                            restoredSource.composePath !== source.composePath ||
+                            restoredSource.contentSha256 !== source.contentSha256 ||
+                            restoredSource.imageReference !== source.imageReference ||
+                            exactRunningServiceImageId(
+                                restored.payload,
+                                selectedService.project,
+                                selectedService.service
+                            ) !==
+                                (revalidatedRuntimeImageIds.get(selectedService.id) ??
+                                    runtimeImageId)
+                        ) {
+                            fail();
+                        }
+                    }
+                    payload = restored.payload;
+                } catch {
+                    recovered = false;
+                }
+                if (!recovered) {
+                    return unknownMutationResult({
+                        addedEvents,
+                        affectedServices: successful,
+                        confirmedCurrentIds: new Set(),
+                        failedCount,
+                        generateId,
+                        nowMs,
+                        payload,
+                        updatedCount: 0,
+                    });
+                }
+                const reconcileEvents = successful.map((service) =>
+                    event(generateId, nowMs, {
+                        kind: "update-failed",
+                        serviceId: service.id,
+                        summary: `Update failed for ${service.project}/${service.service}; full stack reconciliation failed and the prior state was restored.`,
+                    })
+                );
+                payload = v.parse(dockerOverviewCachePayloadSchema, {
+                    ...payload,
+                    updaterEvents: events(payload.updaterEvents, [
+                        ...addedEvents,
+                        ...reconcileEvents,
+                    ]),
+                });
+                return Object.freeze({
+                    failedCount: failedCount + successful.length,
+                    git: Object.freeze({ status: "no-change" as const }),
+                    outcome: "completed-with-failures" as const,
+                    payload,
+                    updatedCount: 0,
+                });
+            }
+        }
+
         let git: DockerUpdaterGitSyncResult;
         try {
             git = await options.git.sync(
@@ -721,7 +861,7 @@ export function createDockerUpdaterService(
                     ),
                     expectedRepositoryHead,
                 },
-                signal
+                operationSignal
             );
         } catch (error) {
             if (successful.length === 0) fail(error);
@@ -739,18 +879,26 @@ export function createDockerUpdaterService(
             });
         }
         if (git.status === "unavailable" && applied.length > 0) {
+            const recoverySignal = AbortSignal.timeout(dockerRecoveryDeadlineMs);
             let rollbackCompleted = true;
             for (const update of applied.toReversed()) {
-                rollbackCompleted = (await update.result.rollback()) && rollbackCompleted;
+                rollbackCompleted =
+                    (await update.result.rollback(recoverySignal)) && rollbackCompleted;
             }
             let recoveredPayload: DockerOverviewCachePayload | undefined;
             if (rollbackCompleted) {
                 try {
-                    const recovered = await options.collector.discover(
+                    const recovered = await reconcileVerifiedStack(
                         preMutationPayload,
-                        signal
+                        preMutationPayload.sourceRevision,
+                        successful.map(({ service }) => service),
+                        recoverySignal
                     );
-                    for (const { selectedService, source } of plannedSources) {
+                    for (const {
+                        runtimeImageId,
+                        selectedService,
+                        source,
+                    } of plannedSources) {
                         const recoveredSource = exactService(
                             recovered.compose.services,
                             selectedService.project,
@@ -759,7 +907,14 @@ export function createDockerUpdaterService(
                         if (
                             recoveredSource.composePath !== source.composePath ||
                             recoveredSource.contentSha256 !== source.contentSha256 ||
-                            recoveredSource.imageReference !== source.imageReference
+                            recoveredSource.imageReference !== source.imageReference ||
+                            exactRunningServiceImageId(
+                                recovered.payload,
+                                selectedService.project,
+                                selectedService.service
+                            ) !==
+                                (revalidatedRuntimeImageIds.get(selectedService.id) ??
+                                    runtimeImageId)
                         ) {
                             fail();
                         }

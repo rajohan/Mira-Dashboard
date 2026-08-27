@@ -1,7 +1,7 @@
 [Unit]
 Description=Mira Dashboard worker coordinator
-After=network-online.target
-Wants=network-online.target
+After=network-online.target stremio-stack.service
+Wants=network-online.target stremio-stack.service
 
 [Service]
 Type=simple
@@ -24,7 +24,7 @@ StandardError=append:/home/ubuntu/projects/mira-dashboard/production/state/logs/
 Restart=on-failure
 RestartSec=5
 KillMode=control-group
-TimeoutStopSec=45
+TimeoutStopSec=72min
 NoNewPrivileges=true
 PrivateTmp=true
 BindPaths=-/tmp/openclaw

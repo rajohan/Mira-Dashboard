@@ -12,6 +12,7 @@ import {
 import {
     DockerComposeImageUpdateError,
     type DockerComposeCommandRunner,
+    reconcileDockerComposeStack,
     updateDockerComposeImage,
 } from "./composeImageUpdate.ts";
 
@@ -107,6 +108,41 @@ afterEach(() => {
     for (const directory of directories.splice(0)) {
         Fs.rmSync(directory, { force: true, recursive: true });
     }
+});
+
+test("selected stack reconciliation health-waits without recreating unrelated services", async () => {
+    const runCompose = runner();
+
+    await reconcileDockerComposeStack(runCompose, ["selected-service"]);
+
+    expect(runCompose.calls.map(({ arguments_ }) => arguments_)).toEqual([
+        [
+            "--file",
+            "/opt/docker/compose.yaml",
+            "--project-directory",
+            "/opt/docker",
+            "up",
+            "--detach",
+            "--pull",
+            "never",
+            "--wait",
+            "--wait-timeout",
+            "600",
+            "selected-service",
+        ],
+    ]);
+    expect(runCompose.calls[0]?.deadlineMs).toBe(660_000);
+});
+
+test("selected stack reconciliation fails when health-waiting startup fails", async () => {
+    const runCompose = runner([1]);
+
+    const failure = await captureFailure(() =>
+        reconcileDockerComposeStack(runCompose, ["selected-service"])
+    );
+
+    expect(failure).toBeInstanceOf(DockerComposeImageUpdateError);
+    expect(runCompose.calls).toHaveLength(1);
 });
 
 describe("Docker Compose image update", () => {
