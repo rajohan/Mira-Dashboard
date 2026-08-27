@@ -20,7 +20,11 @@ import type {
     DockerUpdaterGitSyncRequest,
     DockerUpdaterGitSyncResult,
 } from "./gitSync.ts";
-import type { DockerOverviewCollector } from "./overviewCollector.ts";
+import {
+    DockerOverviewDiscoveryError,
+    type DockerOverviewCollector,
+    type DockerOverviewDiscoveryStage,
+} from "./overviewCollector.ts";
 import { parseDockerImageReference } from "./tagPolicy.ts";
 import {
     createDockerUpdaterService,
@@ -58,6 +62,7 @@ interface HarnessOptions {
     readonly sourceChangeOnDiscoverCall?: number;
     readonly sourceChangeDuringReconcile?: boolean;
     readonly throwOnDiscoverCalls?: readonly number[];
+    readonly throwOnDiscoverStage?: DockerOverviewDiscoveryStage;
     readonly unconfirmedService?: string;
 }
 
@@ -225,7 +230,12 @@ function createHarness(options: HarnessOptions = {}) {
             discoverCalls += 1;
             if (options.throwOnDiscoverCalls?.includes(discoverCalls) === true) {
                 return Promise.reject(
-                    new Error("raw private post-mutation discovery diagnostic")
+                    options.throwOnDiscoverStage === undefined
+                        ? new Error("raw private post-mutation discovery diagnostic")
+                        : new DockerOverviewDiscoveryError(
+                              options.throwOnDiscoverStage,
+                              new Error("raw private post-mutation discovery diagnostic")
+                          )
                 );
             }
             if (options.driftOnDiscoverCall === discoverCalls) {
@@ -1010,6 +1020,7 @@ describe("Docker updater service", () => {
         const harness = createHarness({
             serviceCount: 1,
             throwOnDiscoverCalls: [5, 6],
+            throwOnDiscoverStage: "engine-inventory",
         });
         const initial = harness.currentPayload();
 
@@ -1030,6 +1041,9 @@ describe("Docker updater service", () => {
         });
         expect(eventKinds(result)).toContain("update-failed");
         expect(eventKinds(result)).not.toContain("update-outcome-unknown");
+        expect(result.payload.updaterEvents.at(-1)?.summary).toContain(
+            "during engine inventory"
+        );
         expect(harness.order).toContain("rollback:one");
         expect(JSON.stringify(result)).not.toContain(
             "raw private post-mutation discovery diagnostic"
