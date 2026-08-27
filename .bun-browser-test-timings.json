@@ -54,6 +54,7 @@
         "src/browser/ui/DataTable.test.tsx": 212,
         "src/browser/overview/BackupOverviewSection.test.tsx": 211,
         "src/browser/chat/ChatAttachmentPicker.test.tsx": 207,
+        "src/browser/operations/GlobalOperationsTray.test.tsx": 200,
         "src/browser/operations/OperationTrackerContext.test.tsx": 200,
         "src/browser/auth/useAuthenticatedMutationBoundary.test.tsx": 188,
         "src/browser/jobs/JobRunTable.test.tsx": 181,

@@ -98,7 +98,8 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
                         const query = details[index];
                         const detail = query?.data;
                         const state = detail?.run.state;
-                        const lookupFailed = query?.isError === true;
+                        const lookupFailed =
+                            query?.isError === true && detail === undefined;
                         const terminal = state !== undefined && terminalStates.has(state);
                         const dismissible = terminal || lookupFailed;
                         const badge = operationBadgePresentation(lookupFailed, state);
