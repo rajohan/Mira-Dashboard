@@ -852,7 +852,11 @@ export function createDeliveryGitHubPullRequestPort(
         ) {
             fail("unknown-outcome");
         }
-        for (let poll = 0; merge.status === "pending"; poll += 1) {
+        for (
+            let poll = 0;
+            merge.status === "pending" || merge.status === "enqueued";
+            poll += 1
+        ) {
             if (
                 poll >= nativeStackMergePollMaximum ||
                 merge.details.uuid === undefined ||
@@ -862,10 +866,10 @@ export function createDeliveryGitHubPullRequestPort(
             ) {
                 fail("unknown-outcome");
             }
-            signal?.throwIfAborted();
-            await sleep(nativeStackMergePollIntervalMs, signal);
-            signal?.throwIfAborted();
             try {
+                signal?.throwIfAborted();
+                await sleep(nativeStackMergePollIntervalMs, signal);
+                signal?.throwIfAborted();
                 merge = normalizeAsyncMerge(
                     await options.transport.requestJson(
                         {
@@ -880,8 +884,7 @@ export function createDeliveryGitHubPullRequestPort(
                 fail("unknown-outcome");
             }
         }
-        if (merge.status === "failed") fail("conflict");
-        if (merge.status === "enqueued") return Object.freeze({ outcome: "enqueued" });
+        if (merge.status === "failed") fail("unknown-outcome");
         if (merge.status !== "merged" || merge.details.sha === undefined) {
             fail("unknown-outcome");
         }

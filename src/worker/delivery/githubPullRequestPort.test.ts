@@ -462,6 +462,7 @@ describe("Delivery GitHub pull-request port", () => {
         const bottomHead = "c".repeat(40);
         let merged = false;
         const operations: string[] = [];
+        const pollUuids: string[] = [];
         const sleeps: number[] = [];
         const port = createDeliveryGitHubPullRequestPort({
             transport: transport("mira-2026", (operation) => {
@@ -523,14 +524,14 @@ describe("Delivery GitHub pull-request port", () => {
                             expected_head_sha: head,
                             merge_action: "default",
                             merge_method: "squash",
-                            message: "pending",
+                            message: "enqueued",
                             uuid: "merge-1",
                         },
-                        status: "pending",
+                        status: "enqueued",
                     };
                 }
                 if (operation.kind === "native-stack-merge-poll") {
-                    expect(operation.uuid).toBe("merge-1");
+                    pollUuids.push(operation.uuid);
                     merged = true;
                     return {
                         details: { message: "merged", sha: mergedMainHead },
@@ -552,6 +553,7 @@ describe("Delivery GitHub pull-request port", () => {
             ])
         ).toEqual({ mainHeadSha: mergedMainHead, outcome: "completed" });
         expect(sleeps).toEqual([2000]);
+        expect(pollUuids).toEqual(["merge-1"]);
         expect(operations).toContain("native-stack-merge-start");
         expect(operations).toContain("native-stack-merge-poll");
     });
