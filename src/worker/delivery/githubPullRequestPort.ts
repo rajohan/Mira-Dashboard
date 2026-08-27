@@ -888,6 +888,16 @@ export function createDeliveryGitHubPullRequestPort(
         if (merge.status !== "merged" || merge.details.sha === undefined) {
             fail("unknown-outcome");
         }
+        if (
+            (merge.details.expectedHeadSha !== undefined &&
+                merge.details.expectedHeadSha !== selected.headSha) ||
+            (merge.details.mergeAction !== undefined &&
+                merge.details.mergeAction !== "default") ||
+            (merge.details.mergeMethod !== undefined &&
+                merge.details.mergeMethod !== "squash")
+        ) {
+            fail("unknown-outcome");
+        }
         const confirmed = await Promise.all(
             expectedHeads.map(({ number }) =>
                 getPullRequest(number, signal).catch(() => null)
@@ -903,7 +913,37 @@ export function createDeliveryGitHubPullRequestPort(
         ) {
             fail("unknown-outcome");
         }
-        return Object.freeze({ mainHeadSha: merge.details.sha, outcome: "completed" });
+        let retainedBranch = false;
+        for (const pullRequest of current) {
+            if (
+                pullRequest.isCrossRepository ||
+                pullRequest.headRefName === deliveryGitHubBaseBranch
+            ) {
+                continue;
+            }
+            try {
+                const branchResponse = await options.transport.requestJsonWithStatus(
+                    { branch: pullRequest.headRefName, kind: "branch-ref" },
+                    signal
+                );
+                if (branchResponse.status === 404) continue;
+                v.parse(rawMainRefSchema, branchResponse.body);
+                retainedBranch = true;
+            } catch {
+                return Object.freeze({
+                    mainHeadSha: merge.details.sha,
+                    outcome: "partial-success",
+                    warning: "branch-cleanup-unconfirmed",
+                });
+            }
+        }
+        return retainedBranch
+            ? Object.freeze({
+                  mainHeadSha: merge.details.sha,
+                  outcome: "partial-success" as const,
+                  warning: "branch-retained" as const,
+              })
+            : Object.freeze({ mainHeadSha: merge.details.sha, outcome: "completed" });
     }
 
     async function updatePullRequestBranch(

@@ -534,9 +534,18 @@ describe("Delivery GitHub pull-request port", () => {
                     pollUuids.push(operation.uuid);
                     merged = true;
                     return {
-                        details: { message: "merged", sha: mergedMainHead },
+                        details: {
+                            expected_head_sha: head,
+                            merge_action: "default",
+                            merge_method: "squash",
+                            message: "merged",
+                            sha: mergedMainHead,
+                        },
                         status: "merged",
                     };
+                }
+                if (operation.kind === "branch-ref") {
+                    return { object: { sha: head, type: "commit" } };
                 }
                 throw new Error(`Unexpected ${operation.kind}`);
             }),
@@ -551,11 +560,18 @@ describe("Delivery GitHub pull-request port", () => {
                 { headSha: bottomHead, number: 11 },
                 { headSha: head, number: 12 },
             ])
-        ).toEqual({ mainHeadSha: mergedMainHead, outcome: "completed" });
+        ).toEqual({
+            mainHeadSha: mergedMainHead,
+            outcome: "partial-success",
+            warning: "branch-retained",
+        });
         expect(sleeps).toEqual([2000]);
         expect(pollUuids).toEqual(["merge-1"]);
         expect(operations).toContain("native-stack-merge-start");
         expect(operations).toContain("native-stack-merge-poll");
+        expect(operations.filter((operation) => operation === "branch-ref")).toHaveLength(
+            2
+        );
     });
 
     test("does not dispatch when native stack membership or a lower head drifted", async () => {

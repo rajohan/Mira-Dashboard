@@ -314,18 +314,16 @@ export function createDeliveryOverviewCollector(
         signal?.throwIfAborted();
         const fallback = fallbackProjectionInput(observedAtMs);
         let projectedProduction: DeliveryProductionAuthoritySnapshot | undefined;
-        if (production.state === "succeeded") {
-            projectedProduction = production.value;
-            if (
-                mainHead.state === "succeeded" &&
-                publishedRelease.state === "succeeded"
-            ) {
-                projectedProduction = withPublishedCandidate(
-                    production.value,
-                    publishedRelease.value,
-                    mainHead.value
-                );
-            }
+        if (
+            production.state === "succeeded" &&
+            mainHead.state === "succeeded" &&
+            publishedRelease.state === "succeeded"
+        ) {
+            projectedProduction = withPublishedCandidate(
+                production.value,
+                publishedRelease.value,
+                mainHead.value
+            );
         }
 
         const checkout =
