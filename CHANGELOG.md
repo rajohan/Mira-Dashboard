@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.9](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.8...v0.3.9) (2026-08-27)
+
+
+### Bug Fixes
+
+* **bootstrap:** migrate managed log archives ([#472](https://github.com/rajohan/Mira-Dashboard/issues/472)) ([02100b1](https://github.com/rajohan/Mira-Dashboard/commit/02100b117ddc5c85ae893686e2ffc6144c924bf2))
+* **docker:** reconcile full stack after updates ([#473](https://github.com/rajohan/Mira-Dashboard/issues/473)) ([3955e6c](https://github.com/rajohan/Mira-Dashboard/commit/3955e6caea75be9c8d2e057694bb70b7e6ebb7c5))
+* **logs:** respect Prowlarr native rotation ([#476](https://github.com/rajohan/Mira-Dashboard/issues/476)) ([5582b04](https://github.com/rajohan/Mira-Dashboard/commit/5582b04b7ae492fc3d9d6ec9535f73098fdf4496))
+* **monitoring:** aggregate run notifications ([#474](https://github.com/rajohan/Mira-Dashboard/issues/474)) ([9afe7b6](https://github.com/rajohan/Mira-Dashboard/commit/9afe7b698f5f5fd971c37b17c15eb3f494dcdbdb))
+
 ## [0.3.8](https://github.com/rajohan/Mira-Dashboard/compare/v0.3.7...v0.3.8) (2026-08-26)
 
 
