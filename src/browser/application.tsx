@@ -25,6 +25,7 @@ import {
     type DashboardBrowserCollections,
 } from "./data/dashboardCollections.ts";
 import { DashboardCollectionsProvider } from "./data/dashboardCollectionsContext.tsx";
+import { OperationTrackerProvider } from "./operations/OperationTrackerContext.tsx";
 import { createDashboardRouter, type DashboardRouter } from "./router.tsx";
 import { AutomationTokenPresentationProvider } from "./security/AutomationTokenPresentationContext.tsx";
 import { RecoveryCodesPresentationProvider } from "./security/RecoveryCodesPresentationContext.tsx";
@@ -134,9 +135,13 @@ export function DashboardBrowserApplication({
                                                     <AuthenticatedSessionActivity
                                                         suspended={verificationActive}
                                                     />
-                                                    <ChatRuntimeStoreProvider>
-                                                        <RouterProvider router={router} />
-                                                    </ChatRuntimeStoreProvider>
+                                                    <OperationTrackerProvider>
+                                                        <ChatRuntimeStoreProvider>
+                                                            <RouterProvider
+                                                                router={router}
+                                                            />
+                                                        </ChatRuntimeStoreProvider>
+                                                    </OperationTrackerProvider>
                                                 </AuthenticatedBrowserCacheBoundary>
                                                 {securityVerification !== undefined && (
                                                     <Suspense fallback={null}>

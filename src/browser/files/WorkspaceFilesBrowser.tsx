@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/files.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { PageState } from "../ui/PageState.tsx";
 import { workspaceFileClient } from "./workspaceFileClient.ts";
 import { workspaceFileFailureMessage } from "./workspaceFilePresentation.ts";
@@ -43,6 +44,7 @@ interface SavedWorkspaceFileTreeDirectory {
 export function WorkspaceFilesBrowser() {
     const client = workspaceFileClient(useDashboardTrpcClient());
     const queryClient = useQueryClient();
+    const operationTracker = useOperationTracker();
     const boundary = useAuthenticatedMutationBoundary();
     const rootsQuery = useQuery(workspaceFileRootsQueryOptions(client));
     const [navigation, setNavigation] = useState<WorkspaceFileNavigation>();
@@ -182,6 +184,22 @@ export function WorkspaceFilesBrowser() {
                   )
         );
         if (boundary.completionIsCurrent()) {
+            if (result.status === "accepted") {
+                operationTracker.track({
+                    jobRunId: result.jobRunId,
+                    label:
+                        replacedEntry === undefined
+                            ? `Create ${file.name}`
+                            : `Replace ${replacedEntry.name}`,
+                    onTerminal: () =>
+                        refreshWorkspaceFileDirectory(
+                            queryClient,
+                            replacedEntry === undefined
+                                ? currentDirectoryId
+                                : (parentDirectoryId ?? currentDirectoryId)
+                        ),
+                });
+            }
             const refreshDirectoryId =
                 replacedEntry === undefined
                     ? currentDirectoryId
