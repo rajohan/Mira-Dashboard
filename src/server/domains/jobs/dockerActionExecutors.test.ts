@@ -514,11 +514,15 @@ describe("Docker job action executors", () => {
         const previous = overview();
         const cases = [
             {
-                expected: { previous },
+                expected: { automaticOnly: true, previous },
                 payload: { kind: "updater-run" },
             },
             {
-                expected: { expectedSourceRevision: sourceRevision, previous },
+                expected: {
+                    automaticOnly: false,
+                    expectedSourceRevision: sourceRevision,
+                    previous,
+                },
                 payload: { operation: "updater-run", sourceRevision },
             },
             {

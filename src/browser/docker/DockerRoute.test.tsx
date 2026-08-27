@@ -446,7 +446,7 @@ describe("DockerRoute", () => {
                 name: "Scan Docker services for updates",
             });
             const runUpdates = screen.getByRole("button", {
-                name: "Run automatic Docker updates",
+                name: "Run all available Docker updates",
             });
             expect(scanUpdates.parentElement).toBe(runUpdates.parentElement);
             expect(scanUpdates.parentElement).toHaveClass(
@@ -910,7 +910,7 @@ describe("DockerRoute", () => {
             await user.keyboard("{Escape}");
             expect(
                 screen.getByRole("button", {
-                    name: "Run automatic Docker updates",
+                    name: "Run all available Docker updates",
                 })
             ).toBeDisabled();
             expect(

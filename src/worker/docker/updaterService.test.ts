@@ -46,6 +46,7 @@ interface HarnessOptions {
     readonly failService?: string;
     readonly finalGit?: DockerUpdaterGitSyncResult;
     readonly headVerificationFails?: boolean;
+    readonly manualSecondService?: boolean;
     readonly preflightGit?: DockerUpdaterGitSyncResult;
     readonly preflightGitSequence?: readonly DockerUpdaterGitSyncResult[];
     readonly registryFailure?: boolean;
@@ -56,7 +57,7 @@ interface HarnessOptions {
     readonly serviceCount?: 1 | 2;
     readonly sourceChangeOnDiscoverCall?: number;
     readonly sourceChangeDuringReconcile?: boolean;
-    readonly throwOnDiscoverCall?: number;
+    readonly throwOnDiscoverCalls?: readonly number[];
     readonly unconfirmedService?: string;
 }
 
@@ -114,7 +115,7 @@ function createHarness(options: HarnessOptions = {}) {
             ? []
             : [
                   {
-                      automatic: true,
+                      automatic: !options.manualSecondService,
                       candidateTag: "2.1.0",
                       id: "b".repeat(64),
                       imageReference: "ghcr.io/example/two:2.0.0",
@@ -222,7 +223,7 @@ function createHarness(options: HarnessOptions = {}) {
         },
         discover(previous) {
             discoverCalls += 1;
-            if (options.throwOnDiscoverCall === discoverCalls) {
+            if (options.throwOnDiscoverCalls?.includes(discoverCalls) === true) {
                 return Promise.reject(
                     new Error("raw private post-mutation discovery diagnostic")
                 );
@@ -381,6 +382,32 @@ function eventKinds(result: DockerUpdaterRunResult): string[] {
 }
 
 describe("Docker updater service", () => {
+    test("separates scheduled automatic policy from manual update-all intent", async () => {
+        const scheduled = createHarness({ manualSecondService: true });
+        const scheduledInitial = scheduled.currentPayload();
+        const scheduledResult = await scheduled.updater.run({
+            automaticOnly: true,
+            previous: scheduledInitial,
+        });
+
+        expect(scheduledResult.updatedCount).toBe(1);
+        expect(scheduled.updateCommands.map(({ service }) => service)).toEqual(["one"]);
+
+        const manual = createHarness({ manualSecondService: true });
+        const manualInitial = manual.currentPayload();
+        const manualResult = await manual.updater.run({
+            automaticOnly: false,
+            expectedSourceRevision: manualInitial.sourceRevision,
+            previous: manualInitial,
+        });
+
+        expect(manualResult.updatedCount).toBe(2);
+        expect(manual.updateCommands.map(({ service }) => service)).toEqual([
+            "one",
+            "two",
+        ]);
+    });
+
     test("preserves exact scanned candidates across its own multi-service source changes", async () => {
         const harness = createHarness();
         const initial = harness.currentPayload();
@@ -957,10 +984,10 @@ describe("Docker updater service", () => {
         expect(JSON.stringify(result)).not.toContain(composePath);
     });
 
-    test("returns sanitized unknown outcome when rediscovery fails after mutation", async () => {
+    test("retries a transient rediscovery failure after mutation", async () => {
         const harness = createHarness({
             serviceCount: 1,
-            throwOnDiscoverCall: 5,
+            throwOnDiscoverCalls: [5],
         });
         const initial = harness.currentPayload();
 
@@ -971,14 +998,38 @@ describe("Docker updater service", () => {
 
         expect(result).toMatchObject({
             failedCount: 0,
-            git: { status: "unknown-outcome" },
-            outcome: "unknown-outcome",
+            outcome: "completed",
+            updatedCount: 1,
+        });
+        expect(result.payload.updaterServices[0]?.status).toEqual({ state: "current" });
+        expect(eventKinds(result)).toContain("update-succeeded");
+        expect(harness.order).not.toContain("rollback:one");
+    });
+
+    test("reports a verified rollback as a failed update instead of an unknown outcome", async () => {
+        const harness = createHarness({
+            serviceCount: 1,
+            throwOnDiscoverCalls: [5, 6],
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 1,
+            git: { status: "no-change" },
+            outcome: "completed-with-failures",
             updatedCount: 0,
         });
         expect(result.payload.updaterServices[0]?.status).toEqual({
-            state: "unavailable",
+            candidateImage: "ghcr.io/example/one:1.1.0",
+            state: "update-available",
         });
-        expect(eventKinds(result)).toContain("update-outcome-unknown");
+        expect(eventKinds(result)).toContain("update-failed");
+        expect(eventKinds(result)).not.toContain("update-outcome-unknown");
         expect(harness.order).toContain("rollback:one");
         expect(JSON.stringify(result)).not.toContain(
             "raw private post-mutation discovery diagnostic"

@@ -3,6 +3,7 @@ import { formatDistanceStrict } from "date-fns";
 import type {
     DockerContainer,
     DockerContainerPort,
+    DockerUpdaterEvent,
     DockerUpdaterService,
 } from "../../contracts/docker.ts";
 import { formatByteCount, formatPercent } from "../lib/formatMeasurements.ts";
@@ -45,6 +46,27 @@ export function formatDockerContainerRuntime(
 }
 
 type BadgeVariant = "danger" | "default" | "info" | "success" | "warning";
+
+export function dockerUpdaterEventVariant(
+    kind: DockerUpdaterEvent["kind"]
+): BadgeVariant {
+    switch (kind) {
+        case "scan-completed":
+        case "update-succeeded": {
+            return "success";
+        }
+        case "source-sync-pending":
+        case "update-available": {
+            return "warning";
+        }
+        case "discovery-failed":
+        case "scan-failed":
+        case "update-failed":
+        case "update-outcome-unknown": {
+            return "danger";
+        }
+    }
+}
 
 /**
  * @param state Exact Engine state.

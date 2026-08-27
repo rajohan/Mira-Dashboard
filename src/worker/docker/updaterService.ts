@@ -406,6 +406,22 @@ export function createDockerUpdaterService(
         return after;
     }
 
+    async function discoverAfterMutation(
+        previous: DockerOverviewCachePayload,
+        signal: AbortSignal
+    ) {
+        let firstFailure: unknown;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                return await options.collector.discover(previous, signal);
+            } catch (error) {
+                firstFailure ??= error;
+                signal.throwIfAborted();
+            }
+        }
+        throw firstFailure;
+    }
+
     async function run(
         input: DockerJobUpdaterInput,
         signal?: AbortSignal
@@ -435,7 +451,7 @@ export function createDockerUpdaterService(
             if (service.status.state !== "update-available") return false;
             if (service.policy.state !== "managed") return false;
             if (input.serviceId !== undefined) return service.id === input.serviceId;
-            return service.policy.automatic;
+            return !input.automaticOnly || service.policy.automatic;
         });
         if (input.serviceId !== undefined) {
             if (selected.length !== 1) sourceConflict();
@@ -616,6 +632,63 @@ export function createDockerUpdaterService(
             readonly result: DockerComposeImageUpdateResult;
             readonly service: (typeof selected)[number];
         }> = [];
+
+        async function rollbackAndVerify(
+            updates: readonly (typeof applied)[number][],
+            affectedServices: readonly (typeof selected)[number][]
+        ): Promise<DockerOverviewCachePayload | undefined> {
+            const recoverySignal = AbortSignal.timeout(dockerRecoveryDeadlineMs);
+            let rollbackCompleted = true;
+            for (const update of updates.toReversed()) {
+                try {
+                    rollbackCompleted =
+                        (await update.result.rollback(recoverySignal)) &&
+                        rollbackCompleted;
+                } catch {
+                    rollbackCompleted = false;
+                }
+            }
+            if (!rollbackCompleted) return undefined;
+
+            try {
+                const restored = await reconcileVerifiedStack(
+                    preMutationPayload,
+                    preMutationPayload.sourceRevision,
+                    affectedServices.map(({ service }) => service),
+                    recoverySignal
+                );
+                const plannedById = new Map(
+                    plannedSources.map((planned) => [planned.selectedService.id, planned])
+                );
+                for (const service of affectedServices) {
+                    const planned = plannedById.get(service.id);
+                    if (planned === undefined) fail();
+                    const restoredSource = exactService(
+                        restored.compose.services,
+                        service.project,
+                        service.service
+                    );
+                    if (
+                        restoredSource.composePath !== planned.source.composePath ||
+                        restoredSource.contentSha256 !== planned.source.contentSha256 ||
+                        restoredSource.imageReference !== planned.source.imageReference ||
+                        exactRunningServiceImageId(
+                            restored.payload,
+                            service.project,
+                            service.service
+                        ) !==
+                            (revalidatedRuntimeImageIds.get(service.id) ??
+                                planned.runtimeImageId)
+                    ) {
+                        fail();
+                    }
+                }
+                return restored.payload;
+            } catch {
+                return undefined;
+            }
+        }
+
         const addedEvents: DockerUpdaterEvent[] = [];
         let failedCount = 0;
         for (const selectedService of selected) {
@@ -688,7 +761,7 @@ export function createDockerUpdaterService(
                     operationSignal
                 );
                 updateSucceeded = true;
-                discovery = await options.collector.discover(payload, operationSignal);
+                discovery = await discoverAfterMutation(payload, operationSignal);
                 payload = discovery.payload;
                 const after = exactService(
                     discovery.compose.services,
@@ -712,11 +785,36 @@ export function createDockerUpdaterService(
                     if (updateResult === undefined) {
                         for (const update of applied) update.result.settle();
                     } else {
-                        for (const update of [
+                        const affectedUpdates = [
                             ...applied,
                             { result: updateResult, service: selectedService },
-                        ].toReversed()) {
-                            await update.result.rollback();
+                        ];
+                        const affectedServices = [...successful, selectedService];
+                        const restoredPayload = await rollbackAndVerify(
+                            affectedUpdates,
+                            affectedServices
+                        );
+                        if (restoredPayload !== undefined) {
+                            const failureEvents = affectedServices.map((service) =>
+                                event(generateId, nowMs, {
+                                    kind: "update-failed",
+                                    serviceId: service.id,
+                                    summary: `Update verification failed for ${service.project}/${service.service}; the prior state was restored.`,
+                                })
+                            );
+                            return Object.freeze({
+                                failedCount: failedCount + affectedServices.length,
+                                git: Object.freeze({ status: "no-change" as const }),
+                                outcome: "completed-with-failures" as const,
+                                payload: v.parse(dockerOverviewCachePayloadSchema, {
+                                    ...restoredPayload,
+                                    updaterEvents: events(restoredPayload.updaterEvents, [
+                                        ...addedEvents,
+                                        ...failureEvents,
+                                    ]),
+                                }),
+                                updatedCount: 0,
+                            });
                         }
                     }
                     return unknownMutationResult({

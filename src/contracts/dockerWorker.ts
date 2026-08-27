@@ -149,6 +149,7 @@ export interface DockerJobExecutionPort {
 
 export type DockerJobUpdaterInput =
     | Readonly<{
+          automaticOnly?: boolean;
           candidateImage?: never;
           currentImage?: never;
           expectedSourceRevision?: string;
@@ -156,6 +157,7 @@ export type DockerJobUpdaterInput =
           serviceId?: never;
       }>
     | Readonly<{
+          automaticOnly?: never;
           candidateImage: string;
           currentImage: string;
           expectedSourceRevision: string;
