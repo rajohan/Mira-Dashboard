@@ -475,7 +475,7 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                     <Button
                                         aria-label={`Run ${policy.label}`}
                                         busy={policy.activeRun !== undefined}
-                                        busyLabel="Running…"
+                                        busyLabel="Maintenance running…"
                                         disabled={disabled}
                                         onClick={() =>
                                             confirmAction({
@@ -493,7 +493,7 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                         <Button
                                             aria-label={`Dry run ${policy.label}`}
                                             busy={policy.activeRun !== undefined}
-                                            busyLabel="Running dry run…"
+                                            busyLabel="Maintenance running…"
                                             disabled={disabled}
                                             onClick={() =>
                                                 confirmAction({
