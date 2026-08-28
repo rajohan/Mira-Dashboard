@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.3...v0.4.4) (2026-08-28)
+
+
+### Bug Fixes
+
+* **docker:** settle updates against stable authority ([#495](https://github.com/rajohan/Mira-Dashboard/issues/495)) ([67c701b](https://github.com/rajohan/Mira-Dashboard/commit/67c701bc2f8e2900a456a0673d318c18f42fa759))
+
 ## [0.4.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.2...v0.4.3) (2026-08-27)
 
 
