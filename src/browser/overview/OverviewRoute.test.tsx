@@ -1333,10 +1333,17 @@ describe("Dashboard operational overview foundation", () => {
         const jobSummaryCalls = transport.queryCalls.filter(
             ({ path }) => path === "jobs.listRuns"
         );
-        expect(jobSummaryCalls.length).toBeGreaterThan(0);
-        for (const call of jobSummaryCalls) {
-            expect(call).toEqual({ input: { limit: 1 }, path: "jobs.listRuns" });
-        }
+        expect(jobSummaryCalls).toContainEqual({
+            input: { limit: 1 },
+            path: "jobs.listRuns",
+        });
+        expect(jobSummaryCalls).toContainEqual({
+            input: {
+                filters: { states: ["queued", "running"] },
+                limit: 100,
+            },
+            path: "jobs.listRuns",
+        });
         expect(
             transport.queryCalls.filter(({ path }) => path === "serviceActions.getStatus")
         ).toEqual([{ input: {}, path: "serviceActions.getStatus" }]);

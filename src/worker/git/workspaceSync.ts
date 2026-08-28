@@ -417,14 +417,25 @@ export function createWorkspaceGitSync(rootPath: string) {
             trackedInventory.changedPaths.length === 0 &&
             safeUntrackedPaths.length === 0
         ) {
+            let residualCount: number;
+            if (recoveredCommit === undefined) {
+                residualCount = await residualChangedFileCount(canonicalRoot, signal);
+            } else {
+                residualCount = 1;
+                try {
+                    residualCount = await residualChangedFileCount(
+                        canonicalRoot,
+                        AbortSignal.timeout(cleanupTimeoutMs)
+                    );
+                } catch {
+                    // A confirmed recovery remains successful while heartbeat fails closed.
+                }
+            }
             return {
                 changedFileCount: 0,
                 ...(recoveredCommit === undefined ? {} : { commit: recoveredCommit }),
                 pushed: recoveredCommit !== undefined,
-                residualChangedFileCount: await residualChangedFileCount(
-                    canonicalRoot,
-                    signal
-                ),
+                residualChangedFileCount: residualCount,
             };
         }
 

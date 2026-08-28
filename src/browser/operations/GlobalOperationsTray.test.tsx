@@ -14,6 +14,8 @@ import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { dashboardTrpcContext } from "../api/trpcContextValue.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { authenticatedDashboardStoryStatus } from "../storySupport/dashboardStoryTransport.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { GlobalOperationsTray } from "./GlobalOperationsTray.tsx";
 import { OperationTrackerContext } from "./operationTrackerContextValue.ts";
@@ -28,7 +30,10 @@ describe("global operations tray", () => {
     test("keeps a cached active operation non-dismissible after a refetch error", async () => {
         const user = userEvent.setup();
         let activeRunAttempt = 0;
-        const query = jest.fn((_name: string, input: { id: string }) => {
+        const query = jest.fn((name: string, input: { id?: string }) => {
+            if (name === "jobs.listRuns") {
+                return Promise.resolve({ runs: [], summary: {} });
+            }
             if (input.id === "missing-run") {
                 return Promise.reject(new Error("run not found"));
             }
@@ -63,6 +68,7 @@ describe("global operations tray", () => {
         const queryClient = new QueryClient({
             defaultOptions: { queries: { retry: false } },
         });
+        queryClient.setQueryData(authStatusQueryKey, authenticatedDashboardStoryStatus);
         const realtimeClient = new ControlledDashboardRealtimeClient();
         const rootRoute = createRootRoute();
         const indexRoute = createRoute({
@@ -166,5 +172,76 @@ describe("global operations tray", () => {
             view.unmount();
             queryClient.clear();
         }
+    });
+
+    test("shows an active backend job without browser-local tracking", async () => {
+        const query = jest.fn((name: string) =>
+            Promise.resolve(
+                name === "jobs.listRuns"
+                    ? {
+                          runs: [
+                              {
+                                  displayName: "Remote Docker update",
+                                  id: "remote-run",
+                              },
+                          ],
+                          summary: {},
+                      }
+                    : {
+                          events: [],
+                          run: {
+                              attemptCount: 1,
+                              attemptLimit: 1,
+                              state: "running",
+                              updatedAtMs: 1_800_000_000_000,
+                          },
+                      }
+            )
+        );
+        const client = { query } as unknown as DashboardTrpcClient;
+        const queryClient = new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+        });
+        queryClient.setQueryData(authStatusQueryKey, authenticatedDashboardStoryStatus);
+        const rootRoute = createRootRoute();
+        const indexRoute = createRoute({
+            component: GlobalOperationsTray,
+            getParentRoute: () => rootRoute,
+            path: "/",
+        });
+        const jobsRoute = createRoute({
+            component: () => null,
+            getParentRoute: () => rootRoute,
+            path: "/jobs",
+        });
+        const router = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/"] }),
+            routeTree: rootRoute.addChildren([indexRoute, jobsRoute]),
+        });
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <dashboardTrpcContext.Provider value={client}>
+                    <DashboardRealtimeProvider
+                        client={new ControlledDashboardRealtimeClient()}
+                    >
+                        <OperationTrackerContext
+                            value={{
+                                dismiss: jest.fn(),
+                                operationIsActive: () => false,
+                                operations: [],
+                                settle: jest.fn(),
+                                track: jest.fn(),
+                            }}
+                        >
+                            <RouterProvider router={router} />
+                        </OperationTrackerContext>
+                    </DashboardRealtimeProvider>
+                </dashboardTrpcContext.Provider>
+            </QueryClientProvider>
+        );
+
+        expect(await screen.findByText("Remote Docker update")).toBeVisible();
+        expect(await screen.findByText("running")).toBeVisible();
     });
 });

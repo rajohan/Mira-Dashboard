@@ -1,12 +1,15 @@
-import { type QueryClient, useQueries } from "@tanstack/react-query";
+import { type QueryClient, useQueries, useQuery } from "@tanstack/react-query";
 import { Activity, ExternalLink, X } from "lucide-react";
 import { useEffect } from "react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
 import type { JobRunState } from "../../contracts/jobModel.ts";
 import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
-import type { JobRunDetail } from "../../contracts/jobs.ts";
+import type { JobRunDetail, ListJobRunsResult } from "../../contracts/jobs.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { useObservedQueryData } from "../api/useObservedQueryState.ts";
 import { useRealtimeQueryInvalidation } from "../api/useRealtimeQueryInvalidation.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
@@ -22,15 +25,19 @@ import {
 
 const terminalStates = new Set(["cancelled", "failed", "succeeded", "timed-out"]);
 const operationRunQueryRoot = ["operations", "runs"] as const;
+const activeOperationRunsQueryKey = ["operations", "active-runs"] as const;
 
 async function refreshTrackedOperationRuns(queryClient: QueryClient): Promise<void> {
-    await queryClient.invalidateQueries({
-        predicate: (query) => {
-            const detail = query.state.data as JobRunDetail | undefined;
-            return !terminalStates.has(detail?.run.state ?? "");
-        },
-        queryKey: operationRunQueryRoot,
-    });
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: activeOperationRunsQueryKey }),
+        queryClient.invalidateQueries({
+            predicate: (query) => {
+                const detail = query.state.data as JobRunDetail | undefined;
+                return !terminalStates.has(detail?.run.state ?? "");
+            },
+            queryKey: operationRunQueryRoot,
+        }),
+    ]);
 }
 
 function operationBadgePresentation(lookupFailed: boolean, state?: JobRunState) {
@@ -192,6 +199,31 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
 /** @returns Floating, route-independent lifecycle view for recently queued jobs. */
 export function GlobalOperationsTray() {
     const tracker = useOperationTracker();
-    if (tracker.operations.length === 0) return null;
-    return <PopulatedOperationsTray {...tracker} />;
+    const client = useDashboardTrpcClient();
+    const authentication = useObservedQueryData<AuthStatus>(authStatusQueryKey);
+    const activeRuns = useQuery({
+        enabled: authentication?.state === "authenticated",
+        queryFn: ({ signal }): Promise<ListJobRunsResult> =>
+            client.query(
+                "jobs.listRuns",
+                { filters: { states: ["queued", "running"] }, limit: 100 },
+                { signal }
+            ),
+        queryKey: activeOperationRunsQueryKey,
+        refetchInterval: 5000,
+        staleTime: 0,
+    });
+    const trackedIds = new Set(tracker.operations.map(({ jobRunId }) => jobRunId));
+    const operations = [
+        ...tracker.operations,
+        ...(activeRuns.data?.runs ?? [])
+            .filter(({ id }) => !trackedIds.has(id))
+            .map(({ displayName, id }) => ({
+                jobRunId: id,
+                label: displayName,
+                terminal: false,
+            })),
+    ];
+    if (operations.length === 0) return null;
+    return <PopulatedOperationsTray {...tracker} operations={operations} />;
 }

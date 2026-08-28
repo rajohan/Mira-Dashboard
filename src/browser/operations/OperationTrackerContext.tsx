@@ -13,6 +13,10 @@ import {
 
 const trackedOperationMaximum = 12;
 
+interface OperationTrackerProviderProps extends PropsWithChildren {
+    readonly restoreStoredOperations?: boolean;
+}
+
 function capTerminalHistory(operations: readonly TrackedOperation[]) {
     const capped = [...operations];
     while (capped.length > trackedOperationMaximum) {
@@ -24,8 +28,13 @@ function capTerminalHistory(operations: readonly TrackedOperation[]) {
 }
 
 /** @returns Session-scoped durable job identities shared across route navigation. */
-export function OperationTrackerProvider({ children }: PropsWithChildren) {
-    const [operations, setOperations] = useState<readonly TrackedOperation[]>([]);
+export function OperationTrackerProvider({
+    children,
+    restoreStoredOperations = false,
+}: OperationTrackerProviderProps) {
+    const [operations, setOperations] = useState<readonly TrackedOperation[]>(() =>
+        restoreStoredOperations ? readStoredOperations() : []
+    );
     const settledRunIds = useRef(new Set<string>());
     useEffect(() => {
         const synchronize = () => {

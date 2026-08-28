@@ -603,7 +603,7 @@ describe("Dashboard jobs route", () => {
                 queryKey: ["jobs", "runs", "detail"],
             });
         });
-        await waitFor(() => expect(transport.callsFor("jobs.getRun")).toHaveLength(2));
+        await waitFor(() => expect(transport.callsFor("jobs.getRun")).toHaveLength(3));
         expect(cancelButton).toHaveFocus();
         expect(transport.callsFor("jobs.getRun").at(-1)?.input).toEqual({
             eventLimit: 100,

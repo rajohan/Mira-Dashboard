@@ -1,6 +1,6 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import { lazy, Suspense, useSyncExternalStore } from "react";
+import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
 import type { AuthStatus } from "../contracts/auth.ts";
@@ -16,6 +16,7 @@ import {
     type DashboardTrpcClient,
 } from "./api/trpcClient.ts";
 import { DashboardTrpcProvider } from "./api/trpcContext.tsx";
+import { useObservedQueryData } from "./api/useObservedQueryState.ts";
 import { AuthenticatedBrowserCacheBoundary } from "./auth/AuthenticatedBrowserCacheBoundary.tsx";
 import { AuthenticatedSessionActivity } from "./auth/AuthenticatedSessionActivity.tsx";
 import { authStatusCacheIdentity, authStatusQueryKey } from "./auth/authQueries.ts";
@@ -60,6 +61,21 @@ const LazyGlobalSecurityVerification = lazy(async () => {
     const module = await import("./security/GlobalSecurityVerification.tsx");
     return { default: module.GlobalSecurityVerification };
 });
+
+function AuthenticatedOperationTrackerProvider({
+    children,
+}: {
+    readonly children: ReactNode;
+}) {
+    const authentication = useObservedQueryData<AuthStatus>(authStatusQueryKey);
+    return (
+        <OperationTrackerProvider
+            restoreStoredOperations={authentication?.state === "authenticated"}
+        >
+            {children}
+        </OperationTrackerProvider>
+    );
+}
 
 /** Browser dependencies accepted by the testable provider boundary. */
 export interface DashboardBrowserApplicationProps {
@@ -135,13 +151,13 @@ export function DashboardBrowserApplication({
                                                     <AuthenticatedSessionActivity
                                                         suspended={verificationActive}
                                                     />
-                                                    <OperationTrackerProvider>
+                                                    <AuthenticatedOperationTrackerProvider>
                                                         <ChatRuntimeStoreProvider>
                                                             <RouterProvider
                                                                 router={router}
                                                             />
                                                         </ChatRuntimeStoreProvider>
-                                                    </OperationTrackerProvider>
+                                                    </AuthenticatedOperationTrackerProvider>
                                                 </AuthenticatedBrowserCacheBoundary>
                                                 {securityVerification !== undefined && (
                                                     <Suspense fallback={null}>

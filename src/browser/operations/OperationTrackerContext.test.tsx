@@ -88,11 +88,10 @@ describe("operation tracker", () => {
         await user.click(screen.getByRole("button", { name: "Track first" }));
         first.unmount();
         render(
-            <OperationTrackerProvider>
+            <OperationTrackerProvider restoreStoredOperations>
                 <Harness />
             </OperationTrackerProvider>
         );
-        act(() => reconcileTrackedOperationsIdentity("authenticated:session-a"));
 
         expect(screen.getByRole("status", { name: "Operations" })).toHaveTextContent(
             "First (1)"
