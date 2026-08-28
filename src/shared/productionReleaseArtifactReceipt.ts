@@ -24,6 +24,7 @@ export const productionReleaseArtifactReceiptSchema = v.strictObject({
     }),
     formatVersion: v.literal(1),
     releaseId: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
+    releaseDescriptorSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     releaseManifestSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     runtime: v.strictObject({
         revision: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),

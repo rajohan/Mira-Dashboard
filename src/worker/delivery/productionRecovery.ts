@@ -4,6 +4,7 @@ import {
     type DeliveryProductionOperationInspection,
     type DeliveryProductionOperationRecord,
 } from "../../shared/deliveryProductionOperation.ts";
+import type { ProductionDeliveryExecutorOwner } from "../../shared/productionDeliveryExecutorOwner.ts";
 import {
     ensureProductionDeliveryExecutor,
     productionDeliveryArtifactSource,
@@ -26,6 +27,9 @@ export interface DeliveryProductionCutoverResumeOptions {
     readonly readActive: (
         signal?: AbortSignal
     ) => Promise<DeliveryProductionOperationRecord | null>;
+    readonly readOwner?: (
+        signal?: AbortSignal
+    ) => Promise<ProductionDeliveryExecutorOwner | null>;
     readonly readinessUrl: string;
 }
 
@@ -69,15 +73,24 @@ export async function reconcileDeliveryProductionCutoverBeforeValidation(
               });
     if (before.state === "terminal") return before;
     const { capsule } = before.record;
+    const owner = options.readOwner
+        ? await options.readOwner(signal)
+        : {
+              formatVersion: 1 as const,
+              releaseId: capsule.executor.releaseId,
+              runtimeRevision: capsule.executor.runtimeRevision,
+              transitionId: capsule.transitionId,
+          };
+    if (owner === null || owner.transitionId !== capsule.transitionId) throw failure();
     await (options.ensure ?? ensureProductionDeliveryExecutor)(
         {
             artifactSource: productionDeliveryArtifactSource(
                 capsule.enqueue.payload.operation
             ),
-            executorReleaseId: capsule.executor.releaseId,
+            executorReleaseId: owner.releaseId,
             projectRoot: options.projectRoot,
             readinessUrl: options.readinessUrl,
-            runtimeRevision: capsule.executor.runtimeRevision,
+            runtimeRevision: owner.runtimeRevision,
             transitionId: capsule.transitionId,
         },
         signal

@@ -286,4 +286,13 @@ describe("schedule procedure contracts", () => {
             },
         ]);
     });
+
+    test("declares conditional manual-run identity verification", () => {
+        const run = scheduleProcedureContracts.find(
+            ({ name }) => name === "schedules.run"
+        );
+        expect(
+            run !== undefined && "errorReasons" in run ? run.errorReasons : []
+        ).toEqual(["mfa_enrollment_required", "step_up_required"]);
+    });
 });

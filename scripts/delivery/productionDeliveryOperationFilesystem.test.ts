@@ -119,7 +119,7 @@ function capsule(
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v3",
+        protocol: "delivery.production.v4",
         runId: transitionId,
         transitionId,
     };

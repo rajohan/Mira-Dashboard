@@ -1,4 +1,4 @@
-import { deployProduction } from "./productionBootstrap.ts";
+import { queueProductionDeploy } from "./productionDeployClient.ts";
 
 interface ProductionDeployDependencies {
     readonly deploy: () => Promise<void>;
@@ -7,7 +7,7 @@ interface ProductionDeployDependencies {
 }
 
 const defaultDependencies: ProductionDeployDependencies = {
-    deploy: deployProduction,
+    deploy: queueProductionDeploy,
     writeError: (message) => process.stderr.write(message),
     writeOutput: (message) => process.stdout.write(message),
 };

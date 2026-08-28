@@ -199,7 +199,7 @@ class TestServiceController implements ProductionServiceController {
     readonly settledReleaseIds: string[] = [];
     onStart:
         | ((
-              release: PublishedProductionRelease,
+              release: Parameters<ProductionServiceController["start"]>[0],
               runtime: Parameters<ProductionServiceController["start"]>[1]
           ) => Promise<void> | void)
         | undefined;
@@ -208,32 +208,51 @@ class TestServiceController implements ProductionServiceController {
     rejectSettleReleaseId: string | undefined;
     rejectStartReleaseId: string | undefined;
 
-    provision(release: PublishedProductionRelease): Promise<void> {
-        const releaseId = release.manifest.source.commitSha;
+    provision(
+        release: Parameters<ProductionServiceController["provision"]>[0]
+    ): Promise<void> {
+        const releaseId =
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha;
         this.events.push(`provision:${releaseId}`);
         return releaseId === this.rejectProvisionReleaseId
             ? Promise.reject(new Error("candidate authority install failed"))
             : Promise.resolve();
     }
 
-    settle(release: PublishedProductionRelease): Promise<void> {
-        const releaseId = release.manifest.source.commitSha;
+    settle(
+        release: Parameters<NonNullable<ProductionServiceController["settle"]>>[0]
+    ): Promise<void> {
+        const releaseId =
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha;
         this.settledReleaseIds.push(releaseId);
         return releaseId === this.rejectSettleReleaseId
             ? Promise.reject(new Error("root retention failed"))
             : Promise.resolve();
     }
 
-    prepare(release: PublishedProductionRelease): Promise<void> {
-        this.events.push(`prepare:${release.manifest.source.commitSha}`);
+    prepare(
+        release: Parameters<ProductionServiceController["prepare"]>[0]
+    ): Promise<void> {
+        const releaseId =
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha;
+        this.events.push(`prepare:${releaseId}`);
         return Promise.resolve();
     }
 
     async start(
-        release: PublishedProductionRelease,
+        release: Parameters<ProductionServiceController["start"]>[0],
         runtime: Parameters<ProductionServiceController["start"]>[1]
     ): Promise<void> {
-        const releaseId = release.manifest.source.commitSha;
+        const releaseId =
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha;
         this.events.push(`start:${releaseId}`);
         await this.onStart?.(release, runtime);
         if (releaseId === this.rejectStartReleaseId) {
@@ -246,16 +265,27 @@ class TestServiceController implements ProductionServiceController {
         return Promise.resolve();
     }
 
-    verifyReady(release: PublishedProductionRelease): Promise<void> {
-        const releaseId = release.manifest.source.commitSha;
+    verifyReady(
+        release: Parameters<ProductionServiceController["verifyReady"]>[0]
+    ): Promise<void> {
+        const releaseId =
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha;
         this.events.push(`ready:${releaseId}`);
         return releaseId === this.rejectReadyReleaseId
             ? Promise.reject(new Error("candidate not ready"))
             : Promise.resolve();
     }
 
-    verifySmoke(release: PublishedProductionRelease): Promise<void> {
-        this.events.push(`smoke:${release.manifest.source.commitSha}`);
+    verifySmoke(
+        release: Parameters<ProductionServiceController["verifySmoke"]>[0]
+    ): Promise<void> {
+        const releaseId =
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha;
+        this.events.push(`smoke:${releaseId}`);
         return Promise.resolve();
     }
 }

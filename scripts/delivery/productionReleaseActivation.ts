@@ -47,7 +47,9 @@ import {
 } from "./productionArtifactRetention.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import {
+    loadDescribedPublishedProductionReleaseById,
     loadPublishedProductionRelease,
+    type DescribedPublishedProductionRelease,
     type PublishedProductionRelease,
 } from "./productionReleasePublication.ts";
 import {
@@ -68,29 +70,29 @@ export class ProductionReleaseActivationError extends TaggedErrorClass<Productio
 /** Idempotent process-control port implemented by the project-local systemd adapter. */
 export interface ProductionServiceController {
     readonly provision: (
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime
     ) => Promise<void>;
     readonly settle?: (
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime
     ) => Promise<void>;
     readonly prepare: (
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime
     ) => Promise<void>;
     readonly start: (
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime
     ) => Promise<void>;
     readonly stop: () => Promise<void>;
     readonly verifyReady: (
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime
     ) => Promise<void>;
     /** Full commit-bound production smoke after bootstrap readiness and before activation commit. */
     readonly verifySmoke: (
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime,
         transitionId: string
     ) => Promise<void>;
@@ -130,9 +132,24 @@ export interface ProductionReleaseActivationTestHooks {
     readonly afterServicesStopped?: () => Promise<void> | void;
 }
 
+export type ActivationRelease =
+    | PublishedProductionRelease
+    | DescribedPublishedProductionRelease;
+
 interface ActiveArtifacts {
+    readonly release: ActivationRelease;
+    readonly runtime: InstalledProductionRuntime;
+}
+
+interface CandidateArtifacts {
     readonly release: PublishedProductionRelease;
     readonly runtime: InstalledProductionRuntime;
+}
+
+function releaseId(release: ActivationRelease): string {
+    return "descriptor" in release
+        ? release.descriptor.releaseId
+        : release.manifest.source.commitSha;
 }
 
 async function prepareAndStartServices(
@@ -233,7 +250,7 @@ function activationArtifactReferences(
         candidate === undefined
             ? undefined
             : {
-                  releaseId: candidate.release.manifest.source.commitSha,
+                  releaseId: releaseId(candidate.release),
                   runtimeRevision: candidate.runtime.identity.revision,
               },
     ];
@@ -270,14 +287,19 @@ async function loadActiveArtifacts(
     record: ProductionActivationRecord,
     dependencies: ProductionReleaseActivationDependencies
 ): Promise<ActiveArtifacts> {
-    const release = await loadPublishedProductionRelease(
+    const release = await loadDescribedPublishedProductionReleaseById(
         paths,
-        record.current.releaseId,
-        record.current.runtimeRevision
+        record.current.releaseId
     );
+    if (release.descriptor.runtime.revision !== record.current.runtimeRevision) {
+        throw activationError();
+    }
     const runtime = await loadInstalledProductionRuntime(
         paths,
-        release.manifest.runtime,
+        {
+            revision: release.descriptor.runtime.revision,
+            version: release.descriptor.runtime.version,
+        },
         dependencies.runtimeVerification
     );
     return Object.freeze({ release, runtime });
@@ -288,7 +310,7 @@ async function loadExactArtifacts(
     releaseId: string,
     runtimeRevision: string,
     dependencies: ProductionReleaseActivationDependencies
-): Promise<ActiveArtifacts> {
+): Promise<CandidateArtifacts> {
     const release = await loadPublishedProductionRelease(
         paths,
         releaseId,
@@ -307,7 +329,7 @@ async function verifyCandidateArtifacts(
     candidateRelease: PublishedProductionRelease,
     candidateRuntime: InstalledProductionRuntime,
     dependencies: ProductionReleaseActivationDependencies
-): Promise<ActiveArtifacts> {
+): Promise<CandidateArtifacts> {
     const verified = await loadExactArtifacts(
         paths,
         candidateRelease.manifest.source.commitSha,
@@ -334,7 +356,7 @@ function journalFor(
 ): ProductionActivationTransition {
     return parseProductionActivationTransition({
         candidate: {
-            releaseId: candidate.release.manifest.source.commitSha,
+            releaseId: releaseId(candidate.release),
             runtimeRevision: candidate.runtime.identity.revision,
         },
         formatVersion: 1,
@@ -364,7 +386,7 @@ function nextActivationRecord(
 ): ProductionActivationRecord {
     return {
         current: {
-            releaseId: candidate.release.manifest.source.commitSha,
+            releaseId: releaseId(candidate.release),
             runtimeRevision: candidate.runtime.identity.revision,
         },
         formatVersion: 1,
@@ -631,15 +653,16 @@ async function activateRelease(
         dependencies,
         candidate
     );
+    const currentActivation = activation.record;
     if (
-        activation.record?.current.releaseId ===
+        currentActivation?.current.releaseId ===
             candidate.release.manifest.source.commitSha &&
-        activation.record.current.runtimeRevision === candidate.runtime.identity.revision
+        currentActivation.current.runtimeRevision === candidate.runtime.identity.revision
     ) {
         await prepareAndStartServices(dependencies.services, candidate);
         await dependencies.services.verifyReady(candidate.release, candidate.runtime);
         await settleServices(dependencies.services, candidate);
-        return activation.record;
+        return currentActivation;
     }
 
     const previous = activation.record

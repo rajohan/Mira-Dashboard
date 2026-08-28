@@ -8,7 +8,7 @@ import { DrizzleSecurityAuditStore } from "../security/securityAuditStore.ts";
 export interface DeliveryOperationActor {
     readonly authenticatorId: string;
     readonly id: string;
-    readonly kind: "user";
+    readonly kind: "automation" | "user";
 }
 
 export interface DeliveryOperationAuditContext {

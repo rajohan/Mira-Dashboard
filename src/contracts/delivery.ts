@@ -732,6 +732,8 @@ export const deliveryReleasesResultSchema = v.pipe(
 );
 
 export const deliveryDeploymentOperations = ["deploy", "rollback-release"] as const;
+/** Exact least-privilege automation principal accepted by `bun deploy`. */
+export const productionDeployAutomationPrincipalId = "production-deploy" as const;
 export const deliveryDeploymentOperationSchema = v.picklist(
     deliveryDeploymentOperations,
     "Delivery deployment operation is invalid"
@@ -1001,6 +1003,10 @@ export const deliveryRejectPullRequestInputSchema = rejectPullRequestInputObject
 export const deliveryApproveReviewInputSchema = approveReviewInputObjectSchema;
 export const deliveryUpdateBranchInputSchema = updateBranchInputObjectSchema;
 export const deliveryDeployInputSchema = deployInputObjectSchema;
+export const deliveryDeployCurrentInputSchema = v.strictObject({
+    confirmation: v.literal("deploy-delivery-main"),
+    idempotencyKey: jobIdempotencyKeySchema,
+});
 export const deliveryRollbackReleaseInputSchema = rollbackReleaseInputObjectSchema;
 export const deliveryCreatePullRequestStackInputSchema = createStackInputSchema;
 
@@ -1016,6 +1022,12 @@ const deliveryWriteAccess = {
     principalKinds: ["session"],
     whenMfaDisabled: "deny",
     whenMfaEnabled: "mfa",
+} as const;
+const deliveryAutomationWriteAccess = {
+    capabilities: ["delivery:write"],
+    capabilityPolicy: "all",
+    kind: "authenticated",
+    principalKinds: ["automation"],
 } as const;
 const queryTransport = {
     batching: "adapter-default",
@@ -1083,7 +1095,27 @@ function mutationContract(
     };
 }
 
-/** Five isolated reads and nine exact recent-MFA Delivery mutations. */
+function automationMutationContract(
+    name: string,
+    input: v.GenericSchema,
+    summary: string
+): ProcedureContract {
+    return {
+        access: deliveryAutomationWriteAccess,
+        domain: "delivery",
+        errors: mutationErrors,
+        input,
+        inputSchemaId: `${name}.input`,
+        kind: "mutation",
+        name,
+        output: deliveryRequestOperationResultSchema,
+        outputSchemaId: `${name}.output`,
+        summary,
+        transport: mutationTransport,
+    };
+}
+
+/** Five isolated reads, nine recent-MFA mutations, and one deploy-only automation mutation. */
 export const deliveryProcedureContracts = [
     readContract(
         "delivery.listPullRequests",
@@ -1144,6 +1176,11 @@ export const deliveryProcedureContracts = [
         "delivery.deploy",
         deliveryDeployInputSchema,
         "Queues an exact-main immutable production deployment."
+    ),
+    automationMutationContract(
+        "delivery.deployCurrent",
+        deliveryDeployCurrentInputSchema,
+        "Queues the current exact-main immutable production deployment through dedicated automation authority."
     ),
     mutationContract(
         "delivery.rollbackRelease",

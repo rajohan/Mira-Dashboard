@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import type { ProductionReleaseDescriptor } from "../../src/shared/productionReleaseDescriptor.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { parseReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { readBoundedRegularFile } from "../files/boundedFile.ts";
@@ -27,7 +28,11 @@ import {
     maximumReleaseRuntimeBytes,
     type ReleaseArtifactInventoryRecord,
 } from "./releaseArtifactInventory.ts";
-import { type ReleaseRuntimeIdentity, verifyReleaseIdentity } from "./releaseIdentity.ts";
+import {
+    type ReleaseRuntimeIdentity,
+    verifyProductionReleaseDescriptorIdentity,
+    verifyReleaseIdentity,
+} from "./releaseIdentity.ts";
 
 const productionReleaseFailureMessage = "Production release publication failed";
 const privateDirectoryMode = 0o700;
@@ -51,6 +56,12 @@ const destinationFileFlags =
 /** Immutable production release materialized below the project-local release root. */
 export interface PublishedProductionRelease {
     readonly manifest: ReleaseManifest;
+    readonly releaseRoot: string;
+}
+
+/** Cross-generation immutable release identity; contains no semantic manifest data. */
+export interface DescribedPublishedProductionRelease {
+    readonly descriptor: ProductionReleaseDescriptor;
     readonly releaseRoot: string;
 }
 
@@ -616,6 +627,93 @@ export async function publishProductionRelease(
 }
 
 /**
+ * Copies one descriptor-verified foreign release into its immutable production slot.
+ * The caller intentionally learns no semantic manifest shape; the published release's
+ * digest-bound executor is the only code allowed to interpret that manifest.
+ * @param lease Held production deployment lease.
+ * @param paths Prepared private production Delivery paths.
+ * @param sourceReleaseRoot Descriptor-verified source release directory.
+ * @param testHooks Optional deterministic publication test hooks.
+ * @returns Immutable descriptor-only publication identity.
+ */
+export async function publishDescribedProductionRelease(
+    lease: DashboardDeploymentLease,
+    paths: PreparedProductionDeliveryPaths,
+    sourceReleaseRoot: string,
+    testHooks: ProductionReleasePublicationTestHooks = {}
+): Promise<DescribedPublishedProductionRelease> {
+    validatePublicationInputs(lease, paths, sourceReleaseRoot);
+    await assertPrivateReleasesDirectory(paths.releasesDirectory);
+    let ownedRoot: string | undefined;
+    let ownedName: string | undefined;
+    try {
+        const sourceDescriptor =
+            await verifyProductionReleaseDescriptorIdentity(sourceReleaseRoot);
+        const sourceRecords = await inventoryReleaseArtifactTree(sourceReleaseRoot);
+        const commitSha = sourceDescriptor.releaseId;
+        if (!commitShaPattern.test(commitSha)) throw productionReleaseFailure();
+        const finalRoot = path.join(paths.releasesDirectory, commitSha);
+        if (await pathExists(finalRoot)) {
+            const existing = await loadDescribedPublishedProductionReleaseById(
+                paths,
+                commitSha
+            );
+            if (
+                JSON.stringify(existing.descriptor) !== JSON.stringify(sourceDescriptor)
+            ) {
+                throw productionReleaseFailure();
+            }
+            return existing;
+        }
+        const stageName = `.stage-${commitSha}-${Bun.randomUUIDv7()}`;
+        const stagingRoot = path.join(paths.releasesDirectory, stageName);
+        ownedRoot = stagingRoot;
+        ownedName = stageName;
+        await testHooks.beforeCopy?.(sourceReleaseRoot);
+        const stagedRecords = await copyReleaseTree(
+            sourceReleaseRoot,
+            stagingRoot,
+            sourceRecords,
+            testHooks.availableCapacity
+        );
+        await testHooks.afterCopy?.(stagingRoot);
+        const staged = await verifyProductionReleaseDescriptorIdentity(stagingRoot);
+        if (JSON.stringify(staged) !== JSON.stringify(sourceDescriptor)) {
+            throw productionReleaseFailure();
+        }
+        await freezeReleaseTree(stagingRoot, stagedRecords);
+        await testHooks.afterFreeze?.(stagingRoot);
+        await rename(stagingRoot, finalRoot);
+        ownedRoot = finalRoot;
+        ownedName = commitSha;
+        await syncDirectory(paths.releasesDirectory);
+        const published = await loadDescribedPublishedProductionReleaseById(
+            paths,
+            commitSha
+        );
+        if (JSON.stringify(published.descriptor) !== JSON.stringify(sourceDescriptor)) {
+            throw productionReleaseFailure();
+        }
+        ownedRoot = undefined;
+        ownedName = undefined;
+        return published;
+    } catch {
+        if (ownedRoot && ownedName) {
+            try {
+                await discardOwnedProductionReleaseCandidate(
+                    paths.releasesDirectory,
+                    ownedRoot,
+                    ownedName
+                );
+            } catch {
+                // Preserve the fixed publication failure and bounded evidence.
+            }
+        }
+        throw productionReleaseFailure();
+    }
+}
+
+/**
  * Reloads and fully verifies one immutable production release named by activation state.
  * @param paths Exact project-local production delivery paths.
  * @param releaseId Full commit identity stored in the activation record.
@@ -670,6 +768,31 @@ export async function loadPublishedProductionReleaseById(
             throw productionReleaseFailure();
         }
         return Object.freeze({ manifest, releaseRoot });
+    } catch {
+        throw productionReleaseFailure();
+    }
+}
+
+/**
+ * Loads a foreign immutable release through the stable descriptor contract only.
+ * Semantic manifest validation belongs exclusively to that release's executor.
+ * @param paths Prepared private production Delivery paths.
+ * @param releaseId Exact immutable release identifier.
+ * @returns Descriptor-verified foreign release identity and root.
+ */
+export async function loadDescribedPublishedProductionReleaseById(
+    paths: PreparedProductionDeliveryPaths,
+    releaseId: string
+): Promise<DescribedPublishedProductionRelease> {
+    try {
+        if (!commitShaPattern.test(releaseId)) throw productionReleaseFailure();
+        await assertPrivateReleasesDirectory(paths.releasesDirectory);
+        const releaseRoot = path.join(paths.releasesDirectory, releaseId);
+        const descriptor = await verifyProductionReleaseDescriptorIdentity(releaseRoot);
+        if (descriptor.releaseId !== releaseId) throw productionReleaseFailure();
+        const records = await inventoryReleaseArtifactTree(releaseRoot);
+        await assertReleaseTreeMode(releaseRoot, records, true);
+        return Object.freeze({ descriptor, releaseRoot });
     } catch {
         throw productionReleaseFailure();
     }

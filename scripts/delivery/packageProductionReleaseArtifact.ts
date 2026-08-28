@@ -7,6 +7,10 @@ import {
     productionReleaseArtifactReceiptSchema as receiptSchema,
     type ProductionReleaseArtifactReceipt,
 } from "../../src/shared/productionReleaseArtifactReceipt.ts";
+import {
+    parseProductionReleaseDescriptor,
+    productionReleaseDescriptorFileName,
+} from "../../src/shared/productionReleaseDescriptor.ts";
 import { releaseManifestSchema } from "../../src/shared/releaseManifest.ts";
 
 export { productionReleaseArtifactReceiptSchema } from "../../src/shared/productionReleaseArtifactReceipt.ts";
@@ -93,13 +97,22 @@ export async function packageProductionReleaseArtifact(
     );
     const selectedRuntimeVersion = selectedRuntimeVersionFile.trim();
     const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
+    const descriptorBytes = await readFile(
+        path.join(releaseRoot, productionReleaseDescriptorFileName)
+    );
     const manifest = v.parse(
         releaseManifestSchema,
         JSON.parse(manifestBytes.toString("utf8"))
     );
+    const descriptor = parseProductionReleaseDescriptor(
+        JSON.parse(descriptorBytes.toString("utf8")) as unknown
+    );
     if (
         manifest.source.commitSha !== releaseId ||
-        manifest.runtime.version !== selectedRuntimeVersion
+        manifest.runtime.version !== selectedRuntimeVersion ||
+        descriptor.releaseId !== releaseId ||
+        descriptor.runtime.revision !== manifest.runtime.revision ||
+        descriptor.runtime.version !== manifest.runtime.version
     ) {
         throw new Error(failureMessage);
     }
@@ -116,6 +129,7 @@ export async function packageProductionReleaseArtifact(
             },
             formatVersion: 1,
             releaseId,
+            releaseDescriptorSha256: sha256(descriptorBytes),
             releaseManifestSha256: sha256(manifestBytes),
             runtime: {
                 revision: manifest.runtime.revision,

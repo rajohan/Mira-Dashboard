@@ -27,7 +27,7 @@ import {
     prepareProductionArtifactAdmission,
     type ProductionServiceController,
 } from "./productionReleaseActivation.ts";
-import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type { DescribedPublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import { productionHostProvisioningRoot } from "./provisioning/host-operations/policy.ts";
@@ -368,12 +368,18 @@ describe("production artifact pre-admission lifecycle", () => {
                             {
                                 verifyRelease: (_verifiedPaths, releaseId) =>
                                     Promise.resolve({
-                                        manifest: manifest(releaseId, staleRuntime),
+                                        descriptor: {
+                                            releaseId,
+                                            runtime: {
+                                                revision: staleRuntime,
+                                                version: runtimeVersion,
+                                            },
+                                        },
                                         releaseRoot: path.join(
                                             retentionPaths.releasesDirectory,
                                             releaseId
                                         ),
-                                    } as PublishedProductionRelease),
+                                    } as DescribedPublishedProductionRelease),
                                 verifyRuntime: (_verifiedPaths, revision) =>
                                     Promise.resolve({
                                         executable: path.join(

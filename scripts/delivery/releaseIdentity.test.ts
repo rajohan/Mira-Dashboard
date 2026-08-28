@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { databaseSchemaTarget } from "../../src/shared/databaseMigrationManifest.ts";
+import {
+    parseProductionReleaseDescriptor,
+    serializeProductionReleaseDescriptor,
+} from "../../src/shared/productionReleaseDescriptor.ts";
 import { serializeReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { compareStrings } from "../../src/shared/validation.ts";
 import type { BuildSourceIdentity } from "../buildSourceIdentity.ts";
@@ -321,7 +325,9 @@ describe("release identity", () => {
         ]);
         const completeInventory = await inventoryReleaseArtifactTree(fixture.releaseRoot);
         const artifacts = completeInventory.filter(
-            ({ path: artifactPath }) => artifactPath !== "release-manifest.json"
+            ({ path: artifactPath }) =>
+                artifactPath !== "release-manifest.json" &&
+                artifactPath !== "release-descriptor.json"
         );
         const releaseOwnedMigration = Object.freeze({
             id: migrationId,
@@ -338,6 +344,33 @@ describe("release identity", () => {
                 migrations: [...persisted.migrations, releaseOwnedMigration].toSorted(
                     (left, right) => compareStrings(left.id, right.id)
                 ),
+            })
+        );
+        const descriptorPath = path.join(fixture.releaseRoot, "release-descriptor.json");
+        const descriptor = parseProductionReleaseDescriptor(
+            JSON.parse(await readFile(descriptorPath, "utf8")) as unknown
+        );
+        const descriptorInventory = await inventoryReleaseArtifactTree(
+            fixture.releaseRoot
+        );
+        const descriptorArtifacts = descriptorInventory.filter(
+            ({ path: artifactPath }) => artifactPath !== "release-descriptor.json"
+        );
+        await writeFile(
+            descriptorPath,
+            serializeProductionReleaseDescriptor({
+                ...descriptor,
+                artifacts: descriptorArtifacts,
+                deliveryExecutor: descriptorArtifacts.find(
+                    ({ path: artifactPath }) =>
+                        artifactPath === "server/productionDelivery.js"
+                ),
+                runtime: {
+                    ...descriptor.runtime,
+                    executable: descriptorArtifacts.find(
+                        ({ path: artifactPath }) => artifactPath === "runtime/bun"
+                    ),
+                },
             })
         );
 

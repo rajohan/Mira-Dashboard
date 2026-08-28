@@ -27,10 +27,10 @@ import { withDeploymentLease } from "../../../../scripts/delivery/deploymentLeas
 import { prepareProductionDeliveryDirectories } from "../../../../scripts/delivery/productionDeliveryFilesystem.ts";
 import {
     activatePublishedProductionRelease,
+    type ActivationRelease,
     type ProductionServiceController,
 } from "../../../../scripts/delivery/productionReleaseActivation.ts";
 import { publishProductionRelease } from "../../../../scripts/delivery/productionReleasePublication.ts";
-import type { PublishedProductionRelease } from "../../../../scripts/delivery/productionReleasePublication.ts";
 import { installProductionRuntime } from "../../../../scripts/delivery/productionRuntime.ts";
 import type { InstalledProductionRuntime } from "../../../../scripts/delivery/productionRuntime.ts";
 import { pointProductionProcessesAtRelease } from "../../../../scripts/delivery/productionRuntimePointers.ts";
@@ -343,7 +343,7 @@ class DirectProcessController implements ProductionServiceController {
     }
 
     async start(
-        release: PublishedProductionRelease,
+        release: ActivationRelease,
         runtime: InstalledProductionRuntime
     ): Promise<void> {
         await this.stop();

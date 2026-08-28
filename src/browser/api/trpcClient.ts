@@ -222,7 +222,6 @@ function contractAllowsSecurityVerification(
     reason: ContractAuthenticationErrorReason
 ): boolean {
     return (
-        contract.access.kind === "recent-auth" &&
         contract.errors.includes("FORBIDDEN") &&
         contract.errorReasons?.includes(reason) === true
     );

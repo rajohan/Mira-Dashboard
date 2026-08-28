@@ -75,7 +75,7 @@ function terminalInspection(): Extract<
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v3",
+        protocol: "delivery.production.v4",
         runId: transitionId,
         transitionId,
     });
@@ -345,6 +345,14 @@ describe("Delivery production startup recovery", () => {
                         },
                         projectRoot: "/srv/mira-dashboard",
                         readActive: () => Promise.resolve(inspection.record),
+                        readOwner: () =>
+                            Promise.resolve({
+                                formatVersion: 1 as const,
+                                releaseId: inspection.record.capsule.executor.releaseId,
+                                runtimeRevision:
+                                    inspection.record.capsule.executor.runtimeRevision,
+                                transitionId: inspection.record.capsule.transitionId,
+                            }),
                         readinessUrl: "http://127.0.0.1:3100/api/health/ready",
                     });
 

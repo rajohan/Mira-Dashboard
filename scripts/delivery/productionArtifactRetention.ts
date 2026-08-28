@@ -15,8 +15,8 @@ import path from "node:path";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import {
-    loadPublishedProductionReleaseById,
-    type PublishedProductionRelease,
+    loadDescribedPublishedProductionReleaseById,
+    type DescribedPublishedProductionRelease,
 } from "./productionReleasePublication.ts";
 import {
     inspectInstalledProductionRuntime,
@@ -70,7 +70,7 @@ export interface ProductionArtifactRetentionDependencies {
     readonly verifyRelease?: (
         paths: PreparedProductionDeliveryPaths,
         releaseId: string
-    ) => Promise<PublishedProductionRelease>;
+    ) => Promise<DescribedPublishedProductionRelease>;
     readonly verifyRuntime?: (
         paths: PreparedProductionDeliveryPaths,
         revision: string,
@@ -683,7 +683,7 @@ export async function retainProductionArtifacts(
         references.map(({ runtimeRevision }) => runtimeRevision)
     );
     const verifyRelease =
-        dependencies.verifyRelease ?? loadPublishedProductionReleaseById;
+        dependencies.verifyRelease ?? loadDescribedPublishedProductionReleaseById;
     const verifyRuntime = dependencies.verifyRuntime ?? inspectInstalledProductionRuntime;
     const readMountId = dependencies.readMountId ?? readDescriptorMountId;
     const releases = await openPrivateRoot(paths.releasesDirectory, readMountId);
@@ -700,13 +700,13 @@ export async function retainProductionArtifacts(
                   published: new Map<string, ManagedEntry>(),
               });
 
-        const verifiedReleases = new Map<string, PublishedProductionRelease>();
+        const verifiedReleases = new Map<string, DescribedPublishedProductionRelease>();
         for (const [releaseId, entry] of releaseInventory.published) {
             await validateManagedTree(releases, entry);
             const release = await verifyRelease(paths, releaseId);
             if (
                 release.releaseRoot !== path.join(paths.releasesDirectory, releaseId) ||
-                release.manifest.source.commitSha !== releaseId
+                release.descriptor.releaseId !== releaseId
             ) {
                 throw failure();
             }
@@ -714,7 +714,7 @@ export async function retainProductionArtifacts(
         }
         for (const reference of references) {
             const release = verifiedReleases.get(reference.releaseId);
-            if (release?.manifest.runtime.revision !== reference.runtimeRevision) {
+            if (release?.descriptor.runtime.revision !== reference.runtimeRevision) {
                 throw failure();
             }
         }
@@ -738,10 +738,10 @@ export async function retainProductionArtifacts(
             verifiedRuntimes.set(revision, runtime);
         }
         for (const release of verifiedReleases.values()) {
-            const runtime = verifiedRuntimes.get(release.manifest.runtime.revision);
+            const runtime = verifiedRuntimes.get(release.descriptor.runtime.revision);
             if (
                 !runtime ||
-                release.manifest.runtime.version !== runtime.identity.version
+                release.descriptor.runtime.version !== runtime.identity.version
             ) {
                 throw failure();
             }

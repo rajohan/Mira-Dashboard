@@ -94,7 +94,7 @@ function capsule(
             releaseId: "e".repeat(40),
             runtimeRevision: "b".repeat(40),
         },
-        protocol: "delivery.production.v3",
+        protocol: "delivery.production.v4",
         runId: transitionId,
         transitionId,
     };
@@ -117,10 +117,29 @@ function targetActivation() {
 }
 
 describe("delivery production operation protocol", () => {
+    test("preserves a dedicated automation enqueue actor", () => {
+        const value = capsule();
+        const parsed = parseDeliveryProductionOperationCapsule({
+            ...value,
+            enqueue: {
+                ...value.enqueue,
+                actor: {
+                    authenticatorId: "019fd974-54a2-74dd-a64b-d4186f8d8823",
+                    id: "production-deploy",
+                    kind: "automation",
+                },
+            },
+        });
+        expect(parsed.enqueue.actor).toEqual({
+            authenticatorId: "019fd974-54a2-74dd-a64b-d4186f8d8823",
+            id: "production-deploy",
+            kind: "automation",
+        });
+    });
     test("canonically parses, freezes, and serializes the secret-free rehydration capsule", () => {
         const parsed = parseDeliveryProductionOperationCapsule(capsule());
 
-        expect(parsed.protocol).toBe("delivery.production.v3");
+        expect(parsed.protocol).toBe("delivery.production.v4");
         expect(Object.isFrozen(parsed)).toBe(true);
         expect(Object.isFrozen(parsed.enqueue.actor)).toBe(true);
         expect(Object.isFrozen(parsed.enqueue.payload)).toBe(true);
@@ -244,7 +263,7 @@ describe("delivery production operation protocol", () => {
                 updatedAtMs: 2000,
             })
         ).toThrow("Delivery production operation is invalid");
-        expect(deliveryProductionOperationPhases).toHaveLength(9);
+        expect(deliveryProductionOperationPhases).toHaveLength(11);
         expect(
             retainedDeliveryProductionReceiptIds({
                 currentTransitionId: transitionId,

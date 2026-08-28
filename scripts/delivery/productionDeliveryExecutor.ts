@@ -31,6 +31,11 @@ import { withDeploymentLease, type DashboardDeploymentLease } from "./deployment
 import { loadProductionActivationState } from "./productionActivationState.ts";
 import { assertProductionArtifactCapacity } from "./productionArtifactCapacity.ts";
 import {
+    clearProductionDeliveryExecutorOwner,
+    commitProductionDeliveryExecutorOwner,
+    loadProductionDeliveryExecutorOwnerState,
+} from "./productionDeliveryExecutorOwnerState.ts";
+import {
     prepareProductionDeliveryDirectories,
     type PreparedProductionDeliveryPaths,
 } from "./productionDeliveryFilesystem.ts";
@@ -53,6 +58,8 @@ import { admitProductionReleasePreparation } from "./productionReleasePreparatio
 import {
     discardOwnedProductionReleaseCandidate,
     loadPublishedProductionRelease,
+    loadDescribedPublishedProductionReleaseById,
+    publishDescribedProductionRelease,
     publishProductionRelease,
     type PublishedProductionRelease,
 } from "./productionReleasePublication.ts";
@@ -137,6 +144,10 @@ const argumentsSchema = v.variant("operation", [
         projectRoot: absoluteProjectRootSchema,
     }),
     v.strictObject({
+        operation: v.literal("inspect-owner"),
+        projectRoot: absoluteProjectRootSchema,
+    }),
+    v.strictObject({
         operation: v.literal("clear"),
         projectRoot: absoluteProjectRootSchema,
         transitionId: lowercaseUuidV7Schema(executorUsage),
@@ -179,6 +190,7 @@ export interface ProductionDeliveryExecutorDependencies {
     readonly installRuntime?: typeof installProductionRuntime;
     readonly nowMs?: () => number;
     readonly publishRelease?: typeof publishProductionRelease;
+    readonly publishDescribedRelease?: typeof publishDescribedProductionRelease;
     readonly preparePublishedRelease?: typeof preparePublishedProductionRelease;
     readonly preparationCapacityAdmission?: (checkoutRoot: string) => Promise<void>;
     readonly resolveSourceIdentity?: typeof resolveBuildSourceIdentity;
@@ -188,6 +200,15 @@ export interface ProductionDeliveryExecutorDependencies {
     ) => Promise<void>;
     readonly verifyPreviewTailscaleOperator?: () => Promise<void>;
     readonly verifyLocalRelease?: typeof verifyReleaseIdentity;
+    readonly verifyExecutorOwnerTarget?: (
+        projectRoot: string,
+        releaseId: string,
+        runtimeRevision: string
+    ) => Promise<void>;
+}
+
+class TargetExecutorHandoff extends Error {
+    override readonly name = "TargetExecutorHandoff";
 }
 
 function failure(): Error {
@@ -492,6 +513,27 @@ async function loadCurrentArtifacts(
     requireProtocol(release);
     const runtime = await loadInstalledProductionRuntime(paths, release.manifest.runtime);
     return Object.freeze({ release, runtime });
+}
+
+async function resolveDescriptorVerifiedExecutor(
+    paths: PreparedProductionDeliveryPaths,
+    releaseId: string,
+    runtimeRevision: string
+) {
+    const release = await loadDescribedPublishedProductionReleaseById(paths, releaseId);
+    if (release.descriptor.runtime.revision !== runtimeRevision) throw failure();
+    const runtime = await loadInstalledProductionRuntime(paths, {
+        revision: release.descriptor.runtime.revision,
+        version: release.descriptor.runtime.version,
+    });
+    return Object.freeze({
+        executor: path.join(
+            release.releaseRoot,
+            release.descriptor.deliveryExecutor.path
+        ),
+        releaseRoot: release.releaseRoot,
+        runtimeExecutable: runtime.executable,
+    });
 }
 
 async function pathState(candidate: string): Promise<"missing" | "present"> {
@@ -808,6 +850,22 @@ export async function runProductionDeliveryExecutorUnderLease(
     }
     if (inspection.state === "terminal") return inspection.record;
 
+    let ownerState = await loadProductionDeliveryExecutorOwnerState(lease, paths);
+    if (ownerState.owner === undefined) {
+        ownerState = await commitProductionDeliveryExecutorOwner(
+            lease,
+            paths,
+            ownerState,
+            {
+                formatVersion: 1,
+                releaseId: inspection.record.capsule.executor.releaseId,
+                runtimeRevision: inspection.record.capsule.executor.runtimeRevision,
+                transitionId: inspection.transitionId,
+            }
+        );
+    }
+    if (ownerState.owner?.transitionId !== inspection.transitionId) throw failure();
+
     await (
         dependencies.verifyPreviewTailscaleOperator ?? verifyPreviewTailscaleOperator
     )().catch(() => {
@@ -819,6 +877,94 @@ export async function runProductionDeliveryExecutorUnderLease(
         record = await advanceTo(lease, paths, record, "executor-confirmed", nowMs);
     }
     if (record.phase === "intent-recorded") throw failure();
+
+    const targetIdentity = record.capsule.cas.target;
+    const currentOwner = ownerState.owner;
+    if (
+        dependencies.loadArtifacts === undefined &&
+        (currentOwner?.releaseId !== targetIdentity.releaseId ||
+            currentOwner.runtimeRevision !== targetIdentity.runtimeRevision)
+    ) {
+        const publishedRoot = path.join(
+            paths.releasesDirectory,
+            targetIdentity.releaseId
+        );
+        let described;
+        if ((await pathState(publishedRoot)) === "present") {
+            described = await loadDescribedPublishedProductionReleaseById(
+                paths,
+                targetIdentity.releaseId
+            );
+        } else {
+            if (
+                options.artifactSource !== "published-release" ||
+                record.capsule.enqueue.payload.operation !== "deploy"
+            ) {
+                throw failure();
+            }
+            const checkoutRoot = path.join(options.projectRoot, "production/checkout");
+            await (
+                dependencies.preparationCapacityAdmission ??
+                ((root) =>
+                    admitProductionReleasePreparation(
+                        root,
+                        productionHostProvisioningRoot
+                    ))
+            )(checkoutRoot);
+            const admitted = await (
+                dependencies.preparePublishedRelease ?? preparePublishedProductionRelease
+            )(
+                targetIdentity.releaseId,
+                checkoutRoot,
+                productionBootstrapDependencies,
+                undefined,
+                undefined,
+                record.capsule.enqueue.payload.release,
+                { stageRootAuthority: false }
+            );
+            try {
+                described = await (
+                    dependencies.publishDescribedRelease ??
+                    publishDescribedProductionRelease
+                )(lease, paths, admitted.releaseRoot);
+            } finally {
+                await (
+                    dependencies.discardCandidate ??
+                    discardOwnedProductionReleaseCandidate
+                )(
+                    path.dirname(admitted.releaseRoot),
+                    admitted.releaseRoot,
+                    targetIdentity.releaseId
+                );
+            }
+        }
+        if (
+            described.descriptor.releaseId !== targetIdentity.releaseId ||
+            described.descriptor.runtime.revision !== targetIdentity.runtimeRevision
+        ) {
+            throw failure();
+        }
+        await (dependencies.installRuntime ?? installProductionRuntime)(
+            lease,
+            paths,
+            described.descriptor.runtime,
+            { sourceExecutable: path.join(described.releaseRoot, "runtime/bun") }
+        );
+        record = await advanceTo(lease, paths, record, "target-executor-admitted", nowMs);
+        ownerState = await commitProductionDeliveryExecutorOwner(
+            lease,
+            paths,
+            ownerState,
+            {
+                formatVersion: 1,
+                releaseId: targetIdentity.releaseId,
+                runtimeRevision: targetIdentity.runtimeRevision,
+                transitionId: record.capsule.transitionId,
+            }
+        );
+        await advanceTo(lease, paths, record, "target-executor-owner-transferred", nowMs);
+        throw new TargetExecutorHandoff();
+    }
 
     let services: ProductionServiceController | undefined;
     try {
@@ -921,6 +1067,42 @@ export async function runProductionDeliveryExecutorUnderLease(
                     verifyProductionRunBeforeSnapshot
                 )(paths, record.capsule);
             }
+            if (phase === "target-smoke-verified") {
+                const verifyOwnerTarget =
+                    dependencies.verifyExecutorOwnerTarget ??
+                    (dependencies.loadArtifacts === undefined
+                        ? async (
+                              projectRoot: string,
+                              releaseId: string,
+                              runtimeRevision: string
+                          ) => {
+                              if (projectRoot !== options.projectRoot) throw failure();
+                              await resolveDescriptorVerifiedExecutor(
+                                  paths,
+                                  releaseId,
+                                  runtimeRevision
+                              );
+                          }
+                        : undefined);
+                if (verifyOwnerTarget) {
+                    await verifyOwnerTarget(
+                        options.projectRoot,
+                        record.capsule.cas.target.releaseId,
+                        record.capsule.cas.target.runtimeRevision
+                    );
+                }
+                ownerState = await commitProductionDeliveryExecutorOwner(
+                    lease,
+                    paths,
+                    ownerState,
+                    {
+                        formatVersion: 1,
+                        releaseId: record.capsule.cas.target.releaseId,
+                        runtimeRevision: record.capsule.cas.target.runtimeRevision,
+                        transitionId: record.capsule.transitionId,
+                    }
+                );
+            }
         };
         const activation = await Effect.runPromise(
             (dependencies.activate ?? activatePublishedProductionRelease)(
@@ -947,6 +1129,25 @@ export async function runProductionDeliveryExecutorUnderLease(
         const terminal = await inspectDeliveryProductionOperation(lease, paths);
         if (terminal.state === "terminal") throw failure();
         const recovery = await loadActivation(lease, paths).catch(() => null);
+        const recoveryOwner = activationMatchesTarget(recovery?.record, record)
+            ? record.capsule.cas.target
+            : record.capsule.cas.current;
+        if (
+            ownerState.owner?.releaseId !== recoveryOwner.releaseId ||
+            ownerState.owner.runtimeRevision !== recoveryOwner.runtimeRevision
+        ) {
+            ownerState = await commitProductionDeliveryExecutorOwner(
+                lease,
+                paths,
+                ownerState,
+                {
+                    formatVersion: 1,
+                    releaseId: recoveryOwner.releaseId,
+                    runtimeRevision: recoveryOwner.runtimeRevision,
+                    transitionId: record.capsule.transitionId,
+                }
+            );
+        }
         if (
             services !== undefined &&
             recovery?.record !== undefined &&
@@ -985,9 +1186,51 @@ export async function runProductionDeliveryExecutor(
 ): Promise<DeliveryProductionTerminalRecord> {
     const state = await prepareProtectedProductionStatePath(options.projectRoot);
     const paths = await prepareProductionDeliveryDirectories(state);
-    return withDeploymentLease(paths.stateDirectory, (lease) =>
-        runProductionDeliveryExecutorUnderLease(lease, paths, options, dependencies)
-    );
+    try {
+        return await withDeploymentLease(paths.stateDirectory, (lease) =>
+            runProductionDeliveryExecutorUnderLease(lease, paths, options, dependencies)
+        );
+    } catch (error) {
+        if (!(error instanceof TargetExecutorHandoff)) throw error;
+        const active = await inspectActiveProductionDeliveryOperation(
+            options.projectRoot
+        );
+        if (active.state !== "in-progress") throw failure();
+        const owner = await inspectProductionDeliveryExecutorOwner(options.projectRoot);
+        if (owner === null || owner.transitionId !== options.transitionId) {
+            throw failure();
+        }
+        const target = await resolveDescriptorVerifiedExecutor(
+            paths,
+            active.record.capsule.cas.target.releaseId,
+            owner.runtimeRevision
+        );
+        const child = Bun.spawn(
+            [
+                target.runtimeExecutable,
+                target.executor,
+                `--artifact-source=${options.artifactSource}`,
+                "--operation=cutover",
+                `--project-root=${options.projectRoot}`,
+                `--readiness-url=${options.readinessUrl}`,
+                `--transition=${options.transitionId}`,
+            ],
+            {
+                cwd: target.releaseRoot,
+                env: { ...process.env },
+                stderr: "inherit",
+                stdout: "pipe",
+            }
+        );
+        const exitCode = await child.exited;
+        if (exitCode !== 0) throw failure();
+        const inspection = await inspectProductionDeliveryOperation(
+            options.projectRoot,
+            options.transitionId
+        );
+        if (inspection.state !== "terminal") throw failure();
+        return inspection.record;
+    }
 }
 
 /**
@@ -1019,12 +1262,36 @@ export async function prepareProductionDeliveryOperation(
             return existing.record;
         }
         if (existing.state !== "missing") throw failure();
-        return createDeliveryProductionOperation(
+        const ownerState = await loadProductionDeliveryExecutorOwnerState(lease, paths);
+        if (ownerState.owner !== undefined) throw failure();
+        const record = await createDeliveryProductionOperation(
             lease,
             paths,
             capsule,
             Math.max(nowMs(), capsule.enqueue.queuedAtMs)
         );
+        await commitProductionDeliveryExecutorOwner(lease, paths, ownerState, {
+            formatVersion: 1,
+            releaseId: capsule.executor.releaseId,
+            runtimeRevision: capsule.executor.runtimeRevision,
+            transitionId: capsule.transitionId,
+        });
+        return record;
+    });
+}
+
+/**
+ * Reads the stable recovery-owner transport record without parsing a foreign manifest.
+ * @param projectRoot Canonical Dashboard project root.
+ * @returns Current durable executor owner, or null when no transition owns one.
+ */
+export async function inspectProductionDeliveryExecutorOwner(projectRoot: string) {
+    const canonicalRoot = v.parse(absoluteProjectRootSchema, projectRoot);
+    const state = await prepareProtectedProductionStatePath(canonicalRoot);
+    const paths = await prepareProductionDeliveryDirectories(state);
+    return withDeploymentLease(paths.stateDirectory, async (lease) => {
+        const owner = await loadProductionDeliveryExecutorOwnerState(lease, paths);
+        return owner.owner ?? null;
     });
 }
 
@@ -1091,6 +1358,9 @@ export async function clearProductionDeliveryOperationMarker(
         );
         if (inspection.state !== "terminal") throw failure();
         await clearDeliveryProductionOperation(lease, paths, inspection.record);
+        const owner = await loadProductionDeliveryExecutorOwnerState(lease, paths);
+        if (owner.owner?.transitionId !== canonicalTransition) throw failure();
+        await clearProductionDeliveryExecutorOwner(lease, paths, owner);
         return inspection.record;
     });
 }
@@ -1140,6 +1410,11 @@ if (import.meta.main) {
                 options.projectRoot
             );
             process.stdout.write(`${JSON.stringify(inspection)}\n`);
+        } else if (options.operation === "inspect-owner") {
+            const owner = await inspectProductionDeliveryExecutorOwner(
+                options.projectRoot
+            );
+            process.stdout.write(`${JSON.stringify(owner)}\n`);
         } else if (options.operation === "clear") {
             const receipt = await clearProductionDeliveryOperationMarker(
                 options.projectRoot,

@@ -386,6 +386,44 @@ describe("Delivery service", () => {
         ]);
     });
 
+    test("derives the automation deploy from the same fresh authoritative snapshots", () => {
+        const remoteHeadSha = "d".repeat(40);
+        const value = payload();
+        value.checkout = { ...value.checkout, remoteHeadSha };
+        const candidate = publishedReleaseAuthority(remoteHeadSha);
+        value.releases = { ...value.releases, candidate };
+        const next = fixture(value);
+        const automationContext = {
+            actor: {
+                authenticatorId: "018f6f50-6a9e-7b88-8000-000000000012",
+                id: "production-deploy",
+                kind: "automation" as const,
+            },
+            reauthorize() {},
+            requestId: "automation-deploy-request",
+        };
+
+        expect(
+            next.service.deployCurrent(
+                {
+                    confirmation: "deploy-delivery-main",
+                    idempotencyKey: "A".repeat(43),
+                },
+                automationContext
+            )
+        ).resolves.toMatchObject({ operation: "deploy", queued: true });
+        expect(next.queued).toEqual([
+            {
+                activationRevision: sourceRevision,
+                checkoutRevision: sourceRevision,
+                expectedMainHeadSha: remoteHeadSha,
+                operation: "deploy",
+                release: candidate,
+                sourceRevision,
+            },
+        ]);
+    });
+
     test("rejects a cached release candidate from a different remote main head", async () => {
         const remoteHeadSha = "d".repeat(40);
         const candidate = publishedReleaseAuthority("e".repeat(40));
