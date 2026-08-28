@@ -33,6 +33,22 @@ describe("operation tracker storage", () => {
         expect(readStoredOperations()).toEqual([operation]);
     });
 
+    test("does not publish a redundant update for an empty owned store", () => {
+        const onChange = mock(() => {});
+        reconcileTrackedOperationsIdentity("authenticated:session-a");
+        globalThis.addEventListener(trackedOperationsStorageChangedEvent, onChange);
+        try {
+            reconcileTrackedOperationsIdentity("authenticated:session-a");
+
+            expect(onChange).not.toHaveBeenCalled();
+        } finally {
+            globalThis.removeEventListener(
+                trackedOperationsStorageChangedEvent,
+                onChange
+            );
+        }
+    });
+
     test("rejects unowned operations when the first identity resolves", () => {
         storeOperations([operation]);
 

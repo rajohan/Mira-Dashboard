@@ -68,7 +68,9 @@ export function clearTrackedOperations(): void {
 export function reconcileTrackedOperationsIdentity(authenticationIdentity: string): void {
     const state = readStoredState();
     if (state?.authenticationIdentity === authenticationIdentity) {
-        dispatchTrackedOperationsStorageChanged();
+        if (state.operations.length > 0) {
+            dispatchTrackedOperationsStorageChanged();
+        }
         return;
     }
     const storedOperationsExist = (state?.operations.length ?? 0) > 0;
