@@ -8,6 +8,7 @@ import {
     type DockerUpdaterService,
     type DockerUpdaterStatus,
 } from "../../contracts/docker.ts";
+import type { DockerJobProgressReporter } from "../../contracts/dockerWorker.ts";
 import type { DockerComposeDiscoveryResult } from "./composeDiscovery.ts";
 import {
     lookupDockerRegistryImage,
@@ -32,6 +33,7 @@ export interface DockerUpdaterScanOptions {
     readonly lookup?: DockerUpdaterRegistryLookup;
     readonly lookupConcurrency?: number;
     readonly nowMs?: () => number;
+    readonly reportProgress?: DockerJobProgressReporter;
     readonly platform?: string;
     readonly registry?: Omit<DockerRegistryClientOptions, "signal">;
 }
@@ -179,6 +181,7 @@ export async function scanDockerUpdates(
         ])
     );
     if (publicByIdentity.size !== payload.updaterServices.length) fail();
+    let completed = 0;
     const scans = await mapConcurrent<(typeof compose.services)[number], ServiceScan>(
         compose.services,
         concurrency,
@@ -186,47 +189,56 @@ export async function scanDockerUpdates(
             signal?.throwIfAborted();
             const service = publicByIdentity.get(`${source.project}\0${source.service}`);
             if (service === undefined) fail();
+            let scan: ServiceScan;
             if (
                 !source.enabled ||
                 source.image === undefined ||
                 source.tagPolicy === undefined
             ) {
-                return Object.freeze({ service, unavailable: false });
-            }
-            if (!hasEligibleRuntime(payload, source.project, source.service)) {
-                return Object.freeze({
+                scan = Object.freeze({ service, unavailable: false });
+            } else if (hasEligibleRuntime(payload, source.project, source.service)) {
+                try {
+                    const candidate = await lookup({
+                        image: source.image,
+                        platform,
+                        policy: source.tagPolicy,
+                        ...(signal === undefined ? {} : { signal }),
+                    });
+                    signal?.throwIfAborted();
+                    const status: DockerUpdaterStatus = updateIsAvailable(
+                        source.image,
+                        source.pinMode,
+                        candidate
+                    )
+                        ? {
+                              candidateImage: candidateReference(
+                                  source.image,
+                                  source.pinMode,
+                                  candidate
+                              ),
+                              state: "update-available",
+                          }
+                        : { state: "current" };
+                    scan = Object.freeze({ service, status, unavailable: false });
+                } catch (error) {
+                    if (signal?.aborted === true) throw error;
+                    scan = Object.freeze({ service, unavailable: true });
+                }
+            } else {
+                scan = Object.freeze({
                     service,
                     status: { state: "not-checked" as const },
                     unavailable: false,
                 });
             }
-            try {
-                const candidate = await lookup({
-                    image: source.image,
-                    platform,
-                    policy: source.tagPolicy,
-                    ...(signal === undefined ? {} : { signal }),
-                });
-                signal?.throwIfAborted();
-                const status: DockerUpdaterStatus = updateIsAvailable(
-                    source.image,
-                    source.pinMode,
-                    candidate
-                )
-                    ? {
-                          candidateImage: candidateReference(
-                              source.image,
-                              source.pinMode,
-                              candidate
-                          ),
-                          state: "update-available",
-                      }
-                    : { state: "current" };
-                return Object.freeze({ service, status, unavailable: false });
-            } catch (error) {
-                if (signal?.aborted === true) throw error;
-                return Object.freeze({ service, unavailable: true });
-            }
+            completed += 1;
+            await options.reportProgress?.({
+                completed,
+                message: `Checked ${source.project}/${source.service}`,
+                phase: "scanning",
+                total: compose.services.length,
+            });
+            return scan;
         }
     );
     if (scans.length !== compose.services.length) fail();

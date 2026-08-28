@@ -27,6 +27,7 @@ import {
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
 } from "./actionRegistry.ts";
+import { reportJobProgress } from "./progressReporting.ts";
 
 export type { DeliveryJobExecutionPort } from "../../../contracts/deliveryWorker.ts";
 
@@ -175,9 +176,17 @@ export function createDeliveryOverviewJobExecutor(
                 );
                 const startedAt = performance.now();
                 try {
+                    await reportJobProgress(context, {
+                        message: "Collecting Delivery status",
+                        phase: "collecting",
+                    });
                     const refreshed = parseRefreshResults(
                         await port.refresh(previousSections(port), signal)
                     );
+                    await reportJobProgress(context, {
+                        message: "Saving Delivery status",
+                        phase: "saving",
+                    });
                     if (!(await persistRefresh(context, refreshed, elapsed(startedAt)))) {
                         throw new Error("Delivery overview refresh was incomplete");
                     }
@@ -209,6 +218,10 @@ function operationExecutor(
                 }
                 const startedAt = performance.now();
                 const previous = previousSections(port);
+                await reportJobProgress(context, {
+                    message: "Executing Delivery operation",
+                    phase: "executing",
+                });
                 const result: DeliveryJobOperationResult = await port.execute(
                     payload,
                     signal,
@@ -220,6 +233,10 @@ function operationExecutor(
                 if (result.outcome === "unknown-outcome") {
                     throw new JobActionOutcomeUnknownError();
                 }
+                await reportJobProgress(context, {
+                    message: "Refreshing Delivery status",
+                    phase: "settling",
+                });
                 const postSettlementWarnings = await refreshAfterSettlement(
                     port,
                     context,

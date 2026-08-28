@@ -17,6 +17,7 @@ import type {
 import {
     taskHeartbeatAgentAssignee,
     taskHeartbeatAgentPriorities,
+    taskHeartbeatAgentStatus,
     taskHeartbeatOwnerAssignee,
     taskHeartbeatOwnerStatus,
 } from "../tasks/heartbeatPolicy.ts";
@@ -63,11 +64,15 @@ export function projectCacheHeartbeatTasks(
             const relevance = cacheHeartbeatTaskRelevanceValues.filter((value) => {
                 switch (value) {
                     case "automation-linked": {
-                        return row.automation !== undefined;
+                        return (
+                            row.automation !== undefined &&
+                            row.status === taskHeartbeatAgentStatus
+                        );
                     }
                     case "agent-priority": {
                         return (
                             row.assignee === taskHeartbeatAgentAssignee &&
+                            row.status === taskHeartbeatAgentStatus &&
                             taskHeartbeatAgentPriorities.some(
                                 (priority) => priority === row.priority
                             )
@@ -99,6 +104,7 @@ export function projectCacheHeartbeatTasks(
                 status: row.status,
             };
         })
+        .filter(({ relevance }) => relevance.length > 0)
         .toSorted((left, right) => compareStrings(left.id, right.id));
     return {
         items,

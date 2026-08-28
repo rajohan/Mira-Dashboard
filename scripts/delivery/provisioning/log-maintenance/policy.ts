@@ -13,6 +13,17 @@ export const logMaintenanceProvisioningArtifacts = Object.freeze([
         mode: 0o755,
     }),
     Object.freeze({
+        artifactPath:
+            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-log-access",
+        destinationPath: "/usr/local/libexec/mira-dashboard-managed-log-access",
+        mode: 0o755,
+    }),
+    Object.freeze({
+        artifactPath: "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
+        destinationPath: "/etc/systemd/system/mira-dashboard-managed-log-access.service",
+        mode: 0o644,
+    }),
+    Object.freeze({
         artifactPath: "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
         destinationPath: "/etc/systemd/system/mira-dashboard-log-maintenance@.service",
         mode: 0o644,

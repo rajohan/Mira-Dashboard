@@ -119,6 +119,15 @@ export interface DockerJobUpdaterResult {
     readonly updatedCount: number;
 }
 
+export interface DockerJobProgress {
+    readonly completed?: number;
+    readonly message: string;
+    readonly phase: "discovering" | "reconciling" | "scanning" | "settling" | "updating";
+    readonly total?: number;
+}
+
+export type DockerJobProgressReporter = (progress: DockerJobProgress) => Promise<void>;
+
 /** Worker authority used by durable jobs; it exposes no command, path, env, or raw output. */
 export interface DockerJobExecutionPort {
     readonly execute: (
@@ -139,11 +148,13 @@ export interface DockerJobExecutionPort {
     ) => Promise<DockerOverviewCachePayload>;
     readonly runUpdater: (
         input: DockerJobUpdaterInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DockerJobProgressReporter
     ) => Promise<DockerJobUpdaterResult>;
     readonly scan: (
         previous?: unknown,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DockerJobProgressReporter
     ) => Promise<DockerOverviewCachePayload>;
 }
 

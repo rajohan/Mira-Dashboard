@@ -784,8 +784,8 @@ export function cacheHeartbeatTasksAreConsistent(
                 item.relevance.includes("automation-linked") ===
                     (item.automation !== undefined) &&
                 (!item.relevance.includes("agent-priority") ||
-                    item.priority === "medium" ||
-                    item.priority === "high") &&
+                    ((item.priority === "medium" || item.priority === "high") &&
+                        item.status === "blocked")) &&
                 (!item.relevance.includes("owner-blocked") || item.status === "blocked")
             );
         })

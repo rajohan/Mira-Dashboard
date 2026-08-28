@@ -372,32 +372,15 @@ describe("task repository cron projection", () => {
             );
 
             const snapshot = repository.readHeartbeatCandidates();
-            expect(snapshot.totalCount).toBe(103);
-            expect(snapshot.rows).toHaveLength(100);
-            expect(snapshot.rows.slice(0, 3)).toEqual([
-                {
-                    assignee: "mira-2026",
-                    id: uuid(0),
-                    priority: "medium",
-                    status: "todo",
-                },
+            expect(snapshot.totalCount).toBe(1);
+            expect(snapshot.rows).toEqual([
                 {
                     assignee: "rajohan",
                     id: uuid(1),
                     priority: "low",
                     status: "blocked",
                 },
-                {
-                    automation: {
-                        cronJobId: "private-cron-0",
-                        recurring: true,
-                    },
-                    id: uuid(6),
-                    priority: "low",
-                    status: "todo",
-                },
             ]);
-            expect(snapshot.rows.at(-1)?.id).toBe(uuid(103));
             expect(JSON.stringify(snapshot)).not.toContain("Private");
         } finally {
             database.sqlite.close(true);

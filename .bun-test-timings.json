@@ -369,6 +369,7 @@
         "src/server/platform/errors/safeFailure.test.ts": 5,
         "src/server/platform/gateway/chatSessionActivitySupervisor.test.ts": 5,
         "src/server/trpc/trpc.test.ts": 5,
+        "src/shared/jobOperationKey.test.ts": 5,
         "src/worker/docker/updaterScan.test.ts": 5,
         "src/worker/system/systemHostOperationsProvisioning.test.ts": 5,
         "src/app/dashboardChatRuntimeMaintenance.test.ts": 4,

@@ -24,6 +24,7 @@ import {
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
 } from "./actionRegistry.ts";
+import { reportJobProgress } from "./progressReporting.ts";
 
 const statusPayloadSchema = v.strictObject({
     key: v.literal(backupStatusCacheGroupKey),
@@ -90,6 +91,10 @@ export function createBackupStatusJobExecutor(
                     : new JobActionRetryableError(error),
             try: async (signal) => {
                 v.parse(statusPayloadSchema, rawPayload);
+                await reportJobProgress(context, {
+                    message: "Refreshing backup provider status",
+                    phase: "collecting",
+                });
                 const startedAt = performance.now();
                 const refreshed = await executionPort.refresh(signal);
                 const cacheKeys: string[] = [];
@@ -137,6 +142,10 @@ export function createBackupRunJobExecutor(
                 ) {
                     throw new Error("Backup attention must be cleared before running");
                 }
+                await reportJobProgress(context, {
+                    message: `Running ${type === "kopia" ? "Kopia" : "WAL-G"} backup`,
+                    phase: "backing-up",
+                });
                 const outcome = await dependencies.executionPort.run(
                     {
                         ...(payload.trigger === "manual"
@@ -184,6 +193,10 @@ export function createBackupClearAttentionJobExecutor(
                 ) {
                     throw new Error("Backup attention run changed");
                 }
+                await reportJobProgress(context, {
+                    message: "Verifying and clearing backup attention",
+                    phase: "verifying",
+                });
                 const outcome = await dependencies.executionPort.clearAttention(
                     payload,
                     signal

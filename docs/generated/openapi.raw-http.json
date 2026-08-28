@@ -10882,6 +10882,10 @@
             "minimum": 0,
             "maximum": 8640000000000000
           },
+          "operationKey": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+          },
           "priority": {
             "type": "integer",
             "minimum": -100,
@@ -29813,6 +29817,10 @@
                   "minimum": 0,
                   "maximum": 8640000000000000
                 },
+                "operationKey": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+                },
                 "priority": {
                   "type": "integer",
                   "minimum": -100,
@@ -30339,6 +30347,10 @@
                 "minimum": 0,
                 "maximum": 8640000000000000
               },
+              "operationKey": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+              },
               "priority": {
                 "type": "integer",
                 "minimum": -100,
@@ -30573,6 +30585,10 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 8640000000000000
+          },
+          "operationKey": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
           },
           "priority": {
             "type": "integer",
@@ -31163,6 +31179,10 @@
                       "minimum": 0,
                       "maximum": 8640000000000000
                     },
+                    "operationKey": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+                    },
                     "priority": {
                       "type": "integer",
                       "minimum": -100,
@@ -31396,6 +31416,10 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 8640000000000000
+                        },
+                        "operationKey": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
                         },
                         "priority": {
                           "type": "integer",
@@ -43635,6 +43659,10 @@
                       "minimum": 0,
                       "maximum": 8640000000000000
                     },
+                    "operationKey": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+                    },
                     "priority": {
                       "type": "integer",
                       "minimum": -100,
@@ -43882,6 +43910,10 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 8640000000000000
+                    },
+                    "operationKey": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
                     },
                     "priority": {
                       "type": "integer",
@@ -44333,6 +44365,10 @@
                 "minimum": 0,
                 "maximum": 8640000000000000
               },
+              "operationKey": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+              },
               "priority": {
                 "type": "integer",
                 "minimum": -100,
@@ -44580,6 +44616,10 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 8640000000000000
+              },
+              "operationKey": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
               },
               "priority": {
                 "type": "integer",
@@ -45145,6 +45185,10 @@
                 "minimum": 0,
                 "maximum": 8640000000000000
               },
+              "operationKey": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+              },
               "priority": {
                 "type": "integer",
                 "minimum": -100,
@@ -45392,6 +45436,10 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 8640000000000000
+              },
+              "operationKey": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
               },
               "priority": {
                 "type": "integer",
@@ -45788,6 +45836,10 @@
             "minimum": 0,
             "maximum": 8640000000000000
           },
+          "operationKey": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+          },
           "priority": {
             "type": "integer",
             "minimum": -100,
@@ -46068,6 +46120,10 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 8640000000000000
+                },
+                "operationKey": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
                 },
                 "priority": {
                   "type": "integer",
@@ -46735,6 +46791,10 @@
                       "minimum": 0,
                       "maximum": 8640000000000000
                     },
+                    "operationKey": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
+                    },
                     "priority": {
                       "type": "integer",
                       "minimum": -100,
@@ -46962,6 +47022,10 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 8640000000000000
+                    },
+                    "operationKey": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9:._-]{0,255}$"
                     },
                     "priority": {
                       "type": "integer",

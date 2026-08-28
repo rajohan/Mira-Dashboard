@@ -840,7 +840,13 @@ describe("worker-only job executor registry", () => {
         ).toEqual({ cacheKeys: ["database.observability"], completedAtMs: 5000 });
         expect(executionOrder).toEqual(["open", "collect", "close", "commit"]);
         expect(reconciliationProgress).toEqual([
-            { databaseObservabilityReconciliation: "unchanged" },
+            { message: "Collecting refreshed data", phase: "collecting" },
+            {
+                databaseObservabilityReconciliation: "unchanged",
+                message: "Reconciling database observability access",
+                phase: "reconciling",
+            },
+            { message: "Saving refreshed data", phase: "saving" },
         ]);
         expect(attempts).toEqual([
             {
@@ -970,7 +976,12 @@ describe("worker-only job executor registry", () => {
         ).catch((error: unknown) => error);
         expect(unavailableFailure).toBeInstanceOf(JobActionRetryableError);
         expect(unavailableProgress).toEqual([
-            { databaseObservabilityReconciliation: "unavailable" },
+            { message: "Collecting refreshed data", phase: "collecting" },
+            {
+                databaseObservabilityReconciliation: "unavailable",
+                message: "Reconciling database observability access",
+                phase: "reconciling",
+            },
         ]);
         expect(unavailableAttempts).toEqual([
             expect.objectContaining({ kind: "failed" }),
@@ -1091,7 +1102,10 @@ describe("worker-only job executor registry", () => {
                 { key: "database.observability" }
             )
         );
-        expect(skippedProgress).toEqual([]);
+        expect(skippedProgress).toEqual([
+            { message: "Collecting refreshed data", phase: "collecting" },
+            { message: "Saving refreshed data", phase: "saving" },
+        ]);
 
         let collectedAfterProgressFailure = false;
         await Effect.runPromise(

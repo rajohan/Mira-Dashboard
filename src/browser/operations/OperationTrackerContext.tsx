@@ -56,7 +56,7 @@ function AuthenticatedOperationTrackerProvider({ children }: PropsWithChildren) 
             .map((run) => ({
                 jobRunId: run.id,
                 label: run.displayName,
-                operationKey: operationKeyForJobAction(run.actionKey),
+                operationKey: run.operationKey ?? operationKeyForJobAction(run.actionKey),
                 summary: run,
                 terminal: false,
             })),

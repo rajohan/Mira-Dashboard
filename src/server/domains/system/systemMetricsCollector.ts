@@ -1,12 +1,5 @@
 import { readFile, statfs } from "node:fs/promises";
-import {
-    availableParallelism,
-    freemem,
-    loadavg,
-    platform,
-    totalmem,
-    uptime,
-} from "node:os";
+import { cpus, freemem, loadavg, platform, totalmem, uptime } from "node:os";
 
 import * as v from "valibot";
 
@@ -97,7 +90,9 @@ async function readDefaultNetworkCounters(): Promise<SystemMetricsNetworkCounter
 const defaultSystemMetricsAdapter: SystemMetricsAdapter = Object.freeze({
     freeMemoryBytes: freemem,
     loadAverage: loadavg,
-    logicalCoreCount: availableParallelism,
+    // Load average is host-wide, so normalize it against host CPUs rather than
+    // the Dashboard service's cgroup CPU quota.
+    logicalCoreCount: () => cpus().length,
     networkCounters: readDefaultNetworkCounters,
     nowMs: Date.now,
     rootFilesystem: () => statfs("/", { bigint: true }),

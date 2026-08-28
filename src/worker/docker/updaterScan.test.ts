@@ -109,6 +109,60 @@ function ids() {
 }
 
 describe("Docker updater scan", () => {
+    test("reports durable per-service scan progress", async () => {
+        const progress: unknown[] = [];
+        const input = payload();
+        input.updaterServices.push({
+            currentImage: "ghcr.io/example/app:1.0.0",
+            id: "b".repeat(64),
+            policy: { automatic: true, state: "managed", track: "tag" },
+            project: "downloads",
+            service: "second",
+            status: { state: "unavailable" },
+        });
+        await scanDockerUpdates(
+            compose([
+                sourceService(),
+                sourceService({
+                    project: "downloads",
+                    service: "second",
+                    contentSha256: "f".repeat(64),
+                }),
+            ]),
+            input,
+            undefined,
+            {
+                generateId: ids(),
+                lookup: () =>
+                    Promise.resolve({
+                        digest: `sha256:${"d".repeat(64)}`,
+                        tag: "1.0.0",
+                    }),
+                nowMs: () => 2000,
+                platform: "linux/amd64",
+                reportProgress: (value) => {
+                    progress.push(value);
+                    return Promise.resolve();
+                },
+            }
+        );
+
+        expect(progress).toEqual([
+            {
+                completed: 1,
+                message: expect.stringMatching(/^Checked /u),
+                phase: "scanning",
+                total: 2,
+            },
+            {
+                completed: 2,
+                message: expect.stringMatching(/^Checked /u),
+                phase: "scanning",
+                total: 2,
+            },
+        ]);
+    });
+
     test("emits one transition and canonical candidate for a newer matching tag", async () => {
         const result = await scanDockerUpdates(compose(), payload(), undefined, {
             generateId: ids(),

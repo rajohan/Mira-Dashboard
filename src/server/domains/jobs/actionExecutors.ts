@@ -144,6 +144,7 @@ import {
     createDockerUpdaterJobExecutor,
     type DockerJobExecutionPort,
 } from "./dockerActionExecutors.ts";
+import { reportJobProgress } from "./progressReporting.ts";
 
 export { hostOperationIds } from "../../../shared/hostOperations.ts";
 
@@ -315,7 +316,13 @@ function createCacheRefreshExecutor<TPayload extends JsonObject>(
                 catch: (error: unknown) => new JobActionRetryableError(error),
                 try: (signal: AbortSignal) => spec.collect(signal, context),
             };
-            const collected = (
+            const collected = Effect.andThen(
+                Effect.promise(() =>
+                    reportJobProgress(context, {
+                        message: "Collecting refreshed data",
+                        phase: "collecting",
+                    })
+                ),
                 spec.waitForCancellationSettlement
                     ? cleanupSafePromiseEffect(collect)
                     : Effect.tryPromise(collect)
@@ -334,21 +341,29 @@ function createCacheRefreshExecutor<TPayload extends JsonObject>(
             );
             return collected.pipe(
                 Effect.flatMap((cachePayload) =>
-                    Effect.tryPromise(() =>
-                        context.commitCacheAttempt({
-                            durationMs: durationMs(),
-                            entries: [
-                                {
-                                    key: spec.key,
-                                    metadata: spec.metadata,
-                                    payload: cachePayload,
-                                    schemaId: spec.schemaId,
-                                    source: spec.source,
-                                    ttlMs: spec.ttlMs,
-                                },
-                            ],
-                            kind: "succeeded",
-                        })
+                    Effect.andThen(
+                        Effect.promise(() =>
+                            reportJobProgress(context, {
+                                message: "Saving refreshed data",
+                                phase: "saving",
+                            })
+                        ),
+                        Effect.tryPromise(() =>
+                            context.commitCacheAttempt({
+                                durationMs: durationMs(),
+                                entries: [
+                                    {
+                                        key: spec.key,
+                                        metadata: spec.metadata,
+                                        payload: cachePayload,
+                                        schemaId: spec.schemaId,
+                                        source: spec.source,
+                                        ttlMs: spec.ttlMs,
+                                    },
+                                ],
+                                kind: "succeeded",
+                            })
+                        )
                     ).pipe(
                         Effect.as({
                             cacheKeys: [spec.key],
@@ -440,11 +455,15 @@ const databaseObservabilityReconciliationStatusSchema = v.picklist(
 export function createSqliteMaintenanceJobExecutor(
     maintenance: SqliteMaintenanceExecutionPort
 ): JobActionExecutor {
-    return (_context, payload) =>
+    return (context, payload) =>
         Effect.tryPromise({
             catch: () => new Error("SQLite maintenance action failed"),
             try: async (signal) => {
                 v.parse(emptyPayloadSchema, payload);
+                await reportJobProgress(context, {
+                    message: "Running SQLite maintenance",
+                    phase: "maintenance",
+                });
                 return v.parse(
                     sqliteMaintenanceJobResultSchema,
                     await maintenance.run(signal)
@@ -477,14 +496,11 @@ export function createDatabaseObservabilityExecutor(
                     const safeStatus = parsedStatus.success
                         ? parsedStatus.output
                         : "unavailable";
-                    await Effect.runPromise(
-                        // Progress is fixed and redacted. Event persistence is
-                        // observational and cannot suppress mandatory cleanup.
-                        context.reportProgress({
-                            databaseObservabilityReconciliation: safeStatus,
-                        }),
-                        { signal: collectionSignal }
-                    ).catch(() => {});
+                    await reportJobProgress(context, {
+                        databaseObservabilityReconciliation: safeStatus,
+                        message: "Reconciling database observability access",
+                        phase: "reconciling",
+                    });
                     return dependencies.collector.collect(collectionSignal);
                 },
                 signal
@@ -550,6 +566,12 @@ export function createLogMaintenanceJobExecutor(
                     logMaintenanceActionPayloadSchema,
                     payload
                 );
+                await reportJobProgress(context, {
+                    message: dryRun
+                        ? "Previewing managed log maintenance"
+                        : "Running managed log maintenance",
+                    phase: "maintenance",
+                });
                 const summary = await maintenance.run(policyId, dryRun, signal);
                 return v.parse(logMaintenanceJobResultSchema, {
                     completedAtMs: context.nowMs(),
@@ -574,6 +596,10 @@ export function createOpenClawGatewayRestartJobExecutor(
             catch: () => new Error("OpenClaw Gateway restart action failed"),
             try: async (signal) => {
                 v.parse(emptyPayloadSchema, payload);
+                await reportJobProgress(context, {
+                    message: "Restarting OpenClaw Gateway",
+                    phase: "restarting",
+                });
                 await gateway.restart(signal);
                 return v.parse(openClawGatewayRestartJobResultSchema, {
                     completedAtMs: context.nowMs(),
@@ -598,6 +624,10 @@ export function createHostOperationJobExecutor(
             catch: () => new Error("Fixed host operation failed"),
             try: async (signal) => {
                 v.parse(emptyPayloadSchema, payload);
+                await reportJobProgress(context, {
+                    message: `Running ${operationId.replaceAll("-", " ")}`,
+                    phase: "executing",
+                });
                 if (operationId === "system-restart") {
                     await context.armHostRestartClaimFence();
                     // The fixed broker cannot prove that an error happened before
@@ -652,6 +682,13 @@ export function createOpenClawServiceActionJobExecutor(
                     : new Error("Fixed OpenClaw Service Action failed"),
             try: async (signal) => {
                 v.parse(emptyPayloadSchema, payload);
+                await reportJobProgress(context, {
+                    message:
+                        operationId === "openclaw-cleanup"
+                            ? "Cleaning OpenClaw sessions"
+                            : "Updating OpenClaw installation",
+                    phase: "executing",
+                });
                 if (operationId === "openclaw-cleanup") {
                     const result = await serviceActions.cleanupSessions(signal);
                     return v.parse(openClawSessionsCleanupJobResultSchema, {
@@ -676,7 +713,7 @@ export function createOpenClawServiceActionJobExecutor(
 export function createWorkspaceFileWriteJobExecutor(
     writer: WorkspaceFileWriteExecutionPort
 ): JobActionExecutor {
-    return (_context, payload) =>
+    return (context, payload) =>
         Effect.suspend(() => {
             const parsed = parseWorkspaceFileJobPayload(payload);
             return Effect.tryPromise({
@@ -687,6 +724,10 @@ export function createWorkspaceFileWriteJobExecutor(
                               cause: error,
                           }),
                 try: async (signal) => {
+                    await reportJobProgress(context, {
+                        message: "Applying workspace file changes",
+                        phase: "writing",
+                    });
                     const result = await writer.apply(parsed.command, signal);
                     return v.parse(workspaceFileWriteResultSchema, {
                         ...result,

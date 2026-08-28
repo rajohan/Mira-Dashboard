@@ -657,6 +657,7 @@ describe("Dashboard worker process", () => {
             },
             createSystem: () => ({
                 availablePolicies: () => Promise.resolve([]),
+                ensureManagedAccess: () => Promise.resolve(),
                 run: () => Promise.resolve(),
             }),
         });

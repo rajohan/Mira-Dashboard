@@ -25,6 +25,7 @@ import {
     JobActionOutcomeUnknownError,
     JobActionRetryableError,
 } from "./actionRegistry.ts";
+import { reportJobProgress } from "./progressReporting.ts";
 export type {
     DockerJobExecutionPort,
     DockerJobUpdaterResult,
@@ -286,6 +287,10 @@ export function createDockerOverviewJobExecutor(
                 const previousAttemptStatus = port.readPreviousAttemptStatus?.();
                 let payload: DockerOverviewCachePayload;
                 try {
+                    await reportJobProgress(context, {
+                        message: "Collecting Docker status",
+                        phase: "collecting",
+                    });
                     payload = await port.refresh(previous, signal);
                 } catch (error) {
                     const failurePersisted = await persistFailure(
@@ -302,6 +307,10 @@ export function createDockerOverviewJobExecutor(
                     }
                     throw new JobActionRetryableError(error);
                 }
+                await reportJobProgress(context, {
+                    message: "Saving Docker status",
+                    phase: "saving",
+                });
                 await persistSnapshot(context, payload, elapsed(startedAt));
                 return {
                     cacheKeys: [dockerOverviewCacheKey],
@@ -348,7 +357,9 @@ export function createDockerUpdaterJobExecutor(
                     parsed.payload.operation === "updater-scan"
                 ) {
                     try {
-                        const scanned = await port.scan(previous, signal);
+                        const scanned = await port.scan(previous, signal, (progress) =>
+                            reportJobProgress(context, { ...progress })
+                        );
                         const payload = bindNewEventsToRun(
                             previous,
                             scanned,
@@ -406,7 +417,9 @@ export function createDockerUpdaterJobExecutor(
                             previous,
                         };
                     }
-                    result = await port.runUpdater(input, signal);
+                    result = await port.runUpdater(input, signal, (progress) =>
+                        reportJobProgress(context, { ...progress })
+                    );
                 } catch (error) {
                     if (error instanceof JobActionOutcomeUnknownError) throw error;
                     if (!(error instanceof DockerUpdaterSourceConflictError)) {
@@ -477,12 +490,20 @@ export function createDockerOperationJobExecutor(
                 }
                 const startedAt = performance.now();
                 const previous = parsedPrevious(port);
+                await reportJobProgress(context, {
+                    message: "Executing Docker operation",
+                    phase: "executing",
+                });
                 const result = await port.execute(payload, signal);
                 if (result.outcome === "unknown-outcome") {
                     throw new JobActionOutcomeUnknownError();
                 }
                 const warnings: DockerPostSettlementWarning[] = [];
                 try {
+                    await reportJobProgress(context, {
+                        message: "Refreshing Docker status",
+                        phase: "settling",
+                    });
                     const overview = await port.refresh(previous, signal);
                     const cacheCommitted = await persistSettledSnapshot(
                         context,

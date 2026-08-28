@@ -51,6 +51,10 @@ export const productionSystemdUnits = Object.freeze([
         fileName: "mira-dashboard-log-maintenance@.service",
     }),
     Object.freeze({
+        artifactPath: "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
+        fileName: "mira-dashboard-managed-log-access.service",
+    }),
+    Object.freeze({
         artifactPath: "systemd/mira-dashboard-web.service",
         fileName: "mira-dashboard-web.service",
     }),

@@ -79,6 +79,7 @@ export function createLogMaintenanceExecutor(options: {
             try {
                 if (signal?.aborted === true) throw executionFailure();
                 if (policyId === "docker-managed") {
+                    await options.system.ensureManagedAccess(signal);
                     const result = await options.managed.run({ dryRun, signal });
                     if (!result.ok) throw executionFailure();
                     return projectManagedSummary(result);

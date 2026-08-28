@@ -85,7 +85,7 @@ describe("cache heartbeat projection", () => {
                         status: "todo" as const,
                     },
                 ],
-                totalCount: 3,
+                totalCount: 1,
             }),
         } satisfies Pick<TaskRepositoryReader, "readHeartbeatCandidates">;
 
@@ -102,31 +102,6 @@ describe("cache heartbeat projection", () => {
         expect(projection).toEqual({
             items: [
                 {
-                    automation: {
-                        cron: {
-                            desiredEnabled: false,
-                            enabled: false,
-                            state: "present",
-                            synchronization: "confirmed",
-                        },
-                        recurring: false,
-                    },
-                    id: uuid(1),
-                    priority: "high",
-                    relevance: ["automation-linked", "agent-priority"],
-                    status: "in-progress",
-                },
-                {
-                    automation: {
-                        cron: { state: "missing" },
-                        recurring: true,
-                    },
-                    id: uuid(2),
-                    priority: "low",
-                    relevance: ["automation-linked"],
-                    status: "todo",
-                },
-                {
                     id: uuid(3),
                     priority: "low",
                     relevance: ["owner-blocked"],
@@ -134,7 +109,7 @@ describe("cache heartbeat projection", () => {
                 },
             ],
             state: "available",
-            totalCount: 3,
+            totalCount: 1,
             truncated: false,
         });
         expect(JSON.stringify(projection)).not.toContain("assignee");
@@ -192,7 +167,7 @@ describe("cache heartbeat projection", () => {
                     },
                     id: uuid(4),
                     priority: "low" as const,
-                    status: "todo" as const,
+                    status: "blocked" as const,
                 },
                 {
                     assignee: "rajohan" as const,
@@ -222,7 +197,7 @@ describe("cache heartbeat projection", () => {
                     id: uuid(4),
                     priority: "low" as const,
                     relevance: ["automation-linked" as const],
-                    status: "todo" as const,
+                    status: "blocked" as const,
                 },
                 {
                     id: uuid(5),

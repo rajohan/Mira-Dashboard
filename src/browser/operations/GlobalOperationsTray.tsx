@@ -54,6 +54,14 @@ function latestRunDetail(detail: JobRunDetail | undefined): string | undefined {
     const event = detail?.events?.[0];
     if (event?.message !== undefined) return event.message;
     if (event?.progress !== undefined) {
+        const message = event.progress.message;
+        if (typeof message === "string") {
+            const completed = event.progress.completed;
+            const total = event.progress.total;
+            return typeof completed === "number" && typeof total === "number"
+                ? `${message} (${completed}/${total})`
+                : message;
+        }
         const values = Object.entries(event.progress)
             .filter((entry): entry is [string, string | number | boolean] =>
                 ["string", "number", "boolean"].includes(typeof entry[1])
@@ -62,9 +70,7 @@ function latestRunDetail(detail: JobRunDetail | undefined): string | undefined {
             .map(([key, value]) => `${key}: ${String(value)}`);
         if (values.length > 0) return values.join(" · ");
     }
-    return detail === undefined
-        ? undefined
-        : `Attempt ${detail.run.attemptCount} of ${detail.run.attemptLimit}`;
+    return undefined;
 }
 
 function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrackerValue) {
@@ -76,8 +82,8 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
         topic: jobRealtimeTopics.runs,
     });
     const details = useQueries({
-        queries: operations.map(({ jobRunId, summary }) => ({
-            enabled: summary === undefined,
+        queries: operations.map(({ jobRunId }) => ({
+            enabled: true,
             queryFn: ({ signal }: { signal: AbortSignal }): Promise<JobRunDetail> =>
                 client.query("jobs.getRun", { eventLimit: 5, id: jobRunId }, { signal }),
             queryKey: [...operationRunQueryRoot, jobRunId] as const,
@@ -148,7 +154,6 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
                                             <Text className="mt-1" size="sm" tone="muted">
                                                 Updated{" "}
                                                 {formatDashboardDateTime(run.updatedAtMs)}
-                                                {` · Attempt ${run.attemptCount}/${run.attemptLimit}`}
                                             </Text>
                                         )}
                                         {latestDetail !== undefined && (
