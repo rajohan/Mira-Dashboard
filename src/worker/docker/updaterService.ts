@@ -7,6 +7,7 @@ import {
     type DockerUpdaterEvent,
 } from "../../contracts/docker.ts";
 import {
+    type DockerJobProgressReporter,
     type DockerJobUpdaterInput,
     DockerUpdaterSourceConflictError,
 } from "../../contracts/dockerWorker.ts";
@@ -77,15 +78,18 @@ export interface DockerUpdaterService {
     ) => Promise<DockerOverviewCachePayload>;
     readonly run: (
         input: DockerJobUpdaterInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DockerJobProgressReporter
     ) => Promise<DockerUpdaterRunResult>;
     readonly scan: (
         previous?: unknown,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DockerJobProgressReporter
     ) => Promise<DockerOverviewCachePayload>;
 }
 
 export interface DockerUpdaterServiceOptions {
+    readonly afterReconcileStack?: (signal?: AbortSignal) => Promise<void>;
     readonly collector: DockerOverviewCollector;
     readonly composeRunner?: DockerComposeCommandRunner;
     readonly generateId?: () => string;
@@ -405,14 +409,19 @@ export function createDockerUpdaterService(
 
     async function scan(
         previous?: unknown,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DockerJobProgressReporter
     ): Promise<DockerOverviewCachePayload> {
+        await reportProgress?.({
+            message: "Discovering Docker services",
+            phase: "discovering",
+        });
         const discovery = await options.collector.discover(previous, signal);
         const result = await scanDockerUpdates(
             discovery.compose,
             discovery.payload,
             signal,
-            scanOptions
+            { ...scanOptions, reportProgress }
         );
         return result.payload;
     }
@@ -428,6 +437,7 @@ export function createDockerUpdaterService(
             sourceConflict();
         }
         await reconcileStack(explicitServices, signal);
+        await options.afterReconcileStack?.(signal);
         const after = await options.collector.discover(before.payload, signal);
         if (after.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();
@@ -453,7 +463,8 @@ export function createDockerUpdaterService(
 
     async function run(
         input: DockerJobUpdaterInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DockerJobProgressReporter
     ): Promise<DockerUpdaterRunResult> {
         const operationSignal =
             signal === undefined
@@ -462,6 +473,10 @@ export function createDockerUpdaterService(
                       signal,
                       AbortSignal.timeout(dockerOperationDeadlineMs),
                   ]);
+        await reportProgress?.({
+            message: "Discovering Docker services",
+            phase: "discovering",
+        });
         let discovery = await options.collector.discover(input.previous, operationSignal);
         if (
             input.expectedSourceRevision !== undefined &&
@@ -473,7 +488,7 @@ export function createDockerUpdaterService(
             discovery.compose,
             discovery.payload,
             operationSignal,
-            scanOptions
+            { ...scanOptions, reportProgress }
         );
         let payload = scanResult.payload;
         const selected = payload.updaterServices.filter((service) => {
@@ -481,6 +496,12 @@ export function createDockerUpdaterService(
             if (service.policy.state !== "managed") return false;
             if (input.serviceId !== undefined) return service.id === input.serviceId;
             return !input.automaticOnly || service.policy.automatic;
+        });
+        await reportProgress?.({
+            completed: 0,
+            message: `Preparing ${selected.length} Docker update${selected.length === 1 ? "" : "s"}`,
+            phase: "updating",
+            total: selected.length,
         });
         if (input.serviceId !== undefined) {
             if (selected.length !== 1) sourceConflict();
@@ -657,6 +678,7 @@ export function createDockerUpdaterService(
                 affectedServices.map(({ service }) => service),
                 signal
             );
+            await options.afterReconcileStack?.(signal);
             const after = await options.collector.discover(before.payload, signal);
             if (after.compose.settlementRevision !== preMutationSettlementRevision) {
                 sourceConflict();
@@ -787,8 +809,14 @@ export function createDockerUpdaterService(
 
         const addedEvents: DockerUpdaterEvent[] = [];
         let failedCount = 0;
-        for (const selectedService of selected) {
+        for (const [selectedIndex, selectedService] of selected.entries()) {
             operationSignal.throwIfAborted();
+            await reportProgress?.({
+                completed: selectedIndex,
+                message: `Updating ${selectedService.project}/${selectedService.service}`,
+                phase: "updating",
+                total: selected.length,
+            });
             if (selectedService.status.state !== "update-available") fail();
             const source = exactService(
                 discovery.compose.services,
@@ -977,9 +1005,19 @@ export function createDockerUpdaterService(
                     })
                 );
             }
+            await reportProgress?.({
+                completed: selectedIndex + 1,
+                message: `Processed ${selectedService.project}/${selectedService.service}`,
+                phase: "updating",
+                total: selected.length,
+            });
         }
 
         if (applied.length > 0) {
+            await reportProgress?.({
+                message: "Reconciling the Docker Compose stack",
+                phase: "reconciling",
+            });
             try {
                 discovery = await reconcileVerifiedStack(
                     payload,
@@ -1095,6 +1133,10 @@ export function createDockerUpdaterService(
         }
 
         let git: DockerUpdaterGitSyncResult;
+        await reportProgress?.({
+            message: "Settling Docker source changes",
+            phase: "settling",
+        });
         try {
             git = await options.git.sync(
                 {

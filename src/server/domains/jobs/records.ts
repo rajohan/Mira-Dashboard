@@ -20,7 +20,8 @@ import {
     scheduleConfigurationSchema,
     scheduleSummarySchema,
 } from "../../../contracts/jobModel.ts";
-import { parseJsonText } from "../../../shared/json.ts";
+import { jobOperationKey } from "../../../shared/jobOperationKey.ts";
+import { jsonObjectSchema, parseJsonText } from "../../../shared/json.ts";
 import { hostRestartClaimFenceSelectSchema } from "../../database/validation/hostRestartClaimFence.ts";
 import { jobDisableIntentSelectSchema } from "../../database/validation/jobDisableIntents.ts";
 import { jobRunEventSelectSchema } from "../../database/validation/jobRunEvents.ts";
@@ -48,6 +49,7 @@ export type WorkerInstanceRecord = v.InferOutput<typeof workerInstanceSelectSche
  * @returns Contract-validated public run summary.
  */
 export function toJobRunSummary(record: JobRunRecord): JobRunSummary {
+    const payload = v.parse(jsonObjectSchema, parseJsonText(record.payloadJson));
     return v.parse(jobRunSummarySchema, {
         actionKey: record.actionKey,
         attemptCount: record.attemptCount,
@@ -69,6 +71,7 @@ export function toJobRunSummary(record: JobRunRecord): JobRunSummary {
         ...(record.lastAttemptStartedAt === null
             ? {}
             : { lastAttemptStartedAtMs: getTime(record.lastAttemptStartedAt) }),
+        operationKey: jobOperationKey(record.actionKey, payload),
         priority: record.priority,
         queuedAtMs: getTime(record.queuedAt),
         resourceClass: record.resourceClass,

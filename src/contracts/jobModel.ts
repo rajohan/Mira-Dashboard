@@ -489,6 +489,12 @@ const jobRunSummaryObjectSchema = v.strictObject({
     firstStartedAtMs: v.optional(jobTimestampSchema),
     id: jobRunIdSchema,
     lastAttemptStartedAtMs: v.optional(jobTimestampSchema),
+    operationKey: v.optional(
+        v.pipe(
+            v.string("Job operation key is invalid"),
+            v.regex(/^[a-z0-9][a-z0-9:._-]{0,255}$/u, "Job operation key is invalid")
+        )
+    ),
     priority: jobPrioritySchema,
     queuedAtMs: jobTimestampSchema,
     resourceClass: jobResourceClassSchema,

@@ -266,6 +266,7 @@ export interface WorkerDockerComposition {
 }
 
 export interface WorkerDockerCompositionOptions {
+    readonly ensureManagedLogAccess?: (signal?: AbortSignal) => Promise<void>;
     readonly gitCredentials?: DockerUpdaterGitCredentials;
     readonly registryCredentials?: DockerRegistryClientOptions["credentials"];
 }
@@ -478,6 +479,9 @@ export function createWorkerDockerComposition(
     const collector = createDockerOverviewCollector();
     const operations = createFixedDockerOperations({ overview: collector });
     const updater = createDockerUpdaterService({
+        ...(options.ensureManagedLogAccess === undefined
+            ? {}
+            : { afterReconcileStack: options.ensureManagedLogAccess }),
         collector,
         git: createDynamicDockerUpdaterGitSync(
             options.gitCredentials === undefined
@@ -522,9 +526,10 @@ export function createWorkerDockerComposition(
         refresh: updater.refresh,
         runUpdater: async (
             input: Parameters<DockerJobExecutionPort["runUpdater"]>[0],
-            signal?: AbortSignal
+            signal?: AbortSignal,
+            reportProgress?: Parameters<DockerJobExecutionPort["runUpdater"]>[2]
         ) => {
-            const result = await updater.run(input, signal);
+            const result = await updater.run(input, signal, reportProgress);
             return {
                 failedCount: result.failedCount,
                 outcome: result.outcome,
@@ -614,7 +619,13 @@ const defaultDependencies = Object.freeze({
             taskNotificationLoop: () => Effect.never,
             workerInstanceId: Bun.randomUUIDv7(),
         }),
-    createDocker: createWorkerDockerComposition,
+    createDocker: (options) => {
+        const systemLogs = createFixedSystemLogrotateBroker();
+        return createWorkerDockerComposition({
+            ...options,
+            ensureManagedLogAccess: (signal) => systemLogs.ensureManagedAccess(signal),
+        });
+    },
     createDelivery: createWorkerDeliveryProcessComposition,
     createHostOperations: createFixedHostOperationsBroker,
     createDatabaseObservabilityConnectionResolver:

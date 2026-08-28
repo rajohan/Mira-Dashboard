@@ -11,6 +11,7 @@ export const taskHeartbeatAgentPriorities = [
     "medium",
     "high",
 ] as const satisfies readonly TaskPriority[];
+export const taskHeartbeatAgentStatus = "blocked" as const satisfies TaskStatus;
 
 /** Product policy selecting owner-blocked work that needs operator attention. */
 export const taskHeartbeatOwnerAssignee =

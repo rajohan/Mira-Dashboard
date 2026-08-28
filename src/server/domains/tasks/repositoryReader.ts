@@ -39,6 +39,7 @@ import { users } from "../../database/schema/users.ts";
 import {
     taskHeartbeatAgentAssignee,
     taskHeartbeatAgentPriorities,
+    taskHeartbeatAgentStatus,
     taskHeartbeatOwnerAssignee,
     taskHeartbeatOwnerStatus,
 } from "./heartbeatPolicy.ts";
@@ -355,12 +356,13 @@ export class DrizzleTaskRepositoryReader implements TaskRepositoryReader {
                 .where(eq(taskAutomationProfiles.taskId, tasks.id))
         );
         const relevance = and(
-            ne(tasks.status, "done"),
+            eq(tasks.status, "blocked"),
             or(
                 linkedAutomation,
                 and(
                     eq(tasks.assignee, taskHeartbeatAgentAssignee),
-                    inArray(tasks.priority, [...taskHeartbeatAgentPriorities])
+                    inArray(tasks.priority, [...taskHeartbeatAgentPriorities]),
+                    eq(tasks.status, taskHeartbeatAgentStatus)
                 ),
                 and(
                     eq(tasks.assignee, taskHeartbeatOwnerAssignee),

@@ -1,7 +1,8 @@
 [Unit]
 Description=Mira Dashboard worker coordinator
-After=network-online.target stremio-stack.service
+After=network-online.target stremio-stack.service mira-dashboard-managed-log-access.service
 Wants=network-online.target stremio-stack.service
+Requires=mira-dashboard-managed-log-access.service
 
 [Service]
 Type=simple

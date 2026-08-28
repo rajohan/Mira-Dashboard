@@ -6,11 +6,13 @@ non-mutating descriptor-anchored preflight of every existing destination directo
 target file, then creates `/usr/local/libexec` as `root:root 0755` when it is absent, and
 replaces each file atomically with these exact ownership and modes:
 
-| Source artifact                           | Destination                                                     | Owner/mode       |
-| ----------------------------------------- | --------------------------------------------------------------- | ---------------- |
-| `mira-dashboard-log-maintenance`          | `/usr/local/libexec/mira-dashboard-log-maintenance`             | `root:root 0755` |
-| `mira-dashboard-log-maintenance@.service` | `/etc/systemd/system/mira-dashboard-log-maintenance@.service`   | `root:root 0644` |
-| `60-mira-dashboard-log-maintenance.rules` | `/etc/polkit-1/rules.d/60-mira-dashboard-log-maintenance.rules` | `root:root 0644` |
+| Source artifact                             | Destination                                                     | Owner/mode       |
+| ------------------------------------------- | --------------------------------------------------------------- | ---------------- |
+| `mira-dashboard-log-maintenance`            | `/usr/local/libexec/mira-dashboard-log-maintenance`             | `root:root 0755` |
+| `mira-dashboard-managed-log-access`         | `/usr/local/libexec/mira-dashboard-managed-log-access`          | `root:root 0755` |
+| `mira-dashboard-log-maintenance@.service`   | `/etc/systemd/system/mira-dashboard-log-maintenance@.service`   | `root:root 0644` |
+| `mira-dashboard-managed-log-access.service` | `/etc/systemd/system/mira-dashboard-managed-log-access.service` | `root:root 0644` |
+| `60-mira-dashboard-log-maintenance.rules`   | `/etc/polkit-1/rules.d/60-mira-dashboard-log-maintenance.rules` | `root:root 0644` |
 
 Run it explicitly as root against one already-published immutable release:
 
@@ -28,6 +30,11 @@ deployment transition after the installed bytes have been inspected.
 Create the fixed `mira-dashboard-log-maintenance` group and grant it only to the worker
 runtime identity before reloading systemd and polkit. The web process must never join this
 group. Deployment must remove the group grant on rollback.
+
+The managed-access oneshot runs after the Docker stack and before the Dashboard worker.
+The worker also invokes the same exact unit before managed rotation, and Docker updater
+reconciliation invokes it after Compose recreation. Reboots, worker restarts, and
+container recreation therefore converge through the same idempotent manifest boundary.
 
 After creating the maintenance group, bootstrap runs the descriptor-bound
 `provisionManagedLogAccess.ts` boundary. It reads the same managed-log manifest as the

@@ -99,6 +99,30 @@ function Harness() {
     );
 }
 
+function IdentityHarness() {
+    const tracker = useOperationTracker();
+    return (
+        <output aria-label="Exact operation state">
+            {tracker.operationIsActive("job:docker.updater:scan") ? "Scanning" : "Idle"}
+        </output>
+    );
+}
+
+function restoredScanQuery() {
+    return Promise.resolve({
+        runs: [
+            {
+                actionKey: "docker.updater",
+                displayName: "Docker updater scan",
+                id: "restored-scan",
+                operationKey: "job:docker.updater:scan",
+                state: "running",
+            },
+        ],
+        summary: {},
+    });
+}
+
 describe("operation tracker", () => {
     test("restores only active manual operations from the backend", async () => {
         const query = mock((..._arguments: readonly unknown[]) =>
@@ -108,6 +132,7 @@ describe("operation tracker", () => {
                         actionKey: "docker.updater",
                         displayName: "Docker updater",
                         id: "run-from-another-device",
+                        operationKey: "job:docker.updater:scan",
                         state: "running",
                     },
                 ],
@@ -134,6 +159,27 @@ describe("operation tracker", () => {
             },
             expect.objectContaining({ signal: expect.any(AbortSignal) })
         );
+    });
+
+    test("restores the exact active button identity after provider remount", async () => {
+        const view = render(
+            <ProviderHarness query={restoredScanQuery}>
+                <IdentityHarness />
+            </ProviderHarness>
+        );
+
+        expect(
+            await screen.findByRole("status", { name: "Exact operation state" })
+        ).toHaveTextContent("Scanning");
+        view.unmount();
+        render(
+            <ProviderHarness query={restoredScanQuery}>
+                <IdentityHarness />
+            </ProviderHarness>
+        );
+        expect(
+            await screen.findByRole("status", { name: "Exact operation state" })
+        ).toHaveTextContent("Scanning");
     });
 
     test("deduplicates durable run identities and dismisses them", async () => {

@@ -144,6 +144,7 @@ function createHarness(options: HarnessOptions = {}) {
     const gitRequests: DockerUpdaterGitSyncRequest[] = [];
     let preflightGitCalls = 0;
     let reconcileCalls = 0;
+    let managedAccessCalls = 0;
     let runtimeImageDrifted = false;
     let runtimeImageReferenceDrifted = false;
     let runtimeReplicaDropped = false;
@@ -381,6 +382,10 @@ function createHarness(options: HarnessOptions = {}) {
         };
     };
     const updater = createDockerUpdaterService({
+        afterReconcileStack: () => {
+            managedAccessCalls += 1;
+            return Promise.resolve();
+        },
         collector,
         generateId: eventIds(),
         git,
@@ -436,6 +441,7 @@ function createHarness(options: HarnessOptions = {}) {
         gitHeadRequests,
         gitRequests,
         order,
+        managedAccessCalls: () => managedAccessCalls,
         reconcileCalls: () => reconcileCalls,
         reconcileSignals,
         reconciledServices,
@@ -493,6 +499,7 @@ describe("Docker updater service", () => {
             updatedCount: 2,
         });
         expect(harness.reconcileCalls()).toBe(1);
+        expect(harness.managedAccessCalls()).toBe(1);
         expect(harness.reconciledServices).toEqual([["one", "two"]]);
         expect(harness.order).toEqual([
             "git-head",

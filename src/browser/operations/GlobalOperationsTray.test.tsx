@@ -41,7 +41,16 @@ describe("global operations tray", () => {
             activeRunAttempt += 1;
             if (activeRunAttempt === 1) {
                 return Promise.resolve({
-                    events: [],
+                    events: [
+                        {
+                            progress: {
+                                completed: 3,
+                                message: "Checked media/app",
+                                phase: "scanning",
+                                total: 7,
+                            },
+                        },
+                    ],
                     run: {
                         attemptCount: 1,
                         attemptLimit: 3,
@@ -118,6 +127,8 @@ describe("global operations tray", () => {
         );
 
         try {
+            expect(await screen.findByText("Checked media/app (3/7)")).toBeVisible();
+            expect(screen.queryByText(/Attempt 1\/3/u)).not.toBeInTheDocument();
             expect(await screen.findByText("running")).toBeVisible();
             await queryClient.refetchQueries({ queryKey: ["operations", "runs"] });
             await waitFor(() => expect(activeRunAttempt).toBe(2));
@@ -175,8 +186,30 @@ describe("global operations tray", () => {
         }
     });
 
-    test("renders backend summaries without per-run detail polling", async () => {
-        const query = jest.fn(() => Promise.reject(new Error("unexpected detail read")));
+    test("renders backend summaries while per-run polling loads progress details", async () => {
+        const query = jest.fn((name: string, input: { id?: string }) => {
+            if (name !== "jobs.getRun" || input.id !== "remote-run") {
+                return Promise.reject(new Error("unexpected query"));
+            }
+            return Promise.resolve({
+                events: [
+                    {
+                        progress: {
+                            completed: 4,
+                            message: "Recreated services",
+                            phase: "reconciling",
+                            total: 8,
+                        },
+                    },
+                ],
+                run: {
+                    attemptCount: 1,
+                    attemptLimit: 1,
+                    state: "running",
+                    updatedAtMs: 1_800_000_001_000,
+                },
+            });
+        });
         const client = { query } as unknown as DashboardTrpcClient;
         const queryClient = new QueryClient({
             defaultOptions: { queries: { retry: false } },
@@ -235,6 +268,11 @@ describe("global operations tray", () => {
 
         expect(await screen.findByText("Remote Docker update")).toBeVisible();
         expect(await screen.findByText("running")).toBeVisible();
-        expect(query).not.toHaveBeenCalled();
+        expect(await screen.findByText("Recreated services (4/8)")).toBeVisible();
+        expect(query).toHaveBeenCalledWith(
+            "jobs.getRun",
+            { eventLimit: 5, id: "remote-run" },
+            expect.objectContaining({ signal: expect.any(AbortSignal) })
+        );
     });
 });

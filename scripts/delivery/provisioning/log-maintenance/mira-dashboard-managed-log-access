@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    printf '%s\n' 'Managed log access provisioning failed' >&2
+    exit 64
+}
+
+[ "$#" -eq 0 ] || fail
+
+group_record=$(/usr/bin/getent group mira-dashboard-log-maintenance) || fail
+old_ifs=$IFS
+IFS=:
+set -- $group_record
+IFS=$old_ifs
+[ "$#" -eq 4 ] || fail
+[ "$1" = mira-dashboard-log-maintenance ] || fail
+group_id=$3
+case "$group_id" in
+    ''|*[!0-9]*) fail ;;
+esac
+[ "$group_id" -gt 0 ] || fail
+
+runtime_user_id=$(/usr/bin/id -u ubuntu) || fail
+case "$runtime_user_id" in
+    ''|*[!0-9]*) fail ;;
+esac
+[ "$runtime_user_id" -gt 0 ] || fail
+
+member=false
+for selected_group_id in $(/usr/bin/id -G ubuntu); do
+    if [ "$selected_group_id" = "$group_id" ]; then
+        member=true
+        break
+    fi
+done
+[ "$member" = true ] || fail
+
+exec /home/ubuntu/projects/mira-dashboard/production/runtimes/bun/current/bun \
+    /home/ubuntu/projects/mira-dashboard/production/releases/current/scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts \
+    "--group-id=$group_id" \
+    "--runtime-user-id=$runtime_user_id"
