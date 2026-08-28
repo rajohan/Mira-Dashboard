@@ -404,6 +404,7 @@ export interface OverviewProviderCollectors {
         readonly changedFileCount: number;
         readonly commit?: string;
         readonly pushed: boolean;
+        readonly residualChangedFileCount: number;
     }>;
     readonly quota: (signal?: AbortSignal) => Promise<QuotaCachePayload>;
     readonly weather: (signal?: AbortSignal) => Promise<WeatherCachePayload>;

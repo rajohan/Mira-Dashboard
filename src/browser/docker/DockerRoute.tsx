@@ -163,7 +163,7 @@ export function DockerRoute({ client }: DockerRouteProps) {
         enabled: overview !== undefined,
         intervalMs: 5000,
         key: dockerOverviewCacheKey,
-        observedAtMs: overview?.checkedAtMs,
+        observedAtMs: overview?.observedAtMs,
     });
     const controlsAvailable = overview?.state === "fresh" && overviewQuery.error === null;
     const [pendingOperation, setPendingOperation] = useState<DockerOperationPrompt>();

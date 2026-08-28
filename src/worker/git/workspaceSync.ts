@@ -520,20 +520,30 @@ export function createWorkspaceGitSync(rootPath: string) {
                 }
                 throw error;
             }
+            const prePushResidualChangedFileCount = await residualChangedFileCount(
+                canonicalRoot,
+                signal
+            );
             await pushAndClassify(
                 canonicalRoot,
                 commit,
                 recoveredCommit ?? upstreamHead,
                 signal
             );
+            let finalResidualChangedFileCount = prePushResidualChangedFileCount;
+            try {
+                finalResidualChangedFileCount = await residualChangedFileCount(
+                    canonicalRoot,
+                    AbortSignal.timeout(cleanupTimeoutMs)
+                );
+            } catch {
+                // A post-push observation cannot turn a confirmed publication into failure.
+            }
             return {
                 changedFileCount,
                 commit,
                 pushed: true,
-                residualChangedFileCount: await residualChangedFileCount(
-                    canonicalRoot,
-                    signal
-                ),
+                residualChangedFileCount: finalResidualChangedFileCount,
             };
         } finally {
             Fs.rmSync(privateIndexDirectory, { force: true, recursive: true });

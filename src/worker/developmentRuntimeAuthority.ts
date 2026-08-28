@@ -424,7 +424,11 @@ function overviewProviders(nowMs: () => number): DevelopmentOverviewProviderColl
             }),
         syncWorkspace: (signal?: AbortSignal) => {
             signal?.throwIfAborted();
-            return Promise.resolve({ changedFileCount: 0, pushed: false });
+            return Promise.resolve({
+                changedFileCount: 0,
+                pushed: false,
+                residualChangedFileCount: 0,
+            });
         },
         openClaw: (signal?: AbortSignal) =>
             Promise.resolve().then(() => {
