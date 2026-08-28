@@ -67,7 +67,7 @@ function manifest(releaseId: string, runtimeRevision: string, title: string) {
     };
 }
 
-function preDeliveryManifest(releaseId: string, runtimeRevision: string) {
+function manifestWithoutDeliveryProtocol(releaseId: string, runtimeRevision: string) {
     const current = manifest(releaseId, runtimeRevision, "Ignored");
     return {
         artifacts: current.artifacts,
@@ -199,39 +199,12 @@ describe("Delivery production authority reader", () => {
         });
     });
 
-    test("shows the exact pre-Delivery previous release but blocks rollback", async () => {
-        const paths = await fixture();
-        await replaceManifest(
-            paths,
-            previousReleaseId,
-            preDeliveryManifest(previousReleaseId, previousRuntime)
-        );
-
-        const result = await createDeliveryProductionAuthorityReader({
-            readActionActive: () => Promise.resolve(false),
-            ...paths,
-        }).read();
-
-        expect(result.releases.previous).toMatchObject({
-            builtAtMs: 0,
-            commitTitle: "Pre-Delivery Greenfield release",
-            releaseId: previousReleaseId,
-            runtimeRevision: previousRuntime,
-            schemaTarget: 0,
-        });
-        expect(result.releases.rollback).toEqual({
-            actor: "mira",
-            available: false,
-            reason: "incompatible",
-        });
-    });
-
     test("fails closed when the current release lacks the production protocol", async () => {
         const paths = await fixture();
         await replaceManifest(
             paths,
             currentReleaseId,
-            preDeliveryManifest(currentReleaseId, currentRuntime)
+            manifestWithoutDeliveryProtocol(currentReleaseId, currentRuntime)
         );
 
         expect(

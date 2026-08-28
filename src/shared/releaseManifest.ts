@@ -106,11 +106,6 @@ const releaseDeliveryProtocolTupleSchema = v.tuple(
     releaseDeliveryProtocols.map((protocol) => v.literal(protocol))
 );
 
-const preDeliveryReleaseProcessRoles = Object.freeze(["web", "worker"] as const);
-const preDeliveryReleaseProcessRoleTupleSchema = v.tuple(
-    preDeliveryReleaseProcessRoles.map((role) => v.literal(role))
-);
-
 const sharedManifestEntries = {
     artifacts: v.pipe(
         v.array(releaseArtifactSchema),
@@ -174,43 +169,10 @@ const currentReleaseManifestSchema = v.strictObject({
     processRoles: v.pipe(releaseProcessRoleTupleSchema, v.readonly()),
 });
 
-const preDeliveryReleaseManifestSchema = v.strictObject({
-    ...sharedManifestEntries,
-    processRoles: v.pipe(preDeliveryReleaseProcessRoleTupleSchema, v.readonly()),
-});
+export type ReleaseManifest = v.InferOutput<typeof currentReleaseManifestSchema>;
 
-type CurrentReleaseManifest = v.InferOutput<typeof currentReleaseManifestSchema>;
-type PreDeliveryReleaseManifest = v.InferOutput<typeof preDeliveryReleaseManifestSchema>;
-
-/** Normalized release identity; empty protocols marks the one-time pre-Delivery format. */
-export type ReleaseManifest = Omit<
-    CurrentReleaseManifest,
-    "deliveryProtocols" | "processRoles"
-> & {
-    readonly deliveryProtocols: readonly (typeof releaseDeliveryProtocols)[number][];
-    readonly processRoles: readonly (typeof releaseProcessRoles)[number][];
-};
-
-function normalizeManifest(
-    manifest: CurrentReleaseManifest | PreDeliveryReleaseManifest
-): ReleaseManifest {
-    if ("deliveryProtocols" in manifest) return manifest;
-    return {
-        ...manifest,
-        deliveryProtocols: Object.freeze([]),
-        display: Object.freeze({
-            builtAtMs: 0,
-            commitTitle: "Pre-Delivery Greenfield release",
-            schemaTarget: 0,
-        }),
-    };
-}
-
-/** Strict current format plus the exact immediately preceding Greenfield format. */
-export const releaseManifestSchema = v.pipe(
-    v.union([currentReleaseManifestSchema, preDeliveryReleaseManifestSchema]),
-    v.transform(normalizeManifest)
-);
+/** Strict current release format; historical release shapes are not admitted. */
+export const releaseManifestSchema = currentReleaseManifestSchema;
 
 function freezeManifest(manifest: ReleaseManifest): ReleaseManifest {
     Object.freeze(manifest.display);

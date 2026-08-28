@@ -23,9 +23,13 @@ import {
 import {
     maximumProductionReleaseArchiveBytes,
     maximumProductionReleaseReceiptBytes,
-    productionReleaseArtifactReceiptSchema,
 } from "../../src/shared/productionReleaseArtifactReceipt.ts";
 import { boundedControlSafeTextSchema } from "../../src/shared/validation.ts";
+import {
+    productionProvisioningReceiptEnvelopeSchema,
+    verifyProductionProvisioningEnvelope,
+    type ProductionProvisioningReceiptEnvelope,
+} from "./productionProvisioningEnvelope.ts";
 import {
     assertProductionReleaseArchiveListing,
     maximumProductionReleaseArchiveListingBytes,
@@ -50,6 +54,7 @@ const installedEntrypoint = `${productionProvisioningPairSelector}/${productionP
 const maximumJsonBytes = 4 * 1024 * 1024;
 const maximumActivationStateBytes = 64 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
+const candidateWorkflowTimeoutMs = 14 * 60_000;
 const runtimeProbeExpression =
     "process.stdout.write(JSON.stringify({revision:Bun.revision,version:Bun.version}))";
 const localAuthorityPattern = /^([a-f\d]{40})--local(--settled)?$/u;
@@ -129,11 +134,12 @@ interface ProductionReleaseProvisionerEnvironment {
         executable: string,
         arguments_: readonly string[],
         stdin?: Uint8Array,
-        stdoutMaximumBytes?: number
+        stdoutMaximumBytes?: number,
+        timeoutMs?: number
     ) => Promise<CommandResult>;
     readonly runtimeExecutable: string;
     readonly syncPath: (target: string) => Promise<void>;
-    readonly verifyReleaseArtifactIdentity: typeof verifyReleaseArtifactIdentity;
+    readonly verifyProvisioningEnvelope: typeof verifyProductionProvisioningEnvelope;
 }
 
 interface StagedProvisioningPair {
@@ -482,7 +488,8 @@ async function run(
     executable: string,
     arguments_: readonly string[],
     stdin?: Uint8Array,
-    stdoutMaximumBytes = maximumCommandOutputBytes
+    stdoutMaximumBytes = maximumCommandOutputBytes,
+    timeoutMs = 120_000
 ): Promise<CommandResult> {
     const child = Bun.spawn([executable, ...arguments_], {
         env: {
@@ -491,7 +498,7 @@ async function run(
             LC_ALL: "C",
             PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
         },
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(timeoutMs),
         stderr: "pipe",
         stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
         stdout: "pipe",
@@ -515,13 +522,15 @@ async function requireSuccess(
     arguments_: readonly string[],
     environment: ProductionReleaseProvisionerEnvironment,
     stdin?: Uint8Array,
-    stdoutMaximumBytes?: number
+    stdoutMaximumBytes?: number,
+    timeoutMs?: number
 ): Promise<Uint8Array> {
     const result = await environment.runCommand(
         executable,
         arguments_,
         stdin,
-        stdoutMaximumBytes
+        stdoutMaximumBytes,
+        timeoutMs
     );
     if (result.exitCode !== 0) throw failure();
     return result.stdout;
@@ -592,7 +601,7 @@ async function verifyStagedRelease(
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<string> {
     const releaseRoot = path.join(environment.releasesRoot, releaseId);
-    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
+    const manifest = await environment.verifyProvisioningEnvelope(releaseRoot);
     if (manifest.source.commitSha !== releaseId) {
         throw failure();
     }
@@ -602,10 +611,10 @@ async function verifyStagedRelease(
 async function verifyReceiptBackedRelease(
     releaseId: string,
     releaseRoot: string,
-    receipt: v.InferOutput<typeof productionReleaseArtifactReceiptSchema>,
+    receipt: ProductionProvisioningReceiptEnvelope,
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<void> {
-    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
+    const manifest = await environment.verifyProvisioningEnvelope(releaseRoot);
     const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
     if (
         manifest.source.commitSha !== releaseId ||
@@ -667,7 +676,7 @@ async function verifyProvisioningPair(
     releaseRoot: string,
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<StagedProvisioningPair> {
-    const manifest = await environment.verifyReleaseArtifactIdentity(releaseRoot);
+    const manifest = await environment.verifyProvisioningEnvelope(releaseRoot);
     const runtime = path.join(pairRoot, productionProvisioningRuntimeName);
     const entrypoint = path.join(pairRoot, productionProvisioningEntrypointName);
     const sourceRuntime = path.join(releaseRoot, "runtime/bun");
@@ -834,7 +843,7 @@ async function downloadAndStageRelease(
         throw failure();
     }
     const receipt = v.parse(
-        productionReleaseArtifactReceiptSchema,
+        productionProvisioningReceiptEnvelopeSchema,
         JSON.parse(
             new TextDecoder("utf-8", { fatal: true }).decode(receiptBytes)
         ) as unknown
@@ -1036,7 +1045,7 @@ async function retainReleaseRoots(
     await validateReleaseRoots(environment);
 }
 
-async function installAuthority(
+async function installCandidateAuthoritySteps(
     releaseId: string,
     releaseRoot: string,
     runtime: string,
@@ -1115,6 +1124,51 @@ async function installAuthority(
     }
 }
 
+async function installAuthority(
+    releaseId: string,
+    releaseRoot: string,
+    runtime: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    await requireSuccess(
+        runtime,
+        [
+            path.join(releaseRoot, "server/productionProvisioning.js"),
+            `--install-authority-release=${releaseId}`,
+            `--release-root=${releaseRoot}`,
+        ],
+        environment,
+        undefined,
+        undefined,
+        candidateWorkflowTimeoutMs
+    );
+}
+
+async function installCandidateReleaseAuthority(
+    releaseId: string,
+    releaseRoot: string,
+    environment: ProductionReleaseProvisionerEnvironment
+): Promise<void> {
+    if (
+        !/^[a-f\d]{40}$/u.test(releaseId) ||
+        releaseRoot !== path.join(environment.releasesRoot, releaseId) ||
+        environment.modulePath !==
+            path.join(releaseRoot, "server/productionProvisioning.js") ||
+        environment.executablePath !== process.execPath ||
+        environment.getUid() !== 0
+    ) {
+        throw failure();
+    }
+    const manifest = await verifyReleaseArtifactIdentity(releaseRoot);
+    if (manifest.source.commitSha !== releaseId) throw failure();
+    await installCandidateAuthoritySteps(
+        releaseId,
+        releaseRoot,
+        environment.executablePath,
+        environment
+    );
+}
+
 const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freeze({
     canonicalPath: realpath,
     executablePath: process.execPath,
@@ -1143,7 +1197,7 @@ const defaultEnvironment: ProductionReleaseProvisionerEnvironment = Object.freez
             await handle.close();
         }
     },
-    verifyReleaseArtifactIdentity,
+    verifyProvisioningEnvelope: verifyProductionProvisioningEnvelope,
 });
 
 /** Test-only dependency surface for exercising the privileged orchestration safely. */
@@ -1156,6 +1210,7 @@ export const productionReleaseProvisionerTestSupport = Object.freeze({
     readBoundedStream,
     readProductionActivationRecord,
     run,
+    installCandidateReleaseAuthority,
     publishProvisioningPairSelection,
     verifyReceiptBackedRelease: (
         releaseId: string,
@@ -1166,7 +1221,7 @@ export const productionReleaseProvisionerTestSupport = Object.freeze({
         verifyReceiptBackedRelease(
             releaseId,
             releaseRoot,
-            v.parse(productionReleaseArtifactReceiptSchema, receipt),
+            v.parse(productionProvisioningReceiptEnvelopeSchema, receipt),
             environment
         ),
 });
@@ -1212,11 +1267,23 @@ export async function provisionProductionRelease(
 
 if (import.meta.main) {
     try {
-        const argument = process.argv[2] ?? "";
-        if (process.argv.length !== 3 || !argument.startsWith("--authority=")) {
+        const first = process.argv[2] ?? "";
+        const second = process.argv[3] ?? "";
+        if (process.argv.length === 3 && first.startsWith("--authority=")) {
+            await provisionProductionRelease(first.slice("--authority=".length));
+        } else if (
+            process.argv.length === 4 &&
+            first.startsWith("--install-authority-release=") &&
+            second.startsWith("--release-root=")
+        ) {
+            await installCandidateReleaseAuthority(
+                first.slice("--install-authority-release=".length),
+                second.slice("--release-root=".length),
+                defaultEnvironment
+            );
+        } else {
             throw failure();
         }
-        await provisionProductionRelease(argument.slice("--authority=".length));
         process.stdout.write("Production release authority installed.\n");
     } catch {
         process.stderr.write(`${failureMessage}\n`);
