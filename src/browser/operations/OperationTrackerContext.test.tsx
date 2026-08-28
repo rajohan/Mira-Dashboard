@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { useState } from "react";
+import { act, useState } from "react";
 
 import { OperationTrackerProvider } from "./OperationTrackerContext.tsx";
 import { useOperationTracker } from "./operationTrackerContextValue.ts";
+import { reconcileTrackedOperationsIdentity } from "./operationTrackerStorage.ts";
 
 const { cleanup, render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -82,6 +83,7 @@ describe("operation tracker", () => {
                 <Harness />
             </OperationTrackerProvider>
         );
+        act(() => reconcileTrackedOperationsIdentity("authenticated:session-a"));
 
         await user.click(screen.getByRole("button", { name: "Track first" }));
         first.unmount();
@@ -90,6 +92,7 @@ describe("operation tracker", () => {
                 <Harness />
             </OperationTrackerProvider>
         );
+        act(() => reconcileTrackedOperationsIdentity("authenticated:session-a"));
 
         expect(screen.getByRole("status", { name: "Operations" })).toHaveTextContent(
             "First (1)"

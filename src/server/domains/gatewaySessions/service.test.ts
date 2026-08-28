@@ -190,6 +190,41 @@ function unsortedProjection(): GatewaySessionProviderSnapshot {
 }
 
 describe("Gateway sessions service", () => {
+    test("coalesces heartbeat refreshes and seeds an empty projection", async () => {
+        const provider = new TestGatewaySessionsProvider();
+        provider.snapshots.push({ sessions: [], truncated: false });
+        const service = createTestGatewaySessionsService({
+            nowMs: () => observedAtMs,
+            provider,
+        });
+
+        await Promise.all([
+            service.refreshHeartbeatProjection!(),
+            service.refreshHeartbeatProjection!(),
+        ]);
+
+        expect(provider.limits).toEqual([gatewaySessionProjectionMaximum]);
+        expect(service.readHeartbeatProjection()).toEqual({
+            count: 0,
+            observedAtMs,
+            state: "fresh",
+            truncated: false,
+        });
+    });
+
+    test("keeps heartbeat refresh failures inside the redacted projection", async () => {
+        const provider = new TestGatewaySessionsProvider();
+        provider.snapshots.push(new Error("secret upstream detail"));
+        const service = createTestGatewaySessionsService({
+            nowMs: () => observedAtMs,
+            provider,
+        });
+
+        await service.refreshHeartbeatProjection!();
+
+        expect(service.readHeartbeatProjection()).toEqual({ state: "unavailable" });
+    });
+
     test("requests one bounded projection and derives stable same-snapshot stats", async () => {
         const provider = new TestGatewaySessionsProvider();
         provider.snapshots.push(unsortedProjection(), unsortedProjection());

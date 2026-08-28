@@ -8,7 +8,7 @@ import {
 import {
     readStoredOperations,
     storeOperations,
-    trackedOperationsClearedEvent,
+    trackedOperationsStorageChangedEvent,
 } from "./operationTrackerStorage.ts";
 
 const trackedOperationMaximum = 12;
@@ -25,16 +25,19 @@ function capTerminalHistory(operations: readonly TrackedOperation[]) {
 
 /** @returns Session-scoped durable job identities shared across route navigation. */
 export function OperationTrackerProvider({ children }: PropsWithChildren) {
-    const [operations, setOperations] =
-        useState<readonly TrackedOperation[]>(readStoredOperations);
+    const [operations, setOperations] = useState<readonly TrackedOperation[]>([]);
     const settledRunIds = useRef(new Set<string>());
     useEffect(() => {
-        const clear = () => {
+        const synchronize = () => {
             settledRunIds.current.clear();
-            setOperations([]);
+            setOperations(readStoredOperations());
         };
-        globalThis.addEventListener(trackedOperationsClearedEvent, clear);
-        return () => globalThis.removeEventListener(trackedOperationsClearedEvent, clear);
+        globalThis.addEventListener(trackedOperationsStorageChangedEvent, synchronize);
+        return () =>
+            globalThis.removeEventListener(
+                trackedOperationsStorageChangedEvent,
+                synchronize
+            );
     }, []);
     const dismiss = (jobRunId: string) => {
         setOperations((current) => {
