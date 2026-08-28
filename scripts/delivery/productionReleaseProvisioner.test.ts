@@ -25,6 +25,7 @@ import {
     createLocalReleaseFixture,
     removeProductionDeliveryFixtures,
 } from "../testSupport/productionDeliveryFixture.ts";
+import { verifyProductionProvisioningEnvelope } from "./productionProvisioningEnvelope.ts";
 import {
     parseProductionProvisioningAuthority,
     productionMaintenanceGroupIsTrusted,
@@ -94,6 +95,57 @@ async function restoreOwnerWrite(target: string): Promise<void> {
 }
 
 describe("production release root provisioner", () => {
+    test("candidate-owned code runs the complete privileged workflow", async () => {
+        const releaseId = "c".repeat(40);
+        const runtime = { revision: "d".repeat(40), version: Bun.version };
+        const releaseRoot = await createLocalReleaseFixture(
+            sourceProjectRoot,
+            releaseId,
+            runtime,
+            temporaryDirectories
+        );
+        const commands: string[] = [];
+        const environment = productionReleaseProvisionerTestSupport.createEnvironment({
+            executablePath: process.execPath,
+            getUid: () => 0,
+            modulePath: path.join(releaseRoot, "server/productionProvisioning.js"),
+            releasesRoot: path.dirname(releaseRoot),
+            runCommand: (executable, arguments_) => {
+                commands.push(`${executable} ${arguments_.join(" ")}`);
+                if (executable === "/usr/bin/id") {
+                    return Promise.resolve(commandResult("1000\n"));
+                }
+                if (executable === "/usr/bin/getent") {
+                    return Promise.resolve(
+                        commandResult("mira-dashboard-log-maintenance:x:986:ubuntu\n")
+                    );
+                }
+                return Promise.resolve(commandResult());
+            },
+        });
+
+        await productionReleaseProvisionerTestSupport.installCandidateReleaseAuthority(
+            releaseId,
+            releaseRoot,
+            environment
+        );
+
+        expect(
+            commands.some((command) =>
+                command.includes("installHostOperationsProvisioning.ts")
+            )
+        ).toBeTrue();
+        expect(
+            commands.some((command) =>
+                command.includes("installLogMaintenanceProvisioning.ts")
+            )
+        ).toBeTrue();
+        expect(
+            commands.some((command) => command.includes("preview-tailscale/operator.ts"))
+        ).toBeTrue();
+        expect(commands).toContain("/usr/bin/systemctl daemon-reload");
+    });
+
     test("parses only exact local and semantic release authorities", () => {
         const releaseId = "a".repeat(40);
         expect(parseProductionProvisioningAuthority(`${releaseId}--local`)).toEqual({
@@ -495,7 +547,7 @@ describe("production release root provisioner", () => {
                 syncedPaths.push(target);
                 return Promise.resolve();
             },
-            verifyReleaseArtifactIdentity,
+            verifyProvisioningEnvelope: verifyProductionProvisioningEnvelope,
         });
 
         await expectProvisioningFailure(
@@ -549,14 +601,7 @@ describe("production release root provisioner", () => {
         expect(
             await verifyReleaseArtifactIdentity(path.join(releasesRoot, releaseId))
         ).toMatchObject({ source: { commitSha: releaseId }, runtime });
-        expect(commands).toContain("/usr/bin/systemctl daemon-reload");
-        expect(
-            commands.filter((command) =>
-                command.includes("/provisionManagedLogAccess.ts ")
-            )
-        ).toEqual([
-            `${path.join(provisioningRoot, "pairs", releaseId, "bun")} ${path.join(releasesRoot, releaseId)}/scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts --group-id=986 --runtime-user-id=1000`,
-        ]);
+        expect(commands.some((command) => command.includes("daemon-reload"))).toBe(false);
         expect(assetDownloads).toBe(2);
         expect(
             syncedPaths.some((target) =>
@@ -575,7 +620,9 @@ describe("production release root provisioner", () => {
             command.startsWith("/usr/bin/install -o root -g root -m 0555")
         );
         const authorityInstallIndex = commands.findIndex((command) =>
-            command.includes("installHostOperationsProvisioning.ts")
+            command.includes(
+                `server/productionProvisioning.js --install-authority-release=${releaseId}`
+            )
         );
         expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
         expect(authorityInstallIndex).toBeGreaterThan(runtimeInstallIndex);

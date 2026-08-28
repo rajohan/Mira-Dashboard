@@ -71,27 +71,6 @@ const exactScriptPaths = Object.freeze(
     ].toSorted()
 );
 const exactSourcePaths = Object.freeze(["src/shared/managedLogManifest.ts"] as const);
-// One release must teach the installed provisioner this exact successor shape before
-// a later release can ship and install the additional root-owned artifacts.
-const managedLogAccessBridgePaths = Object.freeze({
-    script: "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-log-access",
-    systemd: "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
-} as const);
-const acceptedArtifactProfiles = Object.freeze([
-    Object.freeze({ scripts: exactScriptPaths, systemd: exactSystemdPaths }),
-    Object.freeze({
-        scripts: Object.freeze(
-            [...exactScriptPaths, managedLogAccessBridgePaths.script].toSorted(
-                compareCanonicalText
-            )
-        ),
-        systemd: Object.freeze(
-            [...exactSystemdPaths, managedLogAccessBridgePaths.systemd].toSorted(
-                compareCanonicalText
-            )
-        ),
-    }),
-]);
 
 /** Bun identity observed by release creation and activation verification. */
 export interface ReleaseRuntimeIdentity {
@@ -223,13 +202,6 @@ function sameArtifactRecords(
     );
 }
 
-function samePaths(left: readonly string[], right: readonly string[]): boolean {
-    return (
-        left.length === right.length &&
-        left.every((artifactPath, index) => artifactPath === right[index])
-    );
-}
-
 function selectedBunTypesVersion(
     packages: readonly Readonly<{ name: string; version: string }>[]
 ): string | undefined {
@@ -296,6 +268,12 @@ function assertArtifactShape(
     const systemdPaths = artifacts
         .filter(({ path: artifactPath }) => artifactPath.startsWith("systemd/"))
         .map(({ path: artifactPath }) => artifactPath);
+    if (
+        systemdPaths.length !== exactSystemdPaths.length ||
+        exactSystemdPaths.some((expected, index) => systemdPaths[index] !== expected)
+    ) {
+        throw invalidReleaseIdentity();
+    }
     const sourcePaths = artifacts
         .filter(({ path: artifactPath }) => artifactPath.startsWith("src/"))
         .map(({ path: artifactPath }) => artifactPath);
@@ -309,11 +287,8 @@ function assertArtifactShape(
         .filter(({ path: artifactPath }) => artifactPath.startsWith("scripts/"))
         .map(({ path: artifactPath }) => artifactPath);
     if (
-        !acceptedArtifactProfiles.some(
-            (profile) =>
-                samePaths(systemdPaths, profile.systemd) &&
-                samePaths(scriptPaths, profile.scripts)
-        )
+        scriptPaths.length !== exactScriptPaths.length ||
+        exactScriptPaths.some((expected, index) => scriptPaths[index] !== expected)
     ) {
         throw invalidReleaseIdentity();
     }

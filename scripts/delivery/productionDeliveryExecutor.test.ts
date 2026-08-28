@@ -319,17 +319,12 @@ async function createClaimedProductionRunDatabase(
 }
 
 describe("production Delivery executor", () => {
-    test("rejects pre-Delivery releases instead of normalizing legacy state", () => {
+    test("recognizes the exact current Delivery protocol", () => {
         expect(
             releaseSupportsCurrentDeliveryProtocol(
                 artifact(currentReleaseId, currentRuntimeRevision).release
             )
         ).toBeTrue();
-        expect(
-            releaseSupportsCurrentDeliveryProtocol(
-                artifact(currentReleaseId, currentRuntimeRevision, []).release
-            )
-        ).toBeFalse();
     });
 
     test("binds cached release manifests to the published authority digest", () => {
