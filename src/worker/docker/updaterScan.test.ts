@@ -44,6 +44,7 @@ function compose(
 ): DockerComposeDiscoveryResult {
     return {
         composeFiles: ["/opt/docker/compose.yaml"],
+        settlementRevision: "e".repeat(64),
         services,
         sourceRevision: "d".repeat(64),
     };
@@ -51,8 +52,33 @@ function compose(
 
 function payload(status?: DockerUpdaterStatus): DockerOverviewCachePayload {
     return {
-        containers: [],
-        images: [],
+        containers: [
+            {
+                createdAtMs: 900,
+                health: "healthy",
+                id: "1".repeat(64),
+                image: "ghcr.io/example/app:1.0.0",
+                imageId: `sha256:${"2".repeat(64)}`,
+                mounts: [],
+                name: "media-app-1",
+                networks: [],
+                ports: [],
+                project: "media",
+                restartCount: 0,
+                service: "app",
+                startedAtMs: 950,
+                state: "running",
+            },
+        ],
+        images: [
+            {
+                createdAtMs: 800,
+                id: `sha256:${"2".repeat(64)}`,
+                references: ["ghcr.io/example/app:1.0.0"],
+                sizeBytes: 100,
+                usedByContainerIds: ["1".repeat(64)],
+            },
+        ],
         observedAtMs: 1000,
         sourceRevision,
         updaterEvents: [],
@@ -149,6 +175,8 @@ describe("Docker updater scan", () => {
                 track: "digest",
             },
         };
+        input.containers[0] = { ...input.containers[0]!, image: imageReference };
+        input.images[0] = { ...input.images[0]!, references: [imageReference] };
         const nextDigest = `sha256:${"f".repeat(64)}`;
         const result = await scanDockerUpdates(compose([service]), input, undefined, {
             generateId: ids(),
@@ -184,6 +212,37 @@ describe("Docker updater scan", () => {
             },
         ]);
         expect(JSON.stringify(result)).not.toContain("raw provider secret");
+    });
+
+    test("does not scan or authorize an update for an ineligible managed runtime", async () => {
+        const input = payload({
+            candidateImage: "ghcr.io/example/app:1.1.0",
+            state: "update-available",
+        });
+        input.containers[0] = {
+            ...input.containers[0]!,
+            health: "unhealthy",
+        };
+        let calls = 0;
+
+        const result = await scanDockerUpdates(compose(), input, undefined, {
+            generateId: ids(),
+            lookup: () => {
+                calls += 1;
+                return Promise.resolve({
+                    digest: `sha256:${"d".repeat(64)}`,
+                    tag: "1.1.0",
+                });
+            },
+            nowMs: () => 2000,
+            platform: "linux/amd64",
+        });
+
+        expect(calls).toBe(0);
+        expect(result.payload.updaterServices[0]?.status).toEqual({
+            state: "not-checked",
+        });
+        expect(result.events.map(({ kind }) => kind)).toEqual(["scan-completed"]);
     });
 
     test("never calls a registry for an inventory-only service", async () => {

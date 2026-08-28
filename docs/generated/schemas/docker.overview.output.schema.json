@@ -436,6 +436,10 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
+        "updaterSourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "updaterEvents": {
           "type": "array",
           "items": {
@@ -1184,6 +1188,10 @@
           "maximum": 8640000000000000
         },
         "sourceRevision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "updaterSourceRevision": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },

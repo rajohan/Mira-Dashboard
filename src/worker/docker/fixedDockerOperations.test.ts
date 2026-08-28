@@ -118,6 +118,7 @@ function overviewHarness(
             return {
                 compose: {
                     composeFiles: [],
+                    settlementRevision: "a".repeat(64),
                     services: [],
                     sourceRevision: "b".repeat(64),
                 },

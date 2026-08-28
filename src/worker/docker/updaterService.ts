@@ -210,20 +210,33 @@ function compareStrings(left: string, right: string): number {
     return 0;
 }
 
-function exactRunningServiceImageId(
+function exactRunningServiceRuntime(
     payload: DockerOverviewCachePayload,
     project: string,
-    service: string
-): string {
+    service: string,
+    expectedImageReference?: string
+): Readonly<{ imageId: string; replicaCount: number }> {
     const matching = payload.containers.filter(
         (container) => container.project === project && container.service === service
     );
-    if (matching.length === 0 || matching.some(({ state }) => state !== "running")) {
+    if (
+        matching.length === 0 ||
+        matching.some(
+            ({ health, image, state }) =>
+                state !== "running" ||
+                health === "starting" ||
+                health === "unhealthy" ||
+                (expectedImageReference !== undefined && image !== expectedImageReference)
+        )
+    ) {
         return fail();
     }
     const imageIds = new Set(matching.map(({ imageId }) => imageId));
     if (imageIds.size !== 1) return fail();
-    return imageIds.values().next().value!;
+    return Object.freeze({
+        imageId: imageIds.values().next().value!,
+        replicaCount: matching.length,
+    });
 }
 
 function events(
@@ -326,6 +339,7 @@ function unknownMutationResult(input: {
     }[];
     readonly confirmedCurrentIds: ReadonlySet<string>;
     readonly failedCount: number;
+    readonly failureStage: string;
     readonly generateId: () => string;
     readonly nowMs: () => number;
     readonly payload: DockerOverviewCachePayload;
@@ -338,7 +352,7 @@ function unknownMutationResult(input: {
         event(input.generateId, input.nowMs, {
             kind: "update-outcome-unknown",
             serviceId: service.id,
-            summary: `Update outcome for ${service.project}/${service.service} could not be confirmed; Docker and Compose state require reconciliation.`,
+            summary: `Update outcome for ${service.project}/${service.service} could not be confirmed after ${input.failureStage}; Docker and Compose state require reconciliation.`,
         })
     );
     const payload = v.parse(dockerOverviewCachePayloadSchema, {
@@ -405,15 +419,19 @@ export function createDockerUpdaterService(
 
     async function reconcileVerifiedStack(
         previous: DockerOverviewCachePayload,
-        expectedSourceRevision: string,
+        expectedComposeSourceRevision: string,
         services: readonly string[],
         signal: AbortSignal
     ) {
         const before = await options.collector.discover(previous, signal);
-        if (before.payload.sourceRevision !== expectedSourceRevision) sourceConflict();
+        if (before.compose.sourceRevision !== expectedComposeSourceRevision) {
+            sourceConflict();
+        }
         await reconcileStack(services, signal);
         const after = await options.collector.discover(before.payload, signal);
-        if (after.payload.sourceRevision !== expectedSourceRevision) sourceConflict();
+        if (after.compose.sourceRevision !== expectedComposeSourceRevision) {
+            sourceConflict();
+        }
         return after;
     }
 
@@ -563,7 +581,11 @@ export function createDockerUpdaterService(
         }
         discovery = preflightDiscovery;
         const preMutationPayload = payload;
+        const preMutationSettlementRevision = discovery.compose.settlementRevision;
         const revalidatedRuntimeImageIds = new Map<string, string>();
+        const rollbackRuntimeReplicaCounts = new Map<string, number>();
+        const updatedRuntimeImageIds = new Map<string, string>();
+        const updatedRuntimeReplicaCounts = new Map<string, number>();
         const plannedSources = selected.map((selectedService) => {
             const source = exactService(
                 discovery.compose.services,
@@ -576,16 +598,72 @@ export function createDockerUpdaterService(
             ) {
                 fail();
             }
+            const runtime = exactRunningServiceRuntime(
+                preMutationPayload,
+                selectedService.project,
+                selectedService.service
+            );
             return Object.freeze({
-                runtimeImageId: exactRunningServiceImageId(
-                    preMutationPayload,
-                    selectedService.project,
-                    selectedService.service
-                ),
+                runtimeImageId: runtime.imageId,
+                runtimeReplicaCount: runtime.replicaCount,
                 selectedService,
                 source,
             });
         });
+
+        function verifyRestoredSources(
+            restored: Awaited<ReturnType<DockerOverviewCollector["discover"]>>,
+            affectedServices: readonly (typeof selected)[number][]
+        ): void {
+            const plannedById = new Map(
+                plannedSources.map((planned) => [planned.selectedService.id, planned])
+            );
+            for (const service of affectedServices) {
+                const planned = plannedById.get(service.id);
+                if (planned === undefined) fail();
+                const restoredSource = exactService(
+                    restored.compose.services,
+                    service.project,
+                    service.service
+                );
+                if (
+                    restoredSource.composePath !== planned.source.composePath ||
+                    restoredSource.contentSha256 !== planned.source.contentSha256 ||
+                    restoredSource.imageReference !== planned.source.imageReference ||
+                    restoredSource.enabled !== planned.source.enabled ||
+                    restoredSource.sourceAmbiguous !== planned.source.sourceAmbiguous ||
+                    restoredSource.configFiles.length !==
+                        planned.source.configFiles.length ||
+                    restoredSource.configFiles.some(
+                        (path, index) => path !== planned.source.configFiles[index]
+                    )
+                ) {
+                    fail();
+                }
+            }
+        }
+
+        async function reconcileRestoredStack(
+            previous: DockerOverviewCachePayload,
+            affectedServices: readonly (typeof selected)[number][],
+            signal: AbortSignal
+        ) {
+            const before = await options.collector.discover(previous, signal);
+            if (before.compose.settlementRevision !== preMutationSettlementRevision) {
+                sourceConflict();
+            }
+            verifyRestoredSources(before, affectedServices);
+            await reconcileStack(
+                affectedServices.map(({ service }) => service),
+                signal
+            );
+            const after = await options.collector.discover(before.payload, signal);
+            if (after.compose.settlementRevision !== preMutationSettlementRevision) {
+                sourceConflict();
+            }
+            verifyRestoredSources(after, affectedServices);
+            return after;
+        }
         const plannedFilesByPath = new Map<string, DockerUpdaterGitHeadFile>();
         for (const { source } of plannedSources) {
             const existing = plannedFilesByPath.get(source.composePath);
@@ -662,10 +740,9 @@ export function createDockerUpdaterService(
             if (!rollbackCompleted) return undefined;
 
             try {
-                const restored = await reconcileVerifiedStack(
+                const restored = await reconcileRestoredStack(
                     preMutationPayload,
-                    preMutationPayload.sourceRevision,
-                    affectedServices.map(({ service }) => service),
+                    affectedServices,
                     recoverySignal
                 );
                 const plannedById = new Map(
@@ -683,13 +760,21 @@ export function createDockerUpdaterService(
                         restoredSource.composePath !== planned.source.composePath ||
                         restoredSource.contentSha256 !== planned.source.contentSha256 ||
                         restoredSource.imageReference !== planned.source.imageReference ||
-                        exactRunningServiceImageId(
-                            restored.payload,
-                            service.project,
-                            service.service
-                        ) !==
-                            (revalidatedRuntimeImageIds.get(service.id) ??
-                                planned.runtimeImageId)
+                        (() => {
+                            const runtime = exactRunningServiceRuntime(
+                                restored.payload,
+                                service.project,
+                                service.service
+                            );
+                            return (
+                                runtime.imageId !==
+                                    (revalidatedRuntimeImageIds.get(service.id) ??
+                                        planned.runtimeImageId) ||
+                                runtime.replicaCount !==
+                                    (rollbackRuntimeReplicaCounts.get(service.id) ??
+                                        planned.runtimeReplicaCount)
+                            );
+                        })()
                     ) {
                         fail();
                     }
@@ -746,7 +831,7 @@ export function createDockerUpdaterService(
                             ) {
                                 throw new DockerComposeImageUpdateError("conflict");
                             }
-                            const runtimeImageId = exactRunningServiceImageId(
+                            const runtime = exactRunningServiceRuntime(
                                 current.payload,
                                 source.project,
                                 source.service
@@ -754,11 +839,16 @@ export function createDockerUpdaterService(
                             if (phase === "pre-update") {
                                 revalidatedRuntimeImageIds.set(
                                     selectedService.id,
-                                    runtimeImageId
+                                    runtime.imageId
+                                );
+                            } else {
+                                rollbackRuntimeReplicaCounts.set(
+                                    selectedService.id,
+                                    runtime.replicaCount
                                 );
                             }
                             return Object.freeze({
-                                runtimeImageId,
+                                runtimeImageId: runtime.imageId,
                                 target: exactService(
                                     current.compose.services,
                                     source.project,
@@ -780,6 +870,17 @@ export function createDockerUpdaterService(
                     source.service
                 );
                 if (after.imageReference !== targetImageReference) fail();
+                const updatedRuntime = exactRunningServiceRuntime(
+                    discovery.payload,
+                    selectedService.project,
+                    selectedService.service,
+                    targetImageReference
+                );
+                updatedRuntimeImageIds.set(selectedService.id, updatedRuntime.imageId);
+                updatedRuntimeReplicaCounts.set(
+                    selectedService.id,
+                    updatedRuntime.replicaCount
+                );
                 changes.set(source.composePath, {
                     composePath: source.composePath,
                     expectedAfterContentSha256: after.contentSha256,
@@ -840,6 +941,7 @@ export function createDockerUpdaterService(
                                 ? new Set(successful.map(({ id }) => id))
                                 : new Set(),
                         failedCount,
+                        failureStage: "Compose apply or rollback verification",
                         generateId,
                         nowMs,
                         payload,
@@ -881,10 +983,25 @@ export function createDockerUpdaterService(
             try {
                 discovery = await reconcileVerifiedStack(
                     payload,
-                    payload.sourceRevision,
+                    discovery.compose.sourceRevision,
                     successful.map(({ service }) => service),
                     operationSignal
                 );
+                for (const selectedService of successful) {
+                    const runtime = exactRunningServiceRuntime(
+                        discovery.payload,
+                        selectedService.project,
+                        selectedService.service
+                    );
+                    if (
+                        runtime.imageId !==
+                            updatedRuntimeImageIds.get(selectedService.id) ||
+                        runtime.replicaCount !==
+                            updatedRuntimeReplicaCounts.get(selectedService.id)
+                    ) {
+                        fail();
+                    }
+                }
                 payload = discovery.payload;
             } catch {
                 const recoverySignal = AbortSignal.timeout(dockerRecoveryDeadlineMs);
@@ -894,14 +1011,14 @@ export function createDockerUpdaterService(
                         (await update.result.rollback(recoverySignal)) && recovered;
                 }
                 try {
-                    const restored = await reconcileVerifiedStack(
+                    const restored = await reconcileRestoredStack(
                         preMutationPayload,
-                        preMutationPayload.sourceRevision,
-                        successful.map(({ service }) => service),
+                        successful,
                         recoverySignal
                     );
                     for (const {
                         runtimeImageId,
+                        runtimeReplicaCount,
                         selectedService,
                         source,
                     } of plannedSources) {
@@ -914,13 +1031,23 @@ export function createDockerUpdaterService(
                             restoredSource.composePath !== source.composePath ||
                             restoredSource.contentSha256 !== source.contentSha256 ||
                             restoredSource.imageReference !== source.imageReference ||
-                            exactRunningServiceImageId(
-                                restored.payload,
-                                selectedService.project,
-                                selectedService.service
-                            ) !==
-                                (revalidatedRuntimeImageIds.get(selectedService.id) ??
-                                    runtimeImageId)
+                            (() => {
+                                const runtime = exactRunningServiceRuntime(
+                                    restored.payload,
+                                    selectedService.project,
+                                    selectedService.service
+                                );
+                                return (
+                                    runtime.imageId !==
+                                        (revalidatedRuntimeImageIds.get(
+                                            selectedService.id
+                                        ) ?? runtimeImageId) ||
+                                    runtime.replicaCount !==
+                                        (rollbackRuntimeReplicaCounts.get(
+                                            selectedService.id
+                                        ) ?? runtimeReplicaCount)
+                                );
+                            })()
                         ) {
                             fail();
                         }
@@ -935,6 +1062,8 @@ export function createDockerUpdaterService(
                         affectedServices: successful,
                         confirmedCurrentIds: new Set(),
                         failedCount,
+                        failureStage:
+                            "full-stack reconciliation and rollback verification",
                         generateId,
                         nowMs,
                         payload,
@@ -985,6 +1114,7 @@ export function createDockerUpdaterService(
                 affectedServices: successful,
                 confirmedCurrentIds: successfulIds,
                 failedCount,
+                failureStage: "Git source settlement",
                 generateId,
                 nowMs,
                 payload,
@@ -1001,14 +1131,14 @@ export function createDockerUpdaterService(
             let recoveredPayload: DockerOverviewCachePayload | undefined;
             if (rollbackCompleted) {
                 try {
-                    const recovered = await reconcileVerifiedStack(
+                    const recovered = await reconcileRestoredStack(
                         preMutationPayload,
-                        preMutationPayload.sourceRevision,
-                        successful.map(({ service }) => service),
+                        successful,
                         recoverySignal
                     );
                     for (const {
                         runtimeImageId,
+                        runtimeReplicaCount,
                         selectedService,
                         source,
                     } of plannedSources) {
@@ -1021,13 +1151,23 @@ export function createDockerUpdaterService(
                             recoveredSource.composePath !== source.composePath ||
                             recoveredSource.contentSha256 !== source.contentSha256 ||
                             recoveredSource.imageReference !== source.imageReference ||
-                            exactRunningServiceImageId(
-                                recovered.payload,
-                                selectedService.project,
-                                selectedService.service
-                            ) !==
-                                (revalidatedRuntimeImageIds.get(selectedService.id) ??
-                                    runtimeImageId)
+                            (() => {
+                                const runtime = exactRunningServiceRuntime(
+                                    recovered.payload,
+                                    selectedService.project,
+                                    selectedService.service
+                                );
+                                return (
+                                    runtime.imageId !==
+                                        (revalidatedRuntimeImageIds.get(
+                                            selectedService.id
+                                        ) ?? runtimeImageId) ||
+                                    runtime.replicaCount !==
+                                        (rollbackRuntimeReplicaCounts.get(
+                                            selectedService.id
+                                        ) ?? runtimeReplicaCount)
+                                );
+                            })()
                         ) {
                             fail();
                         }
@@ -1043,6 +1183,7 @@ export function createDockerUpdaterService(
                     affectedServices: successful,
                     confirmedCurrentIds: new Set(),
                     failedCount,
+                    failureStage: "Git rejection and rollback verification",
                     generateId,
                     nowMs,
                     payload,

@@ -66,6 +66,7 @@ function composeResult(): DockerComposeDiscoveryResult {
     if (image === undefined) throw new Error("Invalid test image");
     return {
         composeFiles: ["/opt/docker/apps/app/compose.yaml", "/opt/docker/compose.yaml"],
+        settlementRevision: "d".repeat(64),
         services: [
             {
                 autoUpdate: false,

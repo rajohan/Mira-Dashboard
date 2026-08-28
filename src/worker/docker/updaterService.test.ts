@@ -46,18 +46,24 @@ interface MutableService {
 interface HarnessOptions {
     readonly abortOnFirstReconcile?: AbortController;
     readonly driftOnDiscoverCall?: number;
+    readonly engineChangeDuringReconcile?: boolean;
     readonly finalGitThrows?: boolean;
     readonly failService?: string;
     readonly finalGit?: DockerUpdaterGitSyncResult;
     readonly headVerificationFails?: boolean;
     readonly manualSecondService?: boolean;
+    readonly preUpdateReplicaDrift?: boolean;
     readonly preflightGit?: DockerUpdaterGitSyncResult;
     readonly preflightGitSequence?: readonly DockerUpdaterGitSyncResult[];
     readonly registryFailure?: boolean;
     readonly reconcileFails?: boolean;
     readonly rollbackFailsService?: string;
+    readonly rollbackChangesComposeRevision?: boolean;
     readonly runtimeImageDriftAfterRecovery?: boolean;
+    readonly runtimeImageDriftDuringReconcile?: boolean;
+    readonly replicaDisappearsDuringReconcile?: boolean;
     readonly runtimeImageDriftOnDiscoverCall?: number;
+    readonly unexpectedRuntimeImageAfterUpdate?: boolean;
     readonly serviceCount?: 1 | 2;
     readonly sourceChangeOnDiscoverCall?: number;
     readonly sourceChangeDuringReconcile?: boolean;
@@ -129,7 +135,8 @@ function createHarness(options: HarnessOptions = {}) {
               ]),
     ];
     let contentVersion = 10;
-    let revisionVersion = 20;
+    let composeRevisionVersion = 20;
+    let engineRevisionVersion = 20;
     let discoverCalls = 0;
     const updateCommands: DockerComposeImageUpdateCommand[] = [];
     const order: string[] = [];
@@ -137,14 +144,19 @@ function createHarness(options: HarnessOptions = {}) {
     const gitRequests: DockerUpdaterGitSyncRequest[] = [];
     let preflightGitCalls = 0;
     let reconcileCalls = 0;
+    let runtimeImageDrifted = false;
+    let runtimeImageReferenceDrifted = false;
+    let runtimeReplicaDropped = false;
+    let declaredScaleApplied = false;
     const reconcileSignals: Array<AbortSignal | undefined> = [];
     const reconcileServices: string[][] = [];
 
     function compose(): DockerComposeDiscoveryResult {
         return {
             composeFiles: [composePath, rootComposePath],
+            settlementRevision: sourceRevision(contentVersion + 1000),
             services: services.map((service) => sourceService(service, contentVersion)),
-            sourceRevision: sourceRevision(revisionVersion),
+            sourceRevision: sourceRevision(composeRevisionVersion),
         };
     }
 
@@ -154,6 +166,9 @@ function createHarness(options: HarnessOptions = {}) {
             (prior?.updaterServices ?? []).map((service) => [service.id, service])
         );
         const runtimeImageId = (index: number): string => {
+            if (runtimeImageDrifted && index === 0) {
+                return `sha256:${"7".repeat(64)}`;
+            }
             if (
                 options.runtimeImageDriftAfterRecovery &&
                 reconcileCalls >= 2 &&
@@ -170,38 +185,56 @@ function createHarness(options: HarnessOptions = {}) {
             }
             return `sha256:${String(index + 3).repeat(64)}`;
         };
-        const containers = services.map((service, index) => ({
-            createdAtMs: 900,
-            health: "healthy" as const,
-            id: String(index + 1).repeat(64),
-            image: service.imageReference,
-            imageId: runtimeImageId(index),
-            mounts: [],
-            name: `media-${service.name}-1`,
-            networks: [],
-            ports: [],
-            project: "media",
-            restartCount: 0,
-            service: service.name,
-            startedAtMs: 950,
-            state: "running" as const,
-        }));
+        const containers = services.flatMap((service, index) => {
+            let replicaCount = 1;
+            if (index === 0 && options.preUpdateReplicaDrift) {
+                replicaCount = declaredScaleApplied ? 2 : 1;
+            }
+            if (index === 0 && options.replicaDisappearsDuringReconcile) {
+                replicaCount = runtimeReplicaDropped ? 1 : 2;
+            }
+            return Array.from({ length: replicaCount }, (_, replicaIndex) => ({
+                createdAtMs: 900,
+                health: "healthy" as const,
+                id: `${index + 1}${replicaIndex + 1}`.repeat(32),
+                image:
+                    runtimeImageReferenceDrifted && index === 0
+                        ? "ghcr.io/example/unexpected:9.9.9"
+                        : service.imageReference,
+                imageId: runtimeImageId(index),
+                mounts: [],
+                name: `media-${service.name}-${replicaIndex + 1}`,
+                networks: [],
+                ports: [],
+                project: "media",
+                restartCount: 0,
+                service: service.name,
+                startedAtMs: 950,
+                state: "running" as const,
+            }));
+        });
+        const images = [...new Set(containers.map(({ imageId }) => imageId))].map(
+            (imageId) => ({
+                createdAtMs: 800,
+                id: imageId,
+                references: [
+                    containers.find((container) => container.imageId === imageId)!.image,
+                ],
+                sizeBytes: 100,
+                usedByContainerIds: containers
+                    .filter((container) => container.imageId === imageId)
+                    .map(({ id }) => id),
+            })
+        );
         return {
             containers,
-            images: containers.map((container) => ({
-                createdAtMs: 800,
-                id: container.imageId,
-                references: [container.image],
-                sizeBytes: 100,
-                usedByContainerIds: [container.id],
-            })),
+            images,
             observedAtMs: 1000 + discoverCalls,
-            sourceRevision: sourceRevision(revisionVersion),
+            sourceRevision: sourceRevision(engineRevisionVersion),
             updaterEvents: [...(prior?.updaterEvents ?? [])],
             updaterServices: services.map((service) => {
                 const previousService = previousById.get(service.id);
                 const status: DockerUpdaterStatus =
-                    prior?.sourceRevision === sourceRevision(revisionVersion) &&
                     previousService?.currentImage === service.imageReference
                         ? previousService.status
                         : { state: "unavailable" };
@@ -239,11 +272,12 @@ function createHarness(options: HarnessOptions = {}) {
                 );
             }
             if (options.driftOnDiscoverCall === discoverCalls) {
-                revisionVersion += 1;
+                engineRevisionVersion += 1;
             }
             if (options.sourceChangeOnDiscoverCall === discoverCalls) {
                 contentVersion += 1;
-                revisionVersion += 1;
+                composeRevisionVersion += 1;
+                engineRevisionVersion += 1;
             }
             return Promise.resolve({ compose: compose(), payload: payload(previous) });
         },
@@ -300,10 +334,14 @@ function createHarness(options: HarnessOptions = {}) {
         if (service === undefined) throw new Error("Missing test service");
         const previousImageReference = service.imageReference;
         const previousContentVersion = contentVersion;
-        const previousRevisionVersion = revisionVersion;
+        const previousComposeRevisionVersion = composeRevisionVersion;
+        const previousEngineRevisionVersion = engineRevisionVersion;
         service.imageReference = command.targetImageReference;
+        runtimeImageReferenceDrifted = options.unexpectedRuntimeImageAfterUpdate === true;
+        declaredScaleApplied = true;
         contentVersion += 1;
-        revisionVersion += 1;
+        composeRevisionVersion += 1;
+        engineRevisionVersion += 1;
         if (options.unconfirmedService === command.service) {
             throw new DockerComposeImageUpdateError(
                 "rollback-failed",
@@ -315,17 +353,24 @@ function createHarness(options: HarnessOptions = {}) {
         return {
             fromImageReference: command.expectedImageReference,
             project: command.project,
-            rollback() {
+            async rollback() {
                 order.push(`rollback:${command.service}`);
-                if (!settlementPending) return Promise.resolve(false);
+                if (!settlementPending) return false;
                 settlementPending = false;
                 if (options.rollbackFailsService === command.service) {
-                    return Promise.resolve(false);
+                    return false;
                 }
                 service.imageReference = previousImageReference;
                 contentVersion = previousContentVersion;
-                revisionVersion = previousRevisionVersion;
-                return Promise.resolve(true);
+                composeRevisionVersion = options.rollbackChangesComposeRevision
+                    ? previousComposeRevisionVersion + 100
+                    : previousComposeRevisionVersion;
+                engineRevisionVersion = previousEngineRevisionVersion + 1;
+                runtimeImageDrifted = false;
+                runtimeImageReferenceDrifted = false;
+                runtimeReplicaDropped = false;
+                await updaterOptions.revalidateTarget("post-rollback");
+                return true;
             },
             service: command.service,
             settle() {
@@ -345,7 +390,19 @@ function createHarness(options: HarnessOptions = {}) {
             reconcileServices.push([...services]);
             reconcileSignals.push(signal);
             if (options.sourceChangeDuringReconcile && reconcileCalls === 1) {
-                revisionVersion += 1;
+                composeRevisionVersion += 1;
+                engineRevisionVersion += 1;
+            }
+            if (options.engineChangeDuringReconcile && reconcileCalls === 1) {
+                engineRevisionVersion += 1;
+            }
+            if (options.runtimeImageDriftDuringReconcile && reconcileCalls === 1) {
+                runtimeImageDrifted = true;
+                engineRevisionVersion += 1;
+            }
+            if (options.replicaDisappearsDuringReconcile && reconcileCalls === 1) {
+                runtimeReplicaDropped = true;
+                engineRevisionVersion += 1;
             }
             if (options.reconcileFails && reconcileCalls === 1) {
                 options.abortOnFirstReconcile?.abort();
@@ -477,6 +534,92 @@ describe("Docker updater service", () => {
         ).toHaveLength(2);
         expect(JSON.stringify(result)).not.toContain(composePath);
         expect(JSON.stringify(result)).not.toContain("provider diagnostic");
+    });
+
+    test("settles updates when runtime inventory changes but Compose source is stable", async () => {
+        const harness = createHarness({
+            engineChangeDuringReconcile: true,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 0,
+            outcome: "completed",
+            updatedCount: 1,
+        });
+        expect(harness.reconcileCalls()).toBe(1);
+        expect(harness.order).not.toContain("rollback:one");
+    });
+
+    test("rolls back when the selected runtime drifts after Compose reconciliation", async () => {
+        const harness = createHarness({
+            runtimeImageDriftDuringReconcile: true,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 1,
+            outcome: "completed-with-failures",
+            updatedCount: 0,
+        });
+        expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.order).toContain("rollback:one");
+        expect(eventKinds(result)).toContain("update-failed");
+    });
+
+    test("rolls back when the applied runtime does not use the target image", async () => {
+        const harness = createHarness({
+            serviceCount: 1,
+            unexpectedRuntimeImageAfterUpdate: true,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 1,
+            outcome: "completed-with-failures",
+            updatedCount: 0,
+        });
+        expect(harness.order).toContain("rollback:one");
+        expect(eventKinds(result)).toContain("update-failed");
+    });
+
+    test("rolls back when a selected replica disappears after Compose reconciliation", async () => {
+        const harness = createHarness({
+            replicaDisappearsDuringReconcile: true,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 1,
+            outcome: "completed-with-failures",
+            updatedCount: 0,
+        });
+        expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.order).toContain("rollback:one");
+        expect(eventKinds(result)).toContain("update-failed");
     });
 
     test("restores the prior sources and reconciles selected services after an unhealthy result", async () => {
@@ -795,7 +938,10 @@ describe("Docker updater service", () => {
             "git-sync:1",
         ]);
         expect(result.payload.updaterServices.map(({ status }) => status)).toEqual([
-            { state: "unavailable" },
+            {
+                candidateImage: "ghcr.io/example/one:1.1.0",
+                state: "update-available",
+            },
             { state: "current" },
         ]);
         expect(eventKinds(result)).toContain("update-failed");
@@ -897,6 +1043,7 @@ describe("Docker updater service", () => {
                 reason: "conflict",
                 status: "unavailable",
             },
+            rollbackChangesComposeRevision: true,
         });
         const initial = harness.currentPayload();
 
@@ -934,6 +1081,58 @@ describe("Docker updater service", () => {
         ).toHaveLength(2);
     });
 
+    test("verifies rollback against the Compose-reconciled replica count", async () => {
+        const harness = createHarness({
+            finalGit: {
+                composePaths: [],
+                reason: "conflict",
+                status: "unavailable",
+            },
+            preUpdateReplicaDrift: true,
+            serviceCount: 1,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 1,
+            outcome: "completed-with-failures",
+            updatedCount: 0,
+        });
+        expect(eventKinds(result)).not.toContain("update-outcome-unknown");
+        expect(harness.order).toContain("rollback:one");
+    });
+
+    test("uses the planned replica count for a service that never entered rollback", async () => {
+        const harness = createHarness({
+            failService: "one",
+            finalGit: {
+                composePaths: [],
+                reason: "conflict",
+                status: "unavailable",
+            },
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            expectedSourceRevision: initial.sourceRevision,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 2,
+            outcome: "completed-with-failures",
+            updatedCount: 0,
+        });
+        expect(eventKinds(result)).not.toContain("update-outcome-unknown");
+        expect(harness.order).not.toContain("rollback:one");
+        expect(harness.order).toContain("rollback:two");
+    });
+
     test("returns unknown outcome when pre-commit rollback cannot be verified", async () => {
         const harness = createHarness({
             finalGit: {
@@ -960,6 +1159,11 @@ describe("Docker updater service", () => {
             state: "unavailable",
         });
         expect(eventKinds(result)).toContain("update-outcome-unknown");
+        expect(
+            result.payload.updaterEvents.find(
+                ({ kind }) => kind === "update-outcome-unknown"
+            )?.summary
+        ).toContain("Git rejection and rollback verification");
     });
 
     test("returns sanitized unknown outcome when rollback cannot be confirmed", async () => {
@@ -984,6 +1188,11 @@ describe("Docker updater service", () => {
             state: "unavailable",
         });
         expect(eventKinds(result)).toContain("update-outcome-unknown");
+        expect(
+            result.payload.updaterEvents.find(
+                ({ kind }) => kind === "update-outcome-unknown"
+            )?.summary
+        ).toContain("Compose apply or rollback verification");
         expect(harness.order).toEqual([
             "git-head",
             "git-sync:0",

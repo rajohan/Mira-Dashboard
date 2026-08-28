@@ -73,6 +73,25 @@ function updateIsAvailable(
         : image.tag !== candidate.tag;
 }
 
+function hasEligibleRuntime(
+    payload: DockerOverviewCachePayload,
+    project: string,
+    service: string
+): boolean {
+    const containers = payload.containers.filter(
+        (container) => container.project === project && container.service === service
+    );
+    if (containers.length === 0) return false;
+    const imageIds = new Set(containers.map(({ imageId }) => imageId));
+    return (
+        imageIds.size === 1 &&
+        containers.every(
+            ({ health, state }) =>
+                state === "running" && health !== "starting" && health !== "unhealthy"
+        )
+    );
+}
+
 function eventOrder(left: DockerUpdaterEvent, right: DockerUpdaterEvent): number {
     return right.atMs - left.atMs || compareStrings(left.id, right.id);
 }
@@ -173,6 +192,13 @@ export async function scanDockerUpdates(
                 source.tagPolicy === undefined
             ) {
                 return Object.freeze({ service, unavailable: false });
+            }
+            if (!hasEligibleRuntime(payload, source.project, source.service)) {
+                return Object.freeze({
+                    service,
+                    status: { state: "not-checked" as const },
+                    unavailable: false,
+                });
             }
             try {
                 const candidate = await lookup({
