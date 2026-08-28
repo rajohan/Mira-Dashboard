@@ -551,6 +551,7 @@ export function createCacheService(
                     JSON.stringify({
                         key: input.key,
                         procedure: "cache.refreshEntry",
+                        triggerType: input.triggerType,
                         version: 1,
                     })
                 );
@@ -668,7 +669,7 @@ export function createCacheService(
                         terminalCode: null,
                         terminalMessage: null,
                         timeoutMs: schedule.timeoutMs,
-                        triggerType: "system",
+                        triggerType: input.triggerType,
                         updatedAt: at,
                     },
                 });

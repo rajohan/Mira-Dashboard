@@ -65,6 +65,7 @@ describe("cache procedures", () => {
                 readOnly.refreshEntry({
                     idempotencyKey: "A".repeat(32),
                     key: systemHostKey,
+                    triggerType: "manual",
                 }),
             "FORBIDDEN"
         );
@@ -243,6 +244,7 @@ describe("cache procedures", () => {
             await caller.refreshEntry({
                 idempotencyKey: "A".repeat(32),
                 key: systemHostKey,
+                triggerType: "manual",
             })
         ).toEqual(queuedRun);
     });
@@ -272,6 +274,7 @@ describe("cache procedures", () => {
                 caller.refreshEntry({
                     idempotencyKey: "B".repeat(32),
                     key: systemHostKey,
+                    triggerType: "manual",
                 }),
             "CONFLICT"
         );

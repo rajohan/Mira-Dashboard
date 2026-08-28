@@ -652,6 +652,7 @@ describe("cache contracts", () => {
             v.parse(refreshCacheEntryInputSchema, {
                 idempotencyKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcY",
                 key: "system.host",
+                triggerType: "manual",
             })
         ).toBeDefined();
         for (const key of ["System.Host", "system/host", " system.host"] as const) {
@@ -659,6 +660,7 @@ describe("cache contracts", () => {
                 v.safeParse(refreshCacheEntryInputSchema, {
                     idempotencyKey: "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcY",
                     key,
+                    triggerType: "manual",
                 }).success
             ).toBeFalse();
         }

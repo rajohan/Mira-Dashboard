@@ -317,6 +317,10 @@ export const getCacheEntryInputSchema = v.strictObject({ key: cacheEntryKeySchem
 export const refreshCacheEntryInputSchema = v.strictObject({
     idempotencyKey: jobIdempotencyKeySchema,
     key: cacheEntryKeySchema,
+    triggerType: v.picklist(
+        ["manual", "system"],
+        "Cache refresh trigger type is invalid"
+    ),
 });
 
 /**

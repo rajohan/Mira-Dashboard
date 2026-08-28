@@ -48,7 +48,10 @@ describe("demand-driven cache refresh", () => {
             { readonly signal: AbortSignal },
         ];
         expect(call[0]).toBe("cache.refreshEntry");
-        expect(call[1]).toMatchObject({ key: "docker.overview" });
+        expect(call[1]).toMatchObject({
+            key: "docker.overview",
+            triggerType: "system",
+        });
         expect(call[2].signal).toBeInstanceOf(AbortSignal);
 
         act(() => {
@@ -57,6 +60,32 @@ describe("demand-driven cache refresh", () => {
         expect(mutation).toHaveBeenCalledTimes(1);
         view.unmount();
         expect(call[2].signal.aborted).toBeTrue();
+    });
+
+    test("keeps the bounded guard after a rejected refresh request", async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(10_000);
+        const mutation = mock((..._arguments: readonly unknown[]) =>
+            Promise.reject(new Error("Refresh already active"))
+        );
+        const view = render(<RefreshProbe mutation={mutation} />);
+
+        await act(async () => {
+            jest.advanceTimersByTime(5000);
+            await Promise.resolve();
+        });
+        expect(mutation).toHaveBeenCalledTimes(1);
+
+        act(() => {
+            jest.advanceTimersByTime(20_000);
+        });
+        expect(mutation).toHaveBeenCalledTimes(1);
+
+        act(() => {
+            jest.advanceTimersByTime(10_000);
+        });
+        expect(mutation).toHaveBeenCalledTimes(2);
+        view.unmount();
     });
 
     test("stays idle when disabled, hidden, or already fresh", () => {

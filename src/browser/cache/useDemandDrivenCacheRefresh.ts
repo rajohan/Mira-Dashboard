@@ -58,12 +58,11 @@ export function useDemandDrivenCacheRefresh(
                             .randomUUID()
                             .replaceAll("-", ""),
                         key: options.key,
+                        triggerType: "system",
                     },
                     { signal: controller.signal }
                 )
-                .catch(() => {
-                    pendingSince.current = null;
-                });
+                .catch(() => {});
         };
         const interval = globalThis.setInterval(requestIfNeeded, options.intervalMs);
         globalThis.document.addEventListener("visibilitychange", requestIfNeeded);

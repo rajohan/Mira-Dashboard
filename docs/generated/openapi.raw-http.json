@@ -10786,11 +10786,19 @@
             "minLength": 1,
             "maxLength": 128,
             "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "triggerType": {
+            "enum": [
+              "manual",
+              "system"
+            ],
+            "type": "string"
           }
         },
         "required": [
           "idempotencyKey",
-          "key"
+          "key",
+          "triggerType"
         ],
         "additionalProperties": false,
         "$schema": "https://json-schema.org/draft/2020-12/schema"

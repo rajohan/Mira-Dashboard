@@ -186,6 +186,7 @@ describe("cache browser refresh mutation", () => {
             v.parse(refreshCacheEntryInputSchema, {
                 idempotencyKey,
                 key: cacheKey,
+                triggerType: "manual",
             }).idempotencyKey
         ).toBe(idempotencyKey);
     });
@@ -249,11 +250,31 @@ describe("cache browser refresh mutation", () => {
             });
 
             expect(transport.calls.map(({ input }) => input)).toEqual([
-                { idempotencyKey: generatedKeys[0], key: cacheKey },
-                { idempotencyKey: generatedKeys[1], key: otherCacheKey },
-                { idempotencyKey: generatedKeys[0], key: cacheKey },
-                { idempotencyKey: generatedKeys[1], key: otherCacheKey },
-                { idempotencyKey: generatedKeys[2], key: cacheKey },
+                {
+                    idempotencyKey: generatedKeys[0],
+                    key: cacheKey,
+                    triggerType: "manual",
+                },
+                {
+                    idempotencyKey: generatedKeys[1],
+                    key: otherCacheKey,
+                    triggerType: "manual",
+                },
+                {
+                    idempotencyKey: generatedKeys[0],
+                    key: cacheKey,
+                    triggerType: "manual",
+                },
+                {
+                    idempotencyKey: generatedKeys[1],
+                    key: otherCacheKey,
+                    triggerType: "manual",
+                },
+                {
+                    idempotencyKey: generatedKeys[2],
+                    key: cacheKey,
+                    triggerType: "manual",
+                },
             ]);
             expect(transport.calls.map(({ path }) => path)).toEqual(
                 Array.from({ length: 5 }, () => "cache.refreshEntry")
@@ -390,8 +411,16 @@ describe("cache browser refresh mutation", () => {
                 await rendered.result.current.mutateAsync({ key: cacheKey });
             });
             expect(transport.calls.map(({ input }) => input)).toEqual([
-                { idempotencyKey: generatedKeys[0], key: cacheKey },
-                { idempotencyKey: generatedKeys[1], key: cacheKey },
+                {
+                    idempotencyKey: generatedKeys[0],
+                    key: cacheKey,
+                    triggerType: "manual",
+                },
+                {
+                    idempotencyKey: generatedKeys[1],
+                    key: cacheKey,
+                    triggerType: "manual",
+                },
             ]);
             expect(generationCount).toBe(2);
         } finally {

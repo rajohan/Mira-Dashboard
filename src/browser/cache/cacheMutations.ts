@@ -81,7 +81,7 @@ export function useRefreshCacheEntryMutation(
                 pendingKeys.set(key, idempotencyKey);
                 return client.mutation(
                     "cache.refreshEntry",
-                    { idempotencyKey, key },
+                    { idempotencyKey, key, triggerType: "manual" },
                     { signal }
                 );
             }),
