@@ -10,11 +10,13 @@ const monitoringFilterDelayMs = 300;
 export function useDebouncedFilter(value: string): string {
     const [debounced, setDebounced] = useState(value.trim());
     useEffect(() => {
+        const nextValue = value.trim();
+        if (nextValue === debounced) return;
         const timeout = globalThis.setTimeout(
-            () => setDebounced(value.trim()),
+            () => setDebounced(nextValue),
             monitoringFilterDelayMs
         );
         return () => globalThis.clearTimeout(timeout);
-    }, [value]);
+    }, [debounced, value]);
     return debounced;
 }
