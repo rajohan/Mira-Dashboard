@@ -146,6 +146,7 @@ describe("OpenClaw workspace Git sync", () => {
         expect(await createWorkspaceGitSync(repository)()).toEqual({
             changedFileCount: 0,
             pushed: false,
+            residualChangedFileCount: 1,
         });
     });
 
@@ -260,6 +261,7 @@ describe("OpenClaw workspace Git sync", () => {
         expect(await createWorkspaceGitSync(repository)()).toEqual({
             changedFileCount: 0,
             pushed: false,
+            residualChangedFileCount: 0,
         });
     });
 
@@ -377,6 +379,32 @@ describe("OpenClaw workspace Git sync", () => {
             changedFileCount: 0,
             commit: pendingCommit,
             pushed: true,
+            residualChangedFileCount: 0,
+        });
+        expect(run(origin, ["rev-parse", "refs/heads/main"])).toBe(pendingCommit);
+    });
+
+    test("keeps a recovered push successful when residual status exceeds its bound", async () => {
+        const { origin, repository, workspace } = fixture();
+        Fs.writeFileSync(Path.join(workspace, "tracked.md"), "updated\n");
+        run(repository, ["add", "workspace/tracked.md"]);
+        run(repository, ["commit", "-m", "chore: sync OpenClaw workspace state"]);
+        const pendingCommit = run(repository, ["rev-parse", "HEAD"]);
+        for (let index = 0; index < 900; index += 1) {
+            Fs.writeFileSync(
+                Path.join(
+                    repository,
+                    `${String(index).padStart(4, "0")}-${"x".repeat(80)}.md`
+                ),
+                "outside\n"
+            );
+        }
+
+        expect(await createWorkspaceGitSync(repository)()).toEqual({
+            changedFileCount: 0,
+            commit: pendingCommit,
+            pushed: true,
+            residualChangedFileCount: 1,
         });
         expect(run(origin, ["rev-parse", "refs/heads/main"])).toBe(pendingCommit);
     });

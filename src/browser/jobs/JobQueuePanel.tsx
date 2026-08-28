@@ -227,12 +227,16 @@ export function JobQueuePanel({
                     <Text size="sm" tone="muted">
                         Queue setting updated
                     </Text>
-                    <time
-                        className="text-primary-200 mt-1 block text-sm"
-                        dateTime={new Date(summary.control.updatedAtMs).toISOString()}
-                    >
-                        {formatDashboardDateTime(summary.control.updatedAtMs)}
-                    </time>
+                    {summary.control.updatedAtMs === undefined ? (
+                        <Text className="mt-1">Never changed</Text>
+                    ) : (
+                        <time
+                            className="text-primary-200 mt-1 block text-sm"
+                            dateTime={new Date(summary.control.updatedAtMs).toISOString()}
+                        >
+                            {formatDashboardDateTime(summary.control.updatedAtMs)}
+                        </time>
+                    )}
                 </div>
             </div>
 

@@ -299,7 +299,7 @@ class JobsRouteTransport implements DashboardTrpcTransport {
                 const { paused } = input as SetJobClaimingPausedInput;
                 this.control = {
                     claimingPaused: paused,
-                    updatedAtMs: this.control.updatedAtMs + 1000,
+                    updatedAtMs: (this.control.updatedAtMs ?? 0) + 1000,
                     version: this.control.version + 1,
                 };
                 return Promise.resolve(this.control);

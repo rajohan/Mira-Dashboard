@@ -94,6 +94,7 @@ export function useDeliveryOperations(
             operationTracker.track({
                 jobRunId: queued.jobRunId,
                 label: `Delivery: ${queued.operation}`,
+                operationKey: `delivery:${queued.operation}`,
                 onTerminal: () => refreshDeliveryQueries(mutationBoundary.queryClient),
             });
             setResult(queued);

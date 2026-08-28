@@ -785,6 +785,7 @@ export function useRunScheduleMutation(
             operationTracker.track({
                 jobRunId: run.id,
                 label: run.displayName,
+                operationKey: `job:${run.actionKey}`,
                 onTerminal: () => refreshJobAndScheduleQueries(boundary.queryClient),
             });
             scheduleRunKeysForCurrentCache(boundary.queryClient).delete(input.id);

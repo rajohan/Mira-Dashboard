@@ -149,7 +149,7 @@ function createHarness(options: HarnessOptions = {}) {
     let runtimeReplicaDropped = false;
     let declaredScaleApplied = false;
     const reconcileSignals: Array<AbortSignal | undefined> = [];
-    const reconcileServices: string[][] = [];
+    const reconciledServices: string[][] = [];
 
     function compose(): DockerComposeDiscoveryResult {
         return {
@@ -385,9 +385,9 @@ function createHarness(options: HarnessOptions = {}) {
         generateId: eventIds(),
         git,
         nowMs: () => 2000,
-        reconcileStack(services, signal) {
+        reconcileStack(explicitServices, signal) {
             reconcileCalls += 1;
-            reconcileServices.push([...services]);
+            reconciledServices.push([...explicitServices]);
             reconcileSignals.push(signal);
             if (options.sourceChangeDuringReconcile && reconcileCalls === 1) {
                 composeRevisionVersion += 1;
@@ -437,8 +437,8 @@ function createHarness(options: HarnessOptions = {}) {
         gitRequests,
         order,
         reconcileCalls: () => reconcileCalls,
-        reconcileServices,
         reconcileSignals,
+        reconciledServices,
         updateCommands,
         updater,
     };
@@ -493,7 +493,7 @@ describe("Docker updater service", () => {
             updatedCount: 2,
         });
         expect(harness.reconcileCalls()).toBe(1);
-        expect(harness.reconcileServices).toEqual([["one", "two"]]);
+        expect(harness.reconciledServices).toEqual([["one", "two"]]);
         expect(harness.order).toEqual([
             "git-head",
             "git-sync:0",
@@ -641,6 +641,7 @@ describe("Docker updater service", () => {
             updatedCount: 0,
         });
         expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.reconciledServices).toEqual([["one"], ["one"]]);
         expect(harness.reconcileSignals[0]).toBeInstanceOf(AbortSignal);
         expect(harness.reconcileSignals[1]).toBeInstanceOf(AbortSignal);
         expect(harness.reconcileSignals[1]).not.toBe(harness.reconcileSignals[0]);
@@ -1068,10 +1069,7 @@ describe("Docker updater service", () => {
             "rollback:two",
             "rollback:one",
         ]);
-        expect(harness.reconcileServices).toEqual([
-            ["one", "two"],
-            ["one", "two"],
-        ]);
+        expect(harness.reconcileCalls()).toBe(2);
         expect(result.payload.updaterServices.map(({ status }) => status)).toEqual([
             { candidateImage: "ghcr.io/example/one:1.1.0", state: "update-available" },
             { candidateImage: "ghcr.io/example/two:2.1.0", state: "update-available" },

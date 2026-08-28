@@ -353,6 +353,7 @@ function renderDocker(client: DockerClient) {
             <OperationTrackerContext
                 value={{
                     dismiss: dismissOperation,
+                    operationIsActive: () => false,
                     operations: [],
                     settle: jest.fn(),
                     track: trackOperation,
@@ -969,6 +970,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: container-stop",
                     onTerminal: expect.any(Function),
+                    operationKey: "job:docker.operation",
                 })
             );
             expect(mutation).toHaveBeenCalledWith(
@@ -1048,6 +1050,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: updater-update-service",
                     onTerminal: expect.any(Function),
+                    operationKey: `job:docker.updater:service:${"5".repeat(64)}`,
                 })
             );
             await waitForDialogExit();
@@ -1168,6 +1171,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: prune-execute",
                     onTerminal: expect.any(Function),
+                    operationKey: "job:docker.operation",
                 })
             );
             await waitForDialogExit();

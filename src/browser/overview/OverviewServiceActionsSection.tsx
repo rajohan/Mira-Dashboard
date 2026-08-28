@@ -124,6 +124,7 @@ function useServiceActionRequest() {
             operationTracker.track({
                 jobRunId: result.jobRunId,
                 label: serviceActionPresentations[actionId].actionLabel,
+                operationKey: `service-action:${actionId}`,
                 onTerminal: () => refreshServiceActionsStatus(boundary.queryClient),
             });
             const identity = authenticatedServiceActionIdentity(boundary.queryClient);

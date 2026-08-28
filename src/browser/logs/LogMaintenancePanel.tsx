@@ -474,6 +474,8 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                 >
                                     <Button
                                         aria-label={`Run ${policy.label}`}
+                                        busy={policy.activeRun !== undefined}
+                                        busyLabel="Maintenance running…"
                                         disabled={disabled}
                                         onClick={() =>
                                             confirmAction({
@@ -490,6 +492,8 @@ function LogMaintenancePanelContent(properties: LogMaintenancePanelContentProps)
                                     {policy.id === "docker-managed" && (
                                         <Button
                                             aria-label={`Dry run ${policy.label}`}
+                                            busy={policy.activeRun !== undefined}
+                                            busyLabel="Maintenance running…"
                                             disabled={disabled}
                                             onClick={() =>
                                                 confirmAction({

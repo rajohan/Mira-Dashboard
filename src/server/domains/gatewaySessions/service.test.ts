@@ -190,6 +190,41 @@ function unsortedProjection(): GatewaySessionProviderSnapshot {
 }
 
 describe("Gateway sessions service", () => {
+    test("coalesces heartbeat refreshes and seeds an empty projection", async () => {
+        const provider = new TestGatewaySessionsProvider();
+        provider.snapshots.push({ sessions: [], truncated: false });
+        const service = createTestGatewaySessionsService({
+            nowMs: () => observedAtMs,
+            provider,
+        });
+
+        await Promise.all([
+            service.refreshHeartbeatProjection!(),
+            service.refreshHeartbeatProjection!(),
+        ]);
+
+        expect(provider.limits).toEqual([gatewaySessionProjectionMaximum]);
+        expect(service.readHeartbeatProjection()).toEqual({
+            count: 0,
+            observedAtMs,
+            state: "fresh",
+            truncated: false,
+        });
+    });
+
+    test("keeps heartbeat refresh failures inside the redacted projection", async () => {
+        const provider = new TestGatewaySessionsProvider();
+        provider.snapshots.push(new Error("secret upstream detail"));
+        const service = createTestGatewaySessionsService({
+            nowMs: () => observedAtMs,
+            provider,
+        });
+
+        await service.refreshHeartbeatProjection!();
+
+        expect(service.readHeartbeatProjection()).toEqual({ state: "unavailable" });
+    });
+
     test("requests one bounded projection and derives stable same-snapshot stats", async () => {
         const provider = new TestGatewaySessionsProvider();
         provider.snapshots.push(unsortedProjection(), unsortedProjection());
@@ -375,6 +410,52 @@ describe("Gateway sessions service", () => {
             observedAtMs,
             staleSinceMs: observedAtMs,
             state: "last-known-good",
+            truncated: false,
+        });
+    });
+
+    test("does not let an invalidated older refresh stale a committed post-control snapshot", async () => {
+        const preDeleteRefresh = Promise.withResolvers<GatewaySessionProviderSnapshot>();
+        const postDeleteRefresh = Promise.withResolvers<GatewaySessionProviderSnapshot>();
+        let listCall = 0;
+        const provider: GatewaySessionsProvider = {
+            compactSession: () => Promise.resolve("compacted"),
+            deleteSessionTranscript: () => Promise.resolve(),
+            listCurrentSessions: () => {
+                listCall += 1;
+                if (listCall === 1) return Promise.resolve(unsortedProjection());
+                return listCall === 2
+                    ? preDeleteRefresh.promise
+                    : postDeleteRefresh.promise;
+            },
+            resetSession: () => Promise.resolve(),
+        };
+        const service = createTestGatewaySessionsService({
+            nowMs: () => observedAtMs,
+            provider,
+        });
+        await service.list({ filter: "ALL" });
+        const older = service.list({ filter: "ALL" });
+        const deletion = service.delete(
+            { expectedSessionId: "cron-session-id", key: "cron:daily" },
+            controlContext
+        );
+        postDeleteRefresh.resolve({
+            sessions: unsortedProjection().sessions.filter(
+                ({ key }) => key !== "cron:daily"
+            ),
+            truncated: false,
+        });
+        const deleted = await deletion;
+        expect(deleted.refresh.status).toBe("available");
+
+        preDeleteRefresh.resolve(unsortedProjection());
+        const lateOlderProjection = await older;
+        expect(lateOlderProjection.source.freshness).toBe("stale");
+        expect(service.readHeartbeatProjection()).toEqual({
+            count: 4,
+            observedAtMs,
+            state: "fresh",
             truncated: false,
         });
     });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { JobRunState, ScheduleSummary } from "../../contracts/jobModel.ts";
+import type { ScheduleSummary } from "../../contracts/jobModel.ts";
 import { cn } from "../lib/classNames.ts";
 import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
@@ -8,14 +8,8 @@ import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx
 import { StretchedAction } from "../ui/StretchedAction.tsx";
 import { Text } from "../ui/Text.tsx";
 import { VirtualizedList } from "../ui/VirtualizedList.tsx";
+import { jobRunStateBadgeVariant, jobRunStateLabel } from "./jobRunPresentation.ts";
 import { scheduleConfigurationLabel } from "./schedulePresentation.ts";
-
-function runStateVariant(state: JobRunState) {
-    if (["failed", "timed-out"].includes(state)) return "danger" as const;
-    if (state === "succeeded") return "success" as const;
-    if (["queued", "running"].includes(state)) return "info" as const;
-    return "default" as const;
-}
 
 function cardSurface(selected: boolean, hovered: boolean): string {
     if (selected) {
@@ -51,7 +45,7 @@ export function ScheduleTable({
             pagination={pagination}
             renderItem={(schedule) => {
                 const selected = schedule.id === selectedId;
-                const activeState = schedule.activeRun?.state;
+                const visibleRun = schedule.activeRun ?? schedule.latestRun;
                 return (
                     <div
                         className={cn(
@@ -84,9 +78,13 @@ export function ScheduleTable({
                                 <Badge variant={schedule.enabled ? "success" : "default"}>
                                     {schedule.enabled ? "Enabled" : "Disabled"}
                                 </Badge>
-                                {activeState !== undefined && (
-                                    <Badge variant={runStateVariant(activeState)}>
-                                        {activeState}
+                                {visibleRun !== undefined && (
+                                    <Badge
+                                        variant={jobRunStateBadgeVariant(
+                                            visibleRun.state
+                                        )}
+                                    >
+                                        {jobRunStateLabel(visibleRun.state)}
                                     </Badge>
                                 )}
                             </div>

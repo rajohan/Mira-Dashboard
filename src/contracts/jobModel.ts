@@ -716,7 +716,7 @@ export const jobWorkerSummarySchema = v.pipe(
 /** Versioned singleton state controlling cross-process claims. */
 export const jobWorkerControlSchema = v.strictObject({
     claimingPaused: v.boolean("Worker claiming state is invalid"),
-    updatedAtMs: jobTimestampSchema,
+    updatedAtMs: v.optional(jobTimestampSchema),
     version: jobVersionSchema,
 });
 

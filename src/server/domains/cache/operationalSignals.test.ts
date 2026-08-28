@@ -8,6 +8,7 @@ import type { LogMaintenanceStatusOutput } from "../../../contracts/logs.ts";
 import { quotaCacheTtlMs } from "../../../contracts/quota.ts";
 import type { SystemMetrics } from "../../../contracts/system.ts";
 import { weatherCacheTtlMs } from "../../../contracts/weather.ts";
+import type { JobRunRecord } from "../jobs/records.ts";
 import {
     cacheHeartbeatBackupSignalFromStatus,
     createCacheHeartbeatOverviewSignalReaders,
@@ -46,6 +47,49 @@ function cacheRecord(input: {
 }
 
 describe("heartbeat operational signals", () => {
+    test("uses the latest verified workspace-sync settlement for OpenClaw dirt", () => {
+        const gitRecord = cacheRecord({
+            expiresAtMs: 1000 + gitWorkspaceCacheTtlMs,
+            key: "git.workspace",
+            lastSuccessAtMs: 1000,
+            payload: {
+                observedAtMs: 900,
+                repositories: ["dashboard", "docker", "openclaw"].map((id) => ({
+                    branch: "main",
+                    changedFileCount: id === "openclaw" ? 4 : 0,
+                    detached: false,
+                    headSha: "a".repeat(40),
+                    id,
+                    stagedFileCount: 0,
+                    state: "available",
+                    untrackedFileCount: id === "openclaw" ? 4 : 0,
+                })),
+            },
+            schemaId: "git.workspace.v1",
+            source: "git.managed-workspace",
+        });
+        let latestRun = {
+            resultJson: JSON.stringify({ residualChangedFileCount: 0 }),
+            state: "succeeded",
+        } as JobRunRecord;
+        const readers = createCacheHeartbeatOverviewSignalReaders(
+            { findEntry: () => gitRecord },
+            () => 2000,
+            { findLatestRunForSchedule: () => latestRun }
+        );
+
+        expect(readers.readGit()).toMatchObject({ condition: "clean" });
+
+        latestRun = {
+            resultJson: JSON.stringify({ residualChangedFileCount: 1 }),
+            state: "succeeded",
+        } as JobRunRecord;
+        expect(readers.readGit()).toMatchObject({ condition: "attention" });
+
+        latestRun = { resultJson: null, state: "failed" } as JobRunRecord;
+        expect(readers.readGit()).toMatchObject({ condition: "attention" });
+    });
+
     test("reads exact Git, quota, and weather rows with independent freshness", () => {
         const records = new Map<string, CacheEntryRecord>([
             [

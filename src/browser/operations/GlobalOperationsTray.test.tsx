@@ -10,10 +10,13 @@ import {
 } from "@tanstack/react-router";
 import { act } from "react";
 
+import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import { dashboardTrpcContext } from "../api/trpcContextValue.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { authenticatedDashboardStoryStatus } from "../storySupport/dashboardStoryTransport.ts";
 import { ControlledDashboardRealtimeClient } from "../test/realtime.ts";
 import { GlobalOperationsTray } from "./GlobalOperationsTray.tsx";
 import { OperationTrackerContext } from "./operationTrackerContextValue.ts";
@@ -28,18 +31,37 @@ describe("global operations tray", () => {
     test("keeps a cached active operation non-dismissible after a refetch error", async () => {
         const user = userEvent.setup();
         let activeRunAttempt = 0;
-        const query = jest.fn((_name: string, input: { id: string }) => {
+        const query = jest.fn((name: string, input: { id?: string }) => {
+            if (name === "jobs.listRuns") {
+                return Promise.resolve({ runs: [], summary: {} });
+            }
             if (input.id === "missing-run") {
                 return Promise.reject(new Error("run not found"));
             }
             activeRunAttempt += 1;
             if (activeRunAttempt === 1) {
-                return Promise.resolve({ run: { state: "running" } });
+                return Promise.resolve({
+                    events: [],
+                    run: {
+                        attemptCount: 1,
+                        attemptLimit: 3,
+                        state: "running",
+                        updatedAtMs: 1_800_000_000_000,
+                    },
+                });
             }
             if (activeRunAttempt === 2) {
                 return Promise.reject(new Error("temporarily unavailable"));
             }
-            return Promise.resolve({ run: { state: "succeeded" } });
+            return Promise.resolve({
+                events: [],
+                run: {
+                    attemptCount: 1,
+                    attemptLimit: 3,
+                    state: "succeeded",
+                    updatedAtMs: 1_800_000_001_000,
+                },
+            });
         });
         const dismiss = jest.fn();
         const settle = jest.fn();
@@ -47,6 +69,7 @@ describe("global operations tray", () => {
         const queryClient = new QueryClient({
             defaultOptions: { queries: { retry: false } },
         });
+        queryClient.setQueryData(authStatusQueryKey, authenticatedDashboardStoryStatus);
         const realtimeClient = new ControlledDashboardRealtimeClient();
         const rootRoute = createRootRoute();
         const indexRoute = createRoute({
@@ -70,6 +93,7 @@ describe("global operations tray", () => {
                         <OperationTrackerContext
                             value={{
                                 dismiss,
+                                operationIsActive: () => false,
                                 operations: [
                                     {
                                         jobRunId: "run-1",
@@ -149,5 +173,68 @@ describe("global operations tray", () => {
             view.unmount();
             queryClient.clear();
         }
+    });
+
+    test("renders backend summaries without per-run detail polling", async () => {
+        const query = jest.fn(() => Promise.reject(new Error("unexpected detail read")));
+        const client = { query } as unknown as DashboardTrpcClient;
+        const queryClient = new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+        });
+        queryClient.setQueryData(authStatusQueryKey, authenticatedDashboardStoryStatus);
+        const rootRoute = createRootRoute();
+        const indexRoute = createRoute({
+            component: GlobalOperationsTray,
+            getParentRoute: () => rootRoute,
+            path: "/",
+        });
+        const jobsRoute = createRoute({
+            component: () => null,
+            getParentRoute: () => rootRoute,
+            path: "/jobs",
+        });
+        const router = createRouter({
+            history: createMemoryHistory({ initialEntries: ["/"] }),
+            routeTree: rootRoute.addChildren([indexRoute, jobsRoute]),
+        });
+
+        render(
+            <QueryClientProvider client={queryClient}>
+                <dashboardTrpcContext.Provider value={client}>
+                    <DashboardRealtimeProvider
+                        client={new ControlledDashboardRealtimeClient()}
+                    >
+                        <OperationTrackerContext
+                            value={{
+                                dismiss: jest.fn(),
+                                operationIsActive: () => false,
+                                operations: [
+                                    {
+                                        jobRunId: "remote-run",
+                                        label: "Remote Docker update",
+                                        operationKey: "job:docker.updater",
+                                        summary: {
+                                            attemptCount: 1,
+                                            attemptLimit: 1,
+                                            state: "running",
+                                            updatedAtMs: 1_800_000_000_000,
+                                        } as JobRunSummary,
+                                        terminal: false,
+                                    },
+                                ],
+                                settle: jest.fn(),
+                                track: jest.fn(),
+                            }}
+                        >
+                            <RouterProvider router={router} />
+                        </OperationTrackerContext>
+                    </DashboardRealtimeProvider>
+                </dashboardTrpcContext.Provider>
+            </QueryClientProvider>
+        );
+
+        expect(await screen.findByText("Remote Docker update")).toBeVisible();
+        expect(await screen.findByText("running")).toBeVisible();
+        expect(query).not.toHaveBeenCalled();
     });
 });

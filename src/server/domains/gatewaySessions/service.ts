@@ -102,6 +102,7 @@ export type GatewaySessionsHeartbeatProjection =
 /** Non-fetching summary seam; it never exposes session identity or upstream payloads. */
 export interface GatewaySessionsHeartbeatReader {
     readonly readHeartbeatProjection: () => GatewaySessionsHeartbeatProjection;
+    readonly refreshHeartbeatProjection?: () => Promise<void>;
 }
 
 export interface GatewaySessionsServiceDependencies {
@@ -248,6 +249,7 @@ export function createGatewaySessionsService(
     let committedRefreshGeneration = 0;
     let mutationEpoch = 0;
     let projectionStaleSinceMs: number | undefined;
+    let heartbeatRefresh: Promise<void> | undefined;
 
     function markProjectionStale(candidateCheckedAtMs?: number): void {
         const projection = lastKnownGood;
@@ -301,7 +303,9 @@ export function createGatewaySessionsService(
         }
         const projection = parseProviderSnapshot(providerSnapshot, observedAtMs);
         if (refreshMutationEpoch !== mutationEpoch) {
-            markProjectionStale(observedAtMs);
+            if (refreshGeneration >= committedRefreshGeneration) {
+                markProjectionStale(observedAtMs);
+            }
             throw new GatewaySessionsRefreshInvalidatedError();
         }
         try {
@@ -324,6 +328,19 @@ export function createGatewaySessionsService(
             projectionStaleSinceMs = undefined;
         }
         return lastKnownGood ?? projection;
+    }
+
+    async function refreshHeartbeatProjection(): Promise<void> {
+        heartbeatRefresh ??= (async () => {
+            try {
+                await refresh();
+            } catch {
+                // The heartbeat projection exposes unavailable or stale state.
+            } finally {
+                heartbeatRefresh = undefined;
+            }
+        })();
+        await heartbeatRefresh;
     }
 
     async function list(
@@ -505,6 +522,7 @@ export function createGatewaySessionsService(
         ) => perform("delete", input, context, signal),
         list,
         readHeartbeatProjection,
+        refreshHeartbeatProjection,
         reset: (
             input: GatewaySessionActionInput,
             context: GatewaySessionControlRequestContext,

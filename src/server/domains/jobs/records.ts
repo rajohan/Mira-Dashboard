@@ -234,9 +234,10 @@ export function toScheduleSummary(
  * @returns Contract-validated public worker control.
  */
 export function toJobWorkerControl(record: JobWorkerControlRecord): JobWorkerControl {
+    const updatedAtMs = getTime(record.updatedAt);
     return v.parse(jobWorkerControlSchema, {
         claimingPaused: record.claimingPaused,
-        updatedAtMs: getTime(record.updatedAt),
+        ...(updatedAtMs === 0 ? {} : { updatedAtMs }),
         version: record.version,
     });
 }

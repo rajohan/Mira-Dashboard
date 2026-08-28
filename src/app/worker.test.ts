@@ -266,7 +266,12 @@ function processFixture(
         },
         createWorkspaceGitSync(observedOpenClawRoot) {
             expect(observedOpenClawRoot).toBe(openClawRoot);
-            return () => Promise.resolve({ changedFileCount: 0, pushed: false });
+            return () =>
+                Promise.resolve({
+                    changedFileCount: 0,
+                    pushed: false,
+                    residualChangedFileCount: 0,
+                });
         },
         createOpenClawGatewayLifecycle(observedOpenClawRoot) {
             expect(observedOpenClawRoot).toBe(openClawRoot);

@@ -394,8 +394,8 @@ export function createDockerUpdaterService(
         options.restoreImageReference ?? defaultImageReferenceRestorer;
     const reconcileStack =
         options.reconcileStack ??
-        ((services, signal) =>
-            reconcileDockerComposeStack(composeRunner, services, signal));
+        ((explicitServices, signal) =>
+            reconcileDockerComposeStack(composeRunner, explicitServices, signal));
     const updateImage = options.updateImage ?? updateDockerComposeImage;
     const scanOptions = Object.freeze({
         ...options.scan,
@@ -420,14 +420,14 @@ export function createDockerUpdaterService(
     async function reconcileVerifiedStack(
         previous: DockerOverviewCachePayload,
         expectedComposeSourceRevision: string,
-        services: readonly string[],
+        explicitServices: readonly string[],
         signal: AbortSignal
     ) {
         const before = await options.collector.discover(previous, signal);
         if (before.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();
         }
-        await reconcileStack(services, signal);
+        await reconcileStack(explicitServices, signal);
         const after = await options.collector.discover(before.payload, signal);
         if (after.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();

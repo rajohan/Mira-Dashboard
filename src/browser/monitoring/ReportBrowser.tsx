@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { FileText, Filter, RotateCcw, Trash2 } from "lucide-react";
+import { FileText, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import type { ReportDetail, ReportSummary } from "../../contracts/monitoring.ts";
@@ -22,7 +22,6 @@ import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
-import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -42,6 +41,7 @@ import {
 } from "./monitoringQueries.ts";
 import { parseReportsRouteSearch } from "./monitoringRouteSearch.ts";
 import { MonitoringSelectionList } from "./MonitoringSelectionList.tsx";
+import { useDebouncedFilter } from "./useDebouncedFilter.ts";
 
 const reportStatusOptions = Object.freeze([
     { label: "All statuses", value: "all" },
@@ -217,10 +217,10 @@ export function ReportBrowser() {
     const search = parseReportsRouteSearch(useSearch({ from: "/reports" }) as unknown);
     const [kindDraft, setKindDraft] = useState("");
     const [sourceDraft, setSourceDraft] = useState("");
-    const [kind, setKind] = useState("");
-    const [source, setSource] = useState("");
     const [statusDraft, setStatusDraft] = useState<ReportStatusFilter>("all");
-    const [status, setStatus] = useState<ReportStatusFilter>("all");
+    const kind = useDebouncedFilter(kindDraft);
+    const source = useDebouncedFilter(sourceDraft);
+    const status = statusDraft;
     const [deletedReportIds, setDeletedReportIds] = useState<ReadonlySet<string>>(
         () => new Set()
     );
@@ -253,19 +253,6 @@ export function ReportBrowser() {
             replace: true,
             search: reportId === undefined ? {} : { reportId },
         });
-    };
-    const applyFilters = () => {
-        setKind(kindDraft.trim());
-        setSource(sourceDraft.trim());
-        setStatus(statusDraft);
-    };
-    const resetFilters = () => {
-        setKindDraft("");
-        setSourceDraft("");
-        setKind("");
-        setSource("");
-        setStatusDraft("all");
-        setStatus("all");
     };
     let catalogContent: ReactNode;
     if (liveHead.isPending && query.isPending && !catalogHasData) {
@@ -341,10 +328,9 @@ export function ReportBrowser() {
 
     return (
         <div>
-            <Form
+            <section
                 aria-label="Report filters"
-                className="border-primary-700 bg-primary-900/35 grid gap-3 rounded-xl border p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_12rem_auto] md:items-end"
-                onSubmit={applyFilters}
+                className="border-primary-700 bg-primary-900/35 grid gap-3 rounded-xl border p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_12rem] md:items-end"
             >
                 <FormField label="Report type">
                     <Input
@@ -372,17 +358,7 @@ export function ReportBrowser() {
                         value={statusDraft}
                     />
                 </FormField>
-                <div className="flex min-h-10 items-center gap-2">
-                    <Button size="sm" type="submit">
-                        <Icon icon={Filter} size="sm" tone="inherit" />
-                        Apply
-                    </Button>
-                    <Button onClick={resetFilters} size="sm" variant="secondary">
-                        <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                        Reset
-                    </Button>
-                </div>
-            </Form>
+            </section>
             {catalogError !== null && catalogHasData && (
                 <Alert
                     action={

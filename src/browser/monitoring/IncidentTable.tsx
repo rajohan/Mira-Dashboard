@@ -4,7 +4,7 @@ import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import type { InfiniteScrollContinuation } from "../ui/InfiniteScrollTrigger.tsx";
-import { incidentSeverityVariant } from "./incidentPresentation.ts";
+import { incidentSeverityVariant, incidentStateVariant } from "./incidentPresentation.ts";
 import { MonitoringSelectionList } from "./MonitoringSelectionList.tsx";
 
 interface IncidentListItemProps {
@@ -31,9 +31,12 @@ function IncidentListItem({ incident, onSelect, selected }: IncidentListItemProp
                     <span className="text-primary-100 block truncate text-sm font-medium">
                         {incident.title}
                     </span>
-                    <span className="text-primary-400 mt-1 block text-xs capitalize">
+                    <Badge
+                        className="mt-1 capitalize"
+                        variant={incidentStateVariant(incident.state)}
+                    >
                         {incident.state}
-                    </span>
+                    </Badge>
                 </span>
                 <Badge variant={incidentSeverityVariant(incident.severity)}>
                     {incident.severity}

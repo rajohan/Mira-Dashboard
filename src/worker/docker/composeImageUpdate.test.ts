@@ -110,10 +110,10 @@ afterEach(() => {
     }
 });
 
-test("selected stack reconciliation health-waits without recreating unrelated services", async () => {
+test("full stack reconciliation recreates every service and health-waits", async () => {
     const runCompose = runner();
 
-    await reconcileDockerComposeStack(runCompose, ["selected-service"]);
+    await reconcileDockerComposeStack(runCompose, ["profiled", "profiled"]);
 
     expect(runCompose.calls.map(({ arguments_ }) => arguments_)).toEqual([
         [
@@ -125,20 +125,35 @@ test("selected stack reconciliation health-waits without recreating unrelated se
             "--detach",
             "--pull",
             "never",
+            "--force-recreate",
             "--wait",
             "--wait-timeout",
             "600",
-            "selected-service",
+        ],
+        [
+            "--file",
+            "/opt/docker/compose.yaml",
+            "--project-directory",
+            "/opt/docker",
+            "up",
+            "--detach",
+            "--pull",
+            "never",
+            "--force-recreate",
+            "--wait",
+            "--wait-timeout",
+            "600",
+            "profiled",
         ],
     ]);
     expect(runCompose.calls[0]?.deadlineMs).toBe(660_000);
 });
 
-test("selected stack reconciliation fails when health-waiting startup fails", async () => {
+test("full stack reconciliation fails when health-waiting startup fails", async () => {
     const runCompose = runner([1]);
 
     const failure = await captureFailure(() =>
-        reconcileDockerComposeStack(runCompose, ["selected-service"])
+        reconcileDockerComposeStack(runCompose, [])
     );
 
     expect(failure).toBeInstanceOf(DockerComposeImageUpdateError);

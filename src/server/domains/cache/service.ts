@@ -207,6 +207,7 @@ export interface CacheServiceDependencies {
     readonly nowMs?: () => number;
     readonly readGatewayConnection?: () => CacheHeartbeatResult["gateway"]["connection"];
     readonly readGatewaySessionsProjection?: () => CacheHeartbeatResult["gateway"]["sessions"];
+    readonly refreshGatewaySessionsProjection?: () => Promise<void>;
     readonly readHeartbeatDashboardJobs?: (
         generatedAtMs: number
     ) => CacheHeartbeatDashboardJobsRead;
@@ -447,6 +448,9 @@ export function createCacheService(
                 const requestedAtMs = v.parse(jobTimestampSchema, nowMs());
                 const cache = readCacheStatus(requestedAtMs);
                 const connection = readConnection(requestedAtMs);
+                if (connection.phase === "connected") {
+                    await dependencies.refreshGatewaySessionsProjection?.();
+                }
                 const sessions = demoteSessionsWhenDisconnected(
                     readSessionsProjection(),
                     connection
@@ -547,6 +551,7 @@ export function createCacheService(
                     JSON.stringify({
                         key: input.key,
                         procedure: "cache.refreshEntry",
+                        triggerType: input.triggerType,
                         version: 1,
                     })
                 );
@@ -628,6 +633,7 @@ export function createCacheService(
                         ...runEffects.realtimeEvents,
                         ...scheduleEffects.realtimeEvents,
                     ]),
+                    rejectWhenAnyActionActive: [schedule.actionKey],
                     run: {
                         actionKey: schedule.actionKey,
                         attemptLimit: schedule.attemptLimit,
@@ -657,13 +663,13 @@ export function createCacheService(
                         resultJson: null,
                         retrySafe: schedule.retrySafe,
                         scheduledForAt: null,
-                        scheduledJobId: schedule.id,
-                        scheduledJobVersion: schedule.version,
+                        scheduledJobId: null,
+                        scheduledJobVersion: null,
                         state: "queued",
                         terminalCode: null,
                         terminalMessage: null,
                         timeoutMs: schedule.timeoutMs,
-                        triggerType: "manual",
+                        triggerType: input.triggerType,
                         updatedAt: at,
                     },
                 });

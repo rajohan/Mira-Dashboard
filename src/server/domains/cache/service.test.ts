@@ -725,6 +725,7 @@ describe("cache service", () => {
             const input = {
                 idempotencyKey: "b".repeat(32),
                 key: "system.host",
+                triggerType: "manual" as const,
             };
             const first = await Effect.runPromise(
                 service.refreshEntry(principal(1), input)
@@ -732,7 +733,16 @@ describe("cache service", () => {
             expect(first).toMatchObject({
                 actionKey: "cache.refresh.system-host",
                 state: "queued",
+                triggerType: "manual",
             });
+            expect(
+                Effect.runPromise(
+                    service.refreshEntry(principal(1), {
+                        ...input,
+                        idempotencyKey: "c".repeat(32),
+                    })
+                )
+            ).rejects.toBeInstanceOf(CacheConflictError);
 
             const throwingLookupRepository = {
                 ...jobRepository,
@@ -757,6 +767,7 @@ describe("cache service", () => {
                     replayService.refreshEntry(principal(1), {
                         idempotencyKey: input.idempotencyKey,
                         key: "unknown.provider",
+                        triggerType: "manual",
                     })
                 )
             ).rejects.toBeInstanceOf(CacheConflictError);
@@ -765,6 +776,7 @@ describe("cache service", () => {
                     service.refreshEntry(principal(2), {
                         idempotencyKey: input.idempotencyKey,
                         key: "unknown.provider",
+                        triggerType: "manual",
                     })
                 )
             ).rejects.toBeInstanceOf(CacheNotFoundError);

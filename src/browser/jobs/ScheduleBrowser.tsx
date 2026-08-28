@@ -372,7 +372,10 @@ function SelectedSchedule({
             onSaveConfiguration={(configuration: ScheduleConfiguration) =>
                 updateSchedule({ schedule: configuration })
             }
-            runBusy={run.isPending}
+            runBusy={
+                run.isPending ||
+                (schedule.activeRun !== undefined && !run.hasPendingRequest(schedule.id))
+            }
             runReplayAvailable={run.hasPendingRequest(schedule.id)}
             schedule={schedule}
             updateBusy={update.isPending}

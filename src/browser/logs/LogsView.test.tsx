@@ -771,6 +771,16 @@ describe("LogsView", () => {
             })
         ).toHaveTextContent("queued");
         expect(
+            screen.getByRole("button", {
+                name: "Run Managed application and container logs",
+            })
+        ).toHaveTextContent("Maintenance running...");
+        expect(
+            screen.getByRole("button", {
+                name: "Dry run Managed application and container logs",
+            })
+        ).toHaveTextContent("Maintenance running...");
+        expect(
             screen.getByLabelText(
                 "Last maintenance run for Managed application and container logs"
             )

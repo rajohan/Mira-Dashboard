@@ -117,6 +117,7 @@
         "src/browser/terminal/terminalEmulator.test.ts": 26,
         "src/browser/logs/logLinePresentation.test.ts": 25,
         "src/browser/cache/cacheQueries.test.ts": 24,
+        "src/browser/cache/useDemandDrivenCacheRefresh.test.tsx": 24,
         "src/browser/routes/docker.lazy.test.tsx": 22,
         "src/browser/chat/useChatRealtimeInvalidation.test.tsx": 21,
         "src/browser/jobs/ScheduleDetailStateCopy.test.tsx": 21,

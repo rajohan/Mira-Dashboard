@@ -275,6 +275,18 @@ function uniquePaths(paths: readonly Buffer[]): Buffer[] {
     });
 }
 
+async function residualChangedFileCount(
+    root: string,
+    signal?: AbortSignal
+): Promise<number> {
+    const status = await runGit(
+        root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        signal
+    );
+    return uniquePaths(parseWorkspaceStatus(status).changedPaths).length;
+}
+
 export function createWorkspaceGitSync(rootPath: string) {
     const canonicalRoot = Fs.realpathSync(rootPath);
     const status = Fs.lstatSync(rootPath);
@@ -405,10 +417,25 @@ export function createWorkspaceGitSync(rootPath: string) {
             trackedInventory.changedPaths.length === 0 &&
             safeUntrackedPaths.length === 0
         ) {
+            let residualCount: number;
+            if (recoveredCommit === undefined) {
+                residualCount = await residualChangedFileCount(canonicalRoot, signal);
+            } else {
+                residualCount = 1;
+                try {
+                    residualCount = await residualChangedFileCount(
+                        canonicalRoot,
+                        AbortSignal.timeout(cleanupTimeoutMs)
+                    );
+                } catch {
+                    // A confirmed recovery remains successful while heartbeat fails closed.
+                }
+            }
             return {
                 changedFileCount: 0,
                 ...(recoveredCommit === undefined ? {} : { commit: recoveredCommit }),
                 pushed: recoveredCommit !== undefined,
+                residualChangedFileCount: residualCount,
             };
         }
 
@@ -462,7 +489,14 @@ export function createWorkspaceGitSync(rootPath: string) {
             );
             const stagedPaths = uniquePaths(parseWorkspaceStatus(staged).changedPaths);
             if (stagedPaths.length === 0) {
-                return { changedFileCount: 0, pushed: false };
+                return {
+                    changedFileCount: 0,
+                    pushed: false,
+                    residualChangedFileCount: await residualChangedFileCount(
+                        canonicalRoot,
+                        signal
+                    ),
+                };
             }
             const changedFileCount = stagedPaths.length;
             const tree = await git(
@@ -497,13 +531,31 @@ export function createWorkspaceGitSync(rootPath: string) {
                 }
                 throw error;
             }
+            const prePushResidualChangedFileCount = await residualChangedFileCount(
+                canonicalRoot,
+                signal
+            );
             await pushAndClassify(
                 canonicalRoot,
                 commit,
                 recoveredCommit ?? upstreamHead,
                 signal
             );
-            return { changedFileCount, commit, pushed: true };
+            let finalResidualChangedFileCount = prePushResidualChangedFileCount;
+            try {
+                finalResidualChangedFileCount = await residualChangedFileCount(
+                    canonicalRoot,
+                    AbortSignal.timeout(cleanupTimeoutMs)
+                );
+            } catch {
+                // A post-push observation cannot turn a confirmed publication into failure.
+            }
+            return {
+                changedFileCount,
+                commit,
+                pushed: true,
+                residualChangedFileCount: finalResidualChangedFileCount,
+            };
         } finally {
             Fs.rmSync(privateIndexDirectory, { force: true, recursive: true });
         }
