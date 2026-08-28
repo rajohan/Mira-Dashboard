@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.1...v0.5.2) (2026-08-28)
+
+
+### Bug Fixes
+
+* **delivery:** make provisioning generation-independent ([#502](https://github.com/rajohan/Mira-Dashboard/issues/502)) ([c6edd12](https://github.com/rajohan/Mira-Dashboard/commit/c6edd1217f79b310f0d8ae58e1868d6888d4b9f3))
+
 ## [0.5.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.0...v0.5.1) (2026-08-28)
 
 
