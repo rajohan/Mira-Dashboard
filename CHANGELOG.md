@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.0...v0.5.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* **operations:** preserve progress and repair log access ([#500](https://github.com/rajohan/Mira-Dashboard/issues/500)) ([46f97b1](https://github.com/rajohan/Mira-Dashboard/commit/46f97b145a8b8bea02b3820c27d66923d9ac6ef2))
+
 ## [0.5.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.4...v0.5.0) (2026-08-28)
 
 
