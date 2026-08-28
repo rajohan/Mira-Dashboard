@@ -128,6 +128,7 @@
         "src/server/domains/security/authenticationLifecycle.password.test.ts": 103,
         "src/server/domains/security/securityAuditLifecycle.test.ts": 100,
         "scripts/delivery/productionReleasePreparationCapacity.test.ts": 100,
+        "scripts/delivery/productionProvisioningEnvelope.test.ts": 100,
         "scripts/delivery/productionReleaseProvisioner.test.ts": 100,
         "scripts/sourceBoundaries/boundaryConfiguration.test.ts": 98,
         "scripts/delivery/buildAdmission.test.ts": 97,
