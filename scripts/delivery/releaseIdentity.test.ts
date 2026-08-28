@@ -220,6 +220,7 @@ describe("release identity", () => {
                 "systemd/host-operations/mira-dashboard-host-system-update.service",
                 "systemd/host-operations/mira-p@.service",
                 "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
+                "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
                 "systemd/mira-dashboard-web.service",
                 "systemd/mira-dashboard-worker.service",
             ].toSorted()
@@ -274,6 +275,7 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
             "scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
+            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-log-access",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts",
             "scripts/delivery/provisioning/preview-tailscale/README.md",

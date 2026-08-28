@@ -54,6 +54,7 @@ const installedEntrypoint = `${productionProvisioningPairSelector}/${productionP
 const maximumJsonBytes = 4 * 1024 * 1024;
 const maximumActivationStateBytes = 64 * 1024;
 const maximumCommandOutputBytes = 1024 * 1024;
+const candidateWorkflowTimeoutMs = 14 * 60_000;
 const runtimeProbeExpression =
     "process.stdout.write(JSON.stringify({revision:Bun.revision,version:Bun.version}))";
 const localAuthorityPattern = /^([a-f\d]{40})--local(--settled)?$/u;
@@ -133,7 +134,8 @@ interface ProductionReleaseProvisionerEnvironment {
         executable: string,
         arguments_: readonly string[],
         stdin?: Uint8Array,
-        stdoutMaximumBytes?: number
+        stdoutMaximumBytes?: number,
+        timeoutMs?: number
     ) => Promise<CommandResult>;
     readonly runtimeExecutable: string;
     readonly syncPath: (target: string) => Promise<void>;
@@ -486,7 +488,8 @@ async function run(
     executable: string,
     arguments_: readonly string[],
     stdin?: Uint8Array,
-    stdoutMaximumBytes = maximumCommandOutputBytes
+    stdoutMaximumBytes = maximumCommandOutputBytes,
+    timeoutMs = 120_000
 ): Promise<CommandResult> {
     const child = Bun.spawn([executable, ...arguments_], {
         env: {
@@ -495,7 +498,7 @@ async function run(
             LC_ALL: "C",
             PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
         },
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(timeoutMs),
         stderr: "pipe",
         stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
         stdout: "pipe",
@@ -519,13 +522,15 @@ async function requireSuccess(
     arguments_: readonly string[],
     environment: ProductionReleaseProvisionerEnvironment,
     stdin?: Uint8Array,
-    stdoutMaximumBytes?: number
+    stdoutMaximumBytes?: number,
+    timeoutMs?: number
 ): Promise<Uint8Array> {
     const result = await environment.runCommand(
         executable,
         arguments_,
         stdin,
-        stdoutMaximumBytes
+        stdoutMaximumBytes,
+        timeoutMs
     );
     if (result.exitCode !== 0) throw failure();
     return result.stdout;
@@ -1132,7 +1137,10 @@ async function installAuthority(
             `--install-authority-release=${releaseId}`,
             `--release-root=${releaseRoot}`,
         ],
-        environment
+        environment,
+        undefined,
+        undefined,
+        candidateWorkflowTimeoutMs
     );
 }
 

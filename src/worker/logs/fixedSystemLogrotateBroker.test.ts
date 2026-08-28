@@ -35,6 +35,11 @@ describe("fixed system logrotate broker", () => {
             ],
             executable: "/usr/bin/systemctl",
         });
+        await broker.ensureManagedAccess();
+        expect(calls.at(-1)).toEqual({
+            arguments_: ["start", "--wait", "mira-dashboard-managed-log-access.service"],
+            executable: "/usr/bin/systemctl",
+        });
     });
 
     test("does not expose the custom docker policy to system logrotate", () => {

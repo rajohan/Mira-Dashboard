@@ -28,6 +28,19 @@ describe("log-maintenance provisioning artifact policy", () => {
             },
             {
                 artifactPath:
+                    "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-log-access",
+                destinationPath: "/usr/local/libexec/mira-dashboard-managed-log-access",
+                mode: 0o755,
+            },
+            {
+                artifactPath:
+                    "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
+                destinationPath:
+                    "/etc/systemd/system/mira-dashboard-managed-log-access.service",
+                mode: 0o644,
+            },
+            {
+                artifactPath:
                     "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
                 destinationPath:
                     "/etc/systemd/system/mira-dashboard-log-maintenance@.service",
@@ -42,6 +55,7 @@ describe("log-maintenance provisioning artifact policy", () => {
             "logMaintenanceProvisioningFilesystem.ts",
             "migrateManagedApplicationLogs.ts",
             "mira-dashboard-log-maintenance",
+            "mira-dashboard-managed-log-access",
             "policy.ts",
             "provisionManagedLogAccess.ts",
         ]);
@@ -57,6 +71,7 @@ describe("log-maintenance provisioning artifact policy", () => {
             [
                 ...logMaintenanceProvisioningReleaseArtifactPaths,
                 "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
+                "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
             ].toSorted()
         );
         for (const artifact of logMaintenanceProvisioningArtifacts) {

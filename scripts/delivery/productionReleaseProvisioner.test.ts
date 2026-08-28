@@ -384,6 +384,7 @@ describe("production release root provisioner", () => {
         );
         const tagName = "v1.2.3";
         const commands: string[] = [];
+        const commandTimeouts: Array<number | undefined> = [];
         const syncedPaths: string[] = [];
         let assetDownloads = 0;
         let releaseRootPublications = 0;
@@ -505,8 +506,15 @@ describe("production release root provisioner", () => {
                 await rm(target, { force: true, recursive: true });
             },
             releasesRoot,
-            runCommand: async (executable, arguments_, stdin) => {
+            runCommand: async (
+                executable,
+                arguments_,
+                stdin,
+                _stdoutMaximumBytes,
+                timeoutMs
+            ) => {
                 commands.push(`${executable} ${arguments_.join(" ")}`);
+                commandTimeouts.push(timeoutMs);
                 if (executable === "/usr/bin/install") {
                     await cp(arguments_[6]!, arguments_[7]!);
                     return commandResult();
@@ -626,6 +634,7 @@ describe("production release root provisioner", () => {
         );
         expect(runtimeInstallIndex).toBeGreaterThanOrEqual(0);
         expect(authorityInstallIndex).toBeGreaterThan(runtimeInstallIndex);
+        expect(commandTimeouts[authorityInstallIndex]).toBe(14 * 60_000);
         expect(await readlink(provisioningPairSelector)).toBe(
             path.join(provisioningPairsRoot, releaseId)
         );
