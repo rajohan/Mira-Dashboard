@@ -27,10 +27,6 @@ function dependencies(options: { readonly managedOk?: boolean } = {}) {
     };
     const system: FixedSystemLogrotateBroker = {
         availablePolicies: () => Promise.resolve(["host-rsyslog"]),
-        ensureManagedAccess: () => {
-            calls.push("managed-access");
-            return Promise.resolve();
-        },
         run: (policyId) => {
             calls.push(policyId);
             return Promise.resolve();
@@ -52,7 +48,7 @@ describe("worker log maintenance executor", () => {
             dryRun: true,
         });
         await fixture.executor.run("host-rsyslog", false);
-        expect(fixture.calls).toEqual(["managed-access", "managed:true", "host-rsyslog"]);
+        expect(fixture.calls).toEqual(["managed:true", "host-rsyslog"]);
     });
 
     test("fails with a constant error when any managed target fails", () => {

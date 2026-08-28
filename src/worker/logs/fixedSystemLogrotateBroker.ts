@@ -31,10 +31,7 @@ export interface FixedSystemLogrotateBroker {
         policyId: HostLogrotatePolicyId,
         signal?: AbortSignal
     ) => Promise<void>;
-    readonly ensureManagedAccess: (signal?: AbortSignal) => Promise<void>;
 }
-
-const managedLogAccessUnit = "mira-dashboard-managed-log-access.service";
 
 function brokerFailure(): Error {
     return new Error("Fixed system logrotate broker failed");
@@ -127,18 +124,6 @@ export function createFixedSystemLogrotateBroker(
     }
 
     const broker: FixedSystemLogrotateBroker = {
-        async ensureManagedAccess(signal?: AbortSignal) {
-            try {
-                const result = await execute(
-                    executable,
-                    ["start", "--wait", managedLogAccessUnit],
-                    operationSignal(signal)
-                );
-                requireBoundedSuccess(result);
-            } catch {
-                throw brokerFailure();
-            }
-        },
         async availablePolicies(signal?: AbortSignal) {
             const available: HostLogrotatePolicyId[] = [];
             for (const [policyId, unit] of Object.entries(

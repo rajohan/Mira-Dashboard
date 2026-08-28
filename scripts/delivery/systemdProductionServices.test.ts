@@ -560,10 +560,6 @@ describe("production root-systemd service control", () => {
         expect(worker).toContain("User=ubuntu");
         expect(worker).toContain("Group=ubuntu");
         expect(worker).toContain("SupplementaryGroups=docker");
-        expect(worker).toContain("Requires=mira-dashboard-managed-log-access.service");
-        expect(worker).toContain(
-            "After=network-online.target stremio-stack.service mira-dashboard-managed-log-access.service"
-        );
         expect(web).not.toContain("SupplementaryGroups=");
         expect(web).toContain("ProtectHome=tmpfs");
         expect(web).toContain(

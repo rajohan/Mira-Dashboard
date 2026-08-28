@@ -12,8 +12,7 @@ polkit.addRule(function (action, subject) {
         "mira-dashboard-log-maintenance@host-alternatives.service",
         "mira-dashboard-log-maintenance@host-apport.service",
         "mira-dashboard-log-maintenance@host-dpkg.service",
-        "mira-dashboard-log-maintenance@host-rsyslog.service",
-        "mira-dashboard-managed-log-access.service"
+        "mira-dashboard-log-maintenance@host-rsyslog.service"
     ];
     return allowed.indexOf(unit) === -1
         ? polkit.Result.NOT_HANDLED

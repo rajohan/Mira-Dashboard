@@ -220,7 +220,6 @@ describe("release identity", () => {
                 "systemd/host-operations/mira-dashboard-host-system-update.service",
                 "systemd/host-operations/mira-p@.service",
                 "systemd/log-maintenance/mira-dashboard-log-maintenance@.service",
-                "systemd/log-maintenance/mira-dashboard-managed-log-access.service",
                 "systemd/mira-dashboard-web.service",
                 "systemd/mira-dashboard-worker.service",
             ].toSorted()
@@ -275,7 +274,6 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/log-maintenance/logMaintenanceProvisioningFilesystem.ts",
             "scripts/delivery/provisioning/log-maintenance/migrateManagedApplicationLogs.ts",
             "scripts/delivery/provisioning/log-maintenance/mira-dashboard-log-maintenance",
-            "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-log-access",
             "scripts/delivery/provisioning/log-maintenance/policy.ts",
             "scripts/delivery/provisioning/log-maintenance/provisionManagedLogAccess.ts",
             "scripts/delivery/provisioning/preview-tailscale/README.md",
@@ -305,6 +303,44 @@ describe("release identity", () => {
             })
         );
         expect(runtimeFailure.message).toBe("Release identity is invalid");
+    });
+
+    test("admits only the complete managed-log-access successor profile", async () => {
+        const successor = await releaseFixture();
+        await Promise.all([
+            writeFile(
+                path.join(
+                    successor.releaseRoot,
+                    "scripts/delivery/provisioning/log-maintenance/mira-dashboard-managed-log-access"
+                ),
+                "managed-log-access"
+            ),
+            writeFile(
+                path.join(
+                    successor.releaseRoot,
+                    "systemd/log-maintenance/mira-dashboard-managed-log-access.service"
+                ),
+                "managed-log-access-unit"
+            ),
+        ]);
+
+        expect(await writeReleaseIdentity(creationOptions(successor))).toMatchObject({
+            source: { commitSha },
+        });
+
+        const incomplete = await releaseFixture();
+        await writeFile(
+            path.join(
+                incomplete.releaseRoot,
+                "systemd/log-maintenance/mira-dashboard-managed-log-access.service"
+            ),
+            "managed-log-access-unit"
+        );
+
+        const failure = await rejectionError(
+            createReleaseIdentity(creationOptions(incomplete))
+        );
+        expect(failure.message).toBe("Release identity is invalid");
     });
 
     test("reconstructs the migration graph from the release manifest", async () => {

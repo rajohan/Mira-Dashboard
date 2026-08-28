@@ -104,7 +104,6 @@ export function developmentManagedLogManifest(
 
 const unavailableHostBroker: FixedSystemLogrotateBroker = Object.freeze({
     availablePolicies: () => Promise.resolve([]),
-    ensureManagedAccess: () => Promise.resolve(),
     run: () => Promise.reject(new Error("Host log maintenance is unavailable")),
 });
 
