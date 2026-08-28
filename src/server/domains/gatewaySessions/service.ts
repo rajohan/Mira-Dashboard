@@ -303,7 +303,9 @@ export function createGatewaySessionsService(
         }
         const projection = parseProviderSnapshot(providerSnapshot, observedAtMs);
         if (refreshMutationEpoch !== mutationEpoch) {
-            markProjectionStale(observedAtMs);
+            if (refreshGeneration >= committedRefreshGeneration) {
+                markProjectionStale(observedAtMs);
+            }
             throw new GatewaySessionsRefreshInvalidatedError();
         }
         try {

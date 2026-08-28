@@ -414,6 +414,52 @@ describe("Gateway sessions service", () => {
         });
     });
 
+    test("does not let an invalidated older refresh stale a committed post-control snapshot", async () => {
+        const preDeleteRefresh = Promise.withResolvers<GatewaySessionProviderSnapshot>();
+        const postDeleteRefresh = Promise.withResolvers<GatewaySessionProviderSnapshot>();
+        let listCall = 0;
+        const provider: GatewaySessionsProvider = {
+            compactSession: () => Promise.resolve("compacted"),
+            deleteSessionTranscript: () => Promise.resolve(),
+            listCurrentSessions: () => {
+                listCall += 1;
+                if (listCall === 1) return Promise.resolve(unsortedProjection());
+                return listCall === 2
+                    ? preDeleteRefresh.promise
+                    : postDeleteRefresh.promise;
+            },
+            resetSession: () => Promise.resolve(),
+        };
+        const service = createTestGatewaySessionsService({
+            nowMs: () => observedAtMs,
+            provider,
+        });
+        await service.list({ filter: "ALL" });
+        const older = service.list({ filter: "ALL" });
+        const deletion = service.delete(
+            { expectedSessionId: "cron-session-id", key: "cron:daily" },
+            controlContext
+        );
+        postDeleteRefresh.resolve({
+            sessions: unsortedProjection().sessions.filter(
+                ({ key }) => key !== "cron:daily"
+            ),
+            truncated: false,
+        });
+        const deleted = await deletion;
+        expect(deleted.refresh.status).toBe("available");
+
+        preDeleteRefresh.resolve(unsortedProjection());
+        const lateOlderProjection = await older;
+        expect(lateOlderProjection.source.freshness).toBe("stale");
+        expect(service.readHeartbeatProjection()).toEqual({
+            count: 4,
+            observedAtMs,
+            state: "fresh",
+            truncated: false,
+        });
+    });
+
     test("establishes the confirmed mutation barrier before terminal audit settles", async () => {
         const preDeleteRefresh = Promise.withResolvers<GatewaySessionProviderSnapshot>();
         const terminalAuditEntered = Promise.withResolvers<void>();

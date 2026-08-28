@@ -732,7 +732,16 @@ describe("cache service", () => {
             expect(first).toMatchObject({
                 actionKey: "cache.refresh.system-host",
                 state: "queued",
+                triggerType: "system",
             });
+            expect(
+                Effect.runPromise(
+                    service.refreshEntry(principal(1), {
+                        ...input,
+                        idempotencyKey: "c".repeat(32),
+                    })
+                )
+            ).rejects.toBeInstanceOf(CacheConflictError);
 
             const throwingLookupRepository = {
                 ...jobRepository,

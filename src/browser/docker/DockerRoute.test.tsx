@@ -1050,7 +1050,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: updater-update-service",
                     onTerminal: expect.any(Function),
-                    operationKey: "job:docker.updater",
+                    operationKey: `job:docker.updater:service:${"5".repeat(64)}`,
                 })
             );
             await waitForDialogExit();
