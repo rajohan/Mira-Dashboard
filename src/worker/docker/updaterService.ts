@@ -394,7 +394,8 @@ export function createDockerUpdaterService(
         options.restoreImageReference ?? defaultImageReferenceRestorer;
     const reconcileStack =
         options.reconcileStack ??
-        ((signal) => reconcileDockerComposeStack(composeRunner, signal));
+        ((explicitServices, signal) =>
+            reconcileDockerComposeStack(composeRunner, explicitServices, signal));
     const updateImage = options.updateImage ?? updateDockerComposeImage;
     const scanOptions = Object.freeze({
         ...options.scan,
@@ -419,13 +420,14 @@ export function createDockerUpdaterService(
     async function reconcileVerifiedStack(
         previous: DockerOverviewCachePayload,
         expectedComposeSourceRevision: string,
+        explicitServices: readonly string[],
         signal: AbortSignal
     ) {
         const before = await options.collector.discover(previous, signal);
         if (before.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();
         }
-        await reconcileStack(signal);
+        await reconcileStack(explicitServices, signal);
         const after = await options.collector.discover(before.payload, signal);
         if (after.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();
@@ -651,7 +653,10 @@ export function createDockerUpdaterService(
                 sourceConflict();
             }
             verifyRestoredSources(before, affectedServices);
-            await reconcileStack(signal);
+            await reconcileStack(
+                affectedServices.map(({ service }) => service),
+                signal
+            );
             const after = await options.collector.discover(before.payload, signal);
             if (after.compose.settlementRevision !== preMutationSettlementRevision) {
                 sourceConflict();
@@ -979,6 +984,7 @@ export function createDockerUpdaterService(
                 discovery = await reconcileVerifiedStack(
                     payload,
                     discovery.compose.sourceRevision,
+                    successful.map(({ service }) => service),
                     operationSignal
                 );
                 for (const selectedService of successful) {

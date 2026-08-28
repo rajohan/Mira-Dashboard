@@ -149,6 +149,7 @@ function createHarness(options: HarnessOptions = {}) {
     let runtimeReplicaDropped = false;
     let declaredScaleApplied = false;
     const reconcileSignals: Array<AbortSignal | undefined> = [];
+    const reconciledServices: string[][] = [];
 
     function compose(): DockerComposeDiscoveryResult {
         return {
@@ -384,8 +385,9 @@ function createHarness(options: HarnessOptions = {}) {
         generateId: eventIds(),
         git,
         nowMs: () => 2000,
-        reconcileStack(signal) {
+        reconcileStack(explicitServices, signal) {
             reconcileCalls += 1;
+            reconciledServices.push([...explicitServices]);
             reconcileSignals.push(signal);
             if (options.sourceChangeDuringReconcile && reconcileCalls === 1) {
                 composeRevisionVersion += 1;
@@ -436,6 +438,7 @@ function createHarness(options: HarnessOptions = {}) {
         order,
         reconcileCalls: () => reconcileCalls,
         reconcileSignals,
+        reconciledServices,
         updateCommands,
         updater,
     };
@@ -490,6 +493,7 @@ describe("Docker updater service", () => {
             updatedCount: 2,
         });
         expect(harness.reconcileCalls()).toBe(1);
+        expect(harness.reconciledServices).toEqual([["one", "two"]]);
         expect(harness.order).toEqual([
             "git-head",
             "git-sync:0",
@@ -637,6 +641,7 @@ describe("Docker updater service", () => {
             updatedCount: 0,
         });
         expect(harness.reconcileCalls()).toBe(2);
+        expect(harness.reconciledServices).toEqual([["one"], ["one"]]);
         expect(harness.reconcileSignals[0]).toBeInstanceOf(AbortSignal);
         expect(harness.reconcileSignals[1]).toBeInstanceOf(AbortSignal);
         expect(harness.reconcileSignals[1]).not.toBe(harness.reconcileSignals[0]);

@@ -113,7 +113,7 @@ afterEach(() => {
 test("full stack reconciliation recreates every service and health-waits", async () => {
     const runCompose = runner();
 
-    await reconcileDockerComposeStack(runCompose);
+    await reconcileDockerComposeStack(runCompose, ["profiled", "profiled"]);
 
     expect(runCompose.calls.map(({ arguments_ }) => arguments_)).toEqual([
         [
@@ -130,6 +130,21 @@ test("full stack reconciliation recreates every service and health-waits", async
             "--wait-timeout",
             "600",
         ],
+        [
+            "--file",
+            "/opt/docker/compose.yaml",
+            "--project-directory",
+            "/opt/docker",
+            "up",
+            "--detach",
+            "--pull",
+            "never",
+            "--force-recreate",
+            "--wait",
+            "--wait-timeout",
+            "600",
+            "profiled",
+        ],
     ]);
     expect(runCompose.calls[0]?.deadlineMs).toBe(660_000);
 });
@@ -137,7 +152,9 @@ test("full stack reconciliation recreates every service and health-waits", async
 test("full stack reconciliation fails when health-waiting startup fails", async () => {
     const runCompose = runner([1]);
 
-    const failure = await captureFailure(() => reconcileDockerComposeStack(runCompose));
+    const failure = await captureFailure(() =>
+        reconcileDockerComposeStack(runCompose, [])
+    );
 
     expect(failure).toBeInstanceOf(DockerComposeImageUpdateError);
     expect(runCompose.calls).toHaveLength(1);

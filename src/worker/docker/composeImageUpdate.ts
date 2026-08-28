@@ -66,33 +66,44 @@ export type DockerComposeCommandRunner = (
     }
 ) => Promise<DockerComposeCommandResult>;
 
-export type DockerComposeStackReconciler = (signal?: AbortSignal) => Promise<void>;
+export type DockerComposeStackReconciler = (
+    explicitServices: readonly string[],
+    signal?: AbortSignal
+) => Promise<void>;
 
 export async function reconcileDockerComposeStack(
     runCompose: DockerComposeCommandRunner,
+    explicitServices: readonly string[],
     signal?: AbortSignal
 ): Promise<void> {
-    const up = await runCompose(
-        dockerComposeWrapper,
-        [
-            ...fixedComposeArguments,
-            "up",
-            "--detach",
-            "--pull",
-            "never",
-            "--force-recreate",
-            "--wait",
-            "--wait-timeout",
-            "600",
-        ],
-        {
-            cwd: dockerComposeTrustRoot,
-            deadlineMs: composeStackUpDeadlineMs,
-            outputMaximumBytes: composeOutputMaximumBytes,
-            ...(signal === undefined ? {} : { signal }),
-        }
-    );
-    if (up.exitCode !== 0) throw classifiedFailure("unavailable");
+    const runUp = (services: readonly string[]) =>
+        runCompose(
+            dockerComposeWrapper,
+            [
+                ...fixedComposeArguments,
+                "up",
+                "--detach",
+                "--pull",
+                "never",
+                "--force-recreate",
+                "--wait",
+                "--wait-timeout",
+                "600",
+                ...services,
+            ],
+            {
+                cwd: dockerComposeTrustRoot,
+                deadlineMs: composeStackUpDeadlineMs,
+                outputMaximumBytes: composeOutputMaximumBytes,
+                ...(signal === undefined ? {} : { signal }),
+            }
+        );
+    const fullStack = await runUp([]);
+    if (fullStack.exitCode !== 0) throw classifiedFailure("unavailable");
+    const targets = [...new Set(explicitServices)].toSorted();
+    if (targets.length === 0) return;
+    const targeted = await runUp(targets);
+    if (targeted.exitCode !== 0) throw classifiedFailure("unavailable");
 }
 
 export type DockerComposeRevalidationPhase = "pre-update" | "post-rollback";
