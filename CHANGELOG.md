@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.4...v0.5.0) (2026-08-28)
+
+
+### Features
+
+* **operations:** improve durable runtime feedback ([#497](https://github.com/rajohan/Mira-Dashboard/issues/497)) ([01d22ce](https://github.com/rajohan/Mira-Dashboard/commit/01d22ce03e7cc44151055e332e637e63decdd818))
+
 ## [0.4.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.4.3...v0.4.4) (2026-08-28)
 
 
