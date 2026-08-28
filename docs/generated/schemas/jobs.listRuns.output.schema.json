@@ -273,7 +273,6 @@
           },
           "required": [
             "claimingPaused",
-            "updatedAtMs",
             "version"
           ],
           "additionalProperties": false

@@ -2,6 +2,7 @@ export interface WorkspaceGitSyncResult {
     readonly changedFileCount: number;
     readonly commit?: string;
     readonly pushed: boolean;
+    readonly residualChangedFileCount: number;
 }
 
 export class WorkspaceGitSyncOutcomeUnknownError extends Error {

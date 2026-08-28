@@ -146,6 +146,7 @@ describe("OpenClaw workspace Git sync", () => {
         expect(await createWorkspaceGitSync(repository)()).toEqual({
             changedFileCount: 0,
             pushed: false,
+            residualChangedFileCount: 1,
         });
     });
 
@@ -260,6 +261,7 @@ describe("OpenClaw workspace Git sync", () => {
         expect(await createWorkspaceGitSync(repository)()).toEqual({
             changedFileCount: 0,
             pushed: false,
+            residualChangedFileCount: 0,
         });
     });
 
@@ -377,6 +379,7 @@ describe("OpenClaw workspace Git sync", () => {
             changedFileCount: 0,
             commit: pendingCommit,
             pushed: true,
+            residualChangedFileCount: 0,
         });
         expect(run(origin, ["rev-parse", "refs/heads/main"])).toBe(pendingCommit);
     });

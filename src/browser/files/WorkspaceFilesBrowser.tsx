@@ -191,6 +191,7 @@ export function WorkspaceFilesBrowser() {
                         replacedEntry === undefined
                             ? `Create ${file.name}`
                             : `Replace ${replacedEntry.name}`,
+                    operationKey: "workspace-file-write",
                     onTerminal: () =>
                         refreshWorkspaceFileDirectory(
                             queryClient,

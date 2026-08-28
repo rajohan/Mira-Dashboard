@@ -207,6 +207,7 @@ export interface CacheServiceDependencies {
     readonly nowMs?: () => number;
     readonly readGatewayConnection?: () => CacheHeartbeatResult["gateway"]["connection"];
     readonly readGatewaySessionsProjection?: () => CacheHeartbeatResult["gateway"]["sessions"];
+    readonly refreshGatewaySessionsProjection?: () => Promise<void>;
     readonly readHeartbeatDashboardJobs?: (
         generatedAtMs: number
     ) => CacheHeartbeatDashboardJobsRead;
@@ -447,6 +448,9 @@ export function createCacheService(
                 const requestedAtMs = v.parse(jobTimestampSchema, nowMs());
                 const cache = readCacheStatus(requestedAtMs);
                 const connection = readConnection(requestedAtMs);
+                if (connection.phase === "connected") {
+                    await dependencies.refreshGatewaySessionsProjection?.();
+                }
                 const sessions = demoteSessionsWhenDisconnected(
                     readSessionsProjection(),
                     connection

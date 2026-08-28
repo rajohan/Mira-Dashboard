@@ -3,6 +3,7 @@ import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { AuthStatus } from "../../contracts/auth.ts";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
 import type { DashboardBrowserCollections } from "../data/dashboardCollections.ts";
+import { clearTrackedOperations } from "../operations/operationTrackerStorage.ts";
 
 export const authStatusQueryKey = ["auth", "status"] as const;
 const authenticatedBrowserCacheGenerations = new WeakMap<QueryClient, number>();
@@ -200,6 +201,7 @@ export async function invalidateAuthenticationStatusWhenAllowed(
 }
 
 function beginAuthenticatedBrowserCacheReset(queryClient: QueryClient): void {
+    clearTrackedOperations();
     authenticatedBrowserCacheGenerations.set(
         queryClient,
         authenticatedBrowserCacheGeneration(queryClient) + 1

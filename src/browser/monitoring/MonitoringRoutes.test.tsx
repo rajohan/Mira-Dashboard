@@ -383,10 +383,7 @@ describe("monitoring browser routes", () => {
         expect(screen.getByLabelText("Report type")).toHaveClass("mt-2");
         expect(screen.getByLabelText("Source")).toHaveClass("mt-2");
         expect(screen.getByLabelText("Status")).toHaveClass("mt-2");
-        expect(screen.getByRole("button", { name: "Apply" }).parentElement).toHaveClass(
-            "min-h-10",
-            "items-center"
-        );
+        expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(await screen.findByText("Reports unavailable")).toBeTruthy();
 
@@ -414,10 +411,7 @@ describe("monitoring browser routes", () => {
         expect(screen.getByLabelText("Check")).toHaveClass("mt-2");
         expect(screen.getByLabelText("Status")).toHaveClass("mt-2");
         expect(screen.getByLabelText("Severity")).toHaveClass("mt-2");
-        expect(screen.getByRole("button", { name: "Apply" }).parentElement).toHaveClass(
-            "min-h-10",
-            "items-center"
-        );
+        expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
         expect(await screen.findByText("Incidents unavailable")).toBeTruthy();
 
@@ -465,7 +459,7 @@ describe("monitoring browser routes", () => {
         expect(transport.calls.some(({ path }) => path === "reports.get")).toBeFalse();
     });
 
-    test("applies report text filters as one query transition", async () => {
+    test("applies report text filters automatically after typing", async () => {
         const transport = new MonitoringRouteTransport();
         await renderMonitoringRoute("/reports", transport);
         const user = userEvent.setup();
@@ -477,25 +471,17 @@ describe("monitoring browser routes", () => {
         expect(source).toHaveAttribute("placeholder", "openclaw");
         await user.type(kind, "heartbeat");
         await user.type(source, "openclaw");
-        expect(
-            transport.calls.filter(({ path }) => path === "reports.list")
-        ).toHaveLength(2);
-
-        await user.click(screen.getByRole("button", { name: "Apply" }));
         await waitFor(() =>
             expect(
-                transport.calls.filter(({ path }) => path === "reports.list")
-            ).toHaveLength(4)
+                transport.calls.findLast(({ path }) => path === "reports.list")?.input
+            ).toEqual({
+                filters: {
+                    kinds: ["heartbeat"],
+                    sources: ["openclaw"],
+                },
+                limit: 50,
+            })
         );
-        expect(
-            transport.calls.findLast(({ path }) => path === "reports.list")?.input
-        ).toEqual({
-            filters: {
-                kinds: ["heartbeat"],
-                sources: ["openclaw"],
-            },
-            limit: 50,
-        });
     });
 
     test("loads an overlapping report page without rendering duplicate identities", async () => {

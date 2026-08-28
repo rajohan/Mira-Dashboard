@@ -1625,6 +1625,8 @@ export async function createDashboardServer(
             ...(domainNow === undefined ? {} : { nowMs: () => domainNow().getTime() }),
             readGatewayConnection: gatewayConnectionService.get,
             readGatewaySessionsProjection: gatewaySessionsService.readHeartbeatProjection,
+            refreshGatewaySessionsProjection:
+                gatewaySessionsService.refreshHeartbeatProjection,
             readHeartbeatDashboardJobs: (generatedAtMs) =>
                 readCacheHeartbeatDashboardJobs(
                     jobRepository,
@@ -1644,7 +1646,8 @@ export async function createDashboardServer(
             readOperationalSignals: createCacheHeartbeatOperationalSignalsReader({
                 ...createCacheHeartbeatOverviewSignalReaders(
                     cacheRepository,
-                    domainNow === undefined ? Date.now : () => domainNow().getTime()
+                    domainNow === undefined ? Date.now : () => domainNow().getTime(),
+                    jobRepository
                 ),
                 databaseService: databaseObservabilityService,
                 readKopiaBackup: () =>

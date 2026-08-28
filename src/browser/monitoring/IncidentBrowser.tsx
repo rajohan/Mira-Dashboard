@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Filter, RotateCcw, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import type { ListIncidentsInput } from "../../contracts/incidents.ts";
@@ -16,7 +16,6 @@ import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { ExpandableCard } from "../ui/ExpandableCard.tsx";
-import { Form } from "../ui/Form.tsx";
 import { FormField } from "../ui/FormField.tsx";
 import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -24,7 +23,7 @@ import { Input } from "../ui/Input.tsx";
 import { PageState } from "../ui/PageState.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Text } from "../ui/Text.tsx";
-import { incidentSeverityVariant } from "./incidentPresentation.ts";
+import { incidentSeverityVariant, incidentStateVariant } from "./incidentPresentation.ts";
 import { IncidentTable } from "./IncidentTable.tsx";
 import {
     incidentDetailQueryOptions,
@@ -33,6 +32,7 @@ import {
     uniqueMonitoringRows,
 } from "./monitoringQueries.ts";
 import { parseIncidentsRouteSearch } from "./monitoringRouteSearch.ts";
+import { useDebouncedFilter } from "./useDebouncedFilter.ts";
 
 const incidentFilters = Object.freeze([
     { label: "All", value: "all" },
@@ -77,9 +77,7 @@ function IncidentDetailPanel({ id }: { readonly id: string }) {
                 <Badge variant={incidentSeverityVariant(detail.severity)}>
                     {detail.severity}
                 </Badge>
-                <Badge variant={detail.state === "active" ? "warning" : "success"}>
-                    {detail.state}
-                </Badge>
+                <Badge variant={incidentStateVariant(detail.state)}>{detail.state}</Badge>
                 <Badge>occurrence group {detail.generation}</Badge>
             </div>
             <Heading
@@ -131,12 +129,12 @@ export function IncidentBrowser() {
     );
     const [kindDraft, setKindDraft] = useState("");
     const [monitorDraft, setMonitorDraft] = useState("");
-    const [kind, setKind] = useState("");
-    const [monitor, setMonitor] = useState("");
     const [stateDraft, setStateDraft] = useState<IncidentFilter>("all");
-    const [state, setState] = useState<IncidentFilter>("all");
     const [severityDraft, setSeverityDraft] = useState<SeverityFilter>("all");
-    const [severity, setSeverity] = useState<SeverityFilter>("all");
+    const kind = useDebouncedFilter(kindDraft);
+    const monitor = useDebouncedFilter(monitorDraft);
+    const state = stateDraft;
+    const severity = severityDraft;
     const filters: ListIncidentsInput["filters"] =
         kind === "" && monitor === "" && state === "all" && severity === "all"
             ? undefined
@@ -166,22 +164,6 @@ export function IncidentBrowser() {
     const selectedId = search.incidentId;
     const selectIncident = (incidentId: string) => {
         void navigate({ replace: true, search: { incidentId } });
-    };
-    const applyFilters = () => {
-        setKind(kindDraft.trim());
-        setMonitor(monitorDraft.trim());
-        setState(stateDraft);
-        setSeverity(severityDraft);
-    };
-    const resetFilters = () => {
-        setKindDraft("");
-        setMonitorDraft("");
-        setKind("");
-        setMonitor("");
-        setStateDraft("all");
-        setState("all");
-        setSeverityDraft("all");
-        setSeverity("all");
     };
     let catalogContent: ReactNode;
     if (liveHead.isPending && query.isPending && !catalogHasData) {
@@ -236,10 +218,9 @@ export function IncidentBrowser() {
 
     return (
         <div>
-            <Form
+            <section
                 aria-label="Incident filters"
-                className="border-primary-700 bg-primary-900/35 grid gap-3 rounded-xl border p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem_11rem_auto] xl:items-end"
-                onSubmit={applyFilters}
+                className="border-primary-700 bg-primary-900/35 grid gap-3 rounded-xl border p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem_11rem] xl:items-end"
             >
                 <FormField label="Problem type">
                     <Input
@@ -275,17 +256,7 @@ export function IncidentBrowser() {
                         value={severityDraft}
                     />
                 </FormField>
-                <div className="flex min-h-10 items-center gap-2">
-                    <Button size="sm" type="submit">
-                        <Icon icon={Filter} size="sm" tone="inherit" />
-                        Apply
-                    </Button>
-                    <Button onClick={resetFilters} size="sm" variant="secondary">
-                        <Icon icon={RotateCcw} size="sm" tone="inherit" />
-                        Reset
-                    </Button>
-                </div>
-            </Form>
+            </section>
             {catalogError !== null && catalogHasData && (
                 <Alert
                     action={

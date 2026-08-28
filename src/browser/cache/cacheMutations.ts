@@ -98,6 +98,7 @@ export function useRefreshCacheEntryMutation(
             operationTracker.track({
                 jobRunId: run.id,
                 label: `Cache refresh: ${input.key}`,
+                operationKey: `cache-refresh:${input.key}`,
                 onTerminal: () =>
                     refreshCacheRunProjections(boundary.queryClient, input.key),
             });

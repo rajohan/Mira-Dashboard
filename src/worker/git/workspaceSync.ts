@@ -275,6 +275,18 @@ function uniquePaths(paths: readonly Buffer[]): Buffer[] {
     });
 }
 
+async function residualChangedFileCount(
+    root: string,
+    signal?: AbortSignal
+): Promise<number> {
+    const status = await runGit(
+        root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        signal
+    );
+    return uniquePaths(parseWorkspaceStatus(status).changedPaths).length;
+}
+
 export function createWorkspaceGitSync(rootPath: string) {
     const canonicalRoot = Fs.realpathSync(rootPath);
     const status = Fs.lstatSync(rootPath);
@@ -409,6 +421,10 @@ export function createWorkspaceGitSync(rootPath: string) {
                 changedFileCount: 0,
                 ...(recoveredCommit === undefined ? {} : { commit: recoveredCommit }),
                 pushed: recoveredCommit !== undefined,
+                residualChangedFileCount: await residualChangedFileCount(
+                    canonicalRoot,
+                    signal
+                ),
             };
         }
 
@@ -462,7 +478,14 @@ export function createWorkspaceGitSync(rootPath: string) {
             );
             const stagedPaths = uniquePaths(parseWorkspaceStatus(staged).changedPaths);
             if (stagedPaths.length === 0) {
-                return { changedFileCount: 0, pushed: false };
+                return {
+                    changedFileCount: 0,
+                    pushed: false,
+                    residualChangedFileCount: await residualChangedFileCount(
+                        canonicalRoot,
+                        signal
+                    ),
+                };
             }
             const changedFileCount = stagedPaths.length;
             const tree = await git(
@@ -503,7 +526,15 @@ export function createWorkspaceGitSync(rootPath: string) {
                 recoveredCommit ?? upstreamHead,
                 signal
             );
-            return { changedFileCount, commit, pushed: true };
+            return {
+                changedFileCount,
+                commit,
+                pushed: true,
+                residualChangedFileCount: await residualChangedFileCount(
+                    canonicalRoot,
+                    signal
+                ),
+            };
         } finally {
             Fs.rmSync(privateIndexDirectory, { force: true, recursive: true });
         }

@@ -1,10 +1,16 @@
-import { useRef, useState, type PropsWithChildren } from "react";
+import { useEffect, useRef, useState, type PropsWithChildren } from "react";
 
 import {
     OperationTrackerContext,
     type NewTrackedOperation,
     type TrackedOperation,
 } from "./operationTrackerContextValue.ts";
+import {
+    readStoredOperations,
+    storeOperations,
+    trackedOperationsClearedEvent,
+} from "./operationTrackerStorage.ts";
+
 const trackedOperationMaximum = 12;
 
 function capTerminalHistory(operations: readonly TrackedOperation[]) {
@@ -19,12 +25,23 @@ function capTerminalHistory(operations: readonly TrackedOperation[]) {
 
 /** @returns Session-scoped durable job identities shared across route navigation. */
 export function OperationTrackerProvider({ children }: PropsWithChildren) {
-    const [operations, setOperations] = useState<readonly TrackedOperation[]>([]);
+    const [operations, setOperations] =
+        useState<readonly TrackedOperation[]>(readStoredOperations);
     const settledRunIds = useRef(new Set<string>());
+    useEffect(() => {
+        const clear = () => {
+            settledRunIds.current.clear();
+            setOperations([]);
+        };
+        globalThis.addEventListener(trackedOperationsClearedEvent, clear);
+        return () => globalThis.removeEventListener(trackedOperationsClearedEvent, clear);
+    }, []);
     const dismiss = (jobRunId: string) => {
-        setOperations((current) =>
-            current.filter((operation) => operation.jobRunId !== jobRunId)
-        );
+        setOperations((current) => {
+            const next = current.filter((operation) => operation.jobRunId !== jobRunId);
+            storeOperations(next);
+            return next;
+        });
     };
     const settle = (jobRunId: string) => {
         if (settledRunIds.current.has(jobRunId)) return;
@@ -37,13 +54,15 @@ export function OperationTrackerProvider({ children }: PropsWithChildren) {
                 (candidate) => candidate.jobRunId === jobRunId
             );
             if (operation === undefined || operation.terminal) return current;
-            return capTerminalHistory(
+            const next = capTerminalHistory(
                 current.map((candidate) =>
                     candidate.jobRunId === jobRunId
                         ? { ...candidate, terminal: true }
                         : candidate
                 )
             );
+            storeOperations(next);
+            return next;
         });
         if (onTerminal !== undefined) {
             void Promise.resolve(onTerminal()).catch(() => {
@@ -57,7 +76,7 @@ export function OperationTrackerProvider({ children }: PropsWithChildren) {
             const existing = current.find(
                 ({ jobRunId }) => jobRunId === operation.jobRunId
             );
-            return capTerminalHistory([
+            const next = capTerminalHistory([
                 {
                     ...operation,
                     onTerminal: operation.onTerminal ?? existing?.onTerminal,
@@ -67,10 +86,18 @@ export function OperationTrackerProvider({ children }: PropsWithChildren) {
                 },
                 ...current.filter(({ jobRunId }) => jobRunId !== operation.jobRunId),
             ]);
+            storeOperations(next);
+            return next;
         });
     };
+    const operationIsActive = (operationKey: string) =>
+        operations.some(
+            (operation) => !operation.terminal && operation.operationKey === operationKey
+        );
     return (
-        <OperationTrackerContext value={{ dismiss, operations, settle, track }}>
+        <OperationTrackerContext
+            value={{ dismiss, operationIsActive, operations, settle, track }}
+        >
             {children}
         </OperationTrackerContext>
     );

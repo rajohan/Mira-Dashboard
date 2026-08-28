@@ -394,8 +394,7 @@ export function createDockerUpdaterService(
         options.restoreImageReference ?? defaultImageReferenceRestorer;
     const reconcileStack =
         options.reconcileStack ??
-        ((services, signal) =>
-            reconcileDockerComposeStack(composeRunner, services, signal));
+        ((signal) => reconcileDockerComposeStack(composeRunner, signal));
     const updateImage = options.updateImage ?? updateDockerComposeImage;
     const scanOptions = Object.freeze({
         ...options.scan,
@@ -420,14 +419,13 @@ export function createDockerUpdaterService(
     async function reconcileVerifiedStack(
         previous: DockerOverviewCachePayload,
         expectedComposeSourceRevision: string,
-        services: readonly string[],
         signal: AbortSignal
     ) {
         const before = await options.collector.discover(previous, signal);
         if (before.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();
         }
-        await reconcileStack(services, signal);
+        await reconcileStack(signal);
         const after = await options.collector.discover(before.payload, signal);
         if (after.compose.sourceRevision !== expectedComposeSourceRevision) {
             sourceConflict();
@@ -653,10 +651,7 @@ export function createDockerUpdaterService(
                 sourceConflict();
             }
             verifyRestoredSources(before, affectedServices);
-            await reconcileStack(
-                affectedServices.map(({ service }) => service),
-                signal
-            );
+            await reconcileStack(signal);
             const after = await options.collector.discover(before.payload, signal);
             if (after.compose.settlementRevision !== preMutationSettlementRevision) {
                 sourceConflict();
@@ -984,7 +979,6 @@ export function createDockerUpdaterService(
                 discovery = await reconcileVerifiedStack(
                     payload,
                     discovery.compose.sourceRevision,
-                    successful.map(({ service }) => service),
                     operationSignal
                 );
                 for (const selectedService of successful) {

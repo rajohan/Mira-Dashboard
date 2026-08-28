@@ -21,12 +21,16 @@ import {
 } from "./dockerPresentation.ts";
 
 interface DockerUpdaterPanelProps {
-    readonly busy: boolean;
+    readonly anyUpdaterBusy: boolean;
     readonly controlsDisabled: boolean;
     readonly events: readonly DockerUpdaterEvent[];
     readonly onRun: () => void;
     readonly onScan: () => void;
     readonly onUpdateService: (service: DockerUpdaterService) => void;
+    readonly requestBusy: boolean;
+    readonly runBusy: boolean;
+    readonly scanBusy: boolean;
+    readonly serviceIsBusy: (serviceId: string) => boolean;
     readonly services: readonly DockerUpdaterService[];
 }
 
@@ -44,14 +48,55 @@ function updaterEventIsFailure(kind: DockerUpdaterEvent["kind"]): boolean {
     }
 }
 
+interface DockerUpdaterEventGroup {
+    readonly atMs: number;
+    readonly events: readonly DockerUpdaterEvent[];
+    readonly id: string;
+    readonly jobRunId?: string;
+    readonly kind: DockerUpdaterEvent["kind"];
+}
+
+function groupedUpdaterEvents(
+    events: readonly DockerUpdaterEvent[]
+): readonly DockerUpdaterEventGroup[] {
+    const groups = new Map<string, DockerUpdaterEvent[]>();
+    for (const event of events) {
+        const identity = event.jobRunId ?? event.id;
+        groups.set(identity, [...(groups.get(identity) ?? []), event]);
+    }
+    return [...groups.entries()].map(([id, grouped]) => {
+        const failure = grouped.find(({ kind }) => updaterEventIsFailure(kind));
+        const kind =
+            failure?.kind ??
+            grouped.find(({ kind: candidate }) => candidate === "update-succeeded")
+                ?.kind ??
+            grouped.find(({ kind: candidate }) => candidate === "update-available")
+                ?.kind ??
+            grouped[0]!.kind;
+        return {
+            atMs: Math.max(...grouped.map(({ atMs }) => atMs)),
+            events: grouped,
+            id,
+            ...(grouped[0]?.jobRunId === undefined
+                ? {}
+                : { jobRunId: grouped[0].jobRunId }),
+            kind,
+        };
+    });
+}
+
 /** @returns Complete updater policy/status inventory, controls, and bounded history. */
 export function DockerUpdaterPanel({
-    busy,
+    anyUpdaterBusy,
     controlsDisabled,
     events,
     onRun,
     onScan,
     onUpdateService,
+    requestBusy,
+    runBusy,
+    scanBusy,
+    serviceIsBusy,
     services,
 }: DockerUpdaterPanelProps) {
     const updateServices = services.filter(
@@ -73,8 +118,9 @@ export function DockerUpdaterPanel({
     const notifyCount = services.filter(
         ({ policy }) => policy.state === "managed" && !policy.automatic
     ).length;
-    const recentFailureCount = events.filter(({ kind }) =>
-        updaterEventIsFailure(kind)
+    const eventGroups = groupedUpdaterEvents(events);
+    const recentFailureCount = eventGroups.filter(({ events: grouped }) =>
+        grouped.some(({ kind }) => updaterEventIsFailure(kind))
     ).length;
 
     return (
@@ -95,8 +141,10 @@ export function DockerUpdaterPanel({
                 <div className="grid w-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 lg:flex lg:w-auto">
                     <Button
                         aria-label="Scan Docker services for updates"
+                        busy={scanBusy}
+                        busyLabel="Scanning…"
                         className="w-full lg:w-auto"
-                        disabled={controlsDisabled || busy}
+                        disabled={controlsDisabled || requestBusy || anyUpdaterBusy}
                         onClick={onScan}
                         size="sm"
                         variant="secondary"
@@ -106,8 +154,10 @@ export function DockerUpdaterPanel({
                     </Button>
                     <Button
                         aria-label="Run all available Docker updates"
+                        busy={runBusy}
+                        busyLabel="Running updates…"
                         className="w-full lg:w-auto"
-                        disabled={controlsDisabled || busy}
+                        disabled={controlsDisabled || requestBusy || anyUpdaterBusy}
                         onClick={onRun}
                         size="sm"
                     >
@@ -193,6 +243,7 @@ export function DockerUpdaterPanel({
                                 const canUpdate =
                                     service.policy.state === "managed" &&
                                     service.status.state === "update-available";
+                                const serviceBusy = serviceIsBusy(service.id);
                                 return (
                                     <section
                                         aria-label={
@@ -237,8 +288,13 @@ export function DockerUpdaterPanel({
                                                     " " +
                                                     service.service
                                                 }
+                                                busy={serviceBusy}
+                                                busyLabel="Updating…"
                                                 disabled={
-                                                    controlsDisabled || busy || !canUpdate
+                                                    controlsDisabled ||
+                                                    requestBusy ||
+                                                    anyUpdaterBusy ||
+                                                    !canUpdate
                                                 }
                                                 onClick={() => onUpdateService(service)}
                                                 size="sm"
@@ -292,42 +348,57 @@ export function DockerUpdaterPanel({
                             Recent events
                         </Heading>
                     </div>
-                    {events.length === 0 ? (
+                    {eventGroups.length === 0 ? (
                         <Text className="mt-3" tone="muted">
                             No updater events are available.
                         </Text>
                     ) : (
                         <ol className="mt-3 max-h-160 space-y-3 overflow-y-auto pr-1">
-                            {events.map((event) => (
+                            {eventGroups.map((group) => (
                                 <li
                                     className="border-primary-700 bg-primary-900/30 rounded-lg border p-3"
-                                    key={event.id}
+                                    key={group.id}
                                 >
                                     <div className="flex flex-wrap items-start justify-between gap-2">
                                         <Badge
                                             variant={dockerUpdaterEventVariant(
-                                                event.kind
+                                                group.kind
                                             )}
                                         >
-                                            {humanizeDockerEventKind(event.kind)}
+                                            {group.jobRunId === undefined
+                                                ? humanizeDockerEventKind(group.kind)
+                                                : "Updater run"}
                                         </Badge>
                                         <time
                                             className="text-primary-400 text-xs"
-                                            dateTime={new Date(event.atMs).toISOString()}
+                                            dateTime={new Date(group.atMs).toISOString()}
                                         >
-                                            {formatDashboardDateTime(event.atMs)}
+                                            {formatDashboardDateTime(group.atMs)}
                                         </time>
                                     </div>
-                                    <Text className="mt-2 wrap-anywhere" size="sm">
-                                        {event.summary}
-                                    </Text>
-                                    {event.jobRunId !== undefined && (
+                                    {group.events.length === 1 ? (
+                                        <Text className="mt-2 wrap-anywhere" size="sm">
+                                            {group.events[0]!.summary}
+                                        </Text>
+                                    ) : (
+                                        <ul className="text-primary-200 mt-2 space-y-1 text-sm">
+                                            {group.events.map((event) => (
+                                                <li
+                                                    className="wrap-anywhere"
+                                                    key={event.id}
+                                                >
+                                                    {event.summary}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                    {group.jobRunId !== undefined && (
                                         <ActionLink
                                             className="text-accent-300 hover:text-accent-200 mt-2 block text-xs font-medium wrap-anywhere"
-                                            search={{ runId: event.jobRunId }}
+                                            search={{ runId: group.jobRunId }}
                                             to="/jobs"
                                         >
-                                            Open job {event.jobRunId}
+                                            Open job {group.jobRunId}
                                         </ActionLink>
                                     )}
                                 </li>

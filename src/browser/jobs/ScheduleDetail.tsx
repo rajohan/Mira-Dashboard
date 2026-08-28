@@ -50,6 +50,12 @@ function focusScheduleDetailHeading(): void {
     );
 }
 
+function scheduleRunBusyLabel(schedule: ScheduleSummary): string {
+    if (schedule.activeRun?.state === "running") return "Running…";
+    if (schedule.activeRun?.state === "queued") return "Queued…";
+    return "Starting…";
+}
+
 /** @returns Complete operator controls and history for one code-owned schedule. */
 export function ScheduleDetail({
     disableError,
@@ -115,7 +121,7 @@ export function ScheduleDetail({
                     {schedule.manualRunAvailable ? (
                         <Button
                             busy={runBusy}
-                            busyLabel="Starting…"
+                            busyLabel={scheduleRunBusyLabel(schedule)}
                             disabled={
                                 updateBusy ||
                                 (schedule.activeRun !== undefined && !runReplayAvailable)

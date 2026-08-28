@@ -8,6 +8,7 @@ import type { JobRunDetail } from "../../contracts/jobs.ts";
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { useRealtimeQueryInvalidation } from "../api/useRealtimeQueryInvalidation.ts";
 import { jobRunStateBadgeVariant, jobRunStateLabel } from "../jobs/jobRunPresentation.ts";
+import { formatDashboardDateTime } from "../lib/formatDateTime.ts";
 import { ActionLink } from "../ui/ActionLink.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Card } from "../ui/Card.tsx";
@@ -45,6 +46,23 @@ function operationBadgePresentation(lookupFailed: boolean, state?: JobRunState) 
     });
 }
 
+function latestRunDetail(detail: JobRunDetail | undefined): string | undefined {
+    const event = detail?.events?.[0];
+    if (event?.message !== undefined) return event.message;
+    if (event?.progress !== undefined) {
+        const values = Object.entries(event.progress)
+            .filter((entry): entry is [string, string | number | boolean] =>
+                ["string", "number", "boolean"].includes(typeof entry[1])
+            )
+            .slice(0, 4)
+            .map(([key, value]) => `${key}: ${String(value)}`);
+        if (values.length > 0) return values.join(" · ");
+    }
+    return detail === undefined
+        ? undefined
+        : `Attempt ${detail.run.attemptCount} of ${detail.run.attemptLimit}`;
+}
+
 function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrackerValue) {
     const client = useDashboardTrpcClient();
     useRealtimeQueryInvalidation({
@@ -56,7 +74,7 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
     const details = useQueries({
         queries: operations.map(({ jobRunId }) => ({
             queryFn: ({ signal }: { signal: AbortSignal }): Promise<JobRunDetail> =>
-                client.query("jobs.getRun", { eventLimit: 1, id: jobRunId }, { signal }),
+                client.query("jobs.getRun", { eventLimit: 5, id: jobRunId }, { signal }),
             queryKey: [...operationRunQueryRoot, jobRunId] as const,
             refetchInterval: (query: {
                 state: {
@@ -109,6 +127,7 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
                         const terminal = state !== undefined && terminalStates.has(state);
                         const dismissible = terminal || lookupFailed;
                         const badge = operationBadgePresentation(lookupFailed, state);
+                        const latestDetail = latestRunDetail(detail);
                         return (
                             <li
                                 className="border-primary-700 rounded-lg border p-3"
@@ -119,6 +138,23 @@ function PopulatedOperationsTray({ dismiss, operations, settle }: OperationTrack
                                         <Text as="p" className="font-semibold" size="sm">
                                             {operation.label}
                                         </Text>
+                                        {detail !== undefined && (
+                                            <Text className="mt-1" size="sm" tone="muted">
+                                                Updated{" "}
+                                                {formatDashboardDateTime(
+                                                    detail.run.updatedAtMs
+                                                )}
+                                                {` · Attempt ${detail.run.attemptCount}/${detail.run.attemptLimit}`}
+                                            </Text>
+                                        )}
+                                        {latestDetail !== undefined && (
+                                            <Text
+                                                className="mt-2 wrap-anywhere"
+                                                size="sm"
+                                            >
+                                                {latestDetail}
+                                            </Text>
+                                        )}
                                         <div className="mt-2 flex flex-wrap items-center gap-2">
                                             <Badge variant={badge.variant}>
                                                 {badge.label}

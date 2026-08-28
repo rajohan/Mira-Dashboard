@@ -2,11 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Boxes, HeartPulse, Layers3, Package, ServerOff } from "lucide-react";
 import { useState } from "react";
 
-import type {
-    DockerContainer,
-    DockerOverview,
-    DockerPreparePruneResult,
-    DockerRequestOperationInput,
+import {
+    dockerOverviewCacheKey,
+    type DockerContainer,
+    type DockerOverview,
+    type DockerPreparePruneResult,
+    type DockerRequestOperationInput,
 } from "../../contracts/docker.ts";
 import {
     classifyDashboardBrowserFailure,
@@ -14,6 +15,7 @@ import {
     isDashboardOperationOutcomeUnknown,
 } from "../api/trpcError.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
+import { useDemandDrivenCacheRefresh } from "../cache/useDemandDrivenCacheRefresh.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
 import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
@@ -144,12 +146,25 @@ interface DockerRouteProps {
     readonly client: DockerClient;
 }
 
+function dockerTrackedOperationKey(input: DockerRequestOperationInput): string {
+    return input.operation === "updater-update-service"
+        ? `${input.operation}:${input.serviceId}`
+        : input.operation;
+}
+
 /** @returns Complete fresh-gated Docker observability and exact control page. */
 export function DockerRoute({ client }: DockerRouteProps) {
     const mutationBoundary = useAuthenticatedMutationBoundary();
     const operationTracker = useOperationTracker();
     const overviewQuery = useQuery(dockerOverviewQueryOptions(client));
     const overview = overviewQuery.data;
+    useDemandDrivenCacheRefresh({
+        client,
+        enabled: overview !== undefined,
+        intervalMs: 5000,
+        key: dockerOverviewCacheKey,
+        observedAtMs: overview?.checkedAtMs,
+    });
     const controlsAvailable = overview?.state === "fresh" && overviewQuery.error === null;
     const [pendingOperation, setPendingOperation] = useState<DockerOperationPrompt>();
     const [displayedOperation, setDisplayedOperation] = useState<DockerOperationPrompt>();
@@ -199,6 +214,10 @@ export function DockerRoute({ client }: DockerRouteProps) {
         retry: false,
     });
     const busy = operationBusy || preparingPrune !== undefined;
+    const updaterBusy = operationTracker.operations.some(
+        ({ operationKey, terminal }) =>
+            !terminal && operationKey?.startsWith("updater-") === true
+    );
     const freshRevision =
         controlsAvailable && overview.state === "fresh"
             ? overview.sourceRevision
@@ -231,6 +250,7 @@ export function DockerRoute({ client }: DockerRouteProps) {
             operationTracker.track({
                 jobRunId: result.jobRunId,
                 label: `Docker: ${result.operation}`,
+                operationKey: dockerTrackedOperationKey(input),
                 onTerminal: async () => {
                     await overviewQuery.refetch();
                 },
@@ -379,9 +399,21 @@ export function DockerRoute({ client }: DockerRouteProps) {
                             <>
                                 <DockerSummary overview={overview} />
                                 <DockerUpdaterPanel
-                                    busy={busy}
+                                    anyUpdaterBusy={updaterBusy}
                                     controlsDisabled={!controlsAvailable}
                                     events={overview.updaterEvents}
+                                    requestBusy={busy}
+                                    runBusy={operationTracker.operationIsActive(
+                                        "updater-run"
+                                    )}
+                                    scanBusy={operationTracker.operationIsActive(
+                                        "updater-scan"
+                                    )}
+                                    serviceIsBusy={(serviceId) =>
+                                        operationTracker.operationIsActive(
+                                            `updater-update-service:${serviceId}`
+                                        )
+                                    }
                                     onRun={() => {
                                         if (freshRevision !== undefined) {
                                             showPrompt(

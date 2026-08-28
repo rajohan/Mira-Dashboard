@@ -104,13 +104,21 @@ export function dockerUpdaterEventsNotification(
         (left, right) => severityOrder[right.severity] - severityOrder[left.severity]
     )[0]!.severity;
     const onlyUpdates = material.every(({ kind }) => kind === "update-available");
+    const detailLimit = 4;
+    const details = material
+        .slice(0, detailLimit)
+        .map(({ summary }) => summary)
+        .join(" ");
+    const omittedCount = Math.max(0, material.length - detailLimit);
+    const fullMessage =
+        details + (omittedCount === 0 ? "" : ` ${omittedCount} more result(s).`);
+    const message =
+        fullMessage.length <= 500 ? fullMessage : `${fullMessage.slice(0, 499)}…`;
     return {
         id: material.toSorted((left, right) => right.atMs - left.atMs)[0]!.id,
         kind: onlyUpdates ? "docker.updates-available" : "docker.run-summary",
         linkUrl: "/docker",
-        message: onlyUpdates
-            ? "Docker services have updates available."
-            : "Docker updater events were recorded in this run.",
+        message,
         occurredAtMs: Math.max(...material.map(({ atMs }) => atMs)),
         severity,
         source: "docker-updater",
@@ -131,6 +139,21 @@ function newlyEmittedEvents(
 ): readonly DockerUpdaterEvent[] {
     const previousIds = new Set(previous?.updaterEvents.map(({ id }) => id));
     return Object.freeze(current.updaterEvents.filter(({ id }) => !previousIds.has(id)));
+}
+
+function bindNewEventsToRun(
+    previous: DockerOverviewCachePayload | undefined,
+    current: DockerOverviewCachePayload,
+    jobRunId: string | undefined
+): DockerOverviewCachePayload {
+    if (jobRunId === undefined) return current;
+    const previousIds = new Set(previous?.updaterEvents.map(({ id }) => id));
+    return v.parse(dockerOverviewCachePayloadSchema, {
+        ...current,
+        updaterEvents: current.updaterEvents.map((event) =>
+            previousIds.has(event.id) ? event : { ...event, jobRunId }
+        ),
+    });
 }
 
 async function persistSnapshot(
@@ -325,7 +348,12 @@ export function createDockerUpdaterJobExecutor(
                     parsed.payload.operation === "updater-scan"
                 ) {
                     try {
-                        const payload = await port.scan(previous, signal);
+                        const scanned = await port.scan(previous, signal);
+                        const payload = bindNewEventsToRun(
+                            previous,
+                            scanned,
+                            context.runIdentity?.runId
+                        );
                         if (payload.sourceRevision !== parsed.payload.sourceRevision) {
                             throw new DockerUpdaterSourceConflictError();
                         }
@@ -387,6 +415,14 @@ export function createDockerUpdaterJobExecutor(
                     throw new JobActionRetryableError(error);
                 }
 
+                result = {
+                    ...result,
+                    payload: bindNewEventsToRun(
+                        previous,
+                        result.payload,
+                        context.runIdentity?.runId
+                    ),
+                };
                 const warnings: DockerPostSettlementWarning[] = [];
                 const cacheCommitted = await persistSettledSnapshot(
                     context,

@@ -66,21 +66,12 @@ export type DockerComposeCommandRunner = (
     }
 ) => Promise<DockerComposeCommandResult>;
 
-export type DockerComposeStackReconciler = (
-    services: readonly string[],
-    signal?: AbortSignal
-) => Promise<void>;
+export type DockerComposeStackReconciler = (signal?: AbortSignal) => Promise<void>;
 
 export async function reconcileDockerComposeStack(
     runCompose: DockerComposeCommandRunner,
-    services: readonly string[],
     signal?: AbortSignal
 ): Promise<void> {
-    const uniqueServices = [...new Set(services)];
-    if (uniqueServices.length === 0 || uniqueServices.length !== services.length) {
-        throw classifiedFailure("invalid-target");
-    }
-
     const up = await runCompose(
         dockerComposeWrapper,
         [
@@ -89,10 +80,10 @@ export async function reconcileDockerComposeStack(
             "--detach",
             "--pull",
             "never",
+            "--force-recreate",
             "--wait",
             "--wait-timeout",
             "600",
-            ...uniqueServices,
         ],
         {
             cwd: dockerComposeTrustRoot,

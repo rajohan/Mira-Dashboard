@@ -382,6 +382,16 @@ export function BackupOverviewSectionView({
                         </div>
                         <Button
                             aria-label="Queue Postgres backup"
+                            busy={
+                                mutationBusy === "walg" ||
+                                walg?.activity.state === "queued" ||
+                                walg?.activity.state === "running"
+                            }
+                            busyLabel={
+                                walg?.activity.state === "running"
+                                    ? "Running Postgres backup…"
+                                    : "Queuing Postgres backup…"
+                            }
                             disabled={
                                 walg === undefined ||
                                 controlsDisabled ||
@@ -423,6 +433,16 @@ export function BackupOverviewSectionView({
                         </div>
                         <Button
                             aria-label="Queue Kopia backup"
+                            busy={
+                                mutationBusy === "kopia" ||
+                                kopia?.activity.state === "queued" ||
+                                kopia?.activity.state === "running"
+                            }
+                            busyLabel={
+                                kopia?.activity.state === "running"
+                                    ? "Running Kopia backup…"
+                                    : "Queuing Kopia backup…"
+                            }
                             disabled={
                                 kopia === undefined ||
                                 controlsDisabled ||
@@ -678,8 +698,12 @@ export function BackupOverviewSectionView({
                         </div>
                         <Button
                             aria-label="Queue SQLite backup"
-                            busy={sqliteBusy}
-                            busyLabel="Queuing SQLite backup…"
+                            busy={sqliteBusy || sqliteRunActive}
+                            busyLabel={
+                                latestSqliteRun?.state === "running"
+                                    ? "Running SQLite backup…"
+                                    : "Queuing SQLite backup…"
+                            }
                             disabled={
                                 sqlite === undefined ||
                                 sqlite.state === "unavailable" ||
@@ -914,6 +938,7 @@ export function BackupOverviewSection() {
             operationTracker.track({
                 jobRunId: result.jobRunId,
                 label: `${type === "kopia" ? "Kopia" : "WAL-G"}: ${operation}`,
+                operationKey: `backup:${type}:${operation}`,
                 onTerminal: async () => {
                     await Promise.all([
                         queryClient.invalidateQueries({

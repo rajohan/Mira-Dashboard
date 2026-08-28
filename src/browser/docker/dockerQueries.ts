@@ -3,7 +3,7 @@ import { queryOptions } from "@tanstack/react-query";
 import type { DockerClient } from "./dockerClient.ts";
 
 export const dockerOverviewQueryKey = ["docker", "overview"] as const;
-export const dockerOverviewRefreshIntervalMs = 30_000;
+export const dockerOverviewRefreshIntervalMs = 5000;
 
 /** @returns The foreground-polled bounded Docker Engine and Compose overview query. */
 export function dockerOverviewQueryOptions(client: DockerClient) {

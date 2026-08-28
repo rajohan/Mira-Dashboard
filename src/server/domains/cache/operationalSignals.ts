@@ -38,6 +38,9 @@ import {
 import { parseJsonText } from "../../../shared/json.ts";
 import type { DatabaseObservabilityService } from "../database/service.ts";
 import type { DockerService } from "../docker/service.ts";
+import { gitWorkspaceSyncJobScheduleId } from "../jobs/actionRegistry.ts";
+import { toJobRunResult } from "../jobs/records.ts";
+import type { JobRepository } from "../jobs/repository.ts";
 import type { LogsService } from "../logs/service.ts";
 import type { SystemMetricsRuntimeService } from "../system/systemMetricsService.ts";
 import type { CacheEntryRecord, CacheRepository } from "./repository.ts";
@@ -153,7 +156,8 @@ function cacheSignal<TPayload, TCondition extends string>(input: {
  */
 export function createCacheHeartbeatOverviewSignalReaders(
     repository: Pick<CacheRepository, "findEntry">,
-    now: () => number = Date.now
+    now: () => number = Date.now,
+    jobRepository?: Pick<JobRepository, "findLatestRunForSchedule">
 ): Required<
     Pick<CacheHeartbeatOperationalSignalSeams, "readGit" | "readQuota" | "readWeather">
 > {
@@ -161,13 +165,37 @@ export function createCacheHeartbeatOverviewSignalReaders(
         readGit() {
             const nowMs = now();
             return cacheSignal({
-                condition: (payload) =>
-                    payload.repositories.some(
-                        ({ changedFileCount, detached, state }) =>
-                            state !== "available" || detached || changedFileCount > 0
-                    )
-                        ? "attention"
-                        : "clean",
+                condition: (payload) => {
+                    if (jobRepository === undefined) {
+                        return payload.repositories.some(
+                            ({ changedFileCount, detached, state }) =>
+                                state !== "available" || detached || changedFileCount > 0
+                        )
+                            ? "attention"
+                            : "clean";
+                    }
+                    const managedSourceNeedsAttention = payload.repositories
+                        .filter(({ id }) => id !== "openclaw")
+                        .some(
+                            ({ changedFileCount, detached, state }) =>
+                                state !== "available" || detached || changedFileCount > 0
+                        );
+                    const latestSync = jobRepository?.findLatestRunForSchedule(
+                        gitWorkspaceSyncJobScheduleId
+                    );
+                    if (
+                        managedSourceNeedsAttention ||
+                        latestSync?.state !== "succeeded"
+                    ) {
+                        return "attention";
+                    }
+                    const result = toJobRunResult(latestSync);
+                    return typeof result?.residualChangedFileCount === "number" &&
+                        Number.isSafeInteger(result.residualChangedFileCount) &&
+                        result.residualChangedFileCount === 0
+                        ? "clean"
+                        : "attention";
+                },
                 key: gitWorkspaceCacheKey,
                 nowMs,
                 payloadSchema: gitWorkspaceCachePayloadSchema,

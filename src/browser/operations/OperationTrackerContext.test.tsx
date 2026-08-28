@@ -9,7 +9,10 @@ const { cleanup, render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    globalThis.sessionStorage.clear();
+});
 
 function Harness() {
     const tracker = useOperationTracker();
@@ -72,6 +75,27 @@ function Harness() {
 }
 
 describe("operation tracker", () => {
+    test("restores active operations after a provider remount", async () => {
+        const user = userEvent.setup();
+        const first = render(
+            <OperationTrackerProvider>
+                <Harness />
+            </OperationTrackerProvider>
+        );
+
+        await user.click(screen.getByRole("button", { name: "Track first" }));
+        first.unmount();
+        render(
+            <OperationTrackerProvider>
+                <Harness />
+            </OperationTrackerProvider>
+        );
+
+        expect(screen.getByRole("status", { name: "Operations" })).toHaveTextContent(
+            "First (1)"
+        );
+    });
+
     test("deduplicates durable run identities and dismisses them", async () => {
         const user = userEvent.setup();
         render(

@@ -34,12 +34,28 @@ describe("global operations tray", () => {
             }
             activeRunAttempt += 1;
             if (activeRunAttempt === 1) {
-                return Promise.resolve({ run: { state: "running" } });
+                return Promise.resolve({
+                    events: [],
+                    run: {
+                        attemptCount: 1,
+                        attemptLimit: 3,
+                        state: "running",
+                        updatedAtMs: 1_800_000_000_000,
+                    },
+                });
             }
             if (activeRunAttempt === 2) {
                 return Promise.reject(new Error("temporarily unavailable"));
             }
-            return Promise.resolve({ run: { state: "succeeded" } });
+            return Promise.resolve({
+                events: [],
+                run: {
+                    attemptCount: 1,
+                    attemptLimit: 3,
+                    state: "succeeded",
+                    updatedAtMs: 1_800_000_001_000,
+                },
+            });
         });
         const dismiss = jest.fn();
         const settle = jest.fn();
@@ -70,6 +86,7 @@ describe("global operations tray", () => {
                         <OperationTrackerContext
                             value={{
                                 dismiss,
+                                operationIsActive: () => false,
                                 operations: [
                                     {
                                         jobRunId: "run-1",

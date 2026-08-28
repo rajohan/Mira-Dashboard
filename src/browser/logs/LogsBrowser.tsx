@@ -130,6 +130,7 @@ export function LogsBrowser() {
             operationTracker.track({
                 jobRunId: result.jobRunId,
                 label: dryRun ? "Log maintenance preview" : "Log maintenance",
+                operationKey: `log-maintenance:${policyId}:${dryRun ? "preview" : "run"}`,
                 onTerminal: () =>
                     refreshLogMaintenanceQueries(queryClient, result.jobRunId),
             });
