@@ -60,6 +60,7 @@ describe("Dashboard browser artifact", () => {
         outputDirectories.push(outputDirectory);
 
         const execution = await runBuild(outputDirectory);
+        expect(execution).toMatchObject({ exitCode: 0, stderr: "" });
         const result = JSON.parse(execution.stdout) as {
             compressedFileCount: number;
             outputDirectory: string;
@@ -76,7 +77,6 @@ describe("Dashboard browser artifact", () => {
             await readFile(path.join(outputDirectory, "bundle-metrics.json"), "utf8")
         ) as { formatVersion: number };
 
-        expect(execution).toMatchObject({ exitCode: 0, stderr: "" });
         expect(result).toMatchObject({ outputDirectory, status: "BUILT" });
         expect(result.compressedFileCount).toBeGreaterThan(0);
         expect(metrics.formatVersion).toBe(1);

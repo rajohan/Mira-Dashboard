@@ -95,4 +95,25 @@ describe("demand-driven cache refresh", () => {
             }
         }
     });
+
+    test("uses local observation age when browser and server clocks differ", () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(10_000);
+        const mutation = mock((..._arguments: readonly unknown[]) =>
+            Promise.resolve(undefined as never)
+        );
+        const view = render(
+            <RefreshProbe mutation={mutation} observedAtMs={86_400_000} />
+        );
+
+        act(() => {
+            jest.advanceTimersByTime(4999);
+        });
+        expect(mutation).not.toHaveBeenCalled();
+        act(() => {
+            jest.advanceTimersByTime(1);
+        });
+        expect(mutation).toHaveBeenCalledTimes(1);
+        view.unmount();
+    });
 });

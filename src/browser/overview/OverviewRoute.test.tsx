@@ -1339,7 +1339,10 @@ describe("Dashboard operational overview foundation", () => {
         });
         expect(jobSummaryCalls).toContainEqual({
             input: {
-                filters: { states: ["queued", "running"] },
+                filters: {
+                    states: ["queued", "running"],
+                    triggerTypes: ["manual"],
+                },
                 limit: 100,
             },
             path: "jobs.listRuns",

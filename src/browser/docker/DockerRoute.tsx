@@ -17,7 +17,10 @@ import {
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
 import { useDemandDrivenCacheRefresh } from "../cache/useDemandDrivenCacheRefresh.ts";
 import { formatByteCount } from "../lib/formatMeasurements.ts";
-import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
+import {
+    operationKeyForJobAction,
+    useOperationTracker,
+} from "../operations/operationTrackerContextValue.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ConfirmModal } from "../ui/ConfirmModal.tsx";
@@ -146,10 +149,13 @@ interface DockerRouteProps {
     readonly client: DockerClient;
 }
 
+const dockerOperationKey = operationKeyForJobAction("docker.operation");
+const dockerUpdaterOperationKey = operationKeyForJobAction("docker.updater");
+
 function dockerTrackedOperationKey(input: DockerRequestOperationInput): string {
-    return input.operation === "updater-update-service"
-        ? `${input.operation}:${input.serviceId}`
-        : input.operation;
+    return input.operation.startsWith("updater-")
+        ? dockerUpdaterOperationKey
+        : dockerOperationKey;
 }
 
 /** @returns Complete fresh-gated Docker observability and exact control page. */
@@ -219,7 +225,7 @@ export function DockerRoute({ client }: DockerRouteProps) {
     const busy = operationBusy || preparingPrune !== undefined;
     const updaterBusy = operationTracker.operations.some(
         ({ operationKey, terminal }) =>
-            !terminal && operationKey?.startsWith("updater-") === true
+            !terminal && operationKey === dockerUpdaterOperationKey
     );
     const freshRevision =
         controlsAvailable && overview.state === "fresh"
@@ -407,14 +413,14 @@ export function DockerRoute({ client }: DockerRouteProps) {
                                     events={overview.updaterEvents}
                                     requestBusy={busy}
                                     runBusy={operationTracker.operationIsActive(
-                                        "updater-run"
+                                        dockerUpdaterOperationKey
                                     )}
                                     scanBusy={operationTracker.operationIsActive(
-                                        "updater-scan"
+                                        dockerUpdaterOperationKey
                                     )}
-                                    serviceIsBusy={(serviceId) =>
+                                    serviceIsBusy={() =>
                                         operationTracker.operationIsActive(
-                                            `updater-update-service:${serviceId}`
+                                            dockerUpdaterOperationKey
                                         )
                                     }
                                     onRun={() => {

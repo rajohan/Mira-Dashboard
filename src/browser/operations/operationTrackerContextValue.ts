@@ -1,10 +1,26 @@
 import { createContext, use } from "react";
 
+import type { JobRunSummary } from "../../contracts/jobModel.ts";
+
+export const activeManualOperationRunsQueryKey = [
+    "operations",
+    "active-manual-runs",
+] as const;
+
+/**
+ * @param actionKey Durable worker action identity.
+ * @returns The UI identity shared by one durable worker action across devices.
+ */
+export function operationKeyForJobAction(actionKey: string): string {
+    return `job:${actionKey}`;
+}
+
 export interface TrackedOperation {
     readonly jobRunId: string;
     readonly label: string;
     readonly operationKey?: string;
     readonly onTerminal?: () => Promise<void> | void;
+    readonly summary?: JobRunSummary;
     readonly terminal: boolean;
 }
 

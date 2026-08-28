@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 
-import { act, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
 
+import type { DashboardTrpcClient } from "../api/trpcClient.ts";
+import { dashboardTrpcContext } from "../api/trpcContextValue.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
+import { authenticatedDashboardStoryStatus } from "../storySupport/dashboardStoryTransport.ts";
 import { OperationTrackerProvider } from "./OperationTrackerContext.tsx";
 import { useOperationTracker } from "./operationTrackerContextValue.ts";
-import { reconcileTrackedOperationsIdentity } from "./operationTrackerStorage.ts";
 
 const { cleanup, render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
@@ -12,8 +16,28 @@ const userEvent = userEventModule.default;
 
 afterEach(() => {
     cleanup();
-    globalThis.sessionStorage.clear();
 });
+
+function ProviderHarness({
+    children,
+    query = () => Promise.resolve({ runs: [], summary: {} }),
+}: {
+    readonly children: ReactNode;
+    readonly query?: (...arguments_: readonly unknown[]) => Promise<unknown>;
+}) {
+    const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(authStatusQueryKey, authenticatedDashboardStoryStatus);
+    const client = { query } as unknown as DashboardTrpcClient;
+    return (
+        <QueryClientProvider client={queryClient}>
+            <dashboardTrpcContext.Provider value={client}>
+                <OperationTrackerProvider>{children}</OperationTrackerProvider>
+            </dashboardTrpcContext.Provider>
+        </QueryClientProvider>
+    );
+}
 
 function Harness() {
     const tracker = useOperationTracker();
@@ -76,34 +100,48 @@ function Harness() {
 }
 
 describe("operation tracker", () => {
-    test("restores active operations after a provider remount", async () => {
-        const user = userEvent.setup();
-        const first = render(
-            <OperationTrackerProvider>
-                <Harness />
-            </OperationTrackerProvider>
+    test("restores only active manual operations from the backend", async () => {
+        const query = mock((..._arguments: readonly unknown[]) =>
+            Promise.resolve({
+                runs: [
+                    {
+                        actionKey: "docker.updater",
+                        displayName: "Docker updater",
+                        id: "run-from-another-device",
+                        state: "running",
+                    },
+                ],
+                summary: {},
+            })
         );
-        act(() => reconcileTrackedOperationsIdentity("authenticated:session-a"));
-
-        await user.click(screen.getByRole("button", { name: "Track first" }));
-        first.unmount();
         render(
-            <OperationTrackerProvider restoreStoredOperations>
+            <ProviderHarness query={query}>
                 <Harness />
-            </OperationTrackerProvider>
+            </ProviderHarness>
         );
 
-        expect(screen.getByRole("status", { name: "Operations" })).toHaveTextContent(
-            "First (1)"
+        expect(
+            await screen.findByRole("status", { name: "Operations" })
+        ).toHaveTextContent("Docker updater (1)");
+        expect(query).toHaveBeenCalledWith(
+            "jobs.listRuns",
+            {
+                filters: {
+                    states: ["queued", "running"],
+                    triggerTypes: ["manual"],
+                },
+                limit: 100,
+            },
+            expect.objectContaining({ signal: expect.any(AbortSignal) })
         );
     });
 
     test("deduplicates durable run identities and dismisses them", async () => {
         const user = userEvent.setup();
         render(
-            <OperationTrackerProvider>
+            <ProviderHarness>
                 <Harness />
-            </OperationTrackerProvider>
+            </ProviderHarness>
         );
 
         await user.click(screen.getByRole("button", { name: "Track first" }));
@@ -126,9 +164,9 @@ describe("operation tracker", () => {
     test("keeps every active operation and caps only terminal history", async () => {
         const user = userEvent.setup();
         render(
-            <OperationTrackerProvider>
+            <ProviderHarness>
                 <Harness />
-            </OperationTrackerProvider>
+            </ProviderHarness>
         );
 
         await user.click(screen.getByRole("button", { name: "Track active batch" }));
@@ -151,9 +189,9 @@ describe("operation tracker", () => {
     test("runs one domain refresh exactly once when a tracked job becomes terminal", async () => {
         const user = userEvent.setup();
         render(
-            <OperationTrackerProvider>
+            <ProviderHarness>
                 <Harness />
-            </OperationTrackerProvider>
+            </ProviderHarness>
         );
 
         await user.click(screen.getByRole("button", { name: "Track refresh" }));

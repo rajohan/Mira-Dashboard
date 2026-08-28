@@ -970,7 +970,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: container-stop",
                     onTerminal: expect.any(Function),
-                    operationKey: "container-stop",
+                    operationKey: "job:docker.operation",
                 })
             );
             expect(mutation).toHaveBeenCalledWith(
@@ -1050,7 +1050,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: updater-update-service",
                     onTerminal: expect.any(Function),
-                    operationKey: `updater-update-service:${"5".repeat(64)}`,
+                    operationKey: "job:docker.updater",
                 })
             );
             await waitForDialogExit();
@@ -1171,7 +1171,7 @@ describe("DockerRoute", () => {
                     jobRunId: queuedJobId,
                     label: "Docker: prune-execute",
                     onTerminal: expect.any(Function),
-                    operationKey: "prune-execute",
+                    operationKey: "job:docker.operation",
                 })
             );
             await waitForDialogExit();

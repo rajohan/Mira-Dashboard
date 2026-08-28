@@ -65,7 +65,7 @@ describe("coverage runner", () => {
     test("discovers exact current inventories and creates nine complete batches", async () => {
         const inventories = await loadCoverageTestInventories(projectRoot);
         expect(inventories.bun).toHaveLength(519);
-        expect(inventories.browser).toHaveLength(194);
+        expect(inventories.browser).toHaveLength(193);
         expect(inventories.storybook).toHaveLength(87);
 
         const plans = createCoveragePartitionPlan("/tmp/coverage", inventories);

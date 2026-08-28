@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { act } from "react";
 
+import type { JobRunSummary } from "../../contracts/jobModel.ts";
 import { jobRealtimeTopics } from "../../contracts/jobRealtime.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import type { DashboardTrpcClient } from "../api/trpcClient.ts";
@@ -174,30 +175,8 @@ describe("global operations tray", () => {
         }
     });
 
-    test("shows an active backend job without browser-local tracking", async () => {
-        const query = jest.fn((name: string) =>
-            Promise.resolve(
-                name === "jobs.listRuns"
-                    ? {
-                          runs: [
-                              {
-                                  displayName: "Remote Docker update",
-                                  id: "remote-run",
-                              },
-                          ],
-                          summary: {},
-                      }
-                    : {
-                          events: [],
-                          run: {
-                              attemptCount: 1,
-                              attemptLimit: 1,
-                              state: "running",
-                              updatedAtMs: 1_800_000_000_000,
-                          },
-                      }
-            )
-        );
+    test("renders backend summaries without per-run detail polling", async () => {
+        const query = jest.fn(() => Promise.reject(new Error("unexpected detail read")));
         const client = { query } as unknown as DashboardTrpcClient;
         const queryClient = new QueryClient({
             defaultOptions: { queries: { retry: false } },
@@ -229,7 +208,20 @@ describe("global operations tray", () => {
                             value={{
                                 dismiss: jest.fn(),
                                 operationIsActive: () => false,
-                                operations: [],
+                                operations: [
+                                    {
+                                        jobRunId: "remote-run",
+                                        label: "Remote Docker update",
+                                        operationKey: "job:docker.updater",
+                                        summary: {
+                                            attemptCount: 1,
+                                            attemptLimit: 1,
+                                            state: "running",
+                                            updatedAtMs: 1_800_000_000_000,
+                                        } as JobRunSummary,
+                                        terminal: false,
+                                    },
+                                ],
                                 settle: jest.fn(),
                                 track: jest.fn(),
                             }}
@@ -243,5 +235,6 @@ describe("global operations tray", () => {
 
         expect(await screen.findByText("Remote Docker update")).toBeVisible();
         expect(await screen.findByText("running")).toBeVisible();
+        expect(query).not.toHaveBeenCalled();
     });
 });

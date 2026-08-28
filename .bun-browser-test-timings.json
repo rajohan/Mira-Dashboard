@@ -103,7 +103,6 @@
         "src/browser/sessions/GatewaySessionsRoute.test.tsx": 41,
         "src/browser/terminal/terminalProtocol.test.ts": 41,
         "src/browser/ui/Switch.test.tsx": 41,
-        "src/browser/operations/operationTrackerStorage.test.tsx": 40,
         "src/browser/overview/OverviewReportsCard.test.tsx": 40,
         "src/browser/jobs/jobMutations.test.tsx": 36,
         "src/browser/ui/Popover.test.tsx": 35,

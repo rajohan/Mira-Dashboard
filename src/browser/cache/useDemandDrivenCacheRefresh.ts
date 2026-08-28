@@ -36,12 +36,12 @@ export function useDemandDrivenCacheRefresh(
     useEffect(() => {
         if (!options.enabled) return;
         const controller = new AbortController();
+        const observationReceivedAtMs = Date.now();
         const requestIfNeeded = () => {
             const nowMs = Date.now();
             if (
                 globalThis.document.visibilityState !== "visible" ||
-                (options.observedAtMs !== undefined &&
-                    nowMs - options.observedAtMs < options.intervalMs) ||
+                nowMs - observationReceivedAtMs < options.intervalMs ||
                 (pendingSince.current !== null &&
                     pendingObservedAtMs.current === options.observedAtMs &&
                     nowMs - pendingSince.current < requestTimeoutMs)

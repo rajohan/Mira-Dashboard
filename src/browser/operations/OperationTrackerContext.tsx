@@ -1,21 +1,19 @@
-import { useEffect, useRef, useState, type PropsWithChildren } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useRef, useState, type PropsWithChildren } from "react";
 
+import type { AuthStatus } from "../../contracts/auth.ts";
+import type { ListJobRunsResult } from "../../contracts/jobs.ts";
+import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
+import { useObservedQueryData } from "../api/useObservedQueryState.ts";
+import { authStatusQueryKey } from "../auth/authQueries.ts";
 import {
+    activeManualOperationRunsQueryKey,
     OperationTrackerContext,
+    operationKeyForJobAction,
     type NewTrackedOperation,
     type TrackedOperation,
 } from "./operationTrackerContextValue.ts";
-import {
-    readStoredOperations,
-    storeOperations,
-    trackedOperationsStorageChangedEvent,
-} from "./operationTrackerStorage.ts";
-
 const trackedOperationMaximum = 12;
-
-interface OperationTrackerProviderProps extends PropsWithChildren {
-    readonly restoreStoredOperations?: boolean;
-}
 
 function capTerminalHistory(operations: readonly TrackedOperation[]) {
     const capped = [...operations];
@@ -27,41 +25,56 @@ function capTerminalHistory(operations: readonly TrackedOperation[]) {
     return capped;
 }
 
-/** @returns Session-scoped durable job identities shared across route navigation. */
-export function OperationTrackerProvider({
-    children,
-    restoreStoredOperations = false,
-}: OperationTrackerProviderProps) {
-    const [operations, setOperations] = useState<readonly TrackedOperation[]>(() =>
-        restoreStoredOperations ? readStoredOperations() : []
+function AuthenticatedOperationTrackerProvider({ children }: PropsWithChildren) {
+    const client = useDashboardTrpcClient();
+    const [localOperations, setLocalOperations] = useState<readonly TrackedOperation[]>(
+        []
     );
+    const activeRuns = useQuery({
+        queryFn: ({ signal }): Promise<ListJobRunsResult> =>
+            client.query(
+                "jobs.listRuns",
+                {
+                    filters: {
+                        states: ["queued", "running"],
+                        triggerTypes: ["manual"],
+                    },
+                    limit: 100,
+                },
+                { signal }
+            ),
+        queryKey: activeManualOperationRunsQueryKey,
+        refetchInterval: 5000,
+        staleTime: 0,
+    });
     const settledRunIds = useRef(new Set<string>());
-    useEffect(() => {
-        const synchronize = () => {
-            settledRunIds.current.clear();
-            setOperations(readStoredOperations());
-        };
-        globalThis.addEventListener(trackedOperationsStorageChangedEvent, synchronize);
-        return () =>
-            globalThis.removeEventListener(
-                trackedOperationsStorageChangedEvent,
-                synchronize
-            );
-    }, []);
+    const localIds = new Set(localOperations.map(({ jobRunId }) => jobRunId));
+    const operations = [
+        ...localOperations,
+        ...(activeRuns.data?.runs ?? [])
+            .filter(({ id }) => !localIds.has(id))
+            .map((run) => ({
+                jobRunId: run.id,
+                label: run.displayName,
+                operationKey: operationKeyForJobAction(run.actionKey),
+                summary: run,
+                terminal: false,
+            })),
+    ];
     const dismiss = (jobRunId: string) => {
-        setOperations((current) => {
-            const next = current.filter((operation) => operation.jobRunId !== jobRunId);
-            storeOperations(next);
-            return next;
-        });
+        setLocalOperations((current) =>
+            current.filter((operation) => operation.jobRunId !== jobRunId)
+        );
     };
     const settle = (jobRunId: string) => {
         if (settledRunIds.current.has(jobRunId)) return;
-        const operation = operations.find((candidate) => candidate.jobRunId === jobRunId);
+        const operation = localOperations.find(
+            (candidate) => candidate.jobRunId === jobRunId
+        );
         if (operation === undefined || operation.terminal) return;
         settledRunIds.current.add(jobRunId);
         const onTerminal = operation.onTerminal;
-        setOperations((current) => {
+        setLocalOperations((current) => {
             const operation = current.find(
                 (candidate) => candidate.jobRunId === jobRunId
             );
@@ -73,7 +86,6 @@ export function OperationTrackerProvider({
                         : candidate
                 )
             );
-            storeOperations(next);
             return next;
         });
         if (onTerminal !== undefined) {
@@ -84,7 +96,7 @@ export function OperationTrackerProvider({
         }
     };
     const track = (operation: NewTrackedOperation) => {
-        setOperations((current) => {
+        setLocalOperations((current) => {
             const existing = current.find(
                 ({ jobRunId }) => jobRunId === operation.jobRunId
             );
@@ -98,7 +110,6 @@ export function OperationTrackerProvider({
                 },
                 ...current.filter(({ jobRunId }) => jobRunId !== operation.jobRunId),
             ]);
-            storeOperations(next);
             return next;
         });
     };
@@ -112,5 +123,17 @@ export function OperationTrackerProvider({
         >
             {children}
         </OperationTrackerContext>
+    );
+}
+
+/** @returns Backend-backed manual operations plus local completion callbacks. */
+export function OperationTrackerProvider({ children }: PropsWithChildren) {
+    const authentication = useObservedQueryData<AuthStatus>(authStatusQueryKey);
+    return authentication?.state === "authenticated" ? (
+        <AuthenticatedOperationTrackerProvider>
+            {children}
+        </AuthenticatedOperationTrackerProvider>
+    ) : (
+        children
     );
 }
