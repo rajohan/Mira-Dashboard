@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -16,7 +16,10 @@ import {
     deliveryProductionProtocol,
     type DeliveryProductionOperationCapsule,
 } from "../../src/shared/deliveryProductionOperation.ts";
-import { parseProductionReleaseDescriptor } from "../../src/shared/productionReleaseDescriptor.ts";
+import {
+    parseProductionReleaseDescriptor,
+    serializeProductionReleaseDescriptor,
+} from "../../src/shared/productionReleaseDescriptor.ts";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
@@ -63,9 +66,21 @@ const checksum = "e".repeat(64);
 
 afterEach(async () => {
     for (const directory of temporaryDirectories.splice(0)) {
+        await restoreOwnerWrite(directory);
         await rm(directory, { force: true, recursive: true });
     }
 });
+
+async function restoreOwnerWrite(directory: string): Promise<void> {
+    const status = await lstat(directory).catch(() => null);
+    if (!status?.isDirectory()) return;
+    await chmod(directory, 0o700);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) await restoreOwnerWrite(entryPath);
+        else if (entry.isFile()) await chmod(entryPath, 0o600);
+    }
+}
 
 function operationCapsule(): DeliveryProductionOperationCapsule {
     const payload = {
@@ -211,6 +226,61 @@ function describedArtifact(releaseId: string, runtimeRevision: string) {
             identity: { revision: runtimeRevision, version: "1.4.0" },
         }),
     });
+}
+
+function describedArtifactRecord(artifactPath: string, content: string) {
+    return {
+        bytes: Buffer.byteLength(content),
+        path: artifactPath,
+        sha256: new Bun.CryptoHasher("sha256").update(content).digest("hex"),
+    };
+}
+
+async function materializeDescribedRelease(
+    releaseRoot: string,
+    releaseId: string,
+    runtimeRevision: string
+): Promise<void> {
+    const runtimeBytes = "runtime";
+    const executorBytes = "executor";
+    const executable = describedArtifactRecord("runtime/bun", runtimeBytes);
+    const deliveryExecutor = describedArtifactRecord(
+        "server/productionDelivery.js",
+        executorBytes
+    );
+    await mkdir(releaseRoot, { recursive: true });
+    await Promise.all([
+        mkdir(path.join(releaseRoot, "runtime"), { recursive: true }),
+        mkdir(path.join(releaseRoot, "server"), { recursive: true }),
+    ]);
+    await Promise.all([
+        writeFile(path.join(releaseRoot, executable.path), runtimeBytes, {
+            mode: 0o500,
+        }),
+        writeFile(path.join(releaseRoot, deliveryExecutor.path), executorBytes, {
+            mode: 0o400,
+        }),
+        writeFile(
+            path.join(releaseRoot, "release-descriptor.json"),
+            serializeProductionReleaseDescriptor({
+                artifacts: [executable, deliveryExecutor],
+                deliveryExecutor,
+                formatVersion: 1,
+                releaseId,
+                runtime: {
+                    executable,
+                    revision: runtimeRevision,
+                    version: "1.4.0",
+                },
+            }),
+            { mode: 0o400 }
+        ),
+    ]);
+    await Promise.all([
+        chmod(path.join(releaseRoot, "runtime"), 0o500),
+        chmod(path.join(releaseRoot, "server"), 0o500),
+    ]);
+    await chmod(releaseRoot, 0o500);
 }
 
 async function fixture() {
@@ -891,6 +961,52 @@ describe("production Delivery executor", () => {
                 outcome: "succeeded",
             });
         });
+    });
+
+    test("hands a descriptor-verified target to its own executor before activation", async () => {
+        const { options, paths } = await fixture();
+        const releaseRoot = path.join(paths.releasesDirectory, targetReleaseId);
+        await materializeDescribedRelease(
+            releaseRoot,
+            targetReleaseId,
+            targetRuntimeRevision
+        );
+        const targetRuntime = artifact(targetReleaseId, targetRuntimeRevision).runtime;
+
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule(),
+                1000
+            );
+            const handoff = await rejectionError(
+                runProductionDeliveryExecutorUnderLease(lease, paths, options, {
+                    installRuntime: (_lease, _paths, identity, dependencies) => {
+                        expect(identity).toEqual(targetRuntime.identity);
+                        expect(dependencies?.sourceExecutable).toBe(
+                            path.join(releaseRoot, "runtime/bun")
+                        );
+                        return Promise.resolve(targetRuntime);
+                    },
+                    nowMs: () => 2000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                })
+            );
+            expect(handoff.name).toBe("TargetExecutorHandoff");
+            expect(await inspectDeliveryProductionOperation(lease, paths)).toMatchObject({
+                record: { phase: "target-executor-owner-transferred" },
+                state: "in-progress",
+            });
+        });
+        expect(await inspectProductionDeliveryExecutorOwner(options.projectRoot)).toEqual(
+            {
+                formatVersion: 1,
+                releaseId: targetReleaseId,
+                runtimeRevision: targetRuntimeRevision,
+                transitionId: operationTransitionId,
+            }
+        );
     });
 
     test("builds, capacity-admits, installs, and publishes an exact clean target", async () => {
