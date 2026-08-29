@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.6](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.5...v0.5.6) (2026-08-29)
+
+
+### Bug Fixes
+
+* **operations:** resolve dashboard regressions ([#510](https://github.com/rajohan/Mira-Dashboard/issues/510)) ([d905dd1](https://github.com/rajohan/Mira-Dashboard/commit/d905dd1d0815219073b69d3a8edc93b090a52f42))
+
 ## [0.5.5](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.4...v0.5.5) (2026-08-29)
 
 
