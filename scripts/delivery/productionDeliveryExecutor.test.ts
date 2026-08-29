@@ -34,6 +34,7 @@ import {
 import {
     clearProductionDeliveryOperationMarker,
     inspectActiveProductionDeliveryOperation,
+    inspectProductionDeliveryExecutorOwner,
     inspectProductionDeliveryOperation,
     parseProductionDeliveryExecutorArguments,
     prepareProductionDeliveryOperation,
@@ -664,6 +665,12 @@ describe("production Delivery executor", () => {
             )
         ).toEqual(receipt);
         expect(
+            await clearProductionDeliveryOperationMarker(
+                options.projectRoot,
+                operationTransitionId
+            )
+        ).toEqual(receipt);
+        expect(
             await inspectActiveProductionDeliveryOperation(options.projectRoot)
         ).toEqual({ state: "missing" });
         expect(
@@ -677,6 +684,30 @@ describe("production Delivery executor", () => {
             prepareProductionDeliveryOperation(options.projectRoot, capsule, () => 3000)
         );
         expect(replayFailure.message).toBe("Production Delivery executor failed");
+    });
+
+    test("backfills the capsule executor owner when journal creation outlives owner commit", async () => {
+        const { options, paths } = await fixture();
+        const capsule = operationCapsule();
+        await withDeploymentLease(paths.stateDirectory, (lease) =>
+            createDeliveryProductionOperation(lease, paths, capsule, 1000)
+        );
+
+        const replay = await prepareProductionDeliveryOperation(
+            options.projectRoot,
+            capsule,
+            () => 2000
+        );
+
+        expect(replay.phase).toBe("intent-recorded");
+        expect(await inspectProductionDeliveryExecutorOwner(options.projectRoot)).toEqual(
+            {
+                formatVersion: 1,
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+                transitionId: operationTransitionId,
+            }
+        );
     });
 
     test("keeps recovery retryable when the normal runtime restart fails", async () => {

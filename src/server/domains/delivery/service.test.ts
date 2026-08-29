@@ -424,6 +424,44 @@ describe("Delivery service", () => {
         ]);
     });
 
+    test("audits an automation deploy conflict before snapshot derivation fails", async () => {
+        const next = fixture();
+        const automationContext = {
+            actor: {
+                authenticatorId: "018f6f50-6a9e-7b88-8000-000000000012",
+                id: "production-deploy",
+                kind: "automation" as const,
+            },
+            reauthorize() {},
+            requestId: "automation-deploy-conflict",
+        };
+
+        const failure = await next.service
+            .deployCurrent(
+                {
+                    confirmation: "deploy-delivery-main",
+                    idempotencyKey: "A".repeat(43),
+                },
+                automationContext
+            )
+            .catch((error: unknown) => error);
+        expect(failure).toMatchObject({ reason: "conflict" });
+        expect(next.queued).toHaveLength(0);
+        expect(next.audits).toEqual([
+            {
+                actor: automationContext.actor,
+                operation: "deploy",
+                requestId: automationContext.requestId,
+                settlement: "attempted",
+            },
+            {
+                ...automationContext,
+                operation: "deploy",
+                settlement: "failed",
+            },
+        ]);
+    });
+
     test("rejects a cached release candidate from a different remote main head", async () => {
         const remoteHeadSha = "d".repeat(40);
         const candidate = publishedReleaseAuthority("e".repeat(40));

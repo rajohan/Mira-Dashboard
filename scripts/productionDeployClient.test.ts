@@ -11,7 +11,7 @@ function run(state: "running" | "succeeded") {
     const running = state === "running";
     return {
         events: [],
-        ...(running ? {} : { result: { status: "ok" } }),
+        ...(running ? {} : { result: { operation: "deploy", outcome: "completed" } }),
         run: {
             actionKey: "delivery.production.v1",
             attemptCount: 1,
@@ -93,6 +93,28 @@ describe("production deploy client", () => {
                 sleep: () => Promise.resolve(),
             })
         ).rejects.toThrow("Production deploy job failed");
+    });
+
+    test("rejects a succeeded job whose deployment outcome is unknown", () => {
+        expect(
+            queueProductionDeploy({
+                nowMs: () => 1000,
+                readToken: () => Promise.resolve("token"),
+                request: (_token, kind) =>
+                    Promise.resolve(
+                        kind === "mutation"
+                            ? { jobRunId: runId, operation: "deploy", queued: true }
+                            : {
+                                  ...run("succeeded"),
+                                  result: {
+                                      operation: "deploy",
+                                      outcome: "unknown-outcome",
+                                  },
+                              }
+                    ),
+                sleep: () => Promise.resolve(),
+            })
+        ).rejects.toThrow("Production deploy outcome unknown-outcome");
     });
 
     test("retries an ambiguous enqueue with the same idempotency key", async () => {

@@ -4,6 +4,7 @@ import { open } from "node:fs/promises";
 import * as v from "valibot";
 
 import { deliveryRequestOperationResultSchema } from "../src/contracts/delivery.ts";
+import { deliveryJobOperationResultSchema } from "../src/contracts/deliveryWorker.ts";
 import { jobRunDetailSchema } from "../src/contracts/jobs.ts";
 
 const origin = "http://127.0.0.1:3100";
@@ -147,7 +148,17 @@ export async function queueProductionDeploy(
         }
         const detail = v.parse(jobRunDetailSchema, rawDetail);
         if (terminal(detail.run.state)) {
-            if (detail.run.state === "succeeded") return;
+            if (detail.run.state === "succeeded") {
+                const result = v.parse(deliveryJobOperationResultSchema, detail.result);
+                if (
+                    result.operation === "deploy" &&
+                    (result.outcome === "completed" ||
+                        result.outcome === "completed-with-warnings")
+                ) {
+                    return;
+                }
+                throw new Error(`Production deploy outcome ${result.outcome}`);
+            }
             throw new Error(`Production deploy job ${detail.run.state}`);
         }
         await sleep(pollIntervalMs);

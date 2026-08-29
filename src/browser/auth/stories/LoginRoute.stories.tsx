@@ -63,6 +63,9 @@ export const Unavailable: Story = {
         },
         route: "/login",
     },
+    play: async ({ canvasElement }) => {
+        await expect(await within(canvasElement).findByRole("alert")).toBeVisible();
+    },
 };
 
 export const Bootstrap: Story = { args: loginStory(bootstrap) };

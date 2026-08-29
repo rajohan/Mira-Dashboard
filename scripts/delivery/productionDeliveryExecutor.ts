@@ -1289,6 +1289,28 @@ export async function prepareProductionDeliveryOperation(
             if (JSON.stringify(existing.record.capsule) !== JSON.stringify(capsule)) {
                 throw failure();
             }
+            const ownerState = await loadProductionDeliveryExecutorOwnerState(
+                lease,
+                paths
+            );
+            const expectedOwner = {
+                formatVersion: 1 as const,
+                releaseId: capsule.executor.releaseId,
+                runtimeRevision: capsule.executor.runtimeRevision,
+                transitionId: capsule.transitionId,
+            };
+            if (ownerState.owner === undefined) {
+                await commitProductionDeliveryExecutorOwner(
+                    lease,
+                    paths,
+                    ownerState,
+                    expectedOwner
+                );
+            } else if (
+                JSON.stringify(ownerState.owner) !== JSON.stringify(expectedOwner)
+            ) {
+                throw failure();
+            }
             return existing.record;
         }
         if (existing.state !== "missing") throw failure();
@@ -1389,8 +1411,10 @@ export async function clearProductionDeliveryOperationMarker(
         if (inspection.state !== "terminal") throw failure();
         await clearDeliveryProductionOperation(lease, paths, inspection.record);
         const owner = await loadProductionDeliveryExecutorOwnerState(lease, paths);
-        if (owner.owner?.transitionId !== canonicalTransition) throw failure();
-        await clearProductionDeliveryExecutorOwner(lease, paths, owner);
+        if (owner.owner !== undefined) {
+            if (owner.owner.transitionId !== canonicalTransition) throw failure();
+            await clearProductionDeliveryExecutorOwner(lease, paths, owner);
+        }
         return inspection.record;
     });
 }
