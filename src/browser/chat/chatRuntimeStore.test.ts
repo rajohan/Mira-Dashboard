@@ -82,6 +82,238 @@ function providerAnchorPart(key: string) {
 }
 
 describe("chat runtime store", () => {
+    test("retains completed task progress until a newer run replaces it", () => {
+        const store = createChatRuntimeStore();
+        store.apply(
+            event(1, {
+                explanation: "First run completed.",
+                kind: "plan",
+                steps: [{ status: "completed", text: "First task" }],
+            })
+        );
+        store.apply(event(2, { kind: "final", text: "Done" }));
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "First run completed."
+        );
+
+        store.apply({
+            ...event(3, {
+                explanation: "Second run started.",
+                kind: "plan",
+                steps: [{ status: "in_progress", text: "Second task" }],
+            }),
+            runId: "run-2",
+            sequence: 1,
+        });
+
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([
+            expect.objectContaining({
+                description: "Second run started.",
+                title: "Task progress",
+            }),
+        ]);
+
+        store.apply({
+            ...event(4, { kind: "assistant", mode: "append", text: "Late detail" }),
+            runId: "run-1",
+            sequence: 3,
+        });
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Second run started."
+        );
+    });
+
+    test("replaces retained progress from a newer authoritative reset snapshot", () => {
+        const store = createChatRuntimeStore();
+        store.apply(
+            event(1, {
+                explanation: "Older realtime plan.",
+                kind: "plan",
+                steps: [{ status: "completed", text: "Older task" }],
+            })
+        );
+        store.installSnapshots(
+            sessionKey,
+            [
+                {
+                    lastSequence: 2,
+                    message: {
+                        attachments: [],
+                        id: `runtime:${sessionKey}:run-2`,
+                        parts: [],
+                        role: "assistant",
+                        runId: "run-2",
+                        sequence: 2,
+                        sessionKey,
+                    },
+                    phase: "completed",
+                    plan: {
+                        description: "Newer snapshot plan.",
+                        items: [
+                            { id: "newer", label: "Newer task", status: "completed" },
+                        ],
+                        runId: "run-2",
+                        title: "Task progress",
+                    },
+                    reconciliation: "runtime-authoritative",
+                    runId: "run-2",
+                    updatedAtMs: occurredAtMs + 10,
+                },
+            ],
+            2,
+            true
+        );
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Newer snapshot plan."
+        );
+    });
+
+    test("does not replace newer retained progress with an older external plan", () => {
+        const store = createChatRuntimeStore();
+        store.apply(
+            event(1, {
+                explanation: "Newer realtime plan.",
+                kind: "plan",
+                steps: [{ status: "in_progress", text: "Newer task" }],
+            })
+        );
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "complete",
+                lifecycle: "active",
+                hasUnprojectedActivity: false,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:older`,
+                    parts: [],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs - 10,
+                plan: {
+                    description: "Older external plan.",
+                    items: [{ id: "older", label: "Older task", status: "in-progress" }],
+                    runId: "provider:older",
+                    title: "Task progress",
+                },
+                projectionTruncated: false,
+                providerRunId: "older",
+                source: "provider-runtime",
+                updatedAtMs: occurredAtMs - 10,
+            },
+        ]);
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Newer realtime plan."
+        );
+    });
+
+    test("hydrates retained progress from a terminal external run", () => {
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "complete",
+                lifecycle: "terminal-pending-history",
+                hasUnprojectedActivity: false,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:settled`,
+                    parts: [],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
+                plan: {
+                    description: "External run completed.",
+                    items: [{ id: "done", label: "External task", status: "completed" }],
+                    runId: "provider:settled",
+                    title: "Task progress",
+                },
+                projectionTruncated: false,
+                providerRunId: "settled",
+                source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
+            },
+        ]);
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "External run completed."
+        );
+    });
+
+    test("does not republish a retained external plan on unrelated activity", () => {
+        const store = createChatRuntimeStore();
+        const olderPlan = {
+            description: "Older external plan.",
+            items: [{ id: "older", label: "Older task", status: "in-progress" as const }],
+            runId: "provider:older",
+            title: "Task progress",
+        };
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "complete",
+                lifecycle: "active",
+                hasUnprojectedActivity: false,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:older`,
+                    parts: [],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
+                plan: olderPlan,
+                projectionTruncated: false,
+                providerRunId: "older",
+                source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
+            },
+        ]);
+        store.apply({
+            ...event(2, {
+                explanation: "Newer realtime plan.",
+                kind: "plan",
+                steps: [{ status: "in_progress", text: "Newer task" }],
+            }),
+            occurredAtMs: occurredAtMs + 10,
+            runId: "run-2",
+            sequence: 1,
+        });
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "interrupted",
+                lifecycle: "active",
+                hasUnprojectedActivity: true,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:older`,
+                    parts: [{ kind: "text", text: "Unrelated later activity" }],
+                    role: "assistant",
+                    sequence: 2,
+                    sessionKey,
+                },
+                observationEpoch: 2,
+                observedAtMs: occurredAtMs + 20,
+                projectionTruncated: true,
+                providerRunId: "older",
+                source: "provider-in-flight",
+                updatedAtMs: occurredAtMs + 20,
+            },
+        ]);
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Newer realtime plan."
+        );
+    });
+
     test("renders a provider user event before any following provider activity", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
@@ -275,6 +507,13 @@ describe("chat runtime store", () => {
             text: "Before reset",
         });
         store.apply(event(2, { clientRunId: "client-before-reset", kind: "started" }));
+        store.apply(
+            event(3, {
+                explanation: "Old transcript plan.",
+                kind: "plan",
+                steps: [{ status: "completed", text: "Old task" }],
+            })
+        );
         store.installExternalRuns(sessionKey, [
             {
                 continuity: "complete",
@@ -301,6 +540,7 @@ describe("chat runtime store", () => {
 
         expect(store.cursorFor(sessionKey)).toBe(7);
         expect(store.transcriptGenerationFor(sessionKey)).toBe(2);
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
         expect(store.state.sessions[sessionKey]).toMatchObject({
             eventIdentities: [],
             externalRuns: {},
@@ -600,7 +840,7 @@ describe("chat runtime store", () => {
                         },
                     ],
                     runId: "provider:provider-1",
-                    title: "OpenClaw plan",
+                    title: "Task progress",
                 },
                 observationEpoch: 1,
                 observedAtMs: occurredAtMs,
@@ -743,7 +983,12 @@ describe("chat runtime store", () => {
             store.state.sessions[sessionKey]?.externalRuns["provider-1"]
         ).toBeUndefined();
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
-        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([
+            expect.objectContaining({
+                description: "Explain the active work.",
+                title: "Task progress",
+            }),
+        ]);
     });
 
     test("preserves known detail only during non-reset truncated catch-up", () => {

@@ -131,6 +131,30 @@ async function immutableTree(
 }
 
 describe("production artifact pre-admission lifecycle", () => {
+    test("deduplicates repeated executor target retention", async () => {
+        const fixture = await createFixture();
+        await withDeploymentLease(fixture.state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(fixture.state);
+            const target = { releaseId: releaseA, runtimeRevision: runtimeA };
+            let retained: readonly (typeof target)[] = [];
+
+            await prepareProductionArtifactAdmission(
+                lease,
+                paths,
+                {
+                    artifactRetention: (_retentionLease, _retentionPaths, references) => {
+                        retained = references;
+                        return Promise.resolve();
+                    },
+                    services,
+                },
+                { additionalReferences: [target, target] }
+            );
+
+            expect(retained).toEqual([target]);
+        });
+    });
+
     test("admits a root-owned bootstrap runtime only under root-controlled ancestors", () => {
         expect(runtimeSourceOwnershipIsTrusted(0n, 1000n, 0o755n, true)).toBeTrue();
         expect(runtimeSourceOwnershipIsTrusted(0n, 1000n, 0o755n, false)).toBeFalse();

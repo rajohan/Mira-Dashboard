@@ -151,6 +151,97 @@ function terminalExecutionPort(
 }
 
 describe("Delivery production execution", () => {
+    test("omits an empty warning list from the initial production capsule", async () => {
+        const input: DeliveryProductionJobPayload = {
+            activationRevision,
+            checkoutRevision,
+            expectedMainHeadSha: mergedMainHead,
+            operation: "deploy",
+            release: publishedReleaseAuthority(
+                mergedMainHead,
+                "v1.2.3",
+                candidateRuntimeRevision
+            ),
+            sourceRevision,
+        };
+        const runIdentity = identity(input);
+        const current = currentAuthority(candidateRuntimeRevision);
+        const activation = {
+            formatVersion: 1,
+            current: {
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+            },
+            previous: null,
+            transitionId: "01917d36-2e64-7c89-9abc-1234567890b0",
+        } as const;
+        let prepared:
+            | ReturnType<typeof parseDeliveryProductionOperationCapsule>
+            | undefined;
+        const port = createDeliveryProductionExecutionPort({
+            authority: {
+                read: () => Promise.reject(new Error("unused")),
+                readExact: () =>
+                    Promise.resolve({
+                        activation,
+                        snapshot: {
+                            actionActive: false,
+                            releases: current.releases,
+                        },
+                    }),
+                readForOperation: () => Promise.reject(new Error("unused")),
+            },
+            control: {
+                clear: () => Promise.reject(new Error("unused")),
+                inspect: () => Promise.resolve({ state: "missing" as const }),
+                inspectActive: () => Promise.reject(new Error("unused")),
+                prepare: (capsule) => {
+                    prepared = capsule;
+                    return Promise.resolve({
+                        capsule,
+                        phase: "intent-recorded" as const,
+                        updatedAtMs: nowMs,
+                    });
+                },
+            },
+            executorReleaseId: currentReleaseId,
+            executorRuntimeRevision: currentRuntimeRevision,
+            github: {
+                createNativeStack: () => Promise.reject(new Error("unused")),
+                findNativeStack: () => Promise.reject(new Error("unused")),
+                getPullRequest: () => Promise.reject(new Error("unused")),
+                listOpenPullRequests: () => Promise.reject(new Error("unused")),
+                mergeNativeStack: () => Promise.reject(new Error("unused")),
+                mergePullRequest: () => Promise.reject(new Error("unused")),
+                readMainRef: () => Promise.resolve(mergedMainHead),
+                rejectPullRequest: () => Promise.reject(new Error("unused")),
+                supportsNativeStacks: () => Promise.reject(new Error("unused")),
+                updatePullRequestBranch: () => Promise.reject(new Error("unused")),
+            },
+            launch: () => Promise.reject(new Error("stop after prepare")),
+            mainGit: {
+                inspect: () =>
+                    Promise.resolve({
+                        branch: "main",
+                        condition: "ready" as const,
+                        headSha: mergedMainHead,
+                        safe: true,
+                    }),
+                syncMainToExactRef: () => Promise.reject(new Error("unused")),
+            },
+            projectRoot: "/srv/mira-dashboard",
+            readinessUrl: "http://127.0.0.1/api/health/ready",
+        });
+
+        const thrownError = await port
+            .execute(input, current, runIdentity)
+            .catch((error: unknown) => error);
+        expect(thrownError).toBeInstanceOf(Error);
+        expect((thrownError as Error).message).toBe("stop after prepare");
+        expect(prepared).toBeDefined();
+        expect(prepared).not.toHaveProperty("preCutoverWarnings");
+    });
+
     test("clears an exact terminal marker before returning its durable result", async () => {
         const input: DeliveryProductionJobPayload = {
             activationRevision,
@@ -209,11 +300,11 @@ describe("Delivery production execution", () => {
             phase: "terminal",
             result: {
                 activation: {
+                    formatVersion: 1,
                     current: {
                         releaseId: mergedMainHead,
                         runtimeRevision: candidateRuntimeRevision,
                     },
-                    formatVersion: 1,
                     previous: {
                         databaseSnapshotTransitionId: runId,
                         releaseId: currentReleaseId,

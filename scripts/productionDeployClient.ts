@@ -18,6 +18,44 @@ interface TrpcEnvelope {
     readonly result?: { readonly data?: { readonly json?: unknown } };
 }
 
+/**
+ * Reads one response without allowing an absent content length to bypass the byte cap.
+ * @returns The bounded response bytes.
+ */
+export async function readBoundedProductionDeployResponse(
+    response: Response
+): Promise<Uint8Array> {
+    if (response.body === null) throw new Error("Production deploy request failed");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            const value: unknown = next.value;
+            if (!(value instanceof Uint8Array)) {
+                throw new Error("Production deploy request failed");
+            }
+            total += value.byteLength;
+            if (total > maximumResponseBytes) {
+                await reader.cancel();
+                throw new Error("Production deploy request failed");
+            }
+            chunks.push(value);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return bytes;
+}
+
 export class ProductionDeployTemporarilyUnavailableError extends Error {}
 
 async function readCredential(): Promise<string> {
@@ -78,10 +116,7 @@ async function request(
     if (!response.ok || (declared !== null && Number(declared) > maximumResponseBytes)) {
         throw new Error("Production deploy request failed");
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maximumResponseBytes) {
-        throw new Error("Production deploy request failed");
-    }
+    const bytes = await readBoundedProductionDeployResponse(response);
     const parsed = JSON.parse(
         new TextDecoder("utf-8", { fatal: true }).decode(bytes)
     ) as TrpcEnvelope;

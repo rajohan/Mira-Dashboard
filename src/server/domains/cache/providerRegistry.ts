@@ -34,6 +34,11 @@ import {
     deliveryPullRequestsPayloadMaximumBytes,
 } from "../../../contracts/delivery.ts";
 import {
+    deliveryGitHubActionKey,
+    deliveryPreviewActionKey,
+    deliveryProductionActionKey,
+} from "../../../contracts/deliveryWorker.ts";
+import {
     dockerOverviewCacheKey,
     dockerOverviewCachePayloadSchema,
     dockerOverviewCacheSchemaId,
@@ -279,6 +284,11 @@ const backupStatusProviders = [
 
 const deliveryOverviewProviders = deliveryOverviewSectionIds.map((section) =>
     validateCacheProviderDefinition({
+        additionalWriterActionKeys: Object.freeze([
+            deliveryGitHubActionKey,
+            deliveryPreviewActionKey,
+            deliveryProductionActionKey,
+        ]),
         actionKey: deliveryOverviewCacheJobActionKey,
         actionPayloadKey: deliveryOverviewCacheKey,
         key: deliveryOverviewSectionKeys[section],

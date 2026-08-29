@@ -982,7 +982,9 @@ export const deliveryGitHubJobActionDefinition = validateJobUnscheduledActionDef
     description:
         "Executes one exact-state Dashboard repository mutation as the fixed Mira identity.",
     displayName: "Delivery GitHub operation",
-    manualExposure: "none",
+    // Delivery mutations refresh only their domain-owned projections after the
+    // external effect settles; they do not expose generic cache writes.
+    manualExposure: "cache-internal",
     priority: 20,
     resourceClass: "network",
     resourceKeys: Object.freeze(["delivery.mutation", "github.repository"]),
@@ -998,7 +1000,7 @@ export const deliveryPreviewJobActionDefinition = validateJobUnscheduledActionDe
     description:
         "Starts, rebuilds, or stops one exact-SHA isolated pull request preview.",
     displayName: "Delivery preview operation",
-    manualExposure: "none",
+    manualExposure: "cache-internal",
     priority: 20,
     resourceClass: "host-heavy",
     resourceKeys: Object.freeze([
@@ -1019,7 +1021,7 @@ export const deliveryProductionJobActionDefinition =
         description:
             "Runs one exact-main deployment or paired rollback through the versioned activation protocol.",
         displayName: "Delivery production operation",
-        manualExposure: "none",
+        manualExposure: "cache-internal",
         priority: 50,
         resourceClass: "exclusive",
         resourceKeys: Object.freeze([

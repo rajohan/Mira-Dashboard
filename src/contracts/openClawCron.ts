@@ -299,6 +299,9 @@ const openClawCronScriptPayloadSchema = v.strictObject({
 const openClawCronHeartbeatPayloadSchema = v.strictObject({
     kind: v.literal("heartbeat"),
 });
+const openClawCronSkillCollectionReviewPayloadSchema = v.strictObject({
+    kind: v.literal("skill-collection-review"),
+});
 
 /** Bounded payload projection that redacts every privileged command/script value. */
 export const openClawCronPayloadSchema = v.variant("kind", [
@@ -306,6 +309,7 @@ export const openClawCronPayloadSchema = v.variant("kind", [
     openClawCronAgentTurnPayloadSchema,
     openClawCronCommandPayloadSchema,
     openClawCronScriptPayloadSchema,
+    openClawCronSkillCollectionReviewPayloadSchema,
     openClawCronHeartbeatPayloadSchema,
 ]);
 

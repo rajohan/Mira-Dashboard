@@ -215,6 +215,34 @@ async function captureFailure(work: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("persistent OpenClaw cron provider", () => {
+    test("accepts the current built-in skill collection review payload", async () => {
+        const transport = new TestPersistentOpenClawCronTransport();
+        queue(
+            transport,
+            "cron.list",
+            listPage([
+                upstreamJob("skill-review", {
+                    payload: { kind: "skillCollectionReview" },
+                }),
+            ])
+        );
+        const provider = createPersistentOpenClawCronProvider(transport);
+
+        const page = await provider.list({
+            compact: false,
+            enabled: "all",
+            includeDeliveryPreviews: false,
+            lastRunStatus: "all",
+            limit: 1,
+            offset: 0,
+            scheduleKind: "all",
+            sortBy: "updatedAtMs",
+            sortDir: "desc",
+        });
+
+        expect(page.jobs[0]?.payload).toEqual({ kind: "skillCollectionReview" });
+    });
+
     test("lists full bounded rows through the persistent lane with exact filters", async () => {
         const transport = new TestPersistentOpenClawCronTransport();
         const abortController = new AbortController();

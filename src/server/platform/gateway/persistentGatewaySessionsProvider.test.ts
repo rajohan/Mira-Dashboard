@@ -102,6 +102,22 @@ async function captureFailure(work: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe("persistent Gateway sessions provider", () => {
+    test("accepts the current owners metadata field from OpenClaw", async () => {
+        const transport = new TestPersistentGatewaySessionsTransport();
+        transport.responses.push(
+            listResponse([upstreamSession("agent:main:main")], {
+                creators: undefined,
+                owners: [],
+            })
+        );
+        const provider = createPersistentGatewaySessionsProvider(transport);
+
+        const page = await provider.listCurrentSessions({ limit: 1 });
+
+        expect(page.sessions).toHaveLength(1);
+        expect(page.sessions[0]?.key).toBe("agent:main:main");
+    });
+
     test("projects one bounded current snapshot through the persistent lane", async () => {
         const transport = new TestPersistentGatewaySessionsTransport();
         const abortController = new AbortController();

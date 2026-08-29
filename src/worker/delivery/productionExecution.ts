@@ -430,8 +430,12 @@ export function createDeliveryProductionExecutionPort(
                         runtimeRevision: options.executorRuntimeRevision,
                     },
                     protocol: deliveryProductionProtocol,
-                    preCutoverWarnings:
-                        canonicalDeliveryOperationWarnings(preCutoverWarnings),
+                    ...(preCutoverWarnings.length === 0
+                        ? {}
+                        : {
+                              preCutoverWarnings:
+                                  canonicalDeliveryOperationWarnings(preCutoverWarnings),
+                          }),
                     runId: identity.runId,
                     transitionId: identity.runId,
                 });

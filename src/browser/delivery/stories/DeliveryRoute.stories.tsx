@@ -395,7 +395,7 @@ const operationOutcomeUnknown = Object.assign(new TypeError("Private provider de
 async function openMergeDialog(canvasElement: HTMLElement) {
     const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
     const mergeButtons = pullRequestRegion.getAllByRole("button", {
-        name: "Merge only",
+        name: "Merge",
     });
     const mergeButton = mergeButtons.at(-1);
     if (mergeButton === undefined) throw new TypeError("Merge story control is missing");
@@ -452,7 +452,7 @@ export const PullRequests: Story = {
     play: async ({ canvasElement }) => {
         const pullRequestRegion = await loadedPullRequestRegion(canvasElement);
         const buttons = pullRequestRegion.getAllByRole("button", {
-            name: /^Merge(?: stack through #\d+| only)$/u,
+            name: /^Merge(?: stack through #\d+)?$/u,
         });
         await expect(buttons).toHaveLength(3);
         for (const button of buttons) {

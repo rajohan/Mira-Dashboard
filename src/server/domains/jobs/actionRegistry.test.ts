@@ -198,6 +198,7 @@ describe("durable job action registry", () => {
             actionKey: "delivery.github",
             attemptLimit: 1,
             cancellationPolicy: "never",
+            manualExposure: "cache-internal",
             resourceClass: "network",
             retrySafe: false,
         });
@@ -205,6 +206,7 @@ describe("durable job action registry", () => {
             actionKey: "delivery.preview",
             attemptLimit: 1,
             cancellationPolicy: "never",
+            manualExposure: "cache-internal",
             resourceClass: "host-heavy",
             retrySafe: false,
         });
@@ -212,6 +214,7 @@ describe("durable job action registry", () => {
             actionKey: "delivery.production.v1",
             attemptLimit: 3,
             cancellationPolicy: "never",
+            manualExposure: "cache-internal",
             resourceClass: "exclusive",
             retrySafe: true,
         });

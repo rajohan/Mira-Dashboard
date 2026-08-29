@@ -54,6 +54,10 @@ interface ChatSessionRuntime {
     readonly externalRuns: Readonly<Record<string, ChatExternalRunProjection>>;
     readonly externalRunsTruncated: boolean;
     readonly lastCursor: number;
+    readonly lastPlan?: Readonly<{
+        readonly plan: ChatActivePlanView;
+        readonly updatedAtMs: number;
+    }>;
     readonly needsReconciliation: boolean;
     readonly optimisticSends: Readonly<Record<string, ChatOptimisticSend>>;
     readonly runs: Readonly<Record<string, ChatRuntimeRun>>;
@@ -169,6 +173,8 @@ export interface ChatExternalRunProjection {
     readonly observationEpoch: number;
     readonly observedAtMs: number;
     readonly plan?: ChatActivePlanView;
+    /** Publication time for plan ordering; unlike updatedAtMs this does not advance on unrelated activity. */
+    readonly planUpdatedAtMs?: number;
     readonly projectionTruncated: boolean;
     readonly providerRunId: string;
     /** Provider-ordered assistant lanes split at steer/user boundaries. */
@@ -306,11 +312,8 @@ function planAfterEvent(
                 status: step.status === "in_progress" ? "in-progress" : step.status,
             })),
             runId: event.runId,
-            title: "Active plan",
+            title: "Task progress",
         };
-    }
-    if (event.kind === "final" || event.kind === "aborted" || event.kind === "failed") {
-        return undefined;
     }
     return run.plan;
 }
@@ -1120,6 +1123,14 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                     -retainedEventIdentityLimit
                 ),
                 lastCursor: event.cursor,
+                ...(event.kind !== "plan" || nextRun.plan === undefined
+                    ? {}
+                    : {
+                          lastPlan: {
+                              plan: nextRun.plan,
+                              updatedAtMs: event.occurredAtMs,
+                          },
+                      }),
                 needsReconciliation: runsNeedReconciliation(runs),
                 optimisticSends: retainBoundedFailedOptimisticSends(
                     reconcileOptimisticSendFromEvent(
@@ -1404,6 +1415,25 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             const runs = trimRuns(
                 replace ? projectedRuns : { ...session.runs, ...projectedRuns }
             );
+            const newestPlanRun = Object.values(projectedRuns)
+                .filter((run) => run.plan !== undefined)
+                .toSorted(
+                    (left, right) => right.lastObservedAtMs - left.lastObservedAtMs
+                )[0];
+            const retainedPlan = generationChanged ? undefined : session.lastPlan;
+            const snapshotPlan =
+                newestPlanRun?.plan === undefined
+                    ? undefined
+                    : {
+                          plan: newestPlanRun.plan,
+                          updatedAtMs: newestPlanRun.lastObservedAtMs,
+                      };
+            const lastPlan =
+                snapshotPlan !== undefined &&
+                (retainedPlan === undefined ||
+                    snapshotPlan.updatedAtMs > retainedPlan.updatedAtMs)
+                    ? snapshotPlan
+                    : retainedPlan;
             return {
                 ...state,
                 sessions: {
@@ -1420,6 +1450,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                         lastCursor: replace
                             ? cursor
                             : Math.max(session.lastCursor, cursor),
+                        lastPlan,
                         needsReconciliation: runsNeedReconciliation(runs),
                         optimisticSends:
                             replace && generationChanged ? {} : session.optimisticSends,
@@ -1484,6 +1515,14 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                     const plan =
                         projection.plan ??
                         (projection.projectionTruncated ? existing.plan : undefined);
+                    let planUpdatedAtMs: number | undefined;
+                    if (projection.plan !== undefined) {
+                        planUpdatedAtMs =
+                            projection.planUpdatedAtMs ?? projection.updatedAtMs;
+                    } else if (projection.projectionTruncated) {
+                        planUpdatedAtMs =
+                            existing.planUpdatedAtMs ?? existing.updatedAtMs;
+                    }
                     const preserved = withExternalSegments(
                         {
                             ...projection,
@@ -1503,6 +1542,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                                 projection.updatedAtMs
                             ),
                             ...(plan === undefined ? {} : { plan }),
+                            ...(planUpdatedAtMs === undefined ? {} : { planUpdatedAtMs }),
                             ...(streamResets === undefined ? {} : { streamResets }),
                         },
                         reconciledSegments
@@ -1520,6 +1560,27 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                 ...omitted,
                 ...installed,
             });
+            const newestPlanRun = Object.values(installed)
+                .filter((run) => run.plan !== undefined)
+                .toSorted(
+                    (left, right) =>
+                        (right.planUpdatedAtMs ?? right.updatedAtMs) -
+                        (left.planUpdatedAtMs ?? left.updatedAtMs)
+                )[0];
+            const externalPlan =
+                newestPlanRun?.plan === undefined
+                    ? undefined
+                    : {
+                          plan: newestPlanRun.plan,
+                          updatedAtMs:
+                              newestPlanRun.planUpdatedAtMs ?? newestPlanRun.updatedAtMs,
+                      };
+            const lastPlan =
+                externalPlan !== undefined &&
+                (session.lastPlan === undefined ||
+                    externalPlan.updatedAtMs > session.lastPlan.updatedAtMs)
+                    ? externalPlan
+                    : session.lastPlan;
             return {
                 ...state,
                 sessions: {
@@ -1528,6 +1589,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                         ...session,
                         externalRuns,
                         externalRunsTruncated: truncated,
+                        lastPlan,
                     },
                 },
             };
@@ -1664,10 +1726,10 @@ export function chatRuntimeMessages(
 }
 
 /**
- * Returns only ephemeral plans for runs that remain active.
+ * Returns the latest task progress until a newer run publishes its replacement.
  * @param state Current tab-local runtime state.
  * @param sessionKey Exact selected provider session.
- * @returns Active plans that must disappear at settlement.
+ * @returns At most one durable latest plan for the selected session.
  */
 export function chatRuntimePlans(
     state: ChatRuntimeState,
@@ -1675,11 +1737,5 @@ export function chatRuntimePlans(
 ): readonly ChatActivePlanView[] {
     const session = state.sessions[sessionKey];
     if (session === undefined) return [];
-    const localPlans = Object.values(session.runs)
-        .filter((run) => run.phase === "active" && run.plan !== undefined)
-        .map((run) => run.plan as ChatActivePlanView);
-    const externalPlans = Object.values(session.externalRuns).flatMap((run) =>
-        run.lifecycle !== "active" || run.plan === undefined ? [] : [run.plan]
-    );
-    return [...localPlans, ...externalPlans];
+    return session.lastPlan === undefined ? [] : [session.lastPlan.plan];
 }

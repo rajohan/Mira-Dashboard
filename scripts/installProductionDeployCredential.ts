@@ -40,6 +40,15 @@ export async function installProductionDeployCredential(
         await file.close();
     }
     await rename(temporary, credentialPath);
+    const directoryHandle = await open(
+        directory,
+        constants.O_RDONLY | constants.O_DIRECTORY
+    );
+    try {
+        await directoryHandle.sync();
+    } finally {
+        await directoryHandle.close();
+    }
     (options.writeOutput ?? process.stdout.write.bind(process.stdout))(
         "Installed production deploy credential\n"
     );

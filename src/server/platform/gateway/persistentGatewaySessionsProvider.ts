@@ -201,12 +201,13 @@ const upstreamSessionRowSchema = v.object({
 
 const upstreamSessionsListResponseSchema = v.strictObject({
     count: upstreamNonnegativeIntegerSchema,
-    creators: v.array(v.unknown()),
+    creators: v.optional(v.array(v.unknown())),
     defaults: v.unknown(),
     hasMore: v.boolean(),
     limitApplied: upstreamPositiveIntegerSchema,
     nextOffset: v.nullable(upstreamNonnegativeIntegerSchema),
     offset: v.optional(v.nullable(upstreamNonnegativeIntegerSchema)),
+    owners: v.optional(v.array(v.unknown())),
     path: upstreamPathSchema,
     sessions: v.pipe(
         v.array(upstreamSessionRowSchema),
