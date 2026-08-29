@@ -2,6 +2,7 @@
     "files": {
         "scripts/delivery/foreignReleaseBoundaryArchitecture.test.ts": 1,
         "scripts/delivery/productionDeliveryExecutorOwnerState.test.ts": 1,
+        "scripts/installProductionDeployCredential.test.ts": 1,
         "scripts/productionDeployClient.test.ts": 1,
         "src/shared/productionDeliveryExecutorOwner.test.ts": 1,
         "src/shared/productionReleaseDescriptor.test.ts": 1,
