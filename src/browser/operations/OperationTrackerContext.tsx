@@ -14,6 +14,44 @@ import {
     type TrackedOperation,
 } from "./operationTrackerContextValue.ts";
 const trackedOperationMaximum = 12;
+const activeManualOperationPageSize = 100;
+
+async function listAllActiveManualOperations(
+    client: ReturnType<typeof useDashboardTrpcClient>,
+    signal: AbortSignal
+): Promise<ListJobRunsResult> {
+    const first = await client.query(
+        "jobs.listRuns",
+        {
+            filters: {
+                states: ["queued", "running"],
+                triggerTypes: ["manual"],
+            },
+            limit: activeManualOperationPageSize,
+        },
+        { signal }
+    );
+    const runs = [...first.runs];
+    let cursor = first.nextCursor;
+    while (cursor !== undefined) {
+        const page = await client.query(
+            "jobs.listRuns",
+            {
+                cursor,
+                filters: {
+                    states: ["queued", "running"],
+                    triggerTypes: ["manual"],
+                },
+                limit: activeManualOperationPageSize,
+            },
+            { signal }
+        );
+        runs.push(...page.runs);
+        cursor = page.nextCursor;
+    }
+    const { nextCursor: _nextCursor, ...complete } = first;
+    return Object.freeze({ ...complete, runs });
+}
 
 function capTerminalHistory(operations: readonly TrackedOperation[]) {
     const capped = [...operations];
@@ -32,17 +70,7 @@ function AuthenticatedOperationTrackerProvider({ children }: PropsWithChildren) 
     );
     const activeRuns = useQuery({
         queryFn: ({ signal }): Promise<ListJobRunsResult> =>
-            client.query(
-                "jobs.listRuns",
-                {
-                    filters: {
-                        states: ["queued", "running"],
-                        triggerTypes: ["manual"],
-                    },
-                    limit: 100,
-                },
-                { signal }
-            ),
+            listAllActiveManualOperations(client, signal),
         queryKey: activeManualOperationRunsQueryKey,
         refetchInterval: 5000,
         staleTime: 0,

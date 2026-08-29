@@ -228,6 +228,56 @@ describe("operation tracker", () => {
         ).toHaveTextContent("Busy");
     });
 
+    test("finds an active Delivery run beyond the first manual-run page", async () => {
+        const cursor = { id: "page-one-tail", queuedAtMs: 200 };
+        const query = mock((...arguments_: readonly unknown[]) => {
+            const input = arguments_[1] as Readonly<{
+                cursor?: Readonly<{ id: string }>;
+            }>;
+            return Promise.resolve(
+                input.cursor === undefined
+                    ? {
+                          nextCursor: cursor,
+                          runs: [
+                              {
+                                  actionKey: "docker.updater",
+                                  displayName: "Newer manual operation",
+                                  id: cursor.id,
+                                  operationKey: "job:docker.updater:scan",
+                                  queuedAtMs: cursor.queuedAtMs,
+                                  state: "running",
+                              },
+                          ],
+                          summary: {},
+                      }
+                    : {
+                          runs: [
+                              {
+                                  actionKey: "delivery.github",
+                                  displayName: "Older active merge",
+                                  id: "page-two-delivery",
+                                  operationKey: "delivery:deploy",
+                                  queuedAtMs: 100,
+                                  state: "running",
+                              },
+                          ],
+                          summary: {},
+                      }
+            );
+        });
+        render(
+            <ProviderHarness query={query}>
+                <DeliveryIdentityHarness />
+            </ProviderHarness>
+        );
+
+        expect(
+            await screen.findByRole("status", { name: "Delivery operation state" })
+        ).toHaveTextContent("Busy");
+        expect(query).toHaveBeenCalledTimes(2);
+        expect(query.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ cursor }));
+    });
+
     test("deduplicates durable run identities and dismisses them", async () => {
         const user = userEvent.setup();
         render(
