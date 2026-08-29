@@ -225,7 +225,8 @@ function operationExecutor(
                 const result: DeliveryJobOperationResult = await port.execute(
                     payload,
                     signal,
-                    context.runIdentity
+                    context.runIdentity,
+                    (progress) => reportJobProgress(context, { ...progress })
                 );
                 if (result.operation !== payload.operation) {
                     throw new JobActionOutcomeUnknownError();

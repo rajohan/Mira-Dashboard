@@ -16,6 +16,7 @@ import {
 } from "../../contracts/deliveryGithub.ts";
 import {
     type DeliveryJobExecutionPort,
+    type DeliveryJobProgressReporter,
     type DeliveryJobOperationResult,
     type DeliveryOperationJobPayload,
     type DeliveryOperationWarningCode,
@@ -46,7 +47,8 @@ export interface DeliveryProductionExecutionPort {
         >,
         current: DeliveryOperationAuthoritySnapshot,
         runIdentity: JobExecutionRunIdentity,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        reportProgress?: DeliveryJobProgressReporter
     ) => Promise<DeliveryJobOperationResult>;
 }
 
@@ -543,7 +545,8 @@ export function createDeliveryRuntime(
         async execute(
             payload: DeliveryOperationJobPayload,
             signal?: AbortSignal,
-            runIdentity?: JobExecutionRunIdentity
+            runIdentity?: JobExecutionRunIdentity,
+            reportProgress?: DeliveryJobProgressReporter
         ): Promise<DeliveryJobOperationResult> {
             const productionOperation =
                 payload.operation === "deploy" ||
@@ -551,6 +554,10 @@ export function createDeliveryRuntime(
             if (productionOperation && runIdentity === undefined) {
                 return fail("production-unavailable");
             }
+            await reportProgress?.({
+                message: "Validating Delivery authority",
+                phase: "validating",
+            });
             const current = await currentOverview(
                 options,
                 payload,
@@ -571,11 +578,16 @@ export function createDeliveryRuntime(
                 if (options.production === undefined) {
                     return fail("production-unavailable");
                 }
+                await reportProgress?.({
+                    message: "Preparing production delivery",
+                    phase: "preparing",
+                });
                 const productionResult = await options.production.execute(
                     payload,
                     current,
                     runIdentity!,
-                    signal
+                    signal,
+                    reportProgress
                 );
                 if (productionResult.operation !== payload.operation) {
                     return result(payload.operation, "unknown-outcome");

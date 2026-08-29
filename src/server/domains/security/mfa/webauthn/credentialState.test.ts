@@ -40,7 +40,6 @@ describe("WebAuthn credential state", () => {
 
         expect(descriptor).toEqual({
             id: credential.credentialId,
-            transports: ["nfc", "usb"],
         });
         expect(webAuthnCredentialSummary(withUsage, "drifted.example").usable).toBe(
             false

@@ -8,6 +8,7 @@ import type {
 } from "../../contracts/deliveryGithub.ts";
 import {
     type DeliveryJobOperationResult,
+    type DeliveryJobProgressReporter,
     type DeliveryOperationWarningCode,
     type DeliveryProductionJobPayload,
     deliveryProductionActionKey,
@@ -291,7 +292,8 @@ export function createDeliveryProductionExecutionPort(
             payload: DeliveryProductionJobPayload,
             current: DeliveryOperationAuthoritySnapshot,
             identity: JobExecutionRunIdentity,
-            signal?: AbortSignal
+            signal?: AbortSignal,
+            reportProgress?: DeliveryJobProgressReporter
         ): Promise<DeliveryJobOperationResult> {
             validateRunIdentity(payload, identity);
             const existing = await options.control.inspect(identity.runId, signal);
@@ -310,6 +312,10 @@ export function createDeliveryProductionExecutionPort(
                     throw failure();
                 }
                 if (existing.record.phase === "intent-recorded") {
+                    await reportProgress?.({
+                        message: "Resuming production delivery",
+                        phase: "resuming",
+                    });
                     await (
                         options.ensure ??
                         (async (launchOptions) => {
@@ -326,6 +332,10 @@ export function createDeliveryProductionExecutionPort(
                         transitionId: identity.runId,
                     });
                 }
+                await reportProgress?.({
+                    message: "Waiting for production settlement",
+                    phase: "settling",
+                });
                 return awaitReceipt(options, payload, identity, signal);
             }
 
@@ -342,12 +352,20 @@ export function createDeliveryProductionExecutionPort(
             }
 
             const preCutoverWarnings: DeliveryOperationWarningCode[] = [];
+            await reportProgress?.({
+                message: "Synchronizing target release",
+                phase: "synchronizing",
+            });
             const targetReleaseId =
                 payload.operation === "deploy"
                     ? await synchronizeMain(options, payload.expectedMainHeadSha, signal)
                     : payload.target.releaseId;
 
             const authority = await options.authority.readExact(signal);
+            await reportProgress?.({
+                message: "Validating activation state",
+                phase: "validating-activation",
+            });
             const activation = authority.activation;
             const currentRelease = authority.snapshot.releases.current;
             if (
@@ -440,6 +458,10 @@ export function createDeliveryProductionExecutionPort(
                     transitionId: identity.runId,
                 });
             await options.control.prepare(capsule, signal);
+            await reportProgress?.({
+                message: "Launching production delivery",
+                phase: "launching",
+            });
             await (options.launch ?? launchProductionDeliveryExecutor)({
                 artifactSource: productionDeliveryArtifactSource(payload.operation),
                 executorReleaseId: options.executorReleaseId,
@@ -447,6 +469,10 @@ export function createDeliveryProductionExecutionPort(
                 readinessUrl: options.readinessUrl,
                 runtimeRevision: options.executorRuntimeRevision,
                 transitionId: identity.runId,
+            });
+            await reportProgress?.({
+                message: "Waiting for production settlement",
+                phase: "settling",
             });
             const settled = await awaitReceipt(options, payload, identity, signal);
             return settled;

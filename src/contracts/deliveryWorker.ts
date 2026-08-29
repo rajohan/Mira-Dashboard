@@ -17,6 +17,10 @@ import {
 } from "./delivery.ts";
 import type { JobExecutionRunIdentity } from "./jobModel.ts";
 
+export type DeliveryJobProgressReporter = (
+    progress: Readonly<Record<string, string | number | boolean>>
+) => Promise<void>;
+
 export const deliveryGitHubActionKey = "delivery.github";
 export const deliveryPreviewActionKey = "delivery.preview";
 /** Versioned cross-release protocol key proved by both cutover releases. */
@@ -201,7 +205,8 @@ export interface DeliveryJobExecutionPort {
     readonly execute: (
         payload: DeliveryOperationJobPayload,
         signal?: AbortSignal,
-        runIdentity?: JobExecutionRunIdentity
+        runIdentity?: JobExecutionRunIdentity,
+        reportProgress?: DeliveryJobProgressReporter
     ) => Promise<DeliveryJobOperationResult>;
     readonly readPrevious: (section: DeliveryOverviewSectionId) => unknown;
     readonly refresh: (

@@ -329,7 +329,7 @@ describe("MFA account WebAuthn lifecycle", () => {
                 )
             ).toMatchObject({ status: "created" });
             expect(authenticationOptionsInputs.at(-1)?.allowCredentials).toEqual([
-                { id: ceremonyFixtureCredentialId, transports: ["usb"] },
+                { id: ceremonyFixtureCredentialId },
             ]);
 
             const verified = await harness.service.stepUpWebAuthn(

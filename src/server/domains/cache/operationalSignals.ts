@@ -397,7 +397,8 @@ function projectDocker(
         ? "attention"
         : "healthy";
     const updateCondition = docker.updaterServices.some(
-        ({ status }) => status.state !== "current"
+        ({ status }) =>
+            status.state === "update-available" || status.state === "unavailable"
     )
         ? "attention"
         : "current";

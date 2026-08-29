@@ -94,6 +94,9 @@ export function OpenClawCronDetail({
         if (job.payload.kind === "agent-turn") return job.payload.message;
         if (job.payload.kind === "system-event") return job.payload.text;
         if (job.payload.kind === "heartbeat") return job.scratch?.content;
+        if (job.payload.kind === "skill-collection-review") {
+            return "Review the main workspace Skill Workshop collection using content and observed usage, then apply the configured autonomous workshop policy.";
+        }
         return;
     })();
     let configuredModel: string | undefined;
@@ -110,6 +113,12 @@ export function OpenClawCronDetail({
         ...(job.agentId === undefined ? [] : ([["Agent", job.agentId]] as const)),
         ["Session", openClawCronSessionTargetLabel(job.sessionTarget)],
         ["Task type", openClawCronPayloadLabel(job.payload.kind)],
+        ...(job.payload.kind === "skill-collection-review"
+            ? ([
+                  ["Owner", "OpenClaw system"],
+                  ["Workspace", job.agentId ?? "main"],
+              ] as const)
+            : []),
         ...(message === undefined
             ? []
             : ([

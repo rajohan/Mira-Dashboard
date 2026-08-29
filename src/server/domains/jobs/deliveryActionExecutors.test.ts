@@ -145,7 +145,8 @@ function sections(): readonly DeliveryOverviewSectionRefreshResult[] {
 
 function context(
     attempts: JobCacheAttemptCommit[],
-    outputs: string[] = []
+    outputs: string[] = [],
+    progress: unknown[] = []
 ): JobActionExecutionContext {
     return {
         armHostRestartClaimFence: () => Promise.resolve(),
@@ -156,7 +157,10 @@ function context(
         },
         databaseReleaseId: "c".repeat(40),
         nowMs: () => 2000,
-        reportProgress: () => Effect.succeed("appended"),
+        reportProgress: (value) => {
+            progress.push(value);
+            return Effect.succeed("appended");
+        },
         workerInstanceId: "018f6f50-6a9e-7000-8000-000000000004",
         writeOutput: (_kind, message) => {
             outputs.push(message);
@@ -175,6 +179,37 @@ function rejectPayload(): DeliveryOperationJobPayload {
 }
 
 describe("Delivery job action executors", () => {
+    test("forwards provider progress through the durable job used by UI and CLI", async () => {
+        const progress: unknown[] = [];
+        const result = await Effect.runPromise(
+            createDeliveryGitHubJobExecutor(
+                port({
+                    execute: async (payload, _signal, _identity, reportProgress) => {
+                        await reportProgress?.({
+                            completed: 1,
+                            message: "Applying pull request decision",
+                            phase: "github",
+                            total: 1,
+                        });
+                        return { operation: payload.operation, outcome: "completed" };
+                    },
+                })
+            )(context([], [], progress), rejectPayload())
+        );
+
+        expect(result).toMatchObject({ outcome: "completed" });
+        expect(progress).toContainEqual({
+            completed: 1,
+            message: "Applying pull request decision",
+            phase: "github",
+            total: 1,
+        });
+        expect(progress).toContainEqual({
+            message: "Refreshing Delivery status",
+            phase: "settling",
+        });
+    });
+
     test("persists four independently claim-fenced scheduled sections", async () => {
         const attempts: JobCacheAttemptCommit[] = [];
         const payloads = sections();

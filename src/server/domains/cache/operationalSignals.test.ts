@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { KopiaBackupStatus } from "../../../contracts/backups.ts";
 import type { DatabaseOverview } from "../../../contracts/database.ts";
-import type { DockerOverview } from "../../../contracts/docker.ts";
+import type { DockerOverview, DockerUpdaterStatus } from "../../../contracts/docker.ts";
 import { gitWorkspaceCacheTtlMs } from "../../../contracts/gitWorkspace.ts";
 import type { LogMaintenanceStatusOutput } from "../../../contracts/logs.ts";
 import { quotaCacheTtlMs } from "../../../contracts/quota.ts";
@@ -307,6 +307,10 @@ describe("heartbeat operational signals", () => {
     });
 
     test("projects existing sources and gives log failures priority over running work", async () => {
+        let updaterStatus: DockerUpdaterStatus = {
+            candidateImage: "ghcr.io/example/app:2.0.0",
+            state: "update-available",
+        };
         let logsStatus = {
             observedAtMs: 4800,
             policies: [
@@ -354,7 +358,7 @@ describe("heartbeat operational signals", () => {
                         observedAtMs: 3000,
                         staleSinceMs: 4500,
                         state: "last-known-good",
-                        updaterServices: [{ status: { state: "update-available" } }],
+                        updaterServices: [{ status: updaterStatus }],
                     }) as unknown as DockerOverview,
             },
             logsService: {
@@ -423,6 +427,13 @@ describe("heartbeat operational signals", () => {
         });
         expect(JSON.stringify(result)).not.toContain("container");
         expect(JSON.stringify(result)).not.toContain("path");
+
+        updaterStatus = { state: "not-checked" };
+        const resultWithInventoryOnlyService = await read();
+        expect(resultWithInventoryOnlyService.docker.updates).toMatchObject({
+            condition: "current",
+            state: "last-known-good",
+        });
 
         logsStatus = {
             observedAtMs: 4900,

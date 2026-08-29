@@ -224,11 +224,11 @@ describe("operation tracker", () => {
         );
 
         await user.click(screen.getByRole("button", { name: "Settle oldest" }));
-        expect(
-            screen.getByRole("status", { name: "Operations" }).textContent
-        ).not.toContain("Active 1,");
         expect(screen.getByRole("status", { name: "Operations" }).textContent).toContain(
-            "(12)"
+            "Active 1"
+        );
+        expect(screen.getByRole("status", { name: "Operations" }).textContent).toContain(
+            "(13)"
         );
     });
 

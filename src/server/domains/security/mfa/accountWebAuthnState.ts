@@ -16,8 +16,8 @@ import type {
 } from "./lifecycleRepositoryTypes.ts";
 import type { WebAuthnCredentialDescriptor } from "./webauthn/adapter.ts";
 import {
+    webAuthnCredentialDescriptor,
     webAuthnCredentialSnapshotMatches,
-    webAuthnTransportsFromMask,
 } from "./webauthn/credentialState.ts";
 import type { WebAuthnRelyingPartyConfiguration } from "./webauthn/relyingPartyConfiguration.ts";
 
@@ -174,10 +174,7 @@ export function webAuthnCredentialDescriptors(
     credentials: readonly MfaWebAuthnCredentialRecord[]
 ): readonly WebAuthnCredentialDescriptor[] {
     return Object.freeze(
-        credentials.map((credential) => ({
-            id: credential.credentialId,
-            transports: [...webAuthnTransportsFromMask(credential.transportMask)],
-        }))
+        credentials.map((credential) => webAuthnCredentialDescriptor(credential))
     );
 }
 

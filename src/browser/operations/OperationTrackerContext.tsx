@@ -17,7 +17,7 @@ const trackedOperationMaximum = 12;
 
 function capTerminalHistory(operations: readonly TrackedOperation[]) {
     const capped = [...operations];
-    while (capped.length > trackedOperationMaximum) {
+    while (capped.filter(({ terminal }) => terminal).length > trackedOperationMaximum) {
         const removableIndex = capped.findLastIndex(({ terminal }) => terminal);
         if (removableIndex === -1) break;
         capped.splice(removableIndex, 1);
