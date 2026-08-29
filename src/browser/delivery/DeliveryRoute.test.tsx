@@ -368,18 +368,19 @@ describe("DeliveryRoute", () => {
             "job:delivery.production.v1",
         ]);
         try {
-            for (const name of [
-                /Approve PR in progress/u,
-                /Reject in progress/u,
-                /Merge in progress/u,
-                /Update branch in progress/u,
-                /Rebuild preview in progress/u,
-                /Queueing preview stop/u,
-            ]) {
-                const button = await screen.findByRole("button", { name });
+            const familyBusyButtons = await screen.findAllByRole("button", {
+                name: "Another Delivery action is in progress…",
+            });
+            expect(familyBusyButtons).toHaveLength(5);
+            for (const button of familyBusyButtons) {
                 expect(button).toBeDisabled();
                 expect(button).toHaveAttribute("aria-busy", "true");
             }
+            const stopPreview = await screen.findByRole("button", {
+                name: /Queueing preview stop/u,
+            });
+            expect(stopPreview).toBeDisabled();
+            expect(stopPreview).toHaveAttribute("aria-busy", "true");
             const productionButtons = screen.getAllByRole("button", {
                 name: "Production delivery in progress…",
             });

@@ -322,7 +322,7 @@ function PullRequestCard({
                             <Button
                                 aria-describedby={state.enabled ? undefined : reasonId}
                                 busy={busy}
-                                busyLabel={`${label} in progress…`}
+                                busyLabel="Another Delivery action is in progress…"
                                 className="w-full sm:w-auto"
                                 disabled={!state.enabled}
                                 onClick={() => onAction(group, pullRequest, action)}
