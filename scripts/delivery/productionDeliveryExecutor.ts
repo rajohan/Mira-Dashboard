@@ -1044,7 +1044,8 @@ export async function runProductionDeliveryExecutorUnderLease(
             await (dependencies.artifactAdmission ?? prepareProductionArtifactAdmission)(
                 lease,
                 paths,
-                { services }
+                { services },
+                { additionalReferences: [targetIdentity] }
             );
         }
         const loadedActivation = await loadActivation(lease, paths);

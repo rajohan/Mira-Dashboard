@@ -11,10 +11,14 @@ import {
     type DeliveryOperationAuthoritySnapshot,
 } from "../../../contracts/delivery.ts";
 import {
+    deliveryGitHubActionKey,
+    deliveryPreviewActionKey,
+    deliveryProductionActionKey,
     type DeliveryJobExecutionPort,
     type DeliveryOperationJobPayload,
     type DeliveryOverviewSectionRefreshResult,
 } from "../../../contracts/deliveryWorker.ts";
+import { cacheProviderAcceptsWriter } from "../cache/providerRegistry.ts";
 import {
     type JobActionExecutionContext,
     type JobCacheAttemptCommit,
@@ -28,6 +32,18 @@ import {
 
 const sourceRevision = "a".repeat(64);
 const headSha = "b".repeat(40);
+
+test("Delivery action settlements may write every owned overview section", () => {
+    for (const actionKey of [
+        deliveryGitHubActionKey,
+        deliveryPreviewActionKey,
+        deliveryProductionActionKey,
+    ]) {
+        for (const cacheKey of deliveryOverviewCacheKeys) {
+            expect(cacheProviderAcceptsWriter(cacheKey, actionKey, "{}")).toBeTrue();
+        }
+    }
+});
 
 function overview(): DeliveryOperationAuthoritySnapshot {
     return {

@@ -1121,7 +1121,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                     -retainedEventIdentityLimit
                 ),
                 lastCursor: event.cursor,
-                ...(nextRun.plan === undefined
+                ...(event.kind !== "plan" || nextRun.plan === undefined
                     ? {}
                     : {
                           lastPlan: {
@@ -1418,14 +1418,14 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                 .toSorted(
                     (left, right) => right.lastObservedAtMs - left.lastObservedAtMs
                 )[0];
+            const retainedPlan = generationChanged ? undefined : session.lastPlan;
             const lastPlan =
-                newestPlanRun?.plan !== undefined &&
-                newestPlanRun.lastObservedAtMs >= (session.lastPlan?.updatedAtMs ?? 0)
+                retainedPlan === undefined && newestPlanRun?.plan !== undefined
                     ? {
                           plan: newestPlanRun.plan,
                           updatedAtMs: newestPlanRun.lastObservedAtMs,
                       }
-                    : session.lastPlan;
+                    : retainedPlan;
             return {
                 ...state,
                 sessions: {
@@ -1442,7 +1442,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                         lastCursor: replace
                             ? cursor
                             : Math.max(session.lastCursor, cursor),
-                        ...(lastPlan === undefined ? {} : { lastPlan }),
+                        lastPlan,
                         needsReconciliation: runsNeedReconciliation(runs),
                         optimisticSends:
                             replace && generationChanged ? {} : session.optimisticSends,
@@ -1544,16 +1544,15 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                 ...installed,
             });
             const newestPlanRun = Object.values(installed)
-                .filter((run) => run.plan !== undefined)
+                .filter((run) => run.lifecycle === "active" && run.plan !== undefined)
                 .toSorted((left, right) => right.updatedAtMs - left.updatedAtMs)[0];
             const lastPlan =
-                newestPlanRun?.plan !== undefined &&
-                newestPlanRun.updatedAtMs >= (session.lastPlan?.updatedAtMs ?? 0)
-                    ? {
+                newestPlanRun?.plan === undefined
+                    ? session.lastPlan
+                    : {
                           plan: newestPlanRun.plan,
                           updatedAtMs: newestPlanRun.updatedAtMs,
-                      }
-                    : session.lastPlan;
+                      };
             return {
                 ...state,
                 sessions: {
@@ -1562,7 +1561,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                         ...session,
                         externalRuns,
                         externalRunsTruncated: truncated,
-                        ...(lastPlan === undefined ? {} : { lastPlan }),
+                        lastPlan,
                     },
                 },
             };

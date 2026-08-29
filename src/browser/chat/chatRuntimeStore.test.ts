@@ -113,6 +113,15 @@ describe("chat runtime store", () => {
                 title: "Task progress",
             }),
         ]);
+
+        store.apply({
+            ...event(4, { kind: "assistant", mode: "append", text: "Late detail" }),
+            runId: "run-1",
+            sequence: 3,
+        });
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Second run started."
+        );
     });
 
     test("renders a provider user event before any following provider activity", () => {
@@ -308,6 +317,13 @@ describe("chat runtime store", () => {
             text: "Before reset",
         });
         store.apply(event(2, { clientRunId: "client-before-reset", kind: "started" }));
+        store.apply(
+            event(3, {
+                explanation: "Old transcript plan.",
+                kind: "plan",
+                steps: [{ status: "completed", text: "Old task" }],
+            })
+        );
         store.installExternalRuns(sessionKey, [
             {
                 continuity: "complete",
@@ -334,6 +350,7 @@ describe("chat runtime store", () => {
 
         expect(store.cursorFor(sessionKey)).toBe(7);
         expect(store.transcriptGenerationFor(sessionKey)).toBe(2);
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
         expect(store.state.sessions[sessionKey]).toMatchObject({
             eventIdentities: [],
             externalRuns: {},

@@ -527,7 +527,7 @@ export function projectChatRuntimeSnapshot(
                                   : step.status,
                       })),
                       runId: snapshot.run.id,
-                      title: "Active plan",
+                      title: "Task progress",
                   },
               }),
         runId: snapshot.run.id,

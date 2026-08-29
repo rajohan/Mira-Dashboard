@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
     ProductionDeployTemporarilyUnavailableError,
     queueProductionDeploy,
+    readBoundedProductionDeployResponse,
 } from "./productionDeployClient.ts";
 
 const runId = "018f6f50-6a9e-7b88-8000-000000000002";
@@ -46,6 +47,28 @@ function run(state: "running" | "succeeded") {
 }
 
 describe("production deploy client", () => {
+    test("cancels a streamed response as soon as it exceeds the byte limit", async () => {
+        let cancelled = false;
+        const response = new Response(
+            new ReadableStream<Uint8Array>({
+                cancel: () => {
+                    cancelled = true;
+                },
+                start(controller) {
+                    controller.enqueue(new Uint8Array(1024 * 1024));
+                    controller.enqueue(new Uint8Array([1]));
+                },
+            })
+        );
+
+        const thrownError = await readBoundedProductionDeployResponse(response).catch(
+            (error: unknown) => error
+        );
+        expect(thrownError).toBeInstanceOf(Error);
+        expect((thrownError as Error).message).toBe("Production deploy request failed");
+        expect(cancelled).toBeTrue();
+    });
+
     test("queues one real Delivery job and waits through the same run detail", async () => {
         const calls: Array<readonly [string, string, unknown]> = [];
         const responses: unknown[] = [

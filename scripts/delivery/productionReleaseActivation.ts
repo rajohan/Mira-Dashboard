@@ -272,12 +272,16 @@ async function retainCommittedProductionArtifacts(
     paths: PreparedProductionDeliveryPaths,
     activation: ProductionActivationState,
     dependencies: ProductionReleaseActivationDependencies,
-    candidate?: ActiveArtifacts
+    candidate?: ActiveArtifacts,
+    additionalReferences: readonly ProductionArtifactReference[] = []
 ): Promise<void> {
     await (dependencies.artifactRetention ?? retainProductionArtifacts)(
         lease,
         paths,
-        activationArtifactReferences(activation.record, candidate),
+        [
+            ...activationArtifactReferences(activation.record, candidate),
+            ...additionalReferences,
+        ],
         { runtimeVerification: dependencies.runtimeVerification }
     );
 }
@@ -606,11 +610,21 @@ async function recoverExistingTransition(
 export async function prepareProductionArtifactAdmission(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
-    dependencies: ProductionReleaseActivationDependencies
+    dependencies: ProductionReleaseActivationDependencies,
+    options: Readonly<{
+        additionalReferences?: readonly ProductionArtifactReference[];
+    }> = {}
 ): Promise<void> {
     try {
         const activation = await recoverExistingTransition(lease, paths, dependencies);
-        await retainCommittedProductionArtifacts(lease, paths, activation, dependencies);
+        await retainCommittedProductionArtifacts(
+            lease,
+            paths,
+            activation,
+            dependencies,
+            undefined,
+            options.additionalReferences
+        );
     } catch {
         throw activationError();
     }
