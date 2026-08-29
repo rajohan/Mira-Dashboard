@@ -112,7 +112,10 @@ export function dockerUpdaterEventsNotification(
         .join(" ");
     const omittedCount = Math.max(0, material.length - detailLimit);
     const fullMessage =
-        details + (omittedCount === 0 ? "" : ` ${omittedCount} more result(s).`);
+        details +
+        (omittedCount === 0
+            ? ""
+            : ` ${omittedCount} more ${omittedCount === 1 ? "result" : "results"}.`);
     const message =
         fullMessage.length <= 500 ? fullMessage : `${fullMessage.slice(0, 499)}…`;
     return {

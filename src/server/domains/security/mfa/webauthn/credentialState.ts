@@ -53,9 +53,10 @@ export function webAuthnTransportsFromMask(mask: number): readonly WebAuthnTrans
 export function webAuthnCredentialDescriptor(
     credential: MfaWebAuthnCredentialRecord
 ): WebAuthnCredentialDescriptor {
+    // Authentication must let the user agent discover every currently available
+    // transport. Persisted transports describe registration, not future access.
     return Object.freeze({
         id: credential.credentialId,
-        transports: [...webAuthnTransportsFromMask(credential.transportMask)],
     });
 }
 
@@ -81,12 +82,13 @@ export function webAuthnStoredCredential(
     credential: MfaWebAuthnCredentialRecord
 ): WebAuthnStoredCredential {
     return Object.freeze({
-        ...webAuthnCredentialDescriptor(credential),
         algorithm: credential.algorithm,
         counter: credential.counter,
+        id: credential.credentialId,
         deviceType: credential.deviceType,
         publicKey: Uint8Array.from(credential.publicKey),
         rpId: credential.rpId,
+        transports: [...webAuthnTransportsFromMask(credential.transportMask)],
     });
 }
 

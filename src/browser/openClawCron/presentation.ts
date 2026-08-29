@@ -81,6 +81,13 @@ export function openClawCronPayloadLabel(
     return "Heartbeat";
 }
 
+export function openClawCronPayloadMessage(
+    kind: OpenClawCronJob["payload"]["kind"]
+): string | undefined {
+    if (kind !== "skill-collection-review") return;
+    return "Managed internally by OpenClaw; this workflow has no message or scratch payload.";
+}
+
 export function openClawCronDeliveryModeLabel(
     mode: OpenClawCronJob["deliveryMode"]
 ): string {

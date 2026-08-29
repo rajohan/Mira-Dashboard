@@ -239,6 +239,57 @@ describe("OpenClawCronSection", () => {
         expect(within(history).getAllByText("—")).toHaveLength(2);
     });
 
+    test("describes system skill review jobs and renders their run history", () => {
+        const skillReviewJob = {
+            ...job,
+            agentId: "main",
+            description: undefined,
+            payload: { kind: "skill-collection-review" },
+            sessionTarget: "main",
+        } satisfies OpenClawCronJob;
+        render(
+            <OpenClawCronSectionView
+                {...callbacks()}
+                runs={runs}
+                state={{ result: resultWithJobs([skillReviewJob]), status: "ready" }}
+            />
+        );
+
+        expect(screen.getByText("OpenClaw system")).toBeVisible();
+        expect(screen.getByText("Workspace")).toBeVisible();
+        expect(
+            screen.getByText(
+                "Managed internally by OpenClaw; this workflow has no message or scratch payload."
+            )
+        ).toBeVisible();
+        expect(
+            screen.getByRole("list", {
+                name: `OpenClaw runs for ${skillReviewJob.name}`,
+            })
+        ).toBeVisible();
+    });
+
+    test("renders history for ordinary OpenClaw agent-turn automation", () => {
+        const autopilotJob = {
+            ...job,
+            name: "Mira Dashboard autopilot PR loop",
+        } satisfies OpenClawCronJob;
+        render(
+            <OpenClawCronSectionView
+                {...callbacks()}
+                runs={runs}
+                state={{ result: resultWithJobs([autopilotJob]), status: "ready" }}
+            />
+        );
+
+        expect(
+            screen.getByRole("list", {
+                name: "OpenClaw runs for Mira Dashboard autopilot PR loop",
+            })
+        ).toBeVisible();
+        expect(screen.getByText("Report delivered.")).toBeVisible();
+    });
+
     test("does not present heartbeat session settings as defaults before observation", () => {
         const heartbeatJob = {
             ...job,
@@ -394,6 +445,7 @@ describe("OpenClawCronSection", () => {
             ...job,
             agentId: undefined,
             agentIdTruncated: true,
+            payload: { kind: "skill-collection-review" },
             delivery: {
                 ...job.delivery,
                 metadataTruncated: true,
@@ -413,6 +465,7 @@ describe("OpenClawCronSection", () => {
             )
         ).toBeVisible();
         expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+        expect(screen.getByText("Hidden")).toBeVisible();
     });
 
     test("orders the bounded inventory enabled-first and then by name", () => {
@@ -527,7 +580,10 @@ describe("OpenClawCronSection", () => {
         ).not.toBeInTheDocument();
         await waitFor(() =>
             expect(
-                screen.getByRole("heading", { level: 2, name: "OpenClaw scheduled jobs" })
+                screen.getByRole("heading", {
+                    level: 2,
+                    name: "OpenClaw scheduled jobs",
+                })
             ).toHaveFocus()
         );
     });

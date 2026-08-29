@@ -184,6 +184,9 @@ describe("Docker updater scan", () => {
             "update-available",
             "scan-completed",
         ]);
+        expect(result.payload.updaterEvents.at(-1)?.summary).toBe(
+            "Scanned 1 managed or inventory-only service; 1 update is available."
+        );
     });
 
     test("does not repeat an unchanged update-available transition", async () => {
@@ -262,7 +265,7 @@ describe("Docker updater scan", () => {
             {
                 kind: "scan-failed",
                 summary:
-                    "Registry lookup was unavailable for 1 of 1 services; stale candidates cannot authorize updates.",
+                    "Registry lookup was unavailable for 1 of 1 service; stale candidates cannot authorize updates.",
             },
         ]);
         expect(JSON.stringify(result)).not.toContain("raw provider secret");

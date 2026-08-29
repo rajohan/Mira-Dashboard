@@ -282,8 +282,8 @@ export async function scanDockerUpdates(
         kind: unavailableCount === 0 ? "scan-completed" : "scan-failed",
         summary:
             unavailableCount === 0
-                ? `Scanned ${scans.length} managed or inventory-only services; ${availableCount} updates are available.`
-                : `Registry lookup was unavailable for ${unavailableCount} of ${scans.length} services; stale candidates cannot authorize updates.`,
+                ? `Scanned ${scans.length} managed or inventory-only ${scans.length === 1 ? "service" : "services"}; ${availableCount} ${availableCount === 1 ? "update is" : "updates are"} available.`
+                : `Registry lookup was unavailable for ${unavailableCount} of ${scans.length} ${scans.length === 1 ? "service" : "services"}; stale candidates cannot authorize updates.`,
     });
 
     const updated = v.parse(dockerOverviewCachePayloadSchema, {
