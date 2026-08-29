@@ -170,7 +170,7 @@ export interface ChatReadAloudView {
     readonly phase: "idle" | "loading" | "playing";
 }
 
-/** One ephemeral plan row; plans intentionally disappear when the run settles. */
+/** One row in the latest task progress retained through run settlement. */
 export interface ChatPlanItemView {
     readonly id: string;
     readonly label: string;

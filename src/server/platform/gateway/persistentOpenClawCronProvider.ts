@@ -280,6 +280,7 @@ const upstreamPayloadSchema = v.variant("kind", [
             "OpenClaw script payload is invalid"
         ),
     }),
+    v.object({ kind: v.literal("skillCollectionReview") }),
     v.object({ kind: v.literal("heartbeat") }),
 ]);
 

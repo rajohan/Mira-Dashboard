@@ -2711,7 +2711,7 @@ describe("persistent Gateway chat provider", () => {
         ]);
     });
 
-    test("normalizes installed Gateway plan step fields for runtime events", async () => {
+    test("normalizes installed Gateway progress-card fields for runtime events", async () => {
         const harness = createHarness({});
         const projected: unknown[] = [];
         await harness.provider.subscribeChat({
@@ -2730,7 +2730,7 @@ describe("persistent Gateway chat provider", () => {
                 event: "agent",
                 payload: {
                     data: {
-                        explanation: "Why this plan is useful.",
+                        markdown: "Work completed and verified.",
                         phase: "update",
                         private: "must not cross",
                         source: "provider-private-source",
@@ -2752,7 +2752,7 @@ describe("persistent Gateway chat provider", () => {
 
         expect(projected).toEqual([
             {
-                explanation: "Why this plan is useful.",
+                explanation: "Work completed and verified.",
                 kind: "plan",
                 phase: "update",
                 providerRunId: "provider-plan-run",

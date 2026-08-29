@@ -10,7 +10,10 @@ import {
 
 const outputMaximumBytes = 16 * 1024;
 const updateCommandSchema = v.object({
-    availability: v.object({ available: v.boolean(), latestVersion: v.string() }),
+    availability: v.object({
+        available: v.boolean(),
+        latestVersion: v.nullable(v.string()),
+    }),
     channel: v.object({ value: v.string() }),
 });
 
@@ -145,11 +148,14 @@ export async function collectOpenClawUpdateStatus(
         throw new Error("OpenClaw installed version is invalid");
     }
     const status = v.parse(updateCommandSchema, JSON.parse(rawStatus));
+    if (status.availability.available && status.availability.latestVersion === null) {
+        throw new Error("OpenClaw available update version is invalid");
+    }
     return v.parse(openClawUpdateStatusSchema, {
         available: status.availability.available,
         channel: status.channel.value,
         installedVersion: installedMatch[1],
-        latestVersion: status.availability.latestVersion,
+        latestVersion: status.availability.latestVersion ?? installedMatch[1],
         state: "observed",
     });
 }

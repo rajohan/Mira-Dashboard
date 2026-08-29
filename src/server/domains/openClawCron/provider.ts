@@ -32,6 +32,7 @@ export type OpenClawCronProviderPayload =
       }>
     | Readonly<{ argv: readonly string[]; kind: "command" }>
     | Readonly<{ kind: "script"; script: string }>
+    | Readonly<{ kind: "skillCollectionReview" }>
     | Readonly<{ kind: "heartbeat" }>;
 
 export interface OpenClawCronProviderJob {

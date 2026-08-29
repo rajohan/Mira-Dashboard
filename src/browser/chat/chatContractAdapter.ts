@@ -947,7 +947,7 @@ export function projectChatExternalRun(run: ChatExternalRun): ChatExternalRunPro
                                   : step.status,
                       })),
                       runId: `provider:${run.providerRunId}`,
-                      title: "OpenClaw plan",
+                      title: "Task progress",
                   },
               }),
         projectionTruncated: run.projectionTruncated,

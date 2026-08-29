@@ -289,6 +289,9 @@ function projectPayload(payload: OpenClawCronProviderPayload) {
                 kind: payload.kind,
             };
         }
+        case "skillCollectionReview": {
+            return { kind: "skill-collection-review" as const };
+        }
         case "heartbeat": {
             return { kind: payload.kind };
         }

@@ -61,7 +61,7 @@ const actionLabels: Readonly<
 > = {
     "approve-review": "Approve PR",
     "create-stack": "Create stack",
-    merge: "Merge only",
+    merge: "Merge",
     reject: "Reject",
     "update-branch": "Update branch",
 };

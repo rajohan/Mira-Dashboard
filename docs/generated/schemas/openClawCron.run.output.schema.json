@@ -391,6 +391,18 @@
               "type": "object",
               "properties": {
                 "kind": {
+                  "const": "skill-collection-review"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
                   "const": "heartbeat"
                 }
               },

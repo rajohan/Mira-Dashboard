@@ -469,7 +469,7 @@ describe("chat contract adapter", () => {
         expect(projection.message).not.toHaveProperty("runId");
         expect(projection.plan).toMatchObject({
             runId: "provider:provider-run-1",
-            title: "OpenClaw plan",
+            title: "Task progress",
         });
     });
 

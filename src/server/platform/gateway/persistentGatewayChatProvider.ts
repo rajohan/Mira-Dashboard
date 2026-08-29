@@ -133,6 +133,7 @@ const upstreamInFlightRunSchema = v.object({
     plan: v.optional(
         v.object({
             explanation: v.optional(chatPlanExplanationSchema),
+            markdown: v.optional(chatPlanExplanationSchema),
             steps: v.pipe(v.array(v.unknown()), v.maxLength(64)),
         })
     ),
@@ -1653,7 +1654,7 @@ function projectProviderEvent(
     }
     if (payload.stream === "plan") {
         if (data.phase !== "update") return projectNoopEvent(event);
-        const explanation = projectPlanExplanation(data.explanation);
+        const explanation = projectPlanExplanation(data.explanation ?? data.markdown);
         return Object.freeze({
             ...eventBase(event),
             ...(explanation === undefined ? {} : { explanation }),
@@ -1744,12 +1745,14 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
                               : {
                                     plan: Object.freeze({
                                         ...(upstream.inFlightRun.plan.explanation ===
-                                        undefined
+                                            undefined &&
+                                        upstream.inFlightRun.plan.markdown === undefined
                                             ? {}
                                             : {
                                                   explanation:
                                                       upstream.inFlightRun.plan
-                                                          .explanation,
+                                                          .explanation ??
+                                                      upstream.inFlightRun.plan.markdown,
                                               }),
                                         steps: projectPlanSteps(
                                             upstream.inFlightRun.plan.steps

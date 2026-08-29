@@ -45,6 +45,34 @@ describe("OpenClaw update collector", () => {
         });
     });
 
+    test("uses the installed version when current OpenClaw reports no update", async () => {
+        const result = await collectOpenClawUpdateStatus(undefined, {
+            adapter: {
+                run: (arguments_) =>
+                    Promise.resolve(
+                        arguments_[0] === "--version"
+                            ? "OpenClaw 2026.9.1-beta.1"
+                            : JSON.stringify({
+                                  availability: {
+                                      available: false,
+                                      latestVersion: null,
+                                  },
+                                  channel: { value: "beta" },
+                              })
+                    ),
+            },
+            openClawRoot: "/srv/openclaw",
+        });
+
+        expect(result).toEqual({
+            available: false,
+            channel: "beta",
+            installedVersion: "2026.9.1-beta.1",
+            latestVersion: "2026.9.1-beta.1",
+            state: "observed",
+        });
+    });
+
     test("runs the reviewed executable with only the fixed environment", async () => {
         const calls: Array<{
             readonly command: readonly string[];

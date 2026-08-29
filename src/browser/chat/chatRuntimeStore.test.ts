@@ -82,6 +82,39 @@ function providerAnchorPart(key: string) {
 }
 
 describe("chat runtime store", () => {
+    test("retains completed task progress until a newer run replaces it", () => {
+        const store = createChatRuntimeStore();
+        store.apply(
+            event(1, {
+                explanation: "First run completed.",
+                kind: "plan",
+                steps: [{ status: "completed", text: "First task" }],
+            })
+        );
+        store.apply(event(2, { kind: "final", text: "Done" }));
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "First run completed."
+        );
+
+        store.apply({
+            ...event(3, {
+                explanation: "Second run started.",
+                kind: "plan",
+                steps: [{ status: "in_progress", text: "Second task" }],
+            }),
+            runId: "run-2",
+            sequence: 1,
+        });
+
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([
+            expect.objectContaining({
+                description: "Second run started.",
+                title: "Task progress",
+            }),
+        ]);
+    });
+
     test("renders a provider user event before any following provider activity", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
@@ -600,7 +633,7 @@ describe("chat runtime store", () => {
                         },
                     ],
                     runId: "provider:provider-1",
-                    title: "OpenClaw plan",
+                    title: "Task progress",
                 },
                 observationEpoch: 1,
                 observedAtMs: occurredAtMs,
@@ -743,7 +776,12 @@ describe("chat runtime store", () => {
             store.state.sessions[sessionKey]?.externalRuns["provider-1"]
         ).toBeUndefined();
         expect(chatRuntimeMessages(store.state, sessionKey)).toEqual([]);
-        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([]);
+        expect(chatRuntimePlans(store.state, sessionKey)).toEqual([
+            expect.objectContaining({
+                description: "Explain the active work.",
+                title: "Task progress",
+            }),
+        ]);
     });
 
     test("preserves known detail only during non-reset truncated catch-up", () => {

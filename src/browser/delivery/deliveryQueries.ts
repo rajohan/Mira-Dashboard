@@ -15,7 +15,7 @@ export const deliveryCheckoutQueryKey = [...deliveryQueryRoot, "checkout"] as co
 export const deliveryReleasesQueryKey = [...deliveryQueryRoot, "releases"] as const;
 export const deliveryDeploymentsQueryKey = [...deliveryQueryRoot, "deployments"] as const;
 
-const deliveryRefreshIntervalMs = 30_000;
+export const deliveryRefreshIntervalMs = 5000;
 
 export function deliveryPullRequestsQueryOptions(client: DeliveryClient) {
     return queryOptions({
@@ -23,6 +23,7 @@ export function deliveryPullRequestsQueryOptions(client: DeliveryClient) {
             client.query("delivery.listPullRequests", {}, { signal }),
         queryKey: deliveryPullRequestsQueryKey,
         refetchInterval: deliveryRefreshIntervalMs,
+        refetchOnMount: "always",
         retry: false,
         staleTime: 15_000,
     });
@@ -32,7 +33,8 @@ export function deliveryPreviewQueryOptions(client: DeliveryClient) {
     return queryOptions({
         queryFn: ({ signal }) => client.query("delivery.getPreview", {}, { signal }),
         queryKey: deliveryPreviewQueryKey,
-        refetchInterval: 10_000,
+        refetchInterval: deliveryRefreshIntervalMs,
+        refetchOnMount: "always",
         retry: false,
         staleTime: 2000,
     });
@@ -44,6 +46,7 @@ export function deliveryCheckoutQueryOptions(client: DeliveryClient) {
             client.query("delivery.getProductionCheckout", {}, { signal }),
         queryKey: deliveryCheckoutQueryKey,
         refetchInterval: deliveryRefreshIntervalMs,
+        refetchOnMount: "always",
         retry: false,
         staleTime: 3000,
     });
@@ -54,6 +57,7 @@ export function deliveryReleasesQueryOptions(client: DeliveryClient) {
         queryFn: ({ signal }) => client.query("delivery.getReleases", {}, { signal }),
         queryKey: deliveryReleasesQueryKey,
         refetchInterval: deliveryRefreshIntervalMs,
+        refetchOnMount: "always",
         retry: false,
         staleTime: 10_000,
     });
@@ -64,6 +68,7 @@ export function deliveryDeploymentsQueryOptions(client: DeliveryClient) {
         queryFn: ({ signal }) => client.query("delivery.listDeployments", {}, { signal }),
         queryKey: deliveryDeploymentsQueryKey,
         refetchInterval: deliveryRefreshIntervalMs,
+        refetchOnMount: "always",
         retry: false,
         staleTime: 10_000,
     });

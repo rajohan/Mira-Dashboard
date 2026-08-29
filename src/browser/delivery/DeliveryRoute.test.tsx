@@ -23,8 +23,14 @@ import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import {
+    deliveryCheckoutQueryOptions,
+    deliveryDeploymentsQueryOptions,
+    deliveryPreviewQueryOptions,
     deliveryCheckoutQueryKey,
+    deliveryPullRequestsQueryOptions,
     deliveryPullRequestsQueryKey,
+    deliveryRefreshIntervalMs,
+    deliveryReleasesQueryOptions,
 } from "./deliveryQueries.ts";
 import { DeliveryReadRegion } from "./DeliveryReadRegion.tsx";
 import { DeliveryRoute } from "./DeliveryRoute.tsx";
@@ -43,6 +49,21 @@ const previewRevision = "e".repeat(64);
 const checkoutRevision = "f".repeat(64);
 const activationRevision = "1".repeat(64);
 const jobRunId = "019fdf70-0000-7000-8000-000000000040";
+
+test("Delivery queries poll quickly while the route is mounted", () => {
+    const client = {} as DeliveryClient;
+    for (const option of [
+        deliveryPullRequestsQueryOptions(client),
+        deliveryPreviewQueryOptions(client),
+        deliveryCheckoutQueryOptions(client),
+        deliveryReleasesQueryOptions(client),
+        deliveryDeploymentsQueryOptions(client),
+    ]) {
+        expect(option.refetchInterval).toBe(deliveryRefreshIntervalMs);
+        expect(option.refetchOnMount).toBe("always");
+    }
+    expect(deliveryRefreshIntervalMs).toBe(5000);
+});
 
 const pullRequestsResult = {
     checkedAtMs: observedAtMs + 1000,
@@ -479,7 +500,7 @@ describe("DeliveryRoute", () => {
             ).toBeVisible();
             await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-            await user.click(screen.getByRole("button", { name: "Merge only" }));
+            await user.click(screen.getByRole("button", { name: "Merge" }));
             expect(screen.getByText(/Mira \(mira-2026\).*squash-merge/iu)).toBeVisible();
         } finally {
             view.unmount();
@@ -538,9 +559,7 @@ describe("DeliveryRoute", () => {
                     )
                 ).toBeVisible();
             });
-            expect(
-                within(region).getByRole("button", { name: "Merge only" })
-            ).toBeDisabled();
+            expect(within(region).getByRole("button", { name: "Merge" })).toBeDisabled();
             expect(region.textContent).not.toContain("/secret");
         } finally {
             view.unmount();

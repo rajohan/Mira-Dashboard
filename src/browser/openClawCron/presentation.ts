@@ -77,6 +77,7 @@ export function openClawCronPayloadLabel(
     if (kind === "agent-turn") return "Agent request";
     if (kind === "command") return "Command";
     if (kind === "script") return "Script";
+    if (kind === "skill-collection-review") return "Skill collection review";
     return "Heartbeat";
 }
 
