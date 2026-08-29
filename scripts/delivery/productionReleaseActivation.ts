@@ -275,13 +275,17 @@ async function retainCommittedProductionArtifacts(
     candidate?: ActiveArtifacts,
     additionalReferences: readonly ProductionArtifactReference[] = []
 ): Promise<void> {
+    const references = [
+        ...activationArtifactReferences(activation.record, candidate),
+        ...additionalReferences,
+    ].filter(
+        (reference, index, all) =>
+            all.findIndex(({ releaseId }) => releaseId === reference.releaseId) === index
+    );
     await (dependencies.artifactRetention ?? retainProductionArtifacts)(
         lease,
         paths,
-        [
-            ...activationArtifactReferences(activation.record, candidate),
-            ...additionalReferences,
-        ],
+        references,
         { runtimeVerification: dependencies.runtimeVerification }
     );
 }
