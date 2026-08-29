@@ -20,6 +20,7 @@ import {
     openClawCronDeliveryModeLabel,
     openClawCronDeliveryStatusLabel,
     openClawCronPayloadLabel,
+    openClawCronPayloadMessage,
     openClawCronRunStatusBadgeVariant,
     openClawCronRunStatusLabel,
     openClawCronScheduleLabel,
@@ -94,10 +95,7 @@ export function OpenClawCronDetail({
         if (job.payload.kind === "agent-turn") return job.payload.message;
         if (job.payload.kind === "system-event") return job.payload.text;
         if (job.payload.kind === "heartbeat") return job.scratch?.content;
-        if (job.payload.kind === "skill-collection-review") {
-            return "Review the main workspace Skill Workshop collection using content and observed usage, then apply the configured autonomous workshop policy.";
-        }
-        return;
+        return openClawCronPayloadMessage(job.payload.kind);
     })();
     let configuredModel: string | undefined;
     if (job.payload.kind === "agent-turn") configuredModel = job.payload.model;

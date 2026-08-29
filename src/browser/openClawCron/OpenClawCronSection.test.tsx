@@ -259,7 +259,7 @@ describe("OpenClawCronSection", () => {
         expect(screen.getByText("Workspace")).toBeVisible();
         expect(
             screen.getByText(
-                "Review the main workspace Skill Workshop collection using content and observed usage, then apply the configured autonomous workshop policy."
+                "Managed internally by OpenClaw; this workflow has no message or scratch payload."
             )
         ).toBeVisible();
         expect(
