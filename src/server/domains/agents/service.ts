@@ -53,6 +53,24 @@ const gatewaySessionFallbackActor: AgentRunActor = Object.freeze({
     kind: "automation",
 });
 
+interface GatewayObservedTaskRun {
+    readonly lastActivityAtMs: number;
+    readonly startedAtMs: number;
+    readonly task: string;
+}
+
+type GatewayAvailabilityObservation =
+    | Readonly<{
+          availability: "active";
+          generation: number;
+          taskRun?: GatewayObservedTaskRun;
+      }>
+    | Readonly<{
+          availability: "idle";
+          fallbackFrom?: GatewayObservedTaskRun;
+          generation: number;
+      }>;
+
 class AgentUnexpectedOperationError extends Data.TaggedError(
     "AgentUnexpectedOperationError"
 )<{ readonly cause: unknown }> {}
@@ -352,7 +370,8 @@ export function createAgentService(
         dependencies.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
     );
     const now = () => toDate(v.parse(clockSchema, nowMs()));
-    const observedGatewayAvailability = new Map<string, "active" | "idle">();
+    const observedGatewayAvailability = new Map<string, GatewayAvailabilityObservation>();
+    let nextGatewayObservationGeneration = 0;
 
     async function statusesWithGatewayAvailability(
         statuses: readonly AgentStatus[],
@@ -372,67 +391,131 @@ export function createAgentService(
         }
 
         const projections = projectAgentGatewayAvailability(statuses, snapshot);
-        const transitionedToIdle = projections.filter((projection) => {
+        const transitionedToIdle = projections.flatMap((projection) => {
             if (
                 projection.freshness !== "fresh" ||
                 (projection.gatewayAvailability !== "active" &&
                     projection.gatewayAvailability !== "idle")
             ) {
-                return false;
+                return [];
             }
+            const generation = (nextGatewayObservationGeneration += 1);
             const previous = observedGatewayAvailability.get(projection.agentId);
-            observedGatewayAvailability.set(
-                projection.agentId,
-                projection.gatewayAvailability
-            );
-            return (
-                previous === "active" &&
-                projection.gatewayAvailability === "idle" &&
-                projection.state === "working"
-            );
+            const taskRun =
+                projection.state === "working" &&
+                projection.currentTask !== undefined &&
+                projection.startedAtMs !== undefined &&
+                projection.lastActivityAtMs !== undefined
+                    ? {
+                          lastActivityAtMs: projection.lastActivityAtMs,
+                          startedAtMs: projection.startedAtMs,
+                          task: projection.currentTask,
+                      }
+                    : undefined;
+            if (projection.gatewayAvailability === "active") {
+                observedGatewayAvailability.set(projection.agentId, {
+                    availability: "active",
+                    generation,
+                    ...(taskRun === undefined ? {} : { taskRun }),
+                });
+                return [];
+            }
+            const previousActive =
+                previous?.availability === "active" ? previous : undefined;
+            const fallbackFrom =
+                previousActive?.taskRun !== undefined &&
+                taskRun !== undefined &&
+                previousActive.taskRun.task === taskRun.task &&
+                previousActive.taskRun.startedAtMs === taskRun.startedAtMs &&
+                previousActive.taskRun.lastActivityAtMs === taskRun.lastActivityAtMs
+                    ? previousActive.taskRun
+                    : undefined;
+            observedGatewayAvailability.set(projection.agentId, {
+                availability: "idle",
+                ...(fallbackFrom === undefined ? {} : { fallbackFrom }),
+                generation,
+            });
+            return fallbackFrom === undefined || previousActive === undefined
+                ? []
+                : [
+                      {
+                          fallbackFrom,
+                          generation,
+                          projection,
+                          previous: previousActive,
+                      },
+                  ];
         });
         if (transitionedToIdle.length === 0) return projections;
 
-        const fallbackCompleted = await dependencies.repository.withImmediateTransaction(
-            (unit) => {
-                let changed = false;
-                for (const transition of transitionedToIdle) {
-                    if (transition.state !== "working") continue;
-                    const active = unit.findActiveRun(transition.agentId);
-                    if (
-                        active === undefined ||
-                        active.task !== transition.currentTask ||
-                        getTime(active.startedAt) !== transition.startedAtMs ||
-                        getTime(active.lastActivityAt) !== transition.lastActivityAtMs
-                    ) {
-                        continue;
-                    }
-                    const occurredAt = maximumDate([
-                        now(),
-                        active.lastActivityAt,
-                        ...(transition.observedAtMs === undefined
-                            ? []
-                            : [toDate(transition.observedAtMs)]),
-                    ]);
-                    requiredWrite(
-                        unit.completeRun(
-                            active.id,
+        let fallbackCompleted: boolean;
+        try {
+            fallbackCompleted = await dependencies.repository.withImmediateTransaction(
+                (unit) => {
+                    let changed = false;
+                    for (const {
+                        fallbackFrom,
+                        generation,
+                        projection,
+                    } of transitionedToIdle) {
+                        const currentObservation = observedGatewayAvailability.get(
+                            projection.agentId
+                        );
+                        if (
+                            currentObservation?.availability !== "idle" ||
+                            currentObservation.generation !== generation ||
+                            currentObservation.fallbackFrom !== fallbackFrom
+                        ) {
+                            continue;
+                        }
+                        const active = unit.findActiveRun(projection.agentId);
+                        if (
+                            active === undefined ||
+                            active.task !== fallbackFrom.task ||
+                            getTime(active.startedAt) !== fallbackFrom.startedAtMs ||
+                            getTime(active.lastActivityAt) !==
+                                fallbackFrom.lastActivityAtMs
+                        ) {
+                            continue;
+                        }
+                        const occurredAt = maximumDate([
+                            now(),
+                            active.lastActivityAt,
+                            ...(projection.observedAtMs === undefined
+                                ? []
+                                : [toDate(projection.observedAtMs)]),
+                        ]);
+                        requiredWrite(
+                            unit.completeRun(
+                                active.id,
+                                occurredAt,
+                                gatewaySessionFallbackActor
+                            ),
+                            "Gateway-idle task-run completion"
+                        );
+                        appendRealtimeEvent(
+                            unit,
+                            projection.agentId,
                             occurredAt,
-                            gatewaySessionFallbackActor
-                        ),
-                        "Gateway-idle task-run completion"
-                    );
-                    appendRealtimeEvent(
-                        unit,
-                        transition.agentId,
-                        occurredAt,
-                        retentionMs
-                    );
-                    changed = true;
+                            retentionMs
+                        );
+                        changed = true;
+                    }
+                    return changed;
                 }
-                return changed;
+            );
+        } catch (error) {
+            for (const { generation, previous, projection } of transitionedToIdle) {
+                const current = observedGatewayAvailability.get(projection.agentId);
+                if (
+                    current?.availability === "idle" &&
+                    current.generation === generation
+                ) {
+                    observedGatewayAvailability.set(projection.agentId, previous);
+                }
             }
-        );
+            throw error;
+        }
         if (!fallbackCompleted) return projections;
         if (dependencies.wakeEventPump !== undefined) {
             try {

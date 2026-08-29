@@ -11,7 +11,7 @@ import {
     createGatewaySessionsService,
     type GatewaySessionsService,
 } from "../../gatewaySessions/service.ts";
-import { createAgentRepository } from "../repository.ts";
+import { type AgentRepository, createAgentRepository } from "../repository.ts";
 import { createAgentService } from "../service.ts";
 
 export type TestAgentDatabase = Awaited<ReturnType<typeof openFreshMigratedDatabase>>;
@@ -65,6 +65,7 @@ export function agentServiceFor(
         readonly generateId?: () => string;
         readonly gatewaySessionsService?: GatewaySessionsService;
         readonly nowMs?: () => number;
+        readonly repository?: AgentRepository;
         readonly wakeEventPump?: () => Promise<void> | void;
     } = {}
 ) {
@@ -76,10 +77,9 @@ export function agentServiceFor(
                 provider: unavailableGatewaySessionsProvider,
             }),
         nowMs: overrides.nowMs ?? (() => 10_000),
-        repository: createAgentRepository(
-            database.orm,
-            testImmediateDatabaseWriteAdmission
-        ),
+        repository:
+            overrides.repository ??
+            createAgentRepository(database.orm, testImmediateDatabaseWriteAdmission),
         wakeEventPump: overrides.wakeEventPump,
     });
 }
