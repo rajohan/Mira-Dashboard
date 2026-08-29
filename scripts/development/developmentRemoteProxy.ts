@@ -28,6 +28,7 @@ const standardProxyCloseCodes = new Set([
 export const developmentRemoteProxyMessageMaximumBytes = 16 * 1024 * 1024;
 export const developmentRemoteProxyBufferedMaximumBytes = 16 * 1024 * 1024;
 export const developmentRemoteProxyQueuedMessageMaximum = 1024;
+export const developmentUnixProxyConnectionMaximum = 16;
 
 type DevelopmentRemoteProxyMessage = string | Uint8Array;
 
@@ -54,6 +55,16 @@ export interface DevelopmentRemoteProxySocketData {
     upstreamPendingBytes: number;
     upstreamPendingMessages: DevelopmentRemoteProxyMessage[];
     readonly upstreamUrl: string;
+}
+
+/** @returns Whether the Unix ingress can admit one current HTTP or WebSocket request. */
+export function developmentUnixProxyAdmissionAvailable(
+    server: Readonly<Pick<Bun.Server<unknown>, "pendingRequests" | "pendingWebSockets">>
+): boolean {
+    return (
+        server.pendingRequests + server.pendingWebSockets <=
+        developmentUnixProxyConnectionMaximum
+    );
 }
 
 interface ResolvedDevelopmentRemoteProxyConfiguration {
@@ -598,6 +609,12 @@ export function startDevelopmentUnixProxy(
     return Bun.serve<DevelopmentRemoteProxySocketData>({
         fetch(request, server) {
             server.timeout(request, 0);
+            if (!developmentUnixProxyAdmissionAvailable(server)) {
+                return new Response("Preview ingress capacity reached", {
+                    headers: { connection: "close" },
+                    status: 503,
+                });
+            }
             if (!hasExpectedPublicHost(request, resolved.publicOrigin)) {
                 return new Response("Invalid development host", { status: 421 });
             }

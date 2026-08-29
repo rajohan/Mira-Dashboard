@@ -381,7 +381,7 @@ describe("DeliveryRoute", () => {
                 expect(button).toHaveAttribute("aria-busy", "true");
             }
             const stopPreview = await screen.findByRole("button", {
-                name: /Queueing preview stop/u,
+                name: "Preview delivery in progress…",
             });
             expect(stopPreview).toBeDisabled();
             expect(stopPreview).toHaveAttribute("aria-busy", "true");
@@ -398,7 +398,7 @@ describe("DeliveryRoute", () => {
         }
     });
 
-    test("blocks an open confirmation when another device starts its action family", async () => {
+    test("blocks an open confirmation when another device starts any Delivery job", async () => {
         const harness = createClient();
         const view = renderDelivery(harness.client);
         try {
@@ -406,7 +406,7 @@ describe("DeliveryRoute", () => {
             await user.click(await screen.findByRole("button", { name: "Approve PR" }));
             expect(screen.getByRole("button", { name: "Queue approval" })).toBeEnabled();
 
-            view.setActiveOperationKeys(["job:delivery.github"]);
+            view.setActiveOperationKeys(["job:delivery.production.v1"]);
 
             const confirm = screen.getByRole("button", {
                 name: "Queue approval…",

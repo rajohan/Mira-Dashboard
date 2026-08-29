@@ -60,26 +60,6 @@ async function queueDeliveryOperation(
     }
 }
 
-function deliveryFamilyIsBusy(
-    actionKey: string | undefined,
-    busy: Readonly<{ github: boolean; preview: boolean; production: boolean }>
-): boolean {
-    switch (actionKey) {
-        case deliveryGitHubActionKey: {
-            return busy.github;
-        }
-        case deliveryPreviewActionKey: {
-            return busy.preview;
-        }
-        case deliveryProductionActionKey: {
-            return busy.production;
-        }
-        default: {
-            return false;
-        }
-    }
-}
-
 /** @returns One exact Delivery intent from dialog opening through safe retry or enqueue. */
 export function useDeliveryOperations(
     client: DeliveryClient,
@@ -100,14 +80,8 @@ export function useDeliveryOperations(
     const productionBusy = operationTracker.operationIsActive(
         operationKeyForJobAction(deliveryProductionActionKey)
     );
-    const pendingActionKey =
-        pending === undefined ? undefined : deliveryJobActionKeyForPayload(pending.input);
-    const pendingFamilyBusy = deliveryFamilyIsBusy(pendingActionKey, {
-        github: githubBusy,
-        preview: previewBusy,
-        production: productionBusy,
-    });
-    const confirmationBusy = busy || pendingFamilyBusy;
+    const deliveryBusy = githubBusy || previewBusy || productionBusy;
+    const confirmationBusy = busy || deliveryBusy;
     const current =
         pending === undefined ||
         deliveryOperationIsCurrent(pending.input, currentAuthority);
