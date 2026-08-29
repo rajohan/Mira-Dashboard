@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.3...v0.5.4) (2026-08-29)
+
+
+### Bug Fixes
+
+* **operations:** retain settled updater status ([#506](https://github.com/rajohan/Mira-Dashboard/issues/506)) ([113a7d2](https://github.com/rajohan/Mira-Dashboard/commit/113a7d2011b8fe14de70e3280324b08164a00e35))
+
 ## [0.5.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.2...v0.5.3) (2026-08-29)
 
 
