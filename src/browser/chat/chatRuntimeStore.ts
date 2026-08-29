@@ -1550,7 +1550,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                 ...installed,
             });
             const newestPlanRun = Object.values(installed)
-                .filter((run) => run.lifecycle === "active" && run.plan !== undefined)
+                .filter((run) => run.plan !== undefined)
                 .toSorted((left, right) => right.updatedAtMs - left.updatedAtMs)[0];
             const externalPlan =
                 newestPlanRun?.plan === undefined

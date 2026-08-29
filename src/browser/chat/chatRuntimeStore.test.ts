@@ -212,6 +212,41 @@ describe("chat runtime store", () => {
         );
     });
 
+    test("hydrates retained progress from a terminal external run", () => {
+        const store = createChatRuntimeStore();
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "complete",
+                lifecycle: "terminal-pending-history",
+                hasUnprojectedActivity: false,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:settled`,
+                    parts: [],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
+                plan: {
+                    description: "External run completed.",
+                    items: [{ id: "done", label: "External task", status: "completed" }],
+                    runId: "provider:settled",
+                    title: "Task progress",
+                },
+                projectionTruncated: false,
+                providerRunId: "settled",
+                source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
+            },
+        ]);
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "External run completed."
+        );
+    });
+
     test("renders a provider user event before any following provider activity", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
