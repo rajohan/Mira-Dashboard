@@ -299,6 +299,7 @@ describe("OpenClawCronSection", () => {
             name: `OpenClaw runs for ${longName}`,
         });
         expect(inventory).toHaveClass("relative", "w-full");
+        expect(inventory.parentElement).toHaveClass("h-full");
         expect(history).toHaveClass("relative", "min-w-0", "max-w-full");
         expect(history.querySelector("dl")).toHaveClass(
             "sm:grid-cols-2",
