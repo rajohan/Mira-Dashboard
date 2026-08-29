@@ -54,7 +54,6 @@ const gatewaySessionFallbackActor: AgentRunActor = Object.freeze({
 });
 
 interface GatewayObservedTaskRun {
-    readonly lastActivityAtMs: number;
     readonly startedAtMs: number;
     readonly task: string;
 }
@@ -403,10 +402,8 @@ export function createAgentService(
             const taskRun =
                 projection.state === "working" &&
                 projection.currentTask !== undefined &&
-                projection.startedAtMs !== undefined &&
-                projection.lastActivityAtMs !== undefined
+                projection.startedAtMs !== undefined
                     ? {
-                          lastActivityAtMs: projection.lastActivityAtMs,
                           startedAtMs: projection.startedAtMs,
                           task: projection.currentTask,
                       }
@@ -417,8 +414,7 @@ export function createAgentService(
                 previous.fallbackFrom !== undefined &&
                 taskRun !== undefined &&
                 previous.fallbackFrom.task === taskRun.task &&
-                previous.fallbackFrom.startedAtMs === taskRun.startedAtMs &&
-                previous.fallbackFrom.lastActivityAtMs === taskRun.lastActivityAtMs
+                previous.fallbackFrom.startedAtMs === taskRun.startedAtMs
             ) {
                 return [];
             }
@@ -437,8 +433,7 @@ export function createAgentService(
                 previousActive?.taskRun !== undefined &&
                 taskRun !== undefined &&
                 previousActive.taskRun.task === taskRun.task &&
-                previousActive.taskRun.startedAtMs === taskRun.startedAtMs &&
-                previousActive.taskRun.lastActivityAtMs === taskRun.lastActivityAtMs
+                previousActive.taskRun.startedAtMs === taskRun.startedAtMs
                     ? previousActive.taskRun
                     : undefined;
             observedGatewayAvailability.set(projection.agentId, {
@@ -483,9 +478,7 @@ export function createAgentService(
                         if (
                             active === undefined ||
                             active.task !== fallbackFrom.task ||
-                            getTime(active.startedAt) !== fallbackFrom.startedAtMs ||
-                            getTime(active.lastActivityAt) !==
-                                fallbackFrom.lastActivityAtMs
+                            getTime(active.startedAt) !== fallbackFrom.startedAtMs
                         ) {
                             continue;
                         }

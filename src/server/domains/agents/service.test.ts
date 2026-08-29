@@ -107,6 +107,7 @@ describe("agent service", () => {
     test("ends only the current-task interval after a fresh Gateway active-to-idle transition", async () => {
         const database = await openFreshMigratedDatabase();
         let hasActiveRun = true;
+        let currentTimeMs = 10_000;
         let wakeups = 0;
         const provider: GatewaySessionsProvider = Object.freeze({
             compactSession: unexpectedGatewaySessionControl,
@@ -129,10 +130,10 @@ describe("agent service", () => {
         });
         const service = agentServiceFor(database, {
             gatewaySessionsService: createGatewaySessionsService({
-                nowMs: () => 10_000,
+                nowMs: () => currentTimeMs,
                 provider,
             }),
-            nowMs: () => 10_000,
+            nowMs: () => currentTimeMs,
             wakeEventPump: () => {
                 wakeups += 1;
             },
@@ -152,6 +153,13 @@ describe("agent service", () => {
                 state: "working",
             });
 
+            currentTimeMs = 11_000;
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Keep taskboard ownership separate",
+                })
+            );
             hasActiveRun = false;
             const idle = await runAgentEffect(service.getStatus({ id: "main" }));
             expect(idle).toMatchObject({
@@ -166,7 +174,7 @@ describe("agent service", () => {
             );
             expect(history.runs).toEqual([
                 expect.objectContaining({
-                    completedAtMs: 10_000,
+                    completedAtMs: 11_000,
                     status: "completed",
                     task: "Keep taskboard ownership separate",
                 }),
