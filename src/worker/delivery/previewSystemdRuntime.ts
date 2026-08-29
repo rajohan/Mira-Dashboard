@@ -19,7 +19,7 @@ const systemctlExecutable = "/usr/bin/systemctl";
 const bubblewrapExecutable = "/usr/bin/bwrap";
 const socketProxydExecutable = "/usr/lib/systemd/systemd-socket-proxyd";
 const processDeadlineMs = 30_000;
-const readinessDeadlineMs = 90_000;
+const defaultReadinessDeadlineMs = 90_000;
 const readinessPollMs = 250;
 const processOutputMaximumBytes = 64 * 1024;
 const commandMaximumBytes = 64 * 1024;
@@ -81,6 +81,7 @@ export interface PreviewSystemdRuntimeDependencies {
     readonly gatewayPort: PreviewGatewayProxyPort;
     readonly ingressReadinessProbe?: PreviewIngressReadinessProbe;
     readonly processRunner?: PreviewSystemdProcessRunner;
+    readonly readinessDeadlineMs?: number;
     readonly runtimeUserId?: number;
     readonly startGatewayBroker?: (
         options: PreviewGatewayBrokerOptions
@@ -448,6 +449,8 @@ export function createPreviewSystemdRuntime(
     const environment = managerEnvironment(userId);
     const runner = dependencies.processRunner ?? defaultProcessRunner;
     const delay = dependencies.delay ?? defaultDelay;
+    const readinessDeadlineMs =
+        dependencies.readinessDeadlineMs ?? defaultReadinessDeadlineMs;
     const gatewayBrokerStarter =
         dependencies.startGatewayBroker ?? startPreviewGatewayBroker;
     const ingressReadinessProbe =
@@ -483,14 +486,29 @@ export function createPreviewSystemdRuntime(
             return Object.freeze({ ...state, ready: false });
         }
         const ingress = activeIngress;
-        const ingressSignal = signal ?? new AbortController().signal;
         let ingressReady = false;
         if (ingress !== undefined && ingress.operationId === operationId) {
-            ingressReady = await ingressReadinessProbe(
-                ingress.socketPath,
-                ingress.publicOrigin,
-                ingressSignal
-            );
+            const scope = abortScope(signal, readinessDeadlineMs);
+            try {
+                const aborted = new Promise<false>((resolve) => {
+                    if (scope.signal.aborted) resolve(false);
+                    else
+                        scope.signal.addEventListener("abort", () => resolve(false), {
+                            once: true,
+                        });
+                });
+                ingressReady = await Promise.race([
+                    ingressReadinessProbe(
+                        ingress.socketPath,
+                        ingress.publicOrigin,
+                        scope.signal
+                    ),
+                    aborted,
+                ]);
+                signal?.throwIfAborted();
+            } finally {
+                scope.dispose();
+            }
         }
         return Object.freeze({
             ...state,

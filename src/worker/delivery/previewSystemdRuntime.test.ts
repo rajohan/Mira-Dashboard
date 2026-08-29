@@ -140,6 +140,34 @@ describe("preview systemd runtime", () => {
         expect(JSON.stringify(requests)).not.toContain("TOKEN");
     });
 
+    test("bounds an ingress inspection when the Preview listener never responds", async () => {
+        let stallIngress = false;
+        const runtime = createPreviewSystemdRuntime({
+            ...gatewayDependencies(),
+            ingressReadinessProbe: () =>
+                stallIngress ? new Promise<boolean>(() => {}) : Promise.resolve(true),
+            processRunner(request) {
+                if (request.command.includes("show")) {
+                    return Promise.resolve(unitResult("active", "running"));
+                }
+                return Promise.resolve(emptyResult);
+            },
+            readinessDeadlineMs: 5,
+            runtimeUserId,
+        });
+        const specification = launchSpecification();
+
+        await runtime.start(specification, gatewaySpecification());
+        await runtime.ingress.start(ingressSpecification());
+        stallIngress = true;
+
+        expect(await runtime.inspect(specification.unitName)).toEqual({
+            active: true,
+            ready: false,
+            result: undefined,
+        });
+    });
+
     test("waits for the sandbox-owned ingress socket without launching another unit", async () => {
         const requests: PreviewSystemdProcessRequest[] = [];
         const readinessSockets: string[] = [];

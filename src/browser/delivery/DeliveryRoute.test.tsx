@@ -300,14 +300,14 @@ function renderDelivery(
         history: createMemoryHistory({ initialEntries: ["/delivery"] }),
         routeTree: rootRoute.addChildren([deliveryRoute, jobsRoute]),
     });
-    const view = render(
+    const tree = (operationKeys: readonly string[]) => (
         <DashboardRealtimeProvider client={noOpDashboardRealtimeClient}>
             <QueryClientProvider client={queryClient}>
                 <OperationTrackerContext
                     value={
                         {
                             dismiss: () => {},
-                            operationIsActive: (key) => activeOperationKeys.includes(key),
+                            operationIsActive: (key) => operationKeys.includes(key),
                             operations: [],
                             settle: () => {},
                             track: () => {},
@@ -319,8 +319,12 @@ function renderDelivery(
             </QueryClientProvider>
         </DashboardRealtimeProvider>
     );
+    const view = render(tree(activeOperationKeys));
     return {
         queryClient,
+        setActiveOperationKeys(operationKeys: readonly string[]) {
+            view.rerender(tree(operationKeys));
+        },
         unmount() {
             view.unmount();
             queryClient.clear();
@@ -389,6 +393,28 @@ describe("DeliveryRoute", () => {
                 expect(button).toBeDisabled();
                 expect(button).toHaveAttribute("aria-busy", "true");
             }
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("blocks an open confirmation when another device starts its action family", async () => {
+        const harness = createClient();
+        const view = renderDelivery(harness.client);
+        try {
+            const user = userEvent.setup();
+            await user.click(await screen.findByRole("button", { name: "Approve PR" }));
+            expect(screen.getByRole("button", { name: "Queue approval" })).toBeEnabled();
+
+            view.setActiveOperationKeys(["job:delivery.github"]);
+
+            const confirm = screen.getByRole("button", {
+                name: "Queue approval…",
+            });
+            expect(confirm).toBeDisabled();
+            expect(confirm).toHaveAttribute("aria-busy", "true");
+            await user.click(confirm);
+            expect(harness.mutation).not.toHaveBeenCalled();
         } finally {
             view.unmount();
         }
