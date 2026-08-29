@@ -174,7 +174,7 @@ function mainGit(
 }
 
 describe("Delivery worker runtime", () => {
-    test("rejects source drift before an external mutation", async () => {
+    test("reauthorizes exact operation authority when unrelated projection state drifts", () => {
         let mutations = 0;
         const current = overview([pullRequest(1, { mergeStateStatus: "BEHIND" })]);
         const runtime = createDeliveryRuntime({
@@ -191,20 +191,15 @@ describe("Delivery worker runtime", () => {
             readPrevious: () => current,
         });
 
-        const failure = await runtime
-            .execute({
+        expect(
+            runtime.execute({
                 expectedHeadSha: "1".padStart(40, "0"),
                 number: 1,
                 operation: "update-branch",
                 sourceRevision: "f".repeat(64),
             })
-            .then(
-                () => null,
-                (error: unknown) => error
-            );
-        expect(failure).toBeInstanceOf(DeliveryRuntimeError);
-        expect(failure).toHaveProperty("reason", "conflict");
-        expect(mutations).toBe(0);
+        ).resolves.toMatchObject({ outcome: "completed" });
+        expect(mutations).toBe(1);
     });
 
     test("merges an exact ordinary PR, syncs main, and cleans retained preview state", () => {
@@ -382,7 +377,7 @@ describe("Delivery worker runtime", () => {
                 number: pr.number,
                 operation: "start-preview",
                 previewRevision: current.preview.revision,
-                sourceRevision: current.sourceRevision,
+                sourceRevision: "f".repeat(64),
             })
         ).resolves.toEqual({ operation: "start-preview", outcome: "completed" });
         expect(starts).toEqual([

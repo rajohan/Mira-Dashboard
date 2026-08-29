@@ -263,7 +263,9 @@ describe("OpenClawCronSection", () => {
             )
         ).toBeVisible();
         expect(
-            screen.getByRole("list", { name: `OpenClaw runs for ${skillReviewJob.name}` })
+            screen.getByRole("list", {
+                name: `OpenClaw runs for ${skillReviewJob.name}`,
+            })
         ).toBeVisible();
     });
 
@@ -443,6 +445,7 @@ describe("OpenClawCronSection", () => {
             ...job,
             agentId: undefined,
             agentIdTruncated: true,
+            payload: { kind: "skill-collection-review" },
             delivery: {
                 ...job.delivery,
                 metadataTruncated: true,
@@ -462,6 +465,7 @@ describe("OpenClawCronSection", () => {
             )
         ).toBeVisible();
         expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+        expect(screen.getByText("Hidden")).toBeVisible();
     });
 
     test("orders the bounded inventory enabled-first and then by name", () => {
@@ -576,7 +580,10 @@ describe("OpenClawCronSection", () => {
         ).not.toBeInTheDocument();
         await waitFor(() =>
             expect(
-                screen.getByRole("heading", { level: 2, name: "OpenClaw scheduled jobs" })
+                screen.getByRole("heading", {
+                    level: 2,
+                    name: "OpenClaw scheduled jobs",
+                })
             ).toHaveFocus()
         );
     });

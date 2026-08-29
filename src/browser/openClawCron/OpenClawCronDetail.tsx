@@ -114,7 +114,10 @@ export function OpenClawCronDetail({
         ...(job.payload.kind === "skill-collection-review"
             ? ([
                   ["Owner", "OpenClaw system"],
-                  ["Workspace", job.agentId ?? "main"],
+                  [
+                      "Workspace",
+                      job.agentIdTruncated ? "Hidden" : (job.agentId ?? "main"),
+                  ],
               ] as const)
             : []),
         ...(message === undefined

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import type { KopiaBackupStatus } from "../../../contracts/backups.ts";
 import type { DatabaseOverview } from "../../../contracts/database.ts";
-import type { DockerOverview, DockerUpdaterStatus } from "../../../contracts/docker.ts";
+import type {
+    DockerOverview,
+    DockerUpdaterPolicy,
+    DockerUpdaterStatus,
+} from "../../../contracts/docker.ts";
 import { gitWorkspaceCacheTtlMs } from "../../../contracts/gitWorkspace.ts";
 import type { LogMaintenanceStatusOutput } from "../../../contracts/logs.ts";
 import { quotaCacheTtlMs } from "../../../contracts/quota.ts";
@@ -311,6 +315,11 @@ describe("heartbeat operational signals", () => {
             candidateImage: "ghcr.io/example/app:2.0.0",
             state: "update-available",
         };
+        let updaterPolicy: DockerUpdaterPolicy = {
+            automatic: true,
+            state: "managed",
+            track: "digest",
+        };
         let logsStatus = {
             observedAtMs: 4800,
             policies: [
@@ -358,7 +367,9 @@ describe("heartbeat operational signals", () => {
                         observedAtMs: 3000,
                         staleSinceMs: 4500,
                         state: "last-known-good",
-                        updaterServices: [{ status: updaterStatus }],
+                        updaterServices: [
+                            { policy: updaterPolicy, status: updaterStatus },
+                        ],
                     }) as unknown as DockerOverview,
             },
             logsService: {
@@ -429,9 +440,17 @@ describe("heartbeat operational signals", () => {
         expect(JSON.stringify(result)).not.toContain("path");
 
         updaterStatus = { state: "not-checked" };
+        updaterPolicy = { reason: "disabled", state: "inventory-only" };
         const resultWithInventoryOnlyService = await read();
         expect(resultWithInventoryOnlyService.docker.updates).toMatchObject({
             condition: "current",
+            state: "last-known-good",
+        });
+
+        updaterPolicy = { automatic: true, state: "managed", track: "digest" };
+        const resultWithUnscannedManagedService = await read();
+        expect(resultWithUnscannedManagedService.docker.updates).toMatchObject({
+            condition: "attention",
             state: "last-known-good",
         });
 

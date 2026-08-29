@@ -76,6 +76,16 @@ function Harness() {
                 Settle oldest
             </button>
             <button
+                onClick={() => {
+                    for (let index = 2; index <= 13; index += 1) {
+                        tracker.settle(`active-${index}`);
+                    }
+                }}
+                type="button"
+            >
+                Settle newer batch
+            </button>
+            <button
                 onClick={() =>
                     tracker.track({
                         jobRunId: "refresh-run",
@@ -223,12 +233,14 @@ describe("operation tracker", () => {
             "(13)"
         );
 
+        await user.click(screen.getByRole("button", { name: "Settle newer batch" }));
+
         await user.click(screen.getByRole("button", { name: "Settle oldest" }));
         expect(screen.getByRole("status", { name: "Operations" }).textContent).toContain(
             "Active 1"
         );
         expect(screen.getByRole("status", { name: "Operations" }).textContent).toContain(
-            "(13)"
+            "(12)"
         );
     });
 

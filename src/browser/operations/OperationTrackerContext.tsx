@@ -79,13 +79,10 @@ function AuthenticatedOperationTrackerProvider({ children }: PropsWithChildren) 
                 (candidate) => candidate.jobRunId === jobRunId
             );
             if (operation === undefined || operation.terminal) return current;
-            const next = capTerminalHistory(
-                current.map((candidate) =>
-                    candidate.jobRunId === jobRunId
-                        ? { ...candidate, terminal: true }
-                        : candidate
-                )
-            );
+            const next = capTerminalHistory([
+                { ...operation, terminal: true },
+                ...current.filter((candidate) => candidate.jobRunId !== jobRunId),
+            ]);
             return next;
         });
         if (onTerminal !== undefined) {

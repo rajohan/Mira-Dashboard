@@ -564,9 +564,6 @@ export function createDeliveryRuntime(
                 signal,
                 runIdentity?.runId
             );
-            if (current.sourceRevision !== payload.sourceRevision) {
-                return fail("conflict");
-            }
             authorizePullRequestOperation(current, payload);
             authorizeProductionOperation(current, payload);
             authorizePreviewStop(current, payload);
