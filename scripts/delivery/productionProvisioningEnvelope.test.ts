@@ -28,6 +28,7 @@ async function releaseFixture(): Promise<string> {
         "runtime/bun": "runtime",
         "scripts/delivery/provisioning/future-domain/install.ts": "installer",
         "server/productionProvisioning.js": "provisioner",
+        "server/productionDelivery.js": "executor",
         "src/shared/futurePolicy.ts": "policy",
         "systemd/future-domain/future.service": "unit",
     });
@@ -38,22 +39,26 @@ async function releaseFixture(): Promise<string> {
             await writeFile(target, contents);
         })
     );
+    await writeFile(path.join(releaseRoot, "release-manifest.json"), "manifest\n");
     const artifacts = await inventoryReleaseArtifactTree(releaseRoot);
+    const runtime = artifacts.find(
+        ({ path: artifactPath }) => artifactPath === "runtime/bun"
+    )!;
+    const deliveryExecutor = artifacts.find(
+        ({ path: artifactPath }) => artifactPath === "server/productionDelivery.js"
+    )!;
     await writeFile(
-        path.join(releaseRoot, "release-manifest.json"),
+        path.join(releaseRoot, "release-descriptor.json"),
         `${JSON.stringify(
             {
                 artifacts,
-                futureTopLevelField: { acceptedWithoutPriorGenerationKnowledge: true },
+                deliveryExecutor,
+                formatVersion: 1,
+                releaseId,
                 runtime: {
-                    futureRuntimeField: "allowed",
+                    executable: runtime,
                     revision: runtimeRevision,
                     version: "1.4.0",
-                },
-                source: {
-                    commitSha: releaseId,
-                    futureSourceField: "allowed",
-                    treeState: "clean",
                 },
             },
             null,
@@ -64,12 +69,12 @@ async function releaseFixture(): Promise<string> {
 }
 
 describe("production provisioning envelope", () => {
-    test("admits future artifact categories and manifest fields", async () => {
+    test("admits future artifact categories through the stable descriptor", async () => {
         const releaseRoot = await releaseFixture();
 
         const envelope = await verifyProductionProvisioningEnvelope(releaseRoot);
 
-        expect(envelope.source.commitSha).toBe(releaseId);
+        expect(envelope.releaseId).toBe(releaseId);
         expect(
             envelope.artifacts.map(({ path: artifactPath }) => artifactPath)
         ).toContain("systemd/future-domain/future.service");
@@ -78,7 +83,7 @@ describe("production provisioning envelope", () => {
         ).toContain("scripts/delivery/provisioning/future-domain/install.ts");
     });
 
-    test("rejects an artifact not bound by the manifest", async () => {
+    test("rejects an artifact not bound by the descriptor", async () => {
         const releaseRoot = await releaseFixture();
         await writeFile(path.join(releaseRoot, "unexpected"), "unexpected");
 

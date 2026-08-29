@@ -204,7 +204,6 @@ describe("Storybook test runner", () => {
             "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
-            "--no-isolate",
             "a.stories.tsx",
         ]);
         expect(
@@ -222,7 +221,6 @@ describe("Storybook test runner", () => {
             "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
-            "--no-isolate",
             "--reporter=default",
             "--reporter=json",
             "--outputFile.json=/tmp/report.json",
@@ -234,7 +232,7 @@ describe("Storybook test runner", () => {
             ["a.stories.tsx"],
             { coverageDirectory: "/tmp/coverage/storybook-001" }
         );
-        expect(coverageCommand.slice(0, 12)).toEqual([
+        expect(coverageCommand.slice(0, 11)).toEqual([
             process.execPath,
             "/tmp/dashboard/node_modules/vitest/vitest.mjs",
             "run",
@@ -245,7 +243,6 @@ describe("Storybook test runner", () => {
             "--project=storybook-exclusive-002",
             "--project=storybook",
             "--maxWorkers=3",
-            "--no-isolate",
             "--coverage",
         ]);
         expect(
@@ -476,7 +473,7 @@ describe("Storybook test runner", () => {
             commands.every((command) => command.includes("--maxWorkers=3"))
         ).toBeTrue();
         expect(commands.every((command) => command.includes("--bail=1"))).toBeTrue();
-        expect(commands.every((command) => command.includes("--no-isolate"))).toBeTrue();
+        expect(commands.every((command) => !command.includes("--no-isolate"))).toBeTrue();
         expect(
             commands.every((command) =>
                 storybookTestProjectNames.every((name) =>

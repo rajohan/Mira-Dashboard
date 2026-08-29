@@ -38,4 +38,22 @@ describe("foreign release architecture boundary", () => {
         expect(foreignLoad).not.toContain("loadPublishedProductionRelease(");
         expect(foreignLoad).not.toContain("parseReleaseManifest(");
     });
+
+    test("loads the current release through its descriptor before target activation", async () => {
+        const source = await readFile(
+            path.resolve(deliveryRoot, "productionDeliveryExecutor.ts"),
+            "utf8"
+        );
+        const start = source.indexOf("async function loadCurrentArtifacts(");
+        const end = source.indexOf(
+            "async function resolveDescriptorVerifiedExecutor(",
+            start
+        );
+        const currentLoad = source.slice(start, end);
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        expect(currentLoad).toContain("loadDescribedPublishedProductionReleaseById(");
+        expect(currentLoad).not.toContain("loadPublishedProductionRelease(");
+        expect(currentLoad).not.toContain("requireProtocol(");
+    });
 });

@@ -1,5 +1,10 @@
 {
     "files": {
+        "scripts/delivery/foreignReleaseBoundaryArchitecture.test.ts": 1,
+        "scripts/delivery/productionDeliveryExecutorOwnerState.test.ts": 1,
+        "scripts/productionDeployClient.test.ts": 1,
+        "src/shared/productionDeliveryExecutorOwner.test.ts": 1,
+        "src/shared/productionReleaseDescriptor.test.ts": 1,
         "src/test/integration/delivery/productionReleaseLifecycle.test.ts": 21623,
         "scripts/delivery/productionReleaseActivation.test.ts": 17893,
         "scripts/delivery/productionArtifactRetention.test.ts": 15573,

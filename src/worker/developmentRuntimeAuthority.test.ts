@@ -216,6 +216,7 @@ describe("source-development runtime authority", () => {
                         },
                     ],
                     releaseId: secondPullRequestHead,
+                    releaseDescriptorSha256: "d".repeat(64),
                     releaseManifestSha256: "c".repeat(64),
                     runtime: {
                         revision: secondPullRequestHead,

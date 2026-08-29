@@ -147,6 +147,10 @@
                   "type": "string",
                   "pattern": "^[0-9a-f]{40}$"
                 },
+                "releaseDescriptorSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f\\d]{64}$"
+                },
                 "releaseManifestSha256": {
                   "type": "string",
                   "pattern": "^[a-f\\d]{64}$"
@@ -179,6 +183,7 @@
               "required": [
                 "assets",
                 "releaseId",
+                "releaseDescriptorSha256",
                 "releaseManifestSha256",
                 "runtime",
                 "tagName"
@@ -546,6 +551,10 @@
                   "type": "string",
                   "pattern": "^[0-9a-f]{40}$"
                 },
+                "releaseDescriptorSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f\\d]{64}$"
+                },
                 "releaseManifestSha256": {
                   "type": "string",
                   "pattern": "^[a-f\\d]{64}$"
@@ -578,6 +587,7 @@
               "required": [
                 "assets",
                 "releaseId",
+                "releaseDescriptorSha256",
                 "releaseManifestSha256",
                 "runtime",
                 "tagName"

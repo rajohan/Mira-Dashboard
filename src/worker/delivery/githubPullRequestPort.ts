@@ -646,6 +646,7 @@ export function createDeliveryGitHubPullRequestPort(
                     size,
                 })),
                 releaseId: releaseCommit.sha,
+                releaseDescriptorSha256: receipt.releaseDescriptorSha256,
                 releaseManifestSha256: receipt.releaseManifestSha256,
                 runtime: receipt.runtime,
                 tagName: raw.tag_name,

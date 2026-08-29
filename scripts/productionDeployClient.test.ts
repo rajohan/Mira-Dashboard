@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { queueProductionDeploy } from "./productionDeployClient.ts";
+import {
+    ProductionDeployTemporarilyUnavailableError,
+    queueProductionDeploy,
+} from "./productionDeployClient.ts";
 
 const runId = "018f6f50-6a9e-7b88-8000-000000000002";
 
@@ -90,5 +93,32 @@ describe("production deploy client", () => {
                 sleep: () => Promise.resolve(),
             })
         ).rejects.toThrow("Production deploy job failed");
+    });
+
+    test("retries an ambiguous enqueue with the same idempotency key", async () => {
+        const enqueueInputs: unknown[] = [];
+        let attempt = 0;
+        await queueProductionDeploy({
+            nowMs: () => 1000,
+            readToken: () => Promise.resolve("token"),
+            request: (_token, kind, _procedure, input) => {
+                if (kind === "query") return Promise.resolve(run("succeeded"));
+                enqueueInputs.push(input);
+                attempt += 1;
+                if (attempt === 1) {
+                    return Promise.reject(
+                        new ProductionDeployTemporarilyUnavailableError()
+                    );
+                }
+                return Promise.resolve({
+                    jobRunId: runId,
+                    operation: "deploy",
+                    queued: true,
+                });
+            },
+            sleep: () => Promise.resolve(),
+        });
+        expect(enqueueInputs).toHaveLength(2);
+        expect(enqueueInputs[1]).toEqual(enqueueInputs[0]);
     });
 });

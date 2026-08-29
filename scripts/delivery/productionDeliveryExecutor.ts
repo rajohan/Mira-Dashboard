@@ -61,6 +61,7 @@ import {
     loadDescribedPublishedProductionReleaseById,
     publishDescribedProductionRelease,
     publishProductionRelease,
+    type DescribedPublishedProductionRelease,
     type PublishedProductionRelease,
 } from "./productionReleasePublication.ts";
 import {
@@ -177,7 +178,17 @@ export interface ProductionDeliveryExecutorDependencies {
     ) => ProductionReleaseActivationDependencies["services"];
     readonly discardCandidate?: typeof discardOwnedProductionReleaseCandidate;
     readonly loadActivation?: typeof loadProductionActivationState;
-    readonly loadArtifacts?: (
+    readonly loadCurrentArtifacts?: (
+        paths: PreparedProductionDeliveryPaths,
+        releaseId: string,
+        runtimeRevision: string
+    ) => Promise<
+        Readonly<{
+            release: DescribedPublishedProductionRelease;
+            runtime: InstalledProductionRuntime;
+        }>
+    >;
+    readonly loadTargetArtifacts?: (
         paths: PreparedProductionDeliveryPaths,
         releaseId: string,
         runtimeRevision: string
@@ -503,16 +514,27 @@ async function loadCurrentArtifacts(
     releaseId: string,
     runtimeRevision: string
 ): Promise<
-    Readonly<{ release: PublishedProductionRelease; runtime: InstalledProductionRuntime }>
+    Readonly<{
+        release: DescribedPublishedProductionRelease;
+        runtime: InstalledProductionRuntime;
+    }>
 > {
-    const release = await loadPublishedProductionRelease(
-        paths,
-        releaseId,
-        runtimeRevision
-    );
-    requireProtocol(release);
-    const runtime = await loadInstalledProductionRuntime(paths, release.manifest.runtime);
+    const release = await loadDescribedPublishedProductionReleaseById(paths, releaseId);
+    if (release.descriptor.runtime.revision !== runtimeRevision) throw failure();
+    const runtime = await loadInstalledProductionRuntime(paths, {
+        revision: release.descriptor.runtime.revision,
+        version: release.descriptor.runtime.version,
+    });
     return Object.freeze({ release, runtime });
+}
+
+type ExecutorCurrentArtifacts = Readonly<{
+    release: DescribedPublishedProductionRelease;
+    runtime: InstalledProductionRuntime;
+}>;
+
+function currentReleaseId(current: ExecutorCurrentArtifacts): string {
+    return current.release.descriptor.releaseId;
 }
 
 async function resolveDescriptorVerifiedExecutor(
@@ -568,10 +590,7 @@ export async function prepareProductionDeliveryTargetUnderLease(
     paths: PreparedProductionDeliveryPaths,
     projectRoot: string,
     record: Exclude<DeliveryProductionOperationRecord, { phase: "terminal" }>,
-    current: Readonly<{
-        release: PublishedProductionRelease;
-        runtime: InstalledProductionRuntime;
-    }>,
+    current: ExecutorCurrentArtifacts,
     artifactSource: "published-release" | "retained",
     dependencies: ProductionDeliveryExecutorDependencies
 ): Promise<
@@ -581,10 +600,21 @@ export async function prepareProductionDeliveryTargetUnderLease(
     const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
     if ((await pathState(publishedRoot)) === "present") {
         if (record.capsule.enqueue.payload.operation === "deploy") {
-            const manifestBytes = await readFile(
-                path.join(publishedRoot, "release-manifest.json")
-            );
+            let descriptorBytes: Uint8Array;
+            let manifestBytes: Uint8Array;
+            try {
+                [descriptorBytes, manifestBytes] = await Promise.all([
+                    readFile(path.join(publishedRoot, "release-descriptor.json")),
+                    readFile(path.join(publishedRoot, "release-manifest.json")),
+                ]);
+            } catch {
+                throw failure();
+            }
             if (
+                !releaseManifestMatchesAuthority(
+                    descriptorBytes,
+                    record.capsule.enqueue.payload.release.releaseDescriptorSha256
+                ) ||
                 !releaseManifestMatchesAuthority(
                     manifestBytes,
                     record.capsule.enqueue.payload.release.releaseManifestSha256
@@ -783,7 +813,7 @@ function loadExecutorArtifacts(
     Readonly<{ release: PublishedProductionRelease; runtime: InstalledProductionRuntime }>
 > {
     return (
-        dependencies.loadArtifacts ??
+        dependencies.loadTargetArtifacts ??
         ((_paths, exactReleaseId, exactRuntimeRevision) =>
             loadExactArtifacts(_paths, exactReleaseId, exactRuntimeRevision))
     )(paths, releaseId, runtimeRevision);
@@ -881,7 +911,7 @@ export async function runProductionDeliveryExecutorUnderLease(
     const targetIdentity = record.capsule.cas.target;
     const currentOwner = ownerState.owner;
     if (
-        dependencies.loadArtifacts === undefined &&
+        dependencies.loadTargetArtifacts === undefined &&
         (currentOwner?.releaseId !== targetIdentity.releaseId ||
             currentOwner.runtimeRevision !== targetIdentity.runtimeRevision)
     ) {
@@ -947,7 +977,10 @@ export async function runProductionDeliveryExecutorUnderLease(
         await (dependencies.installRuntime ?? installProductionRuntime)(
             lease,
             paths,
-            described.descriptor.runtime,
+            {
+                revision: described.descriptor.runtime.revision,
+                version: described.descriptor.runtime.version,
+            },
             { sourceExecutable: path.join(described.releaseRoot, "runtime/bun") }
         );
         record = await advanceTo(lease, paths, record, "target-executor-admitted", nowMs);
@@ -977,7 +1010,7 @@ export async function runProductionDeliveryExecutorUnderLease(
                         ? record.capsule.enqueue.payload.release
                         : undefined,
             });
-        if (dependencies.loadArtifacts === undefined) {
+        if (dependencies.loadTargetArtifacts === undefined) {
             await (dependencies.artifactAdmission ?? prepareProductionArtifactAdmission)(
                 lease,
                 paths,
@@ -1019,7 +1052,7 @@ export async function runProductionDeliveryExecutorUnderLease(
         }
         if (!activationMatchesCurrent(observed, record)) throw failure();
 
-        const current = await (dependencies.loadArtifacts ?? loadCurrentArtifacts)(
+        const current = await (dependencies.loadCurrentArtifacts ?? loadCurrentArtifacts)(
             paths,
             record.capsule.cas.current.releaseId,
             record.capsule.cas.current.runtimeRevision
@@ -1028,8 +1061,8 @@ export async function runProductionDeliveryExecutorUnderLease(
             release: PublishedProductionRelease;
             runtime: InstalledProductionRuntime;
         }>;
-        if (dependencies.loadArtifacts !== undefined) {
-            target = await dependencies.loadArtifacts(
+        if (dependencies.loadTargetArtifacts !== undefined) {
+            target = await dependencies.loadTargetArtifacts(
                 paths,
                 record.capsule.cas.target.releaseId,
                 record.capsule.cas.target.runtimeRevision
@@ -1051,10 +1084,7 @@ export async function runProductionDeliveryExecutorUnderLease(
                 dependencies
             );
         }
-        if (
-            current.release.manifest.source.commitSha ===
-            target.release.manifest.source.commitSha
-        ) {
+        if (currentReleaseId(current) === target.release.manifest.source.commitSha) {
             throw failure();
         }
         const progress: NonNullable<
@@ -1070,7 +1100,7 @@ export async function runProductionDeliveryExecutorUnderLease(
             if (phase === "target-smoke-verified") {
                 const verifyOwnerTarget =
                     dependencies.verifyExecutorOwnerTarget ??
-                    (dependencies.loadArtifacts === undefined
+                    (dependencies.loadTargetArtifacts === undefined
                         ? async (
                               projectRoot: string,
                               releaseId: string,

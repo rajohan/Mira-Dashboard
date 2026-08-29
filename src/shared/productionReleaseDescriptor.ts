@@ -9,7 +9,7 @@ import {
 const invalidDescriptor = "Production release descriptor is invalid";
 export const productionReleaseDescriptorFileName = "release-descriptor.json";
 export const maximumProductionReleaseDescriptorBytes = 4 * 1024 * 1024;
-export const maximumProductionReleaseDescriptorArtifacts = 4096;
+export const maximumProductionReleaseDescriptorArtifacts = 4097;
 
 const canonicalRelativePathSchema = v.pipe(
     v.string(invalidDescriptor),

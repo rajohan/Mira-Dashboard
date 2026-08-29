@@ -368,6 +368,9 @@ describe("production release root provisioner", () => {
         const manifestBytes = await readFile(
             path.join(sourceReleaseRoot, "release-manifest.json")
         );
+        const descriptorBytes = await readFile(
+            path.join(sourceReleaseRoot, "release-descriptor.json")
+        );
         const archiveBytes = encoder.encode("verified archive fixture");
         const receiptBytes = encoder.encode(
             JSON.stringify({
@@ -378,6 +381,7 @@ describe("production release root provisioner", () => {
                 },
                 formatVersion: 1,
                 releaseId,
+                releaseDescriptorSha256: sha256(descriptorBytes),
                 releaseManifestSha256: sha256(manifestBytes),
                 runtime,
             })

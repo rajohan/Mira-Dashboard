@@ -16,6 +16,7 @@ import {
     deliveryProductionProtocol,
     type DeliveryProductionOperationCapsule,
 } from "../../src/shared/deliveryProductionOperation.ts";
+import { parseProductionReleaseDescriptor } from "../../src/shared/productionReleaseDescriptor.ts";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
@@ -168,6 +169,39 @@ function artifact(
                         : [...releaseProcessRoles],
                 runtime: { revision: runtimeRevision, version: "1.4.0" },
                 source: { commitSha: releaseId, treeState: "clean" },
+            }),
+            releaseRoot: `/production/releases/${releaseId}`,
+        }),
+        runtime: Object.freeze({
+            executable: `/production/runtimes/bun/${runtimeRevision}/bun`,
+            identity: { revision: runtimeRevision, version: "1.4.0" },
+        }),
+    });
+}
+
+function describedArtifact(releaseId: string, runtimeRevision: string) {
+    const executable = Object.freeze({
+        bytes: 1,
+        path: "runtime/bun",
+        sha256: checksum,
+    });
+    const deliveryExecutor = Object.freeze({
+        bytes: 1,
+        path: "server/productionDelivery.js",
+        sha256: checksum,
+    });
+    return Object.freeze({
+        release: Object.freeze({
+            descriptor: parseProductionReleaseDescriptor({
+                artifacts: [executable, deliveryExecutor],
+                deliveryExecutor,
+                formatVersion: 1,
+                releaseId,
+                runtime: {
+                    executable,
+                    revision: runtimeRevision,
+                    version: "1.4.0",
+                },
             }),
             releaseRoot: `/production/releases/${releaseId}`,
         }),
@@ -489,7 +523,9 @@ describe("production Delivery executor", () => {
                         },
                         verifySmoke: () => Promise.resolve(),
                     }),
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -603,7 +639,9 @@ describe("production Delivery executor", () => {
                 verifyReady: () => Promise.resolve(),
                 verifySmoke: () => Promise.resolve(),
             }),
-            loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+            loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+            loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                 Promise.resolve(artifact(releaseId, runtimeRevision)),
             nowMs: () => 10_000,
             verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -704,7 +742,9 @@ describe("production Delivery executor", () => {
                         verifyReady: () => Promise.resolve(),
                         verifySmoke: () => Promise.resolve(),
                     }),
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -804,7 +844,9 @@ describe("production Delivery executor", () => {
                         verifyReady: () => Promise.resolve(),
                         verifySmoke: () => Promise.resolve(),
                     }),
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -829,7 +871,7 @@ describe("production Delivery executor", () => {
                 operationCapsule(),
                 1000
             );
-            const current = artifact(currentReleaseId, currentRuntimeRevision);
+            const current = describedArtifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
             const candidateRuntimeExecutable = `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`;
@@ -910,7 +952,7 @@ describe("production Delivery executor", () => {
                     paths,
                     options.projectRoot,
                     record,
-                    artifact(currentReleaseId, currentRuntimeRevision),
+                    describedArtifact(currentReleaseId, currentRuntimeRevision),
                     "published-release",
                     {}
                 )
@@ -938,7 +980,7 @@ describe("production Delivery executor", () => {
                     paths,
                     options.projectRoot,
                     record,
-                    artifact(currentReleaseId, currentRuntimeRevision),
+                    describedArtifact(currentReleaseId, currentRuntimeRevision),
                     "retained",
                     {
                         preparePublishedRelease: () => {
@@ -967,7 +1009,7 @@ describe("production Delivery executor", () => {
                 operationCapsule(),
                 1000
             );
-            const current = artifact(currentReleaseId, currentRuntimeRevision);
+            const current = describedArtifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
             const checkoutRoot = `${options.projectRoot}/production/checkout`;
@@ -1052,7 +1094,7 @@ describe("production Delivery executor", () => {
                     paths,
                     options.projectRoot,
                     record,
-                    artifact(currentReleaseId, currentRuntimeRevision),
+                    describedArtifact(currentReleaseId, currentRuntimeRevision),
                     "published-release",
                     {
                         preparationCapacityAdmission: () =>
@@ -1118,7 +1160,9 @@ describe("production Delivery executor", () => {
                 paths,
                 options,
                 {
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),

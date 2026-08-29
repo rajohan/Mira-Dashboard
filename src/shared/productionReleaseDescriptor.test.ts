@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    maximumProductionReleaseDescriptorArtifacts,
     parseProductionReleaseDescriptor,
     serializeProductionReleaseDescriptor,
 } from "./productionReleaseDescriptor.ts";
@@ -69,6 +70,32 @@ describe("production release descriptor", () => {
             parseProductionReleaseDescriptor({
                 ...valid,
                 deliveryExecutor: { ...valid.deliveryExecutor, bytes: 31 },
+            })
+        ).toThrow("Production release descriptor is invalid");
+    });
+
+    test("reserves one descriptor artifact beyond the manifest artifact limit", () => {
+        const valid = descriptor();
+        const fillerCount = maximumProductionReleaseDescriptorArtifacts - 3;
+        const artifacts = [
+            ...Array.from({ length: fillerCount }, (_, index) => ({
+                bytes: 1,
+                path: `assets/${String(index).padStart(4, "0")}`,
+                sha256: "f".repeat(64),
+            })),
+            ...valid.artifacts,
+        ].toSorted((left, right) => left.path.localeCompare(right.path));
+
+        expect(
+            parseProductionReleaseDescriptor({ ...valid, artifacts }).artifacts
+        ).toHaveLength(maximumProductionReleaseDescriptorArtifacts);
+        expect(() =>
+            parseProductionReleaseDescriptor({
+                ...valid,
+                artifacts: [
+                    { bytes: 1, path: "0000", sha256: "f".repeat(64) },
+                    ...artifacts,
+                ],
             })
         ).toThrow("Production release descriptor is invalid");
     });

@@ -17,7 +17,7 @@ interface TrpcEnvelope {
     readonly result?: { readonly data?: { readonly json?: unknown } };
 }
 
-class ProductionDeployTemporarilyUnavailableError extends Error {}
+export class ProductionDeployTemporarilyUnavailableError extends Error {}
 
 async function readCredential(): Promise<string> {
     const file = await open(
@@ -109,14 +109,28 @@ export async function queueProductionDeploy(
     const requestDeploy = dependencies.request ?? request;
     const sleep = dependencies.sleep ?? Bun.sleep;
     const token = await (dependencies.readToken ?? readCredential)();
-    const queued = v.parse(
-        deliveryRequestOperationResultSchema,
-        await requestDeploy(token, "mutation", "delivery.deployCurrent", {
-            confirmation: "deploy-delivery-main",
-            idempotencyKey: Bun.randomUUIDv7().replaceAll("-", ""),
-        })
-    );
     const deadline = nowMs() + deploymentDeadlineMs;
+    const idempotencyKey = Bun.randomUUIDv7().replaceAll("-", "");
+    let queued: v.InferOutput<typeof deliveryRequestOperationResultSchema> | undefined;
+    while (queued === undefined && nowMs() < deadline) {
+        try {
+            queued = v.parse(
+                deliveryRequestOperationResultSchema,
+                await requestDeploy(token, "mutation", "delivery.deployCurrent", {
+                    confirmation: "deploy-delivery-main",
+                    idempotencyKey,
+                })
+            );
+        } catch (error) {
+            if (!(error instanceof ProductionDeployTemporarilyUnavailableError)) {
+                throw error;
+            }
+            await sleep(pollIntervalMs);
+        }
+    }
+    if (queued === undefined) {
+        throw new Error("Production deploy job was not queued before its deadline");
+    }
     while (nowMs() < deadline) {
         let rawDetail: unknown;
         try {

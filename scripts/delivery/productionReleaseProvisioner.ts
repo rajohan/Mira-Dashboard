@@ -602,7 +602,7 @@ async function verifyStagedRelease(
 ): Promise<string> {
     const releaseRoot = path.join(environment.releasesRoot, releaseId);
     const manifest = await environment.verifyProvisioningEnvelope(releaseRoot);
-    if (manifest.source.commitSha !== releaseId) {
+    if (manifest.releaseId !== releaseId) {
         throw failure();
     }
     return releaseRoot;
@@ -614,14 +614,24 @@ async function verifyReceiptBackedRelease(
     receipt: ProductionProvisioningReceiptEnvelope,
     environment: ProductionReleaseProvisionerEnvironment
 ): Promise<void> {
-    const manifest = await environment.verifyProvisioningEnvelope(releaseRoot);
-    const manifestBytes = await readFile(path.join(releaseRoot, "release-manifest.json"));
-    if (
-        manifest.source.commitSha !== releaseId ||
-        manifest.runtime.version !== receipt.runtime.version ||
-        manifest.runtime.revision !== receipt.runtime.revision ||
-        sha256(manifestBytes) !== receipt.releaseManifestSha256
-    ) {
+    try {
+        const manifest = await environment.verifyProvisioningEnvelope(releaseRoot);
+        const manifestBytes = await readFile(
+            path.join(releaseRoot, "release-manifest.json")
+        );
+        const descriptorBytes = await readFile(
+            path.join(releaseRoot, "release-descriptor.json")
+        );
+        if (
+            manifest.releaseId !== releaseId ||
+            manifest.runtime.version !== receipt.runtime.version ||
+            manifest.runtime.revision !== receipt.runtime.revision ||
+            sha256(descriptorBytes) !== receipt.releaseDescriptorSha256 ||
+            sha256(manifestBytes) !== receipt.releaseManifestSha256
+        ) {
+            throw failure();
+        }
+    } catch {
         throw failure();
     }
 }

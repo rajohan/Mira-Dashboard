@@ -106,7 +106,6 @@ export function createStorybookTestCommand(
         "--bail=1",
         ...storybookTestProjectNames.map((name) => `--project=${name}`),
         `--maxWorkers=${testWorkerCount}`,
-        "--no-isolate",
         ...(options.coverageDirectory === undefined
             ? []
             : [
