@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.5](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.4...v0.5.5) (2026-08-29)
+
+
+### Bug Fixes
+
+* **operations:** restore Delivery and OpenClaw compatibility ([#508](https://github.com/rajohan/Mira-Dashboard/issues/508)) ([d1e7baf](https://github.com/rajohan/Mira-Dashboard/commit/d1e7bafdfbf6b871d35c02d8c009be2ae1b2c836))
+
 ## [0.5.4](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.3...v0.5.4) (2026-08-29)
 
 
