@@ -31,6 +31,7 @@ export interface ReleaseArtifactInventoryRecord {
 /** Deterministic mutation boundary used only by adversarial tests. */
 export interface ReleaseArtifactInventoryTestHooks {
     readonly afterFileRead?: (relativePath: string) => Promise<void> | void;
+    readonly maximumFileCount?: number;
 }
 
 interface DirectorySnapshot {
@@ -122,6 +123,15 @@ export async function inventoryReleaseArtifactTree(
         if (canonicalRoot !== releaseRoot) throw invalidArtifactTree();
         const rootSnapshot = await directorySnapshot(releaseRoot);
         const records: ReleaseArtifactInventoryRecord[] = [];
+        const maximumFileCount =
+            testHooks.maximumFileCount ?? maximumReleaseArtifactTreeFileCount;
+        if (
+            !Number.isSafeInteger(maximumFileCount) ||
+            maximumFileCount < 1 ||
+            maximumFileCount > maximumReleaseArtifactTreeFileCount
+        ) {
+            throw invalidArtifactTree();
+        }
         let directoryCount = 0;
         let totalBytes = 0;
 
@@ -154,10 +164,7 @@ export async function inventoryReleaseArtifactTree(
                     await visit(relativePath, depth + 1);
                     continue;
                 }
-                if (
-                    !entry.isFile() ||
-                    records.length >= maximumReleaseArtifactTreeFileCount
-                ) {
+                if (!entry.isFile() || records.length >= maximumFileCount) {
                     throw invalidArtifactTree();
                 }
 

@@ -39,11 +39,11 @@ interface PullRequestActionState {
 type BadgeVariant = "danger" | "default" | "success" | "warning";
 
 interface PullRequestBrowserProps {
+    readonly actionBusy: (action: DeliveryPullRequestActionCapability) => boolean;
     readonly actionState: (
         pullRequest: DeliveryPullRequest,
         action: DeliveryPullRequestActionCapability
     ) => PullRequestActionState;
-    readonly busy: boolean;
     readonly groups: readonly DeliveryPullRequestGroup[];
     readonly onAction: (
         group: DeliveryPullRequestGroup,
@@ -224,8 +224,8 @@ function SafeMarkdownImage({ alt, src }: ComponentProps<"img">) {
 }
 
 function PullRequestCard({
+    actionBusy,
     actionState,
-    busy,
     onAction,
     pullRequest,
     preview,
@@ -311,6 +311,8 @@ function PullRequestCard({
             )}
             <div className="mt-3 grid grid-cols-1 gap-1.5 sm:flex sm:flex-wrap">
                 {actions.map(({ action, reason, state }) => {
+                    const busy = actionBusy(action);
+                    const label = actionLabel(group, pullRequest, action, preview);
                     const reasonId =
                         reason === undefined
                             ? undefined
@@ -319,8 +321,10 @@ function PullRequestCard({
                         <div className="w-full sm:w-auto" key={action.action}>
                             <Button
                                 aria-describedby={state.enabled ? undefined : reasonId}
-                                disabled={!state.enabled || busy}
+                                busy={busy}
+                                busyLabel={`${label} in progress…`}
                                 className="w-full sm:w-auto"
+                                disabled={!state.enabled}
                                 onClick={() => onAction(group, pullRequest, action)}
                                 size="sm"
                                 title={reason}
@@ -330,7 +334,7 @@ function PullRequestCard({
                                     icon={actionIcon(pullRequest, action.action, preview)}
                                     size="sm"
                                 />
-                                {actionLabel(group, pullRequest, action, preview)}
+                                {label}
                             </Button>
                         </div>
                     );
@@ -359,8 +363,8 @@ function PullRequestCard({
 
 /** @returns Server-grouped pull requests with no browser-side chain or policy inference. */
 export function PullRequestBrowser({
+    actionBusy,
     actionState,
-    busy,
     groups,
     onAction,
     preview,
@@ -382,8 +386,8 @@ export function PullRequestBrowser({
                             {group.members.map((pullRequest) => (
                                 <li key={pullRequest.number}>
                                     <PullRequestCard
+                                        actionBusy={actionBusy}
                                         actionState={actionState}
-                                        busy={busy}
                                         group={group}
                                         onAction={onAction}
                                         preview={preview}

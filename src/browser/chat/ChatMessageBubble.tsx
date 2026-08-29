@@ -331,7 +331,7 @@ function SafeMarkdownAnchor({
     );
 }
 
-function BlockedMarkdownImage({ alt }: Readonly<{ alt?: string }>) {
+export function BlockedMarkdownImage({ alt }: Readonly<{ alt?: string }>) {
     const description = alt === undefined || alt === "" ? "" : `: ${alt}`;
     return <span role="note">[External image blocked{description}]</span>;
 }

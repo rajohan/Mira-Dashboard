@@ -95,6 +95,18 @@ function validFile(status: BigIntStats, device: bigint): boolean {
     );
 }
 
+function validSocket(status: BigIntStats, device: bigint): boolean {
+    return (
+        typeof process.getuid === "function" &&
+        status.isSocket() &&
+        !status.isSymbolicLink() &&
+        status.uid === BigInt(process.getuid()) &&
+        status.dev === device &&
+        status.nlink === 1n &&
+        (status.mode & 0o077n) === 0n
+    );
+}
+
 async function mountId(fileDescriptor: number): Promise<bigint> {
     try {
         const text = await Bun.file(`/proc/self/fdinfo/${fileDescriptor}`).text();
@@ -471,6 +483,15 @@ async function emptyDirectory(
                 } finally {
                     await handle.close();
                 }
+            } else if (validSocket(metadata, root.device)) {
+                const retired = path.join(descriptor, `.reap-${Bun.randomUUIDv7()}`);
+                await rename(child, retired);
+                await directory.handle.sync();
+                const named = await lstat(retired, { bigint: true });
+                if (!validSocket(named, root.device) || named.ino !== metadata.ino) {
+                    fail();
+                }
+                await unlink(retired);
             } else {
                 fail();
             }
@@ -505,7 +526,10 @@ async function validateDirectory(
             const metadata = await lstat(child, { bigint: true });
             if (validDirectory(metadata, root.device)) {
                 await validateDirectory(root, child, metadata.ino, depth + 1, observed);
-            } else if (!validFile(metadata, root.device)) {
+            } else if (
+                !validFile(metadata, root.device) &&
+                !validSocket(metadata, root.device)
+            ) {
                 fail();
             }
         }

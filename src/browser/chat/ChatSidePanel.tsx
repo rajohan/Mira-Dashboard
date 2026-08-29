@@ -28,8 +28,10 @@ import { Heading } from "../ui/Heading.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Input } from "../ui/Input.tsx";
 import { LoadingState } from "../ui/LoadingState.tsx";
+import { Markdown } from "../ui/Markdown.tsx";
 import { Text } from "../ui/Text.tsx";
 import { Virtualizer } from "../ui/Virtualizer.tsx";
+import { BlockedMarkdownImage } from "./ChatMessageBubble.tsx";
 import type {
     ChatActivePlanView,
     ChatBackgroundTaskView,
@@ -158,9 +160,11 @@ function Plan({ plan }: Readonly<{ plan: ChatActivePlanView }>) {
         <section aria-label={`Active plan: ${plan.title}`} className="shrink-0 space-y-2">
             <Heading level={3}>{plan.title}</Heading>
             {plan.description === undefined ? null : (
-                <Text size="sm" tone="muted">
-                    {plan.description}
-                </Text>
+                <Markdown
+                    className="text-primary-400 [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_p]:my-1"
+                    components={{ img: BlockedMarkdownImage }}
+                    source={plan.description}
+                />
             )}
             <ol className="space-y-1.5">
                 {plan.items.map((item) => (

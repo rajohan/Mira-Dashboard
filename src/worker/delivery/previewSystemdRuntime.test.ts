@@ -40,6 +40,7 @@ function launchSpecification() {
             bunExecutable: "/opt/mira/runtime/bun",
             capabilitySocket: "/srv/mira-preview/gateways/pr-42/gateway.sock",
             expectedHeadSha: "b".repeat(40),
+            ingressSocket: "/srv/mira-preview/ingress/preview.sock",
             operationId,
             publicOrigin: "https://preview.example.test",
             stateRoot: "/srv/mira-preview/states/pr-42",
@@ -54,6 +55,7 @@ function ingressSpecification() {
         listenUnixSocket: "/run/user/1234/mira-preview.sock",
         operationId,
         previewPort: 5173,
+        publicOrigin: "https://preview.example.test:3445",
     });
 }
 
@@ -114,6 +116,7 @@ describe("preview systemd runtime", () => {
         const specification = launchSpecification();
 
         await runtime.start(specification, gatewaySpecification());
+        await runtime.ingress.start(ingressSpecification());
         expect(await runtime.inspect(specification.unitName)).toEqual({
             active: true,
             ready: true,
@@ -137,7 +140,7 @@ describe("preview systemd runtime", () => {
         expect(JSON.stringify(requests)).not.toContain("TOKEN");
     });
 
-    test("starts the socket-activated ingress joined to the exact preview namespace", async () => {
+    test("waits for the sandbox-owned ingress socket without launching another unit", async () => {
         const requests: PreviewSystemdProcessRequest[] = [];
         const readinessSockets: string[] = [];
         const runtime = createPreviewSystemdRuntime({
@@ -164,16 +167,7 @@ describe("preview systemd runtime", () => {
         await runtime.ingress.start(specification);
         await runtime.ingress.stop(specification);
 
-        const launch = requests[0]?.command ?? [];
-        expect(launch).toContain(
-            `--property=JoinsNamespaceOf=mira-dashboard-preview-${operationId}.service`
-        );
-        expect(launch).toContain(
-            "--socket-property=ListenStream=/run/user/1234/mira-preview.sock"
-        );
-        expect(launch).toContain("--socket-property=SocketMode=0600");
-        expect(launch).toContain("/usr/lib/systemd/systemd-socket-proxyd");
-        expect(launch).toContain("--connections-max=16");
+        expect(requests).toEqual([]);
         expect(readinessSockets).toEqual([specification.listenUnixSocket]);
         expect(requests.some(({ command }) => command.includes("/bin/sh"))).toBe(false);
     });

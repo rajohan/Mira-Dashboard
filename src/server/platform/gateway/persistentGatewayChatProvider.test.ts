@@ -2290,6 +2290,132 @@ describe("persistent Gateway chat provider", () => {
         });
     });
 
+    test("hydrates progress-card markdown beside an in-flight task list", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                inFlightRun: {
+                    plan: {
+                        steps: [
+                            { status: "completed", step: "Prove Preview" },
+                            { status: "in_progress", step: "Verify CI" },
+                        ],
+                    },
+                    runId: "provider-run-progress-card",
+                    text: "",
+                },
+                messages: [],
+                offset: 0,
+                sessionKey,
+            },
+            "progressCard.get": {
+                card: {
+                    markdown:
+                        "**Real Preview and deploy boundaries are green**\n\nThe full rehearsal passed.",
+                    sessionKey,
+                },
+            },
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.inFlightRun?.plan).toEqual({
+            explanation:
+                "**Real Preview and deploy boundaries are green**\n\nThe full rehearsal passed.",
+            steps: [
+                { status: "completed", text: "Prove Preview" },
+                { status: "in_progress", text: "Verify CI" },
+            ],
+        });
+        expect(harness.requests).toEqual([
+            {
+                method: "chat.history",
+                parameters: {
+                    agentId: "main",
+                    limit: 1,
+                    maxChars: 1024,
+                    offset: 0,
+                    sessionKey,
+                },
+            },
+            {
+                method: "progressCard.get",
+                parameters: { sessionKey },
+            },
+        ]);
+    });
+
+    test("keeps history usable when progress-card enrichment is unavailable", async () => {
+        const harness = createHarness({
+            "chat.history": {
+                inFlightRun: {
+                    plan: {
+                        steps: [{ status: "in_progress", step: "Verify CI" }],
+                    },
+                    runId: "provider-run-progress-card-unavailable",
+                    text: "",
+                },
+                messages: [],
+                offset: 0,
+                sessionKey,
+            },
+            "progressCard.get": new Error("older Gateway"),
+        });
+
+        const history = await harness.provider.history({
+            limit: 1,
+            maxChars: 1024,
+            offset: 0,
+            sessionKey,
+        });
+
+        expect(history.inFlightRun?.plan).toEqual({
+            steps: [{ status: "in_progress", text: "Verify CI" }],
+        });
+        expect(harness.requests.map(({ method }) => method)).toEqual([
+            "chat.history",
+            "progressCard.get",
+        ]);
+    });
+
+    test("preserves cancellation during progress-card enrichment", async () => {
+        const controller = new AbortController();
+        const cancellation = new Error("history cancelled");
+        const progressCard = new Promise<never>((_resolve, reject) => {
+            controller.signal.addEventListener("abort", () => reject(cancellation), {
+                once: true,
+            });
+        });
+        const harness = createHarness({
+            "chat.history": {
+                inFlightRun: {
+                    plan: {
+                        steps: [{ status: "in_progress", step: "Verify CI" }],
+                    },
+                    runId: "provider-run-progress-card-cancelled",
+                    text: "",
+                },
+                messages: [],
+                offset: 0,
+                sessionKey,
+            },
+            "progressCard.get": progressCard,
+        });
+
+        const history = harness.provider.history(
+            { limit: 1, maxChars: 1024, offset: 0, sessionKey },
+            controller.signal
+        );
+        await Promise.resolve();
+        controller.abort(cancellation);
+
+        expect(await history.catch((error: unknown) => error)).toBe(cancellation);
+    });
+
     test("rejects a history response larger than the exact requested page", async () => {
         const harness = createHarness({
             "chat.history": {

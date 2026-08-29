@@ -118,6 +118,15 @@ function IdentityHarness() {
     );
 }
 
+function DeliveryIdentityHarness() {
+    const tracker = useOperationTracker();
+    return (
+        <output aria-label="Delivery operation state">
+            {tracker.operationIsActive("job:delivery.github") ? "Busy" : "Idle"}
+        </output>
+    );
+}
+
 function restoredScanQuery() {
     return Promise.resolve({
         runs: [
@@ -190,6 +199,33 @@ describe("operation tracker", () => {
         expect(
             await screen.findByRole("status", { name: "Exact operation state" })
         ).toHaveTextContent("Scanning");
+    });
+
+    test("restores the durable Delivery action family across devices", async () => {
+        render(
+            <ProviderHarness
+                query={() =>
+                    Promise.resolve({
+                        runs: [
+                            {
+                                actionKey: "delivery.github",
+                                displayName: "Reject pull request",
+                                id: "restored-delivery-action",
+                                operationKey: "delivery:reject-pull-request",
+                                state: "running",
+                            },
+                        ],
+                        summary: {},
+                    })
+                }
+            >
+                <DeliveryIdentityHarness />
+            </ProviderHarness>
+        );
+
+        expect(
+            await screen.findByRole("status", { name: "Delivery operation state" })
+        ).toHaveTextContent("Busy");
     });
 
     test("deduplicates durable run identities and dismisses them", async () => {

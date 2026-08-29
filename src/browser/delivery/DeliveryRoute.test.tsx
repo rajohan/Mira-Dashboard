@@ -20,6 +20,10 @@ import type {
 import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
+import {
+    OperationTrackerContext,
+    type OperationTrackerValue,
+} from "../operations/operationTrackerContextValue.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import {
@@ -270,7 +274,8 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
 
 function renderDelivery(
     client: DeliveryClient,
-    initializeQueryClient?: (queryClient: QueryClient) => void
+    initializeQueryClient?: (queryClient: QueryClient) => void,
+    activeOperationKeys: readonly string[] = []
 ) {
     const queryClient = new QueryClient({
         defaultOptions: {
@@ -298,7 +303,19 @@ function renderDelivery(
     const view = render(
         <DashboardRealtimeProvider client={noOpDashboardRealtimeClient}>
             <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
+                <OperationTrackerContext
+                    value={
+                        {
+                            dismiss: () => {},
+                            operationIsActive: (key) => activeOperationKeys.includes(key),
+                            operations: [],
+                            settle: () => {},
+                            track: () => {},
+                        } satisfies OperationTrackerValue
+                    }
+                >
+                    <RouterProvider router={router} />
+                </OperationTrackerContext>
             </QueryClientProvider>
         </DashboardRealtimeProvider>
     );
@@ -312,6 +329,70 @@ function renderDelivery(
 }
 
 describe("DeliveryRoute", () => {
+    test("projects backend-active Delivery jobs into disabled animated action buttons", async () => {
+        const baseGroup = pullRequestsResult.groups[0];
+        const basePullRequest = baseGroup.members[0];
+        const harness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    ...basePullRequest.actions,
+                                    {
+                                        action: "reject",
+                                        actor: "mira",
+                                        available: true,
+                                        scope: "self",
+                                    },
+                                    {
+                                        action: "update-branch",
+                                        actor: "mira",
+                                        available: true,
+                                        scope: "self",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client, undefined, [
+            "job:delivery.github",
+            "job:delivery.preview",
+            "job:delivery.production.v1",
+        ]);
+        try {
+            for (const name of [
+                /Approve PR in progress/u,
+                /Reject in progress/u,
+                /Merge in progress/u,
+                /Update branch in progress/u,
+                /Rebuild preview in progress/u,
+                /Queueing preview stop/u,
+            ]) {
+                const button = await screen.findByRole("button", { name });
+                expect(button).toBeDisabled();
+                expect(button).toHaveAttribute("aria-busy", "true");
+            }
+            const productionButtons = screen.getAllByRole("button", {
+                name: "Production delivery in progress…",
+            });
+            expect(productionButtons).toHaveLength(2);
+            for (const button of productionButtons) {
+                expect(button).toBeDisabled();
+                expect(button).toHaveAttribute("aria-busy", "true");
+            }
+        } finally {
+            view.unmount();
+        }
+    });
+
     test("surfaces and retries an initial production checkout failure", async () => {
         const harness = createClient({ checkout: new Error("private provider detail") });
         const view = renderDelivery(harness.client);

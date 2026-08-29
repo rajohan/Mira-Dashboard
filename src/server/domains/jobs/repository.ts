@@ -614,7 +614,7 @@ export interface JobEnqueueAuditProvenance {
     readonly authenticatorId: string;
     readonly requestId: string;
     readonly actorId: string;
-    readonly actorKind: "user";
+    readonly actorKind: "automation" | "user";
     readonly occurredAt: Date;
 }
 
@@ -952,7 +952,7 @@ class DrizzleJobReader implements JobRepositoryReader {
         }
         const event = v.parse(auditEventSelectSchema, rows[0]);
         if (
-            event.actorKind !== "user" ||
+            (event.actorKind !== "automation" && event.actorKind !== "user") ||
             event.authenticatorId === null ||
             event.requestId === null
         ) {

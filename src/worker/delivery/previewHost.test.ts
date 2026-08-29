@@ -335,6 +335,10 @@ describe("preview host", () => {
             expect(context.gatewayBinds).toEqual([
                 `mira-dashboard-preview-${firstOperation}.service`,
             ]);
+            expect(context.ingressStarts).toEqual([
+                `mira-dashboard-preview-ingress-${firstOperation}.socket`,
+                `mira-dashboard-preview-ingress-${firstOperation}.socket`,
+            ]);
         } finally {
             await context.remove();
         }

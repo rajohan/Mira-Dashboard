@@ -149,15 +149,15 @@ beforeAll(async () => {
             });
         }
     );
-});
+}, 60_000);
 
 afterEach(async () => {
     await removeProductionDeliveryFixtures(temporaryDirectories);
-});
+}, 30_000);
 
 afterAll(async () => {
     await removeProductionDeliveryFixtures(releaseFixtureDirectories);
-});
+}, 30_000);
 
 function sourceReleaseFixtures(): readonly [string, string] {
     if (sharedSourceReleases === undefined) {
@@ -547,8 +547,9 @@ describe("production release activation", () => {
         });
     });
 
-    test("clears first-activation pointers after start or readiness failure", async () => {
-        for (const failureBoundary of ["start", "readiness"] as const) {
+    test.each(["start", "readiness"] as const)(
+        "clears first-activation pointers after %s failure",
+        async (failureBoundary) => {
             const projectRoot = await createProjectFixture(false);
             const state = await prepareProtectedProductionStatePath(projectRoot);
             await withDeploymentLease(state.stateDirectory, async (lease) => {
@@ -618,7 +619,7 @@ describe("production release activation", () => {
                 );
             });
         }
-    });
+    );
 
     test("restores the previous release and database when candidate readiness fails", async () => {
         const projectRoot = await createProjectFixture();

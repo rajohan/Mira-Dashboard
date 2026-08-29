@@ -31,6 +31,7 @@ const fileCreateFlags =
 
 export interface PreviewStatePaths {
     readonly gatewaysRoot: string;
+    readonly ingressRoot: string;
     readonly root: string;
     readonly ownersRoot: string;
     readonly stateFile: string;
@@ -185,14 +186,17 @@ export async function resolvePreviewStatePaths(
     if ((await realpath(root)) !== root) fail("path-unsafe");
     const ownersRoot = path.join(root, "owners");
     const gatewaysRoot = path.join(root, "gateways");
+    const ingressRoot = path.join(root, "ingress");
     const statesRoot = path.join(root, "states");
     const worktreesRoot = path.join(root, "worktrees");
     await ensurePrivateDirectory(gatewaysRoot);
+    await ensurePrivateDirectory(ingressRoot);
     await ensurePrivateDirectory(ownersRoot);
     await ensurePrivateDirectory(statesRoot);
     await ensurePrivateDirectory(worktreesRoot);
     return Object.freeze({
         gatewaysRoot,
+        ingressRoot,
         root,
         ownersRoot,
         stateFile: path.join(root, stateFileName),

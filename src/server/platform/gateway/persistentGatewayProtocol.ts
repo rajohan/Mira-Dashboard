@@ -81,6 +81,7 @@ export const persistentGatewayChatReadMethods = Object.freeze([
     "chat.history",
     "chat.message.get",
     "models.list",
+    "progressCard.get",
     "sessions.companion.state",
 ] as const);
 
@@ -556,6 +557,7 @@ const gatewayModelsListParamsSchema = v.strictObject({
 const gatewayCompanionStateParamsSchema = v.strictObject({
     sessionKey: chatSessionKeySchema,
 });
+const gatewayProgressCardGetParamsSchema = gatewayCompanionStateParamsSchema;
 const gatewayCompanionAskParamsSchema = v.strictObject({
     question: v.pipe(
         v.string("Gateway companion question is invalid"),
@@ -1589,6 +1591,10 @@ export function assertPersistentGatewayChatReadParameters(
             }
             case "models.list": {
                 return v.safeParse(gatewayModelsListParamsSchema, parameters).success;
+            }
+            case "progressCard.get": {
+                return v.safeParse(gatewayProgressCardGetParamsSchema, parameters)
+                    .success;
             }
             case "sessions.companion.state": {
                 return v.safeParse(gatewayCompanionStateParamsSchema, parameters).success;

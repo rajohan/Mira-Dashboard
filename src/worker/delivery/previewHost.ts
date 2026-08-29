@@ -300,11 +300,12 @@ export function createPreviewHost(
     let mutation: Promise<void> = Promise.resolve();
     const paths = () =>
         (pathsPromise ??= resolvePreviewStatePaths(configuration.previewRoot));
-    const ingress = (operationId: string) =>
+    const ingress = (operationId: string, publicOrigin: string) =>
         buildPreviewIngressSpecification({
             listenUnixSocket: configuration.ingressSocket,
             operationId,
             previewPort: 3205,
+            publicOrigin,
         });
     const stopRuntime = async (
         record: PreviewDurableRecord,
@@ -319,7 +320,7 @@ export function createPreviewHost(
                 });
         }
         await dependencies.runtime.ingress
-            .stop(ingress(record.operationId), signal)
+            .stop(ingress(record.operationId, record.publicOrigin), signal)
             .catch((error: unknown) => {
                 failure ??= error;
             });
@@ -405,6 +406,7 @@ export function createPreviewHost(
                     .inspect(unitName(current.operationId), signal)
                     .catch(noValue);
                 if (runtime?.active === true) {
+                    const requiresRuntimeRecovery = runtime.ready !== true;
                     const capability = buildPreviewGatewaySocketSpecification(
                         await createPreviewGatewayCapability({
                             capabilityRoot: await ensurePreviewPrGatewayRoot(
@@ -418,6 +420,12 @@ export function createPreviewHost(
                         capability,
                         signal
                     );
+                    if (requiresRuntimeRecovery) {
+                        await dependencies.runtime.ingress.start(
+                            ingress(current.operationId, current.publicOrigin),
+                            signal
+                        );
+                    }
                     runtime = await dependencies.runtime
                         .inspect(unitName(current.operationId), signal)
                         .catch(noValue);
@@ -517,6 +525,7 @@ export function createPreviewHost(
                     bunExecutable: configuration.bunExecutable,
                     capabilitySocket: capability.socketPath,
                     expectedHeadSha: request.expectedHeads.at(-1)!.headSha,
+                    ingressSocket: configuration.ingressSocket,
                     operationId: request.operationId,
                     publicOrigin: starting.publicOrigin,
                     stateRoot: prStateRoot,
@@ -524,7 +533,7 @@ export function createPreviewHost(
                 });
                 await dependencies.runtime.start(launch, capability, signal);
                 await dependencies.runtime.ingress.start(
-                    ingress(request.operationId),
+                    ingress(request.operationId, starting.publicOrigin),
                     signal
                 );
                 const runtime = await dependencies.runtime.inspect(
@@ -704,6 +713,9 @@ export function createPreviewHost(
                 );
                 await dependencies.runtime
                     .bindGateway(unitName(current.operationId), capability, signal)
+                    .catch(() => {});
+                await dependencies.runtime.ingress
+                    .start(ingress(current.operationId, current.publicOrigin), signal)
                     .catch(() => {});
                 runtime = await dependencies.runtime
                     .inspect(unitName(current.operationId), signal)

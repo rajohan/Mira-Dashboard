@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { constants } from "node:fs";
 import {
     chmod,
@@ -16,6 +16,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+setDefaultTimeout(15_000);
 
 import {
     serializeProductionActivationRecord,

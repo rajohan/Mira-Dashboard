@@ -4,8 +4,17 @@ import type {
     DeliveryRequestOperationInput,
     DeliveryRequestOperationResult,
 } from "../../contracts/delivery.ts";
+import {
+    deliveryGitHubActionKey,
+    deliveryJobActionKeyForPayload,
+    deliveryPreviewActionKey,
+    deliveryProductionActionKey,
+} from "../../contracts/deliveryWorker.ts";
 import { useAuthenticatedMutationBoundary } from "../auth/useAuthenticatedMutationBoundary.ts";
-import { useOperationTracker } from "../operations/operationTrackerContextValue.ts";
+import {
+    operationKeyForJobAction,
+    useOperationTracker,
+} from "../operations/operationTrackerContextValue.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import {
     type DeliveryAuthoritySnapshot,
@@ -62,6 +71,15 @@ export function useDeliveryOperations(
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string>();
     const [result, setResult] = useState<DeliveryRequestOperationResult>();
+    const githubBusy = operationTracker.operationIsActive(
+        operationKeyForJobAction(deliveryGitHubActionKey)
+    );
+    const previewBusy = operationTracker.operationIsActive(
+        operationKeyForJobAction(deliveryPreviewActionKey)
+    );
+    const productionBusy = operationTracker.operationIsActive(
+        operationKeyForJobAction(deliveryProductionActionKey)
+    );
     const current =
         pending === undefined ||
         deliveryOperationIsCurrent(pending.input, currentAuthority);
@@ -94,7 +112,9 @@ export function useDeliveryOperations(
             operationTracker.track({
                 jobRunId: queued.jobRunId,
                 label: `Delivery: ${queued.operation}`,
-                operationKey: `delivery:${queued.operation}`,
+                operationKey: operationKeyForJobAction(
+                    deliveryJobActionKeyForPayload(pending.input)
+                ),
                 onTerminal: () => refreshDeliveryQueries(mutationBoundary.queryClient),
             });
             setResult(queued);
@@ -116,8 +136,11 @@ export function useDeliveryOperations(
         current,
         dismissResult: () => setResult(undefined),
         error,
+        githubBusy,
         open,
         pending,
+        previewBusy,
+        productionBusy,
         result,
     };
 }

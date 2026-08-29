@@ -21,7 +21,10 @@ import {
     type ScheduledJobInsert,
     type WorkerInstanceInsert,
 } from "./repository.ts";
-import { createJobRealtimeSideEffects } from "./sideEffects.ts";
+import {
+    createJobMutationSideEffects,
+    createJobRealtimeSideEffects,
+} from "./sideEffects.ts";
 
 const userId = "019fdf10-0000-7000-8000-000000000001";
 const workerOneId = "019fdf10-0000-7000-8000-000000000002";
@@ -144,6 +147,53 @@ function worker(
 }
 
 describe("durable jobs repository", () => {
+    test("reads authenticated automation enqueue provenance for production jobs", async () => {
+        const database = await openFreshMigratedDatabase();
+        const repository = createJobRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const run = queuedRun(900, {
+            actionKey: "delivery.production.v1",
+            requestedById: "production-deploy",
+            requestedByKind: "automation",
+            scheduledJobId: null,
+            scheduledJobVersion: null,
+        });
+        const auditId = uuid(901);
+        try {
+            await repository.enqueueManualRun({
+                ...createJobMutationSideEffects({
+                    action: "delivery.operation.enqueue",
+                    actor: {
+                        authenticatorId: "automation-credential",
+                        id: "production-deploy",
+                        kind: "automation",
+                    },
+                    auditId,
+                    occurredAt: run.queuedAt,
+                    outcome: "accepted",
+                    requestId: "automation-request",
+                    targetId: run.id,
+                    targetType: "job-run",
+                }),
+                queuedEvent: queuedEvent(run),
+                run,
+            });
+
+            expect(repository.findEnqueueAuditProvenance(run.id)).toEqual({
+                actorId: "production-deploy",
+                actorKind: "automation",
+                auditEventId: auditId,
+                authenticatorId: "automation-credential",
+                occurredAt: run.queuedAt,
+                requestId: "automation-request",
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("lists bounded newest-first history for one exact action key", async () => {
         const database = await openFreshMigratedDatabase();
         const repository = createJobRepository(

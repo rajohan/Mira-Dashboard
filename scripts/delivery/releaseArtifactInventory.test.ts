@@ -71,8 +71,9 @@ describe("release artifact inventory", () => {
     test("reserves inventory entries for both release identity files", async () => {
         const root = await mkdtemp(path.join(tmpdir(), "mira-release-tree-limit-"));
         temporaryDirectories.push(root);
+        const fixtureMaximum = 8;
         await Promise.all(
-            Array.from({ length: maximumReleaseArtifactTreeFileCount }, (_, index) =>
+            Array.from({ length: fixtureMaximum }, (_, index) =>
                 writeFile(
                     path.join(root, `artifact-${String(index).padStart(4, "0")}`),
                     "x"
@@ -80,13 +81,29 @@ describe("release artifact inventory", () => {
             )
         );
 
-        expect(await inventoryReleaseArtifactTree(root)).toHaveLength(
-            maximumReleaseArtifactTreeFileCount
-        );
+        expect(
+            await inventoryReleaseArtifactTree(root, {
+                maximumFileCount: fixtureMaximum,
+            })
+        ).toHaveLength(fixtureMaximum);
         await writeFile(path.join(root, "overflow"), "x");
-        expect(inventoryReleaseArtifactTree(root)).rejects.toThrow(
-            "Release artifact tree is invalid"
-        );
+        expect(
+            inventoryReleaseArtifactTree(root, { maximumFileCount: fixtureMaximum })
+        ).rejects.toThrow("Release artifact tree is invalid");
+        expect(maximumReleaseArtifactTreeFileCount).toBe(4098);
+    });
+
+    test("rejects invalid test-only inventory limits", async () => {
+        for (const maximumFileCount of [
+            0,
+            1.5,
+            maximumReleaseArtifactTreeFileCount + 1,
+        ]) {
+            const root = await releaseTree();
+            expect(
+                inventoryReleaseArtifactTree(root, { maximumFileCount })
+            ).rejects.toThrow("Release artifact tree is invalid");
+        }
     });
 
     test("rejects symlinks, hardlinks, empty files and noncanonical names", async () => {

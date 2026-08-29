@@ -15,6 +15,7 @@ export interface PreviewSandboxInput {
     readonly publicOrigin: string;
     readonly stateRoot: string;
     readonly expectedHeadSha: string;
+    readonly ingressSocket: string;
     readonly worktreePath: string;
 }
 
@@ -27,6 +28,7 @@ export interface PreviewLaunchSpecification {
 export interface PreviewIngressSpecification {
     readonly argv: readonly string[];
     readonly listenUnixSocket: string;
+    readonly publicOrigin: string;
     readonly serviceUnitName: string;
     readonly socketUnitName: string;
 }
@@ -60,6 +62,7 @@ function sandboxCommand(input: PreviewSandboxInput): readonly string[] {
     assertAbsoluteNormalized(input.worktreePath);
     assertAbsoluteNormalized(input.stateRoot);
     assertAbsoluteNormalized(input.capabilitySocket);
+    assertAbsoluteNormalized(input.ingressSocket);
     assertAbsoluteNormalized(input.bunExecutable);
     let origin: URL;
     try {
@@ -84,7 +87,6 @@ function sandboxCommand(input: PreviewSandboxInput): readonly string[] {
         "--unshare-all",
         // Share only systemd's outer PrivateNetwork namespace so the fixed
         // socket-proxyd ingress can reach the preview loopback listener.
-        "--share-net",
         "--die-with-parent",
         "--new-session",
         "--cap-drop",
@@ -115,6 +117,8 @@ function sandboxCommand(input: PreviewSandboxInput): readonly string[] {
         "/run",
         "--dir",
         "/run/mira-preview",
+        "--dir",
+        "/run/mira-preview/ingress",
         "--ro-bind",
         input.worktreePath,
         "/workspace",
@@ -127,6 +131,9 @@ function sandboxCommand(input: PreviewSandboxInput): readonly string[] {
         "--ro-bind",
         path.dirname(input.capabilitySocket),
         "/run/mira-preview/gateway",
+        "--bind",
+        path.dirname(input.ingressSocket),
+        "/run/mira-preview/ingress",
         "--clearenv",
         "--setenv",
         "HOME",
@@ -143,6 +150,9 @@ function sandboxCommand(input: PreviewSandboxInput): readonly string[] {
         "--setenv",
         "MIRA_DASHBOARD_DEV_GATEWAY_SOCKET",
         "/run/mira-preview/gateway/gateway.sock",
+        "--setenv",
+        "MIRA_DASHBOARD_DEV_INGRESS_SOCKET",
+        "/run/mira-preview/ingress/preview.sock",
         "--setenv",
         "MIRA_DASHBOARD_DEV_HOT_RELOAD",
         "0",
@@ -188,13 +198,6 @@ export function buildPreviewLaunchSpecification(
             `--property=MemoryMax=${previewMemoryMaximumBytes}`,
             `--property=TasksMax=${previewTasksMaximum}`,
             "--property=KillMode=control-group",
-            "--property=NoNewPrivileges=yes",
-            "--property=PrivateNetwork=yes",
-            "--property=ProtectControlGroups=yes",
-            "--property=ProtectKernelLogs=yes",
-            "--property=ProtectKernelModules=yes",
-            "--property=ProtectKernelTunables=yes",
-            "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
             "--property=RuntimeMaxSec=4h",
             "--property=TimeoutStopSec=20s",
             "--property=UMask=0077",
@@ -223,9 +226,20 @@ export function buildPreviewIngressSpecification(input: {
     readonly listenUnixSocket: string;
     readonly operationId: string;
     readonly previewPort: number;
+    readonly publicOrigin: string;
 }): PreviewIngressSpecification {
     assertAbsoluteNormalized(input.listenUnixSocket);
+    let publicOrigin: URL;
+    try {
+        publicOrigin = new URL(input.publicOrigin);
+    } catch {
+        fail();
+    }
     if (
+        publicOrigin.protocol !== "https:" ||
+        publicOrigin.pathname !== "/" ||
+        publicOrigin.search !== "" ||
+        publicOrigin.hash !== "" ||
         !Number.isSafeInteger(input.previewPort) ||
         input.previewPort < 1024 ||
         input.previewPort > 65_535
@@ -258,6 +272,7 @@ export function buildPreviewIngressSpecification(input: {
             `127.0.0.1:${input.previewPort}`,
         ]),
         listenUnixSocket: input.listenUnixSocket,
+        publicOrigin: publicOrigin.origin,
         serviceUnitName,
         socketUnitName,
     });

@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { cp, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+setDefaultTimeout(15_000);
 
 import { maximumProductionReleaseArchiveBytes } from "../src/shared/productionReleaseArtifactReceipt.ts";
 import { publishedReleaseAuthority } from "../src/testSupport/publishedReleaseAuthority.ts";

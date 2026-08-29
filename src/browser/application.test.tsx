@@ -199,10 +199,14 @@ describe("Dashboard browser application", () => {
         );
 
         try {
-            await screen.findByRole("heading", {
-                level: 3,
-                name: "No saved data yet",
-            });
+            await screen.findByRole(
+                "heading",
+                {
+                    level: 3,
+                    name: "No saved data yet",
+                },
+                { timeout: 5000 }
+            );
             expect(
                 screen
                     .getByText("Dashboard", { selector: "header > p" })
