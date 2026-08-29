@@ -31,11 +31,12 @@ import {
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
 import { isDatabaseRuntimeWriteUnavailableError } from "../../database/runtime/databaseErrors.ts";
+import { GatewaySessionsUnavailableError } from "../gatewaySessions/errors.ts";
 import type { GatewaySessionsService } from "../gatewaySessions/service.ts";
 import { defaultRealtimeRetentionMilliseconds } from "../realtime/retention.ts";
 import { dashboardAgentConfiguration, findDashboardAgent } from "./directory.ts";
 import { AgentNotFoundError, type AgentOperationError } from "./errors.ts";
-import { readAgentGatewayAvailability } from "./gatewayAvailability.ts";
+import { projectAgentGatewayAvailability } from "./gatewayAvailability.ts";
 import type {
     AgentRepository,
     AgentRepositoryUnitOfWork,
@@ -47,6 +48,10 @@ const clockSchema = timestampMillisecondsSchema("Agent clock is invalid");
 const realtimeRetentionSchema = positiveSafeIntegerSchema(
     "Agent realtime retention must be a positive integer"
 );
+const gatewaySessionFallbackActor: AgentRunActor = Object.freeze({
+    id: "gateway-session-fallback",
+    kind: "automation",
+});
 
 class AgentUnexpectedOperationError extends Data.TaggedError(
     "AgentUnexpectedOperationError"
@@ -347,6 +352,103 @@ export function createAgentService(
         dependencies.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
     );
     const now = () => toDate(v.parse(clockSchema, nowMs()));
+    const observedGatewayAvailability = new Map<string, "active" | "idle">();
+
+    async function statusesWithGatewayAvailability(
+        statuses: readonly AgentStatus[],
+        signal?: AbortSignal
+    ): Promise<AgentStatusProjection[]> {
+        let snapshot;
+        try {
+            snapshot = await dependencies.gatewaySessionsService.list(
+                { filter: "ALL" },
+                signal
+            );
+        } catch (error) {
+            if (error instanceof GatewaySessionsUnavailableError) {
+                return projectAgentGatewayAvailability(statuses);
+            }
+            throw error;
+        }
+
+        const projections = projectAgentGatewayAvailability(statuses, snapshot);
+        const transitionedToIdle = projections.filter((projection) => {
+            if (
+                projection.freshness !== "fresh" ||
+                (projection.gatewayAvailability !== "active" &&
+                    projection.gatewayAvailability !== "idle")
+            ) {
+                return false;
+            }
+            const previous = observedGatewayAvailability.get(projection.agentId);
+            observedGatewayAvailability.set(
+                projection.agentId,
+                projection.gatewayAvailability
+            );
+            return (
+                previous === "active" &&
+                projection.gatewayAvailability === "idle" &&
+                projection.state === "working"
+            );
+        });
+        if (transitionedToIdle.length === 0) return projections;
+
+        const fallbackCompleted = await dependencies.repository.withImmediateTransaction(
+            (unit) => {
+                let changed = false;
+                for (const transition of transitionedToIdle) {
+                    if (transition.state !== "working") continue;
+                    const active = unit.findActiveRun(transition.agentId);
+                    if (
+                        active === undefined ||
+                        active.task !== transition.currentTask ||
+                        getTime(active.startedAt) !== transition.startedAtMs ||
+                        getTime(active.lastActivityAt) !== transition.lastActivityAtMs
+                    ) {
+                        continue;
+                    }
+                    const occurredAt = maximumDate([
+                        now(),
+                        active.lastActivityAt,
+                        ...(transition.observedAtMs === undefined
+                            ? []
+                            : [toDate(transition.observedAtMs)]),
+                    ]);
+                    requiredWrite(
+                        unit.completeRun(
+                            active.id,
+                            occurredAt,
+                            gatewaySessionFallbackActor
+                        ),
+                        "Gateway-idle task-run completion"
+                    );
+                    appendRealtimeEvent(
+                        unit,
+                        transition.agentId,
+                        occurredAt,
+                        retentionMs
+                    );
+                    changed = true;
+                }
+                return changed;
+            }
+        );
+        if (!fallbackCompleted) return projections;
+        if (dependencies.wakeEventPump !== undefined) {
+            try {
+                await dependencies.wakeEventPump();
+            } catch {
+                // SQLite remains authoritative; adaptive polling recovers the wakeup.
+            }
+        }
+        const requestedAgentIds = new Set(statuses.map(({ agentId }) => agentId));
+        return projectAgentGatewayAvailability(
+            listTaskStatuses(dependencies.repository).filter(({ agentId }) =>
+                requestedAgentIds.has(agentId)
+            ),
+            snapshot
+        );
+    }
 
     return AgentService.of({
         getConfiguration: () => Effect.succeed(dashboardAgentConfiguration),
@@ -362,9 +464,8 @@ export function createAgentService(
             }).pipe(
                 Effect.flatMap((status) =>
                     Effect.promise(async () => {
-                        const [projection] = await readAgentGatewayAvailability(
+                        const [projection] = await statusesWithGatewayAvailability(
                             [status],
-                            dependencies.gatewaySessionsService,
                             signal
                         );
                         if (projection === undefined) {
@@ -379,9 +480,8 @@ export function createAgentService(
                 Effect.flatMap((statuses) =>
                     Effect.promise(async () =>
                         v.parse(listAgentStatusesResultSchema, {
-                            statuses: await readAgentGatewayAvailability(
+                            statuses: await statusesWithGatewayAvailability(
                                 statuses,
-                                dependencies.gatewaySessionsService,
                                 signal
                             ),
                         })

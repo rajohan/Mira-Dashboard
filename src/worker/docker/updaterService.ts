@@ -1210,6 +1210,14 @@ export function createDockerUpdaterService(
             if (successful.length === 0) fail(error);
             for (const update of applied) update.result.settle();
             const successfulIds = new Set(successful.map(({ id }) => id));
+            payload = v.parse(dockerOverviewCachePayloadSchema, {
+                ...payload,
+                updaterServices: retainUnchangedScannedStatuses(
+                    scannedPayload,
+                    payload,
+                    successfulIds
+                ),
+            });
             return unknownMutationResult({
                 addedEvents,
                 affectedServices: successful,

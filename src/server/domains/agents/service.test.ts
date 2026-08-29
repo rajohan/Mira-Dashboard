@@ -102,6 +102,83 @@ describe("agent service", () => {
         }
     });
 
+    test("ends only the current-task interval after a fresh Gateway active-to-idle transition", async () => {
+        const database = await openFreshMigratedDatabase();
+        let hasActiveRun = true;
+        let wakeups = 0;
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: unexpectedGatewaySessionControl,
+            deleteSessionTranscript: unexpectedGatewaySessionControl,
+            listCurrentSessions: () =>
+                Promise.resolve({
+                    sessions: [
+                        {
+                            displayName: "Mira",
+                            hasActiveRun,
+                            key: "agent:main:main",
+                            kind: "main" as const,
+                            totalTokensFresh: false,
+                            updatedAtMs: hasActiveRun ? 9000 : 10_000,
+                        },
+                    ],
+                    truncated: false,
+                }),
+            resetSession: unexpectedGatewaySessionControl,
+        });
+        const service = agentServiceFor(database, {
+            gatewaySessionsService: createGatewaySessionsService({
+                nowMs: () => 10_000,
+                provider,
+            }),
+            nowMs: () => 10_000,
+            wakeEventPump: () => {
+                wakeups += 1;
+            },
+        });
+
+        try {
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Keep taskboard ownership separate",
+                })
+            );
+            const active = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(active).toMatchObject({
+                currentTask: "Keep taskboard ownership separate",
+                gatewayAvailability: "active",
+                state: "working",
+            });
+
+            hasActiveRun = false;
+            const idle = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(idle).toMatchObject({
+                agentId: "main",
+                gatewayAvailability: "idle",
+                state: "idle",
+            });
+            expect(idle).not.toHaveProperty("currentTask");
+
+            const history = await runAgentEffect(
+                service.listTaskHistory({ agentId: "main", limit: 10 })
+            );
+            expect(history.runs).toEqual([
+                expect.objectContaining({
+                    completedAtMs: 10_000,
+                    status: "completed",
+                    task: "Keep taskboard ownership separate",
+                }),
+            ]);
+            expect(database.orm.select().from(agentTaskRuns).get()).toMatchObject({
+                completedById: "gateway-session-fallback",
+                completedByKind: "automation",
+            });
+            expect(wakeups).toBe(2);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
     test("starts, touches, replaces, and clears one attributed current task", async () => {
         const database = await openFreshMigratedDatabase();
         let nowMs = 10_000;

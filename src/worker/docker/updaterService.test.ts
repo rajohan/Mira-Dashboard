@@ -1294,12 +1294,16 @@ describe("Docker updater service", () => {
         expect(JSON.stringify(result)).not.toContain(composePath);
     });
 
-    test("returns sanitized unknown outcome when Git settlement throws after mutation", async () => {
-        const harness = createHarness({ finalGitThrows: true, serviceCount: 1 });
+    test("returns sanitized unknown outcome and retains untouched statuses when Git settlement throws", async () => {
+        const harness = createHarness({
+            finalGitThrows: true,
+            manualSecondService: true,
+            serviceCount: 2,
+        });
         const initial = harness.currentPayload();
 
         const result = await harness.updater.run({
-            expectedSourceRevision: initial.sourceRevision,
+            automaticOnly: true,
             previous: initial,
         });
 
@@ -1310,6 +1314,10 @@ describe("Docker updater service", () => {
             updatedCount: 1,
         });
         expect(result.payload.updaterServices[0]?.status).toEqual({ state: "current" });
+        expect(result.payload.updaterServices[1]?.status).toEqual({
+            candidateImage: "ghcr.io/example/two:2.1.0",
+            state: "update-available",
+        });
         expect(eventKinds(result)).toContain("update-outcome-unknown");
         expect(JSON.stringify(result)).not.toContain(
             "raw private Git settlement diagnostic"

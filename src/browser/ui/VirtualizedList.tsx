@@ -9,6 +9,7 @@ import { Virtualizer } from "./Virtualizer.tsx";
 
 interface VirtualizedListProps<TItem> {
     readonly className?: string;
+    readonly constrainHeight?: boolean;
     readonly estimateSize: (index: number) => number;
     readonly getKey: (item: TItem) => string;
     readonly getItemAriaLevel?: (item: TItem) => number;
@@ -26,6 +27,7 @@ interface VirtualizedListProps<TItem> {
 /** @returns A dynamically measured accessible list with automatic continuation. */
 export function VirtualizedList<TItem>({
     className,
+    constrainHeight = true,
     estimateSize,
     getKey,
     getItemAriaLevel,
@@ -79,7 +81,11 @@ export function VirtualizedList<TItem>({
                 return (
                     <section
                         aria-label={`${label} scroll area`}
-                        className={cn("max-h-128 overflow-y-auto", className)}
+                        className={cn(
+                            constrainHeight && "max-h-128",
+                            "overflow-y-auto",
+                            className
+                        )}
                         ref={scrollContainerRef}
                         tabIndex={0}
                     >
