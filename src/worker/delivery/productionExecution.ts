@@ -208,7 +208,8 @@ function validateRunIdentity(
 ): void {
     if (
         identity.actionKey !== deliveryProductionActionKey ||
-        identity.requestedByKind !== "user" ||
+        (identity.requestedByKind !== "automation" &&
+            identity.requestedByKind !== "user") ||
         identity.enqueueAuditEventId === null ||
         identity.enqueueAuthenticatorId === null ||
         identity.enqueueRequestId === null ||
@@ -412,7 +413,7 @@ export function createDeliveryProductionExecutionPort(
                         actor: {
                             authenticatorId: identity.enqueueAuthenticatorId!,
                             id: identity.requestedById,
-                            kind: "user",
+                            kind: identity.requestedByKind,
                         },
                         audit: {
                             eventId: identity.enqueueAuditEventId!,

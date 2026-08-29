@@ -3,6 +3,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { ProductionReleaseDescriptor } from "../../src/shared/productionReleaseDescriptor.ts";
 import type { ReleaseManifest } from "../../src/shared/releaseManifest.ts";
 import { removeProductionDeliveryFixtures } from "../testSupport/productionDeliveryFixture.ts";
 import { rejectionError } from "../testSupport/rejection.ts";
@@ -83,19 +84,37 @@ afterEach(async () => {
 });
 
 describe("root-installed production systemd unit verification", () => {
-    test("accepts only exact manifest bytes under a protected root-owned analogue", async () => {
+    test("accepts only descriptor-bound bytes under a protected root-owned analogue", async () => {
         const { lease, paths, release, unitDirectory } =
             await createVerificationFixture();
+        const descriptor: ProductionReleaseDescriptor = {
+            artifacts: release.manifest.artifacts,
+            deliveryExecutor: {
+                bytes: 1,
+                path: "server/productionDelivery.js",
+                sha256: "a".repeat(64),
+            },
+            formatVersion: 1,
+            releaseId,
+            runtime: {
+                executable: {
+                    bytes: 1,
+                    path: "runtime/bun",
+                    sha256: "b".repeat(64),
+                },
+                ...runtimeIdentity,
+            },
+        };
         const loadPublishedRelease = mock(
-            (
-                actualPaths: PreparedProductionDeliveryPaths,
-                actualReleaseId: string,
-                actualRuntimeRevision: string
-            ) => {
+            (actualPaths: PreparedProductionDeliveryPaths, actualReleaseId: string) => {
                 expect(actualPaths).toBe(paths);
                 expect(actualReleaseId).toBe(releaseId);
-                expect(actualRuntimeRevision).toBe(runtimeIdentity.revision);
-                return Promise.resolve(release);
+                return Promise.resolve(
+                    Object.freeze({
+                        descriptor,
+                        releaseRoot: release.releaseRoot,
+                    })
+                );
             }
         );
         let staleWebDropIn = false;

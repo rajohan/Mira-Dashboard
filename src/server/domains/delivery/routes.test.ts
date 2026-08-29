@@ -154,6 +154,12 @@ function testService(
         createPullRequestStack: (input, context) =>
             request("create-pull-request-stack", input, context),
         deploy: (input, context) => request("deploy", input, context),
+        deployCurrent: (_input, context) => {
+            calls.push("deploy-current:deploy");
+            context.reauthorize();
+            controlContexts.push(context);
+            return Promise.resolve({ jobRunId, operation: "deploy", queued: true });
+        },
         getPreview: () => read("get-preview"),
         getProductionCheckout: () => read("get-production-checkout"),
         getReleases: () => read("get-releases"),
@@ -284,14 +290,22 @@ describe("Delivery routes", () => {
         ).delivery;
         await expectCode(() => anonymous.listPullRequests({}), "UNAUTHORIZED");
 
+        const automationAuthentication = createTestAutomationAuthentication([
+            "delivery:read",
+            "delivery:write",
+        ]);
+        if (automationAuthentication.kind !== "authenticated") {
+            throw new Error("Expected automation authentication");
+        }
         const automation = appRouter.createCaller(
             withDeliveryService(
-                await createTestRequestContext(
-                    createTestAutomationAuthentication([
-                        "delivery:read",
-                        "delivery:write",
-                    ])
-                ),
+                await createTestRequestContext({
+                    ...automationAuthentication,
+                    principal: {
+                        ...automationAuthentication.principal,
+                        id: "production-deploy",
+                    },
+                }),
                 deliveryService
             )
         ).delivery;
@@ -300,6 +314,13 @@ describe("Delivery routes", () => {
             () => automation.rejectPullRequest(rejectPullRequestInput),
             "FORBIDDEN"
         );
+        expect(
+            await automation.deployCurrent({
+                confirmation: "deploy-delivery-main",
+                idempotencyKey,
+            })
+        ).toEqual({ jobRunId, operation: "deploy", queued: true });
+        expect(calls.at(-1)).toBe("deploy-current:deploy");
 
         const readOnly = appRouter.createCaller(
             withDeliveryService(
@@ -326,7 +347,7 @@ describe("Delivery routes", () => {
             )
         ).delivery;
         await expectCode(() => writeOnly.listPullRequests({}), "FORBIDDEN");
-        expect(calls).toEqual(["list-pull-requests"]);
+        expect(calls).toEqual(["deploy-current:deploy", "list-pull-requests"]);
     });
 
     test("enforces recent MFA before dispatch and clears changed sessions", async () => {

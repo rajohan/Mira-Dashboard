@@ -112,17 +112,24 @@ describe("Delivery contracts", () => {
         ).toBe(false);
     });
 
-    test("registers five reads and nine recent-MFA mutations", () => {
-        expect(deliveryProcedureContracts).toHaveLength(14);
-        expect(new Set(deliveryProcedureContracts.map(({ name }) => name)).size).toBe(14);
+    test("keeps reads, recent-MFA writes, and deploy automation separated", () => {
+        expect(new Set(deliveryProcedureContracts.map(({ name }) => name)).size).toBe(
+            deliveryProcedureContracts.length
+        );
         expect(
             deliveryProcedureContracts.filter(({ kind }) => kind === "query")
         ).toHaveLength(5);
         const mutations = deliveryProcedureContracts.filter(
             ({ kind }) => kind === "mutation"
         );
-        expect(mutations).toHaveLength(9);
-        expect(mutations.every(({ access }) => access.kind === "recent-auth")).toBe(true);
+        expect(
+            mutations.filter(({ access }) => access.kind === "recent-auth")
+        ).toHaveLength(9);
+        expect(
+            mutations
+                .filter(({ access }) => access.kind !== "recent-auth")
+                .map(({ name }) => name)
+        ).toEqual(["delivery.deployCurrent"]);
     });
 
     test("accepts bounded operation authority and rejects cross-group duplicates", () => {

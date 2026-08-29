@@ -6,8 +6,10 @@ import type { PublishedReleaseAuthority } from "../../src/shared/publishedReleas
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import { runProductionDeliveryTargetSmoke } from "./productionDeliverySmoke.ts";
-import type { ProductionServiceController } from "./productionReleaseActivation.ts";
-import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type {
+    ActivationRelease,
+    ProductionServiceController,
+} from "./productionReleaseActivation.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { pointProductionProcessesAtRelease } from "./productionRuntimePointers.ts";
 import {
@@ -187,8 +189,11 @@ export function createSystemdProductionServiceController(
     const smoke = options.smoke ?? runProductionDeliveryTargetSmoke;
 
     return Object.freeze({
-        async provision(release: PublishedProductionRelease): Promise<void> {
-            const releaseId = release.manifest.source.commitSha;
+        async provision(release: ActivationRelease): Promise<void> {
+            const releaseId =
+                "descriptor" in release
+                    ? release.descriptor.releaseId
+                    : release.manifest.source.commitSha;
             const authority = options.releaseAuthority;
             const receiptDigest = authority?.assets.find(
                 ({ name }) => name === "receipt.json"
@@ -220,8 +225,11 @@ export function createSystemdProductionServiceController(
                 provisioningDeadlineMs
             );
         },
-        async settle(release: PublishedProductionRelease): Promise<void> {
-            const releaseId = release.manifest.source.commitSha;
+        async settle(release: ActivationRelease): Promise<void> {
+            const releaseId =
+                "descriptor" in release
+                    ? release.descriptor.releaseId
+                    : release.manifest.source.commitSha;
             await requireSystemctlSuccess(
                 execute,
                 executable,
@@ -232,11 +240,11 @@ export function createSystemdProductionServiceController(
                 provisioningDeadlineMs
             );
         },
-        prepare(release: PublishedProductionRelease): Promise<void> {
+        prepare(release: ActivationRelease): Promise<void> {
             return verifyUnits(lease, paths, release);
         },
         async start(
-            release: PublishedProductionRelease,
+            release: ActivationRelease,
             runtime: InstalledProductionRuntime
         ): Promise<void> {
             await pointProductionProcessesAtRelease(lease, paths, release, runtime);
@@ -255,10 +263,11 @@ export function createSystemdProductionServiceController(
             await requireUnitsActive(execute, executable);
         },
         async verifySmoke(
-            release: PublishedProductionRelease,
+            release: ActivationRelease,
             runtime: InstalledProductionRuntime,
             transitionId: string
         ): Promise<void> {
+            if ("descriptor" in release) throw serviceFailure();
             await smoke(paths, release, runtime, readinessUrl, transitionId, {
                 allowEmptyOperator: options.allowEmptyOperatorSmoke,
             });

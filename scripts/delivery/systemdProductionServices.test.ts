@@ -50,6 +50,7 @@ function publishedAuthority(releaseId: string): PublishedReleaseAuthority {
             { digest: `sha256:${"e".repeat(64)}`, name: "release.tar", size: 1 },
         ],
         releaseId,
+        releaseDescriptorSha256: "a".repeat(64),
         releaseManifestSha256: "f".repeat(64),
         runtime: runtimeIdentity,
         tagName: "v1.2.3",

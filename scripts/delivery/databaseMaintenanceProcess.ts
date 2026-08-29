@@ -10,13 +10,35 @@ import {
 import { lowercaseUuidV7Schema } from "../../src/shared/validation.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
-import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type {
+    DescribedPublishedProductionRelease,
+    PublishedProductionRelease,
+} from "./productionReleasePublication.ts";
 import {
     type InstalledProductionRuntime,
     type ProductionRuntimeVerificationDependencies,
     verifyInstalledProductionRuntime,
 } from "./productionRuntime.ts";
-import { verifyReleaseIdentity } from "./releaseIdentity.ts";
+import {
+    verifyProductionReleaseDescriptorIdentity,
+    verifyReleaseIdentity,
+} from "./releaseIdentity.ts";
+
+type MaintenanceRelease =
+    | PublishedProductionRelease
+    | DescribedPublishedProductionRelease;
+
+function maintenanceReleaseId(release: MaintenanceRelease): string {
+    return "descriptor" in release
+        ? release.descriptor.releaseId
+        : release.manifest.source.commitSha;
+}
+
+function maintenanceRuntime(release: MaintenanceRelease) {
+    return "descriptor" in release
+        ? release.descriptor.runtime
+        : release.manifest.runtime;
+}
 
 const databaseMaintenanceProcessFailureMessage = "Database maintenance process failed";
 const databaseMaintenanceDeadlineMs = 5 * 60 * 1000;
@@ -149,27 +171,34 @@ function decodeOutput(output: Uint8Array): unknown {
 async function verifyExecutionInputs(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
-    release: PublishedProductionRelease,
+    release: MaintenanceRelease,
     runtime: InstalledProductionRuntime,
     dependencies: DatabaseMaintenanceProcessDependencies
 ): Promise<void> {
     try {
-        const commitSha = release.manifest.source.commitSha;
+        const commitSha = maintenanceReleaseId(release);
         if (
             lease.stateDirectory !== paths.stateDirectory ||
             release.releaseRoot !== path.join(paths.releasesDirectory, commitSha)
         ) {
             throw processFailure();
         }
-        const [verifiedManifest] = await Promise.all([
-            verifyReleaseIdentity(release.releaseRoot, runtime.identity),
+        const [verifiedRelease] = await Promise.all([
+            "descriptor" in release
+                ? verifyProductionReleaseDescriptorIdentity(release.releaseRoot)
+                : verifyReleaseIdentity(release.releaseRoot, runtime.identity),
             verifyInstalledProductionRuntime(
                 paths,
                 runtime,
                 dependencies.runtimeVerification
             ),
         ]);
-        if (JSON.stringify(verifiedManifest) !== JSON.stringify(release.manifest)) {
+        const expected = "descriptor" in release ? release.descriptor : release.manifest;
+        if (
+            JSON.stringify(verifiedRelease) !== JSON.stringify(expected) ||
+            maintenanceRuntime(release).revision !== runtime.identity.revision ||
+            maintenanceRuntime(release).version !== runtime.identity.version
+        ) {
             throw processFailure();
         }
     } catch {
@@ -193,7 +222,7 @@ async function runProcess(
 }
 
 function maintenanceCommand(
-    release: PublishedProductionRelease,
+    release: MaintenanceRelease,
     runtime: InstalledProductionRuntime,
     arguments_: readonly string[]
 ): readonly string[] {
@@ -217,7 +246,7 @@ function maintenanceCommand(
 export async function runDatabaseCandidateMaintenance(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
-    release: PublishedProductionRelease,
+    release: MaintenanceRelease,
     runtime: InstalledProductionRuntime,
     transitionId: string,
     candidateStateDirectory: string,
@@ -239,7 +268,7 @@ export async function runDatabaseCandidateMaintenance(
         maintenanceCommand(release, runtime, [
             "--operation=migrate-candidate",
             `--migrations=${path.join(release.releaseRoot, "migrations")}`,
-            `--release=${release.manifest.source.commitSha}`,
+            `--release=${maintenanceReleaseId(release)}`,
             `--state=${candidateStateDirectory}`,
         ]),
         release.releaseRoot,
@@ -263,7 +292,7 @@ export async function runDatabaseCandidateMaintenance(
 export async function runDatabaseSnapshotMaintenance(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
-    release: PublishedProductionRelease,
+    release: MaintenanceRelease,
     runtime: InstalledProductionRuntime,
     transitionId: string,
     expectedState: "absent" | "present",
@@ -275,7 +304,7 @@ export async function runDatabaseSnapshotMaintenance(
         expectedState === "present"
             ? [
                   `--migrations=${path.join(release.releaseRoot, "migrations")}`,
-                  `--release=${release.manifest.source.commitSha}`,
+                  `--release=${maintenanceReleaseId(release)}`,
               ]
             : [];
     const value = await runProcess(
@@ -309,7 +338,7 @@ export async function runDatabaseSnapshotMaintenance(
         parsed.output.snapshotDirectory !== expectedDirectory ||
         parsed.output.snapshotFile !== expectedFile ||
         manifest.transitionId !== transitionId ||
-        manifest.releaseId !== release.manifest.source.commitSha
+        manifest.releaseId !== maintenanceReleaseId(release)
     ) {
         throw processFailure();
     }

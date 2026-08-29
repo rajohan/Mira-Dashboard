@@ -66,6 +66,9 @@ describe("repository command entrypoints", () => {
         expect(() => parseDeliveryCommandArguments(["install-root"])).toThrow(
             "Usage: bun run delivery"
         );
+        expect(
+            parseDeliveryCommandArguments(["install-deploy-credential"]).slice(1)
+        ).toEqual(["scripts/installProductionDeployCredential.ts"]);
         expect(parseBuildCommandArguments(["release"]).slice(1)).toEqual([
             "scripts/delivery/buildRelease.ts",
         ]);

@@ -85,7 +85,19 @@ Rollback invokes this same installer with the previous root-owned immutable rele
 exact authority files and reloading systemd. The deferred timer is never enabled; it is started only by the root-owned
 restart helper after systemd accepts the reviewed restart unit.
 
-The first `delivery.production.v3` installation must run the production bootstrap. Bootstrap stages this
+## Production deploy CLI credential
+
+`bun deploy` does not bypass Delivery or write synthetic history. It authenticates to the local
+Dashboard, queues `delivery.deployCurrent`, and follows that exact durable Job run until terminal
+settlement. The dedicated automation principal must have only `delivery:write` and `jobs:read`.
+Create its one-time credential through the authenticated automation-security UI, then install it
+through the host's masked/secure stdin entry path with `bun run delivery
+install-deploy-credential`. The installer never accepts the credential in argv, never prints it,
+and writes only `/home/ubuntu/.config/mira-dashboard/automation/delivery-deploy.token` with mode
+`0600` beneath the existing `0700` automation directory. Localhost is transport only; absence or
+invalid ownership/mode of this credential fails the CLI closed.
+
+The first `delivery.production.v4` installation must run the production bootstrap. Bootstrap stages this
 template and the remaining root-owned authority before it invokes greenfield
 Delivery activation. A normal deploy assumes that bootstrap has completed; no
 pre-bootstrap unit name or earlier protocol is supported.

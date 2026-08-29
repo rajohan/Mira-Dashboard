@@ -137,6 +137,7 @@ describe("Delivery GitHub pull-request port", () => {
                         },
                         formatVersion: 1,
                         releaseId: head,
+                        releaseDescriptorSha256: "f".repeat(64),
                         releaseManifestSha256: "d".repeat(64),
                         runtime: { revision: "e".repeat(40), version: "1.4.0" },
                     };
@@ -179,6 +180,7 @@ describe("Delivery GitHub pull-request port", () => {
                 },
             ],
             releaseId: head,
+            releaseDescriptorSha256: "f".repeat(64),
             releaseManifestSha256: "d".repeat(64),
             runtime: { revision: "e".repeat(40), version: "1.4.0" },
             tagName: "v1.2.3",

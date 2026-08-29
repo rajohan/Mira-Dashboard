@@ -28,7 +28,7 @@ import {
     type ProductionArtifactRetentionDependencies,
 } from "./productionArtifactRetention.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
-import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type { DescribedPublishedProductionRelease } from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 
@@ -99,12 +99,12 @@ function retentionDependencies(
             const revision = releaseRuntimes.get(releaseId);
             if (!revision) return Promise.reject(new Error("unknown release"));
             return Promise.resolve({
-                manifest: {
+                descriptor: {
                     runtime: { revision, version: runtimeVersion },
-                    source: { commitSha: releaseId },
+                    releaseId,
                 },
                 releaseRoot: path.join(paths.releasesDirectory, releaseId),
-            } as unknown as PublishedProductionRelease);
+            } as unknown as DescribedPublishedProductionRelease);
         },
         verifyRuntime: (paths, revision) =>
             Promise.resolve({

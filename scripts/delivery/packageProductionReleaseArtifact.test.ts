@@ -23,6 +23,7 @@ const receipt = {
     archive: { bytes: 42, name: "release.tar", sha256: "a".repeat(64) },
     formatVersion: 1,
     releaseId: "b".repeat(40),
+    releaseDescriptorSha256: "e".repeat(64),
     releaseManifestSha256: "c".repeat(64),
     runtime: { revision: "d".repeat(40), version: bunRuntimePolicy.version },
 };

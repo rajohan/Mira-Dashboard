@@ -47,6 +47,7 @@ const publishedReleaseAssetsSchema = v.union([
 export const publishedReleaseAuthoritySchema = v.strictObject({
     assets: publishedReleaseAssetsSchema,
     releaseId: fullCommitShaSchema(invalidPublishedReleaseAuthority),
+    releaseDescriptorSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     releaseManifestSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     runtime: v.strictObject({
         revision: fullCommitShaSchema(invalidPublishedReleaseAuthority),
@@ -76,6 +77,7 @@ export function publishedReleaseAuthoritiesMatch(
 ): boolean {
     return (
         left.releaseId === right.releaseId &&
+        left.releaseDescriptorSha256 === right.releaseDescriptorSha256 &&
         left.releaseManifestSha256 === right.releaseManifestSha256 &&
         left.runtime.revision === right.runtime.revision &&
         left.runtime.version === right.runtime.version &&

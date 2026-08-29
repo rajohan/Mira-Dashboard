@@ -16,7 +16,7 @@ const invalidDeliveryProductionOperation = "Delivery production operation is inv
 const deliveryProductionPayloadMaximumBytes = 16 * 1024;
 
 /** Immutable protocol supported by production cutover executors. */
-export const deliveryProductionProtocol = "delivery.production.v3" as const;
+export const deliveryProductionProtocol = "delivery.production.v4" as const;
 /** Maximum canonical bytes accepted for an operation journal or terminal receipt. */
 export const deliveryProductionOperationMaximumBytes = 64 * 1024;
 
@@ -24,6 +24,8 @@ export const deliveryProductionOperationMaximumBytes = 64 * 1024;
 export const deliveryProductionOperationPhases = Object.freeze([
     "intent-recorded",
     "executor-confirmed",
+    "target-executor-admitted",
+    "target-executor-owner-transferred",
     "services-stopped",
     "current-snapshot-created",
     "target-database-ready",
@@ -116,7 +118,7 @@ export const deliveryProductionOperationCapsuleSchema = v.strictObject({
         actor: v.strictObject({
             authenticatorId: boundedIdentitySchema,
             id: boundedIdentitySchema,
-            kind: v.literal("user", invalidDeliveryProductionOperation),
+            kind: v.picklist(["automation", "user"], invalidDeliveryProductionOperation),
         }),
         audit: v.strictObject({
             eventId: lowercaseUuidV7Schema(invalidDeliveryProductionOperation),

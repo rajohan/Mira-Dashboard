@@ -27,6 +27,7 @@ export function publishedReleaseAuthority(
     return Object.freeze({
         assets,
         releaseId,
+        releaseDescriptorSha256: "f".repeat(64),
         releaseManifestSha256: "e".repeat(64),
         runtime: { revision: runtimeRevision, version: "1.4.0" },
         tagName,

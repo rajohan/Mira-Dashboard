@@ -27,7 +27,10 @@ function sha256(value: string): string {
     return new Bun.CryptoHasher("sha256").update(value).digest("hex");
 }
 
-function identity(input: DeliveryProductionJobPayload): JobExecutionRunIdentity {
+function identity(
+    input: DeliveryProductionJobPayload,
+    requestedByKind: "automation" | "user" = "user"
+): JobExecutionRunIdentity {
     return {
         actionKey: "delivery.production.v1",
         enqueueAuditEventId: "01917d36-2e64-7c89-9abc-1234567890ac",
@@ -37,8 +40,11 @@ function identity(input: DeliveryProductionJobPayload): JobExecutionRunIdentity 
         idempotencyKey: "A".repeat(43),
         payloadSha256: sha256(JSON.stringify(input)),
         queuedAtMs: nowMs,
-        requestedById: "01917d36-2e64-7c89-9abc-1234567890ae",
-        requestedByKind: "user",
+        requestedById:
+            requestedByKind === "automation"
+                ? "production-deploy"
+                : "01917d36-2e64-7c89-9abc-1234567890ae",
+        requestedByKind,
         runId,
     };
 }
@@ -158,7 +164,7 @@ describe("Delivery production execution", () => {
             ),
             sourceRevision,
         };
-        const runIdentity = identity(input);
+        const runIdentity = identity(input, "automation");
         const capsule = parseDeliveryProductionOperationCapsule({
             cas: {
                 current: {
@@ -178,7 +184,7 @@ describe("Delivery production execution", () => {
                 actor: {
                     authenticatorId: runIdentity.enqueueAuthenticatorId,
                     id: runIdentity.requestedById,
-                    kind: "user",
+                    kind: runIdentity.requestedByKind,
                 },
                 audit: {
                     eventId: runIdentity.enqueueAuditEventId,
@@ -194,7 +200,7 @@ describe("Delivery production execution", () => {
                 releaseId: currentReleaseId,
                 runtimeRevision: currentRuntimeRevision,
             },
-            protocol: "delivery.production.v3",
+            protocol: "delivery.production.v4",
             runId,
             transitionId: runId,
         });
@@ -293,7 +299,7 @@ describe("Delivery production execution", () => {
                 releaseId: currentReleaseId,
                 runtimeRevision: currentRuntimeRevision,
             },
-            protocol: "delivery.production.v3",
+            protocol: "delivery.production.v4",
             runId,
             transitionId: runId,
         });

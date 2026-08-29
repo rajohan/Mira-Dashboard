@@ -14,7 +14,10 @@ import path from "node:path";
 
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
-import type { PublishedProductionRelease } from "./productionReleasePublication.ts";
+import type {
+    DescribedPublishedProductionRelease,
+    PublishedProductionRelease,
+} from "./productionReleasePublication.ts";
 import type { InstalledProductionRuntime } from "./productionRuntime.ts";
 
 const runtimePointerFailureMessage = "Production runtime pointer update failed";
@@ -269,18 +272,23 @@ async function replaceRelativePointer(
 export async function pointProductionProcessesAtRelease(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
-    release: PublishedProductionRelease,
+    release: PublishedProductionRelease | DescribedPublishedProductionRelease,
     runtime: InstalledProductionRuntime
 ): Promise<void> {
-    const releaseId = release.manifest.source.commitSha;
+    const releaseId =
+        "descriptor" in release
+            ? release.descriptor.releaseId
+            : release.manifest.source.commitSha;
+    const releaseRuntime =
+        "descriptor" in release ? release.descriptor.runtime : release.manifest.runtime;
     const runtimeRevision = runtime.identity.revision;
     const bunRoot = path.join(paths.runtimesDirectory, "bun");
     if (
         lease.stateDirectory !== paths.stateDirectory ||
         release.releaseRoot !== path.join(paths.releasesDirectory, releaseId) ||
         runtime.executable !== path.join(bunRoot, runtimeRevision, "bun") ||
-        release.manifest.runtime.revision !== runtimeRevision ||
-        release.manifest.runtime.version !== runtime.identity.version
+        releaseRuntime.revision !== runtimeRevision ||
+        releaseRuntime.version !== runtime.identity.version
     ) {
         throw pointerFailure();
     }

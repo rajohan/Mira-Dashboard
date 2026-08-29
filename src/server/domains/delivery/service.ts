@@ -15,6 +15,8 @@ import {
     type DeliveryRequestOperationInput,
     type DeliveryRequestOperationResult,
     deliveryDeploymentsResultSchema,
+    deliveryDeployInputSchema,
+    deliveryDeployCurrentInputSchema,
     deliveryOverviewSectionKeys,
     deliveryOverviewSectionPayloadSchemas,
     deliveryOverviewSectionSchemaIds,
@@ -91,6 +93,11 @@ export interface DeliveryService {
     ) => Promise<DeliveryRequestOperationResult>;
     readonly deploy: (
         input: Extract<DeliveryRequestOperationInput, { operation: "deploy" }>,
+        context: DeliveryControlContext,
+        signal?: AbortSignal
+    ) => Promise<DeliveryRequestOperationResult>;
+    readonly deployCurrent: (
+        input: v.InferOutput<typeof deliveryDeployCurrentInputSchema>,
         context: DeliveryControlContext,
         signal?: AbortSignal
     ) => Promise<DeliveryRequestOperationResult>;
@@ -431,6 +438,31 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
         return snapshot;
     }
 
+    function currentDeployInput(
+        input: v.InferOutput<typeof deliveryDeployCurrentInputSchema>
+    ): Extract<DeliveryRequestOperationInput, { operation: "deploy" }> {
+        const checkout = freshSnapshot("checkout");
+        const releases = freshSnapshot("releases");
+        const candidate = releases.releases.candidate;
+        if (
+            candidate === undefined ||
+            releases.releases.current === undefined ||
+            candidate.releaseId !== checkout.checkout.remoteHeadSha
+        ) {
+            throw new DeliveryServiceError("conflict");
+        }
+        return v.parse(deliveryDeployInputSchema, {
+            activationRevision: releases.releases.activationRevision,
+            checkoutRevision: checkout.checkout.revision,
+            confirmation: input.confirmation,
+            expectedMainHeadSha: checkout.checkout.remoteHeadSha,
+            idempotencyKey: input.idempotencyKey,
+            operation: "deploy",
+            release: candidate,
+            sourceRevision: checkout.sourceRevision,
+        });
+    }
+
     function authorizeOperation(
         input: DeliveryRequestOperationInput,
         actor: DeliveryOperationActor
@@ -547,7 +579,7 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
     }
 
     async function settleAudit(
-        input: DeliveryRequestOperationInput,
+        input: Pick<DeliveryRequestOperationInput, "operation">,
         context: DeliveryOperationAuditContext,
         settlement:
             | { readonly kind: "failed" }
@@ -580,24 +612,35 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
         }
     }
 
-    async function requestOperation(
-        input: DeliveryRequestOperationInput,
-        context: DeliveryControlContext,
-        signal?: AbortSignal
-    ): Promise<DeliveryRequestOperationResult> {
-        const parsed = v.parse(deliveryRequestOperationInputSchema, input);
-        signal?.throwIfAborted();
+    async function recordAttemptedAudit(
+        operation: DeliveryRequestOperationInput["operation"],
+        context: DeliveryOperationAuditContext
+    ): Promise<void> {
         try {
             await options.auditWriter.record({
                 actor: context.actor,
-                operation: parsed.operation,
+                operation,
                 requestId: context.requestId,
                 settlement: "attempted",
             });
         } catch (error) {
             throw new DeliveryServiceError("audit-unavailable", { cause: error });
         }
+    }
+
+    async function requestOperation(
+        input: DeliveryRequestOperationInput,
+        context: DeliveryControlContext,
+        signal?: AbortSignal,
+        attemptedAuditRecorded = false
+    ): Promise<DeliveryRequestOperationResult> {
+        const parsed = v.parse(deliveryRequestOperationInputSchema, input);
+        if (!attemptedAuditRecorded) {
+            signal?.throwIfAborted();
+            await recordAttemptedAudit(parsed.operation, context);
+        }
         try {
+            signal?.throwIfAborted();
             const result = await options.operationQueue.enqueue({
                 actor: context.actor,
                 authorizeDispatch: () => {
@@ -644,6 +687,20 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
         approveReview: requestOperation,
         createPullRequestStack: requestOperation,
         deploy: requestOperation,
+        async deployCurrent(input, context, signal) {
+            signal?.throwIfAborted();
+            await recordAttemptedAudit("deploy", context);
+            let current: Extract<DeliveryRequestOperationInput, { operation: "deploy" }>;
+            try {
+                current = currentDeployInput(input);
+            } catch (error) {
+                await settleAudit({ operation: "deploy" }, context, {
+                    kind: "failed",
+                });
+                throw error;
+            }
+            return requestOperation(current, context, signal, true);
+        },
         getPreview() {
             const snapshot = overview("preview");
             return snapshot.state === "unavailable"

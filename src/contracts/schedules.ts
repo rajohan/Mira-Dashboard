@@ -243,6 +243,7 @@ export const scheduleProcedureContracts = [
     {
         access: scheduleRunAccess,
         domain: "schedules",
+        errorReasons: ["mfa_enrollment_required", "step_up_required"],
         errors: [
             "CONFLICT",
             "FORBIDDEN",

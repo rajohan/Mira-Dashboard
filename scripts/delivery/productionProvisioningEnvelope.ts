@@ -2,6 +2,10 @@ import path from "node:path";
 
 import * as v from "valibot";
 
+import {
+    parseProductionReleaseDescriptor,
+    productionReleaseDescriptorFileName,
+} from "../../src/shared/productionReleaseDescriptor.ts";
 import { readBoundedUtf8RegularFile } from "../files/boundedFile.ts";
 import {
     inventoryReleaseArtifactTree,
@@ -10,46 +14,11 @@ import {
 } from "./releaseArtifactInventory.ts";
 
 const failureMessage = "Production provisioning envelope is invalid";
-const manifestFileName = "release-manifest.json";
-const maximumManifestBytes = 4 * 1024 * 1024;
+const maximumDescriptorBytes = 4 * 1024 * 1024;
 const stableCandidatePaths = Object.freeze([
     "runtime/bun",
     "server/productionProvisioning.js",
 ] as const);
-
-const canonicalPathSchema = v.pipe(
-    v.string(),
-    v.minLength(1),
-    v.maxLength(4096),
-    v.regex(/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9.@_+/-]+$/u)
-);
-const artifactSchema = v.object({
-    bytes: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
-    path: canonicalPathSchema,
-    sha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
-});
-const envelopeSchema = v.object({
-    artifacts: v.pipe(
-        v.array(artifactSchema),
-        v.minLength(1),
-        v.maxLength(maximumReleaseArtifactCount),
-        v.check((artifacts) =>
-            artifacts.every(
-                ({ path: artifactPath }, index) =>
-                    index === 0 ||
-                    (artifacts[index - 1]?.path ?? artifactPath) < artifactPath
-            )
-        )
-    ),
-    runtime: v.object({
-        revision: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
-        version: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
-    }),
-    source: v.object({
-        commitSha: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
-        treeState: v.literal("clean"),
-    }),
-});
 
 export const productionProvisioningReceiptEnvelopeSchema = v.object({
     archive: v.object({
@@ -58,6 +27,7 @@ export const productionProvisioningReceiptEnvelopeSchema = v.object({
         sha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     }),
     releaseId: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
+    releaseDescriptorSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     releaseManifestSha256: v.pipe(v.string(), v.regex(/^[a-f\d]{64}$/u)),
     runtime: v.object({
         revision: v.pipe(v.string(), v.regex(/^[a-f\d]{40}$/u)),
@@ -65,9 +35,11 @@ export const productionProvisioningReceiptEnvelopeSchema = v.object({
     }),
 });
 
-export type ProductionProvisioningEnvelope = Readonly<
-    v.InferOutput<typeof envelopeSchema>
->;
+export type ProductionProvisioningEnvelope = Readonly<{
+    artifacts: readonly ReleaseArtifactInventoryRecord[];
+    releaseId: string;
+    runtime: Readonly<{ revision: string; version: string }>;
+}>;
 export type ProductionProvisioningReceiptEnvelope = Readonly<
     v.InferOutput<typeof productionProvisioningReceiptEnvelopeSchema>
 >;
@@ -101,23 +73,25 @@ export async function verifyProductionProvisioningEnvelope(
     releaseRoot: string
 ): Promise<ProductionProvisioningEnvelope> {
     try {
-        const manifest = await readBoundedUtf8RegularFile(
-            path.join(releaseRoot, manifestFileName),
+        const descriptorFile = await readBoundedUtf8RegularFile(
+            path.join(releaseRoot, productionReleaseDescriptorFileName),
             releaseRoot,
-            maximumManifestBytes,
+            maximumDescriptorBytes,
             failureMessage,
             failureMessage
         );
-        const parsed = v.parse(envelopeSchema, JSON.parse(manifest.text) as unknown, {
-            abortEarly: true,
-        });
+        const descriptor = parseProductionReleaseDescriptor(
+            JSON.parse(descriptorFile.text) as unknown
+        );
         const completeInventory = await inventoryReleaseArtifactTree(releaseRoot);
         const observed = completeInventory.filter(
-            ({ path: artifactPath }) => artifactPath !== manifestFileName
+            ({ path: artifactPath }) =>
+                artifactPath !== productionReleaseDescriptorFileName
         );
         if (
+            descriptor.artifacts.length > maximumReleaseArtifactCount + 1 ||
             completeInventory.length !== observed.length + 1 ||
-            !sameArtifacts(parsed.artifacts, observed) ||
+            !sameArtifacts(descriptor.artifacts, observed) ||
             stableCandidatePaths.some(
                 (requiredPath) =>
                     !observed.some(
@@ -127,11 +101,14 @@ export async function verifyProductionProvisioningEnvelope(
         ) {
             throw failure();
         }
-        Object.freeze(parsed.runtime);
-        Object.freeze(parsed.source);
-        for (const artifact of parsed.artifacts) Object.freeze(artifact);
-        Object.freeze(parsed.artifacts);
-        return Object.freeze(parsed);
+        return Object.freeze({
+            artifacts: descriptor.artifacts,
+            releaseId: descriptor.releaseId,
+            runtime: Object.freeze({
+                revision: descriptor.runtime.revision,
+                version: descriptor.runtime.version,
+            }),
+        });
     } catch {
         throw failure();
     }

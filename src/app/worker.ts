@@ -713,11 +713,24 @@ const defaultDependencies = Object.freeze({
     },
     createTerminationController: createProcessTerminationController,
     detectCutoverValidation: productionCutoverRequiresReconciliation,
-    async reconcileCutoverValidation(layout, _release, port) {
+    async reconcileCutoverValidation(layout, release, port) {
+        const control = createProductionDeliveryControlPort({
+            executorReleaseId: release.manifest.source.commitSha,
+            projectRoot: layout.root,
+            runtimeRevision: release.manifest.runtime.revision,
+        });
         const inspection = await reconcileDeliveryProductionCutoverBeforeValidation({
             projectRoot: layout.root,
             readActive: () =>
                 readActiveProductionCutoverRecord(layout.production.state.root),
+            readOwner: (signal) => {
+                if (control.inspectOwner === undefined) {
+                    return Promise.reject(
+                        new Error("Production owner reader is unavailable")
+                    );
+                }
+                return control.inspectOwner(signal);
+            },
             readinessUrl: `http://127.0.0.1:${String(port)}/api/health/ready`,
         });
         return (

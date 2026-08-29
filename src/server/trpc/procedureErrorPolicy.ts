@@ -343,6 +343,14 @@ export const procedureExpectedErrorPolicy = freezeProcedureExpectedErrorPolicy({
         "TOO_MANY_REQUESTS",
         "UNAUTHORIZED",
     ],
+    "delivery.deployCurrent": [
+        "CONFLICT",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "SERVICE_UNAVAILABLE",
+        "TOO_MANY_REQUESTS",
+        "UNAUTHORIZED",
+    ],
     "delivery.rollbackRelease": [
         "CONFLICT",
         "FORBIDDEN",

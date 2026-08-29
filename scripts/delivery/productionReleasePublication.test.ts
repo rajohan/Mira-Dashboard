@@ -30,7 +30,10 @@ import {
     productionArtifactCapacityReserveBytes,
 } from "./productionArtifactCapacity.ts";
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
-import { publishProductionRelease } from "./productionReleasePublication.ts";
+import {
+    publishDescribedProductionRelease,
+    publishProductionRelease,
+} from "./productionReleasePublication.ts";
 import { prepareProtectedProductionStatePath } from "./productionStateFilesystem.ts";
 import {
     type ReleaseRuntimeIdentity,
@@ -217,6 +220,35 @@ async function productionProjectFixture(): Promise<string> {
 }
 
 describe("production release publication", () => {
+    test("publishes and replays a descriptor-only foreign release", async () => {
+        const sourceReleaseRoot = sourceReleaseFixture();
+        const projectRoot = await productionProjectFixture();
+        const state = await prepareProtectedProductionStatePath(projectRoot);
+        const first = await withDeploymentLease(state.stateDirectory, async (lease) => {
+            const paths = await prepareProductionDeliveryDirectories(state);
+            return {
+                paths,
+                publication: await publishDescribedProductionRelease(
+                    lease,
+                    paths,
+                    sourceReleaseRoot
+                ),
+            };
+        });
+        const replay = await withDeploymentLease(state.stateDirectory, async (lease) =>
+            publishDescribedProductionRelease(lease, first.paths, sourceReleaseRoot)
+        );
+
+        expect(first.publication.descriptor.releaseId).toBe(commitSha);
+        expect(replay).toEqual(first.publication);
+        const releaseStatus = await stat(first.publication.releaseRoot);
+        const descriptorStatus = await stat(
+            path.join(first.publication.releaseRoot, "release-descriptor.json")
+        );
+        expect(releaseStatus.mode & 0o777).toBe(0o500);
+        expect(descriptorStatus.mode & 0o777).toBe(0o400);
+    });
+
     test("publishes one immutable commit release idempotently under the project root", async () => {
         const sourceReleaseRoot = sourceReleaseFixture();
         const projectRoot = await productionProjectFixture();

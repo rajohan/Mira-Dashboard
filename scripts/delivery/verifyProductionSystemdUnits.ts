@@ -6,7 +6,8 @@ import { readBoundedRegularFile } from "../files/boundedFile.ts";
 import type { DashboardDeploymentLease } from "./deploymentLease.ts";
 import type { PreparedProductionDeliveryPaths } from "./productionDeliveryFilesystem.ts";
 import {
-    loadPublishedProductionRelease,
+    loadDescribedPublishedProductionReleaseById,
+    type DescribedPublishedProductionRelease,
     type PublishedProductionRelease,
 } from "./productionReleasePublication.ts";
 import { productionSystemdUnits } from "./productionSystemdUnitPolicy.ts";
@@ -30,7 +31,7 @@ export interface ProductionSystemdAuthorityVerificationOptions {
     readonly executeSystemctl?: SystemctlExecutor;
     readonly expectedGroupId?: number;
     readonly expectedUserId?: number;
-    readonly loadPublishedRelease?: typeof loadPublishedProductionRelease;
+    readonly loadPublishedRelease?: typeof loadDescribedPublishedProductionReleaseById;
     readonly rootUnitDirectory?: string;
 }
 
@@ -126,12 +127,25 @@ async function readInstalledUnit(
 }
 
 function sameRelease(
-    left: PublishedProductionRelease,
-    right: PublishedProductionRelease
+    left: PublishedProductionRelease | DescribedPublishedProductionRelease,
+    right: DescribedPublishedProductionRelease
+): boolean {
+    if ("descriptor" in left) return sameDescribedRelease(left, right);
+    return (
+        left.releaseRoot === right.releaseRoot &&
+        left.manifest.source.commitSha === right.descriptor.releaseId &&
+        left.manifest.runtime.revision === right.descriptor.runtime.revision &&
+        left.manifest.runtime.version === right.descriptor.runtime.version
+    );
+}
+
+function sameDescribedRelease(
+    left: DescribedPublishedProductionRelease,
+    right: DescribedPublishedProductionRelease
 ): boolean {
     return (
         left.releaseRoot === right.releaseRoot &&
-        JSON.stringify(left.manifest) === JSON.stringify(right.manifest)
+        JSON.stringify(left.descriptor) === JSON.stringify(right.descriptor)
     );
 }
 
@@ -142,7 +156,7 @@ function sameRelease(
 export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
     lease: DashboardDeploymentLease,
     paths: PreparedProductionDeliveryPaths,
-    release: PublishedProductionRelease,
+    release: PublishedProductionRelease | DescribedPublishedProductionRelease,
     options: ProductionSystemdAuthorityVerificationOptions = {}
 ): Promise<void> {
     const unitDirectory = options.rootUnitDirectory ?? "/etc/systemd/system";
@@ -150,7 +164,7 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
     const expectedGroupId = options.expectedGroupId ?? 0;
     const executeSystemctl = options.executeSystemctl ?? executeSystemctlProcess;
     const loadPublishedRelease =
-        options.loadPublishedRelease ?? loadPublishedProductionRelease;
+        options.loadPublishedRelease ?? loadDescribedPublishedProductionReleaseById;
     let directory: FileHandle | undefined;
     let failed = false;
     try {
@@ -165,8 +179,9 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
         }
         const verifiedRelease = await loadPublishedRelease(
             paths,
-            release.manifest.source.commitSha,
-            release.manifest.runtime.revision
+            "descriptor" in release
+                ? release.descriptor.releaseId
+                : release.manifest.source.commitSha
         );
         if (!sameRelease(release, verifiedRelease)) throw verificationFailure();
 
@@ -190,7 +205,7 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
         }
 
         for (const policy of productionSystemdUnits) {
-            const artifact = verifiedRelease.manifest.artifacts.find(
+            const artifact = verifiedRelease.descriptor.artifacts.find(
                 ({ path: artifactPath }) => artifactPath === policy.artifactPath
             );
             if (!artifact || artifact.bytes > maximumUnitBytes) {
@@ -236,13 +251,12 @@ export async function verifyPublishedProductionSystemdUnitsInstalledAtRoot(
         const directoryAfter = await directory.stat({ bigint: true });
         const releaseAfter = await loadPublishedRelease(
             paths,
-            release.manifest.source.commitSha,
-            release.manifest.runtime.revision
+            verifiedRelease.descriptor.releaseId
         );
         if (
             directoryAfter.dev !== heldDirectory.dev ||
             directoryAfter.ino !== heldDirectory.ino ||
-            !sameRelease(verifiedRelease, releaseAfter)
+            !sameDescribedRelease(verifiedRelease, releaseAfter)
         ) {
             throw verificationFailure();
         }

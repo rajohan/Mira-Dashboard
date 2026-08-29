@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { createSecurityVerificationCoordinator } from "../security/securityVerificationCoordinator.ts";
 import {
     createDashboardTrpcClient,
     DashboardProtocolError,
@@ -167,6 +168,103 @@ describe("Dashboard browser tRPC client", () => {
                 path: "schedules.list",
             },
         ]);
+    });
+
+    test("requests global verification for a contract-declared conditional step-up", async () => {
+        const coordinator = createSecurityVerificationCoordinator(() => "session:one");
+        const transport: DashboardTrpcTransport = {
+            mutation: () =>
+                Promise.reject(
+                    Object.assign(new Error("Step-up required"), {
+                        data: { code: "FORBIDDEN", reason: "step_up_required" },
+                    })
+                ),
+            query: () => Promise.reject(new Error("Unexpected query")),
+        };
+        const client = createDashboardTrpcClient(transport, {
+            securityVerification: coordinator,
+        });
+        const pending = client.mutation("schedules.run", {
+            id: "system.worker-smoke",
+            idempotencyKey: "A".repeat(32),
+        });
+
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (coordinator.getSnapshot().phase !== "idle") break;
+            await new Promise<void>((resolve) => setTimeout(resolve, 1));
+        }
+        expect(coordinator.getSnapshot()).toMatchObject({
+            phase: "prompting",
+            reason: "step_up_required",
+        });
+        coordinator.dismiss();
+        expect(pending).rejects.toThrow("Security verification was cancelled");
+    });
+
+    test("replays the exact protected mutation after successful global verification", async () => {
+        const coordinator = createSecurityVerificationCoordinator(() => "session:one");
+        const calls: TransportCall[] = [];
+        const input = {
+            id: "system.worker-smoke",
+            idempotencyKey: "A".repeat(32),
+        };
+        const output = {
+            actionKey: "system.worker-smoke",
+            attemptCount: 0,
+            attemptLimit: 3,
+            availableAtMs: 1000,
+            cancellationPolicy: "cooperative",
+            displayName: "Worker smoke manual run",
+            eventCount: 1,
+            id: "019fdf90-0000-7000-8000-000000000004",
+            priority: 0,
+            queuedAtMs: 1000,
+            resourceClass: "light",
+            resourceKeys: [],
+            retrySafe: true,
+            scheduledJobId: "system.worker-smoke",
+            scheduledJobVersion: 1,
+            state: "queued",
+            stateVersion: 1,
+            timeoutMs: 60_000,
+            triggerType: "manual",
+            updatedAtMs: 1000,
+        } as const;
+        const transport: DashboardTrpcTransport = {
+            mutation(path, mutationInput) {
+                calls.push({ input: mutationInput, kind: "mutation", path });
+                return calls.length === 1
+                    ? Promise.reject(
+                          Object.assign(new Error("Step-up required"), {
+                              data: {
+                                  code: "FORBIDDEN",
+                                  reason: "step_up_required",
+                              },
+                          })
+                      )
+                    : Promise.resolve(output);
+            },
+            query: () => Promise.reject(new Error("Unexpected query")),
+        };
+        const client = createDashboardTrpcClient(transport, {
+            securityVerification: coordinator,
+        });
+        const pending = client.mutation("schedules.run", input);
+
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (coordinator.getSnapshot().phase !== "idle") break;
+            await new Promise<void>((resolve) => setTimeout(resolve, 1));
+        }
+        expect(coordinator.beginProof()).toBeTrue();
+        const replay = coordinator.completeProof();
+
+        expect(await pending).toEqual(output);
+        expect(await replay).toBeTrue();
+        expect(calls).toEqual([
+            { input, kind: "mutation", path: "schedules.run" },
+            { input, kind: "mutation", path: "schedules.run" },
+        ]);
+        coordinator.abortActiveFlow();
     });
 
     test("loads cache contracts on demand", async () => {

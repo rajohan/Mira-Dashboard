@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { rejectionError } from "../../../scripts/testSupport/rejection.ts";
 import type { DeliveryProductionOperationCapsule } from "../../shared/deliveryProductionOperation.ts";
+import { serializeProductionReleaseDescriptor } from "../../shared/productionReleaseDescriptor.ts";
 import {
     releaseBuildCommands,
     releaseDeliveryProtocols,
@@ -48,10 +49,51 @@ async function fixture() {
     const executor = path.join(releaseRoot, "server/productionDelivery.js");
     const runtime = path.join(runtimeRoot, "bun");
     const executorBytes = "executor";
+    const runtimeBytes = "runtime";
+    const executorSha256 = new Bun.CryptoHasher("sha256")
+        .update(executorBytes)
+        .digest("hex");
+    const runtimeSha256 = new Bun.CryptoHasher("sha256")
+        .update(runtimeBytes)
+        .digest("hex");
     await Promise.all([
         writeFile(executor, executorBytes, { mode: 0o400 }),
-        writeFile(runtime, "runtime", { mode: 0o500 }),
+        writeFile(runtime, runtimeBytes, { mode: 0o500 }),
     ]);
+    await writeFile(
+        path.join(releaseRoot, "release-descriptor.json"),
+        serializeProductionReleaseDescriptor({
+            artifacts: [
+                {
+                    bytes: Buffer.byteLength(runtimeBytes),
+                    path: "runtime/bun",
+                    sha256: runtimeSha256,
+                },
+                {
+                    bytes: Buffer.byteLength(executorBytes),
+                    path: "server/productionDelivery.js",
+                    sha256: executorSha256,
+                },
+            ],
+            deliveryExecutor: {
+                bytes: Buffer.byteLength(executorBytes),
+                path: "server/productionDelivery.js",
+                sha256: executorSha256,
+            },
+            formatVersion: 1,
+            releaseId: executorReleaseId,
+            runtime: {
+                executable: {
+                    bytes: Buffer.byteLength(runtimeBytes),
+                    path: "runtime/bun",
+                    sha256: runtimeSha256,
+                },
+                revision: runtimeRevision,
+                version: "1.4.0",
+            },
+        }),
+        { mode: 0o400 }
+    );
     await writeFile(
         path.join(releaseRoot, "release-manifest.json"),
         `${JSON.stringify({
@@ -59,9 +101,7 @@ async function fixture() {
                 {
                     bytes: Buffer.byteLength(executorBytes),
                     path: "server/productionDelivery.js",
-                    sha256: new Bun.CryptoHasher("sha256")
-                        .update(executorBytes)
-                        .digest("hex"),
+                    sha256: executorSha256,
                 },
             ],
             buildCommands: [...releaseBuildCommands],
@@ -160,7 +200,7 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
             releaseId: executorReleaseId,
             runtimeRevision,
         },
-        protocol: "delivery.production.v3" as const,
+        protocol: "delivery.production.v4" as const,
         runId: transitionId,
         transitionId,
     });
@@ -354,13 +394,57 @@ describe("production Delivery launcher", () => {
 describe("production Delivery control port", () => {
     test("bounds an actual immutable executor control process", async () => {
         const fixture_ = await fixture();
+        const runtimeBytes = "#!/bin/sh\nprintf '%s\\n' '{\"state\":\"missing\"}'\n";
         await chmod(fixture_.runtime, 0o700);
-        await writeFile(
-            fixture_.runtime,
-            "#!/bin/sh\nprintf '%s\\n' '{\"state\":\"missing\"}'\n",
-            { mode: 0o500 }
-        );
+        await writeFile(fixture_.runtime, runtimeBytes, { mode: 0o500 });
         await chmod(fixture_.runtime, 0o500);
+        const runtimeSha256 = new Bun.CryptoHasher("sha256")
+            .update(runtimeBytes)
+            .digest("hex");
+        const executorSha256 = new Bun.CryptoHasher("sha256")
+            .update("executor")
+            .digest("hex");
+        const releaseRoot = path.join(
+            fixture_.options.projectRoot,
+            "production/releases",
+            executorReleaseId
+        );
+        await chmod(path.join(releaseRoot, "release-descriptor.json"), 0o600);
+        await writeFile(
+            path.join(releaseRoot, "release-descriptor.json"),
+            serializeProductionReleaseDescriptor({
+                artifacts: [
+                    {
+                        bytes: Buffer.byteLength(runtimeBytes),
+                        path: "runtime/bun",
+                        sha256: runtimeSha256,
+                    },
+                    {
+                        bytes: Buffer.byteLength("executor"),
+                        path: "server/productionDelivery.js",
+                        sha256: executorSha256,
+                    },
+                ],
+                deliveryExecutor: {
+                    bytes: Buffer.byteLength("executor"),
+                    path: "server/productionDelivery.js",
+                    sha256: executorSha256,
+                },
+                formatVersion: 1,
+                releaseId: executorReleaseId,
+                runtime: {
+                    executable: {
+                        bytes: Buffer.byteLength(runtimeBytes),
+                        path: "runtime/bun",
+                        sha256: runtimeSha256,
+                    },
+                    revision: runtimeRevision,
+                    version: "1.4.0",
+                },
+            }),
+            { mode: 0o400 }
+        );
+        await chmod(path.join(releaseRoot, "release-descriptor.json"), 0o400);
         const control = createProductionDeliveryControlPort({
             executorReleaseId,
             projectRoot: fixture_.options.projectRoot,

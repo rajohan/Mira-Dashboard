@@ -614,6 +614,7 @@ export async function admitProductionBootstrapRelease(
     Readonly<{
         archiveBytes: number;
         archiveSha256: string;
+        descriptorSha256: string;
         manifestSha256: string;
         receiptBytes: number;
         receiptSha256: string;
@@ -645,6 +646,8 @@ export async function admitProductionBootstrapRelease(
         receipt.archive.sha256 !== archiveSha256 ||
         (expectedAuthority !== undefined &&
             (expectedAuthority.releaseId !== releaseId ||
+                expectedAuthority.releaseDescriptorSha256 !==
+                    receipt.releaseDescriptorSha256 ||
                 expectedAuthority.releaseManifestSha256 !==
                     receipt.releaseManifestSha256 ||
                 expectedAuthority.runtime.revision !== receipt.runtime.revision ||
@@ -680,10 +683,14 @@ export async function admitProductionBootstrapRelease(
         const manifestBytes = await readFile(
             path.join(releaseRoot, "release-manifest.json")
         );
+        const descriptorBytes = await readFile(
+            path.join(releaseRoot, "release-descriptor.json")
+        );
         if (
             manifest.source.commitSha !== releaseId ||
             manifest.runtime.version !== receipt.runtime.version ||
             manifest.runtime.revision !== receipt.runtime.revision ||
+            sha256(descriptorBytes) !== receipt.releaseDescriptorSha256 ||
             sha256(manifestBytes) !== receipt.releaseManifestSha256
         ) {
             throw new Error(failureMessage);
@@ -691,6 +698,7 @@ export async function admitProductionBootstrapRelease(
         return Object.freeze({
             archiveBytes: archive.bytes,
             archiveSha256: receipt.archive.sha256,
+            descriptorSha256: receipt.releaseDescriptorSha256,
             manifestSha256: receipt.releaseManifestSha256,
             receiptBytes: receiptBytes.byteLength,
             receiptSha256,
@@ -1205,6 +1213,7 @@ export async function preparePublishedProductionRelease(
                         },
                     ],
                     releaseId,
+                    releaseDescriptorSha256: admitted.descriptorSha256,
                     releaseManifestSha256: admitted.manifestSha256,
                     runtime: admitted.runtime,
                     tagName: downloaded.tagName,

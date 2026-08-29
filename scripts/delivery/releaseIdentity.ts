@@ -8,6 +8,12 @@ import {
     migrationManifest,
 } from "../../src/shared/databaseMigrationManifest.ts";
 import {
+    parseProductionReleaseDescriptor,
+    productionReleaseDescriptorFileName,
+    serializeProductionReleaseDescriptor,
+    type ProductionReleaseDescriptor,
+} from "../../src/shared/productionReleaseDescriptor.ts";
+import {
     parseReleaseManifest,
     type ReleaseManifest,
     releaseBuildCommands,
@@ -36,6 +42,7 @@ const releaseManifestFileName = "release-manifest.json";
 const maximumPackageJsonBytes = 1024 * 1024;
 const maximumLockfileBytes = 4 * 1024 * 1024;
 const maximumManifestBytes = 4 * 1024 * 1024;
+const maximumDescriptorBytes = 4 * 1024 * 1024;
 const packageGroupSchema = v.record(v.string(), v.string());
 const packageJsonSchema = v.object({
     dependencies: packageGroupSchema,
@@ -88,6 +95,32 @@ export interface CreateReleaseIdentityOptions {
         readonly commitTitle: string;
     }>;
     readonly sourceIdentity?: BuildSourceIdentity;
+}
+
+function requiredArtifact(
+    artifacts: readonly ReleaseArtifactInventoryRecord[],
+    artifactPath: string
+): ReleaseArtifactInventoryRecord {
+    const artifact = artifacts.find(({ path }) => path === artifactPath);
+    if (!artifact) throw invalidReleaseIdentity();
+    return artifact;
+}
+
+function createDescriptor(
+    manifest: ReleaseManifest,
+    artifacts: readonly ReleaseArtifactInventoryRecord[]
+): ProductionReleaseDescriptor {
+    return parseProductionReleaseDescriptor({
+        artifacts,
+        deliveryExecutor: requiredArtifact(artifacts, "server/productionDelivery.js"),
+        formatVersion: 1,
+        releaseId: manifest.source.commitSha,
+        runtime: {
+            executable: requiredArtifact(artifacts, "runtime/bun"),
+            revision: manifest.runtime.revision,
+            version: manifest.runtime.version,
+        },
+    });
 }
 
 function invalidReleaseIdentity(): Error {
@@ -200,6 +233,40 @@ function sameArtifactRecords(
                 record.sha256 === right[index]?.sha256
         )
     );
+}
+
+/**
+ * Verifies the stable cross-generation descriptor against the complete release tree.
+ * @param releaseRoot Immutable release directory to verify.
+ * @returns Parsed descriptor after exact tree-identity verification.
+ */
+export async function verifyProductionReleaseDescriptorIdentity(
+    releaseRoot: string
+): Promise<ProductionReleaseDescriptor> {
+    const descriptorFile = await readUtf8(
+        path.join(releaseRoot, productionReleaseDescriptorFileName),
+        releaseRoot,
+        maximumDescriptorBytes
+    );
+    let descriptor: ProductionReleaseDescriptor;
+    try {
+        descriptor = parseProductionReleaseDescriptor(
+            JSON.parse(descriptorFile.text) as unknown
+        );
+    } catch {
+        throw invalidReleaseIdentity();
+    }
+    const completeInventory = await inventoryReleaseArtifactTree(releaseRoot);
+    const artifacts = completeInventory.filter(
+        ({ path: artifactPath }) => artifactPath !== productionReleaseDescriptorFileName
+    );
+    if (
+        completeInventory.length !== artifacts.length + 1 ||
+        !sameArtifactRecords(descriptor.artifacts, artifacts)
+    ) {
+        throw invalidReleaseIdentity();
+    }
+    return descriptor;
 }
 
 function selectedBunTypesVersion(
@@ -441,13 +508,23 @@ async function reconstructReleaseArtifactIdentity(
     } catch {
         throw invalidReleaseIdentity();
     }
+    const descriptor = await verifyProductionReleaseDescriptorIdentity(releaseRoot);
     const completeInventory = await inventoryReleaseArtifactTree(releaseRoot);
     const artifacts = completeInventory.filter(
-        ({ path: artifactPath }) => artifactPath !== releaseManifestFileName
+        ({ path: artifactPath }) =>
+            artifactPath !== releaseManifestFileName &&
+            artifactPath !== productionReleaseDescriptorFileName
     );
     if (
-        completeInventory.length !== artifacts.length + 1 ||
+        completeInventory.length !== artifacts.length + 2 ||
         !sameArtifactRecords(manifest.artifacts, artifacts)
+    ) {
+        throw invalidReleaseIdentity();
+    }
+    if (
+        descriptor.releaseId !== manifest.source.commitSha ||
+        descriptor.runtime.revision !== manifest.runtime.revision ||
+        descriptor.runtime.version !== manifest.runtime.version
     ) {
         throw invalidReleaseIdentity();
     }
@@ -524,6 +601,16 @@ export async function writeReleaseIdentity(
         await writeFile(
             path.join(options.releaseRoot, releaseManifestFileName),
             serializeReleaseManifest(manifest),
+            { encoding: "utf8", flag: "wx", mode: 0o600 }
+        );
+        const descriptorArtifacts = await inventoryReleaseArtifactTree(
+            options.releaseRoot
+        );
+        await writeFile(
+            path.join(options.releaseRoot, productionReleaseDescriptorFileName),
+            serializeProductionReleaseDescriptor(
+                createDescriptor(manifest, descriptorArtifacts)
+            ),
             { encoding: "utf8", flag: "wx", mode: 0o600 }
         );
     } catch {

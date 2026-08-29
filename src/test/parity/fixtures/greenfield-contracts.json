@@ -291,6 +291,10 @@
             "name": "delivery.deploy"
         },
         {
+            "kind": "mutation",
+            "name": "delivery.deployCurrent"
+        },
+        {
             "kind": "query",
             "name": "delivery.getPreview"
         },

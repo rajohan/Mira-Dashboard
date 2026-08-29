@@ -9,6 +9,7 @@ import {
     type DeliveryProductionOperationInspection,
     type DeliveryProductionOperationRecord,
 } from "../../shared/deliveryProductionOperation.ts";
+import { parseProductionDeliveryExecutorOwner } from "../../shared/productionDeliveryExecutorOwner.ts";
 import { lowercaseUuidV7Schema } from "../../shared/validation.ts";
 import {
     resolveVerifiedProductionDeliveryExecutor,
@@ -33,6 +34,9 @@ export interface ProductionDeliveryControlPort {
     readonly inspectActive: (
         signal?: AbortSignal
     ) => Promise<DeliveryProductionOperationInspection>;
+    readonly inspectOwner?: (
+        signal?: AbortSignal
+    ) => Promise<ReturnType<typeof parseProductionDeliveryExecutorOwner> | null>;
     readonly inspect: (
         transitionId: string,
         signal?: AbortSignal
@@ -142,7 +146,7 @@ export function createProductionDeliveryControlPort(
     const run = dependencies.execute ?? execute;
 
     async function command(
-        operation: "clear" | "inspect" | "inspect-active" | "prepare",
+        operation: "clear" | "inspect" | "inspect-active" | "inspect-owner" | "prepare",
         standardInput: Uint8Array,
         transitionId?: string,
         signal?: AbortSignal
@@ -181,6 +185,15 @@ export function createProductionDeliveryControlPort(
             return parseDeliveryProductionOperationInspection(
                 await command("inspect-active", new Uint8Array(), undefined, signal)
             );
+        },
+        async inspectOwner(signal?: AbortSignal) {
+            const value = await command(
+                "inspect-owner",
+                new Uint8Array(),
+                undefined,
+                signal
+            );
+            return value === null ? null : parseProductionDeliveryExecutorOwner(value);
         },
         async inspect(transitionId: string, signal?: AbortSignal) {
             const canonicalTransition = v.parse(lowercaseUuidV7Schema(), transitionId);

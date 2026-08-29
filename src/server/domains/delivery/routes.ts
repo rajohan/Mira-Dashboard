@@ -5,6 +5,7 @@ import {
     deliveryApproveReviewInputSchema,
     deliveryCreatePullRequestStackInputSchema,
     deliveryDeployInputSchema,
+    deliveryDeployCurrentInputSchema,
     deliveryDeploymentsResultSchema,
     deliveryGetPreviewInputSchema,
     deliveryGetProductionCheckoutInputSchema,
@@ -21,11 +22,13 @@ import {
     deliveryStartPreviewInputSchema,
     deliveryStopPreviewInputSchema,
     deliveryUpdateBranchInputSchema,
+    productionDeployAutomationPrincipalId,
 } from "../../../contracts/delivery.ts";
 import { appendClearedDashboardSessionCookie } from "../../rawHttp/sessionCookie.ts";
 import type { RequestContext } from "../../trpc/context.ts";
 import {
     authenticationPolicyError,
+    capabilityProcedure,
     operationOutcomeUnknownError,
     router,
     sessionCapabilityProcedure,
@@ -125,8 +128,22 @@ function throwServiceFailure(error: unknown): never {
 
 const readProcedure = sessionCapabilityProcedure("delivery:read");
 const controlProcedure = sessionCapabilityProcedure("delivery:write");
+const automationDeployProcedure = capabilityProcedure("delivery:write").use(
+    ({ ctx, next }) => {
+        if (
+            ctx.principal.kind !== "automation" ||
+            ctx.principal.id !== productionDeployAutomationPrincipalId
+        ) {
+            throw new TRPCError({
+                code: "FORBIDDEN",
+                message: "An automation principal is required",
+            });
+        }
+        return next({ ctx });
+    }
+);
 
-/** Five independent reads and nine recent-MFA exact Delivery mutations. */
+/** Five reads, nine recent-MFA mutations, and one deploy-only automation mutation. */
 export const deliveryRoutes = {
     approvePullRequest: controlProcedure
         .input(deliveryApprovePullRequestInputSchema)
@@ -180,6 +197,28 @@ export const deliveryRoutes = {
             authorizeControl(ctx);
             try {
                 return await service(ctx).deploy(input, controlContext(ctx), signal);
+            } catch (error) {
+                return throwServiceFailure(error);
+            }
+        }),
+    deployCurrent: automationDeployProcedure
+        .input(deliveryDeployCurrentInputSchema)
+        .output(deliveryRequestOperationResultSchema)
+        .mutation(async ({ ctx, input, signal }) => {
+            try {
+                return await service(ctx).deployCurrent(
+                    input,
+                    {
+                        actor: {
+                            authenticatorId: ctx.principal.authenticatorId,
+                            id: ctx.principal.id,
+                            kind: "automation",
+                        },
+                        reauthorize() {},
+                        requestId: ctx.requestId,
+                    },
+                    signal
+                );
             } catch (error) {
                 return throwServiceFailure(error);
             }

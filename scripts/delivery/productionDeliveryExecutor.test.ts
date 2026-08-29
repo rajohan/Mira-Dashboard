@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -16,6 +16,10 @@ import {
     deliveryProductionProtocol,
     type DeliveryProductionOperationCapsule,
 } from "../../src/shared/deliveryProductionOperation.ts";
+import {
+    parseProductionReleaseDescriptor,
+    serializeProductionReleaseDescriptor,
+} from "../../src/shared/productionReleaseDescriptor.ts";
 import {
     parseReleaseManifest,
     releaseBuildCommands,
@@ -33,6 +37,7 @@ import {
 import {
     clearProductionDeliveryOperationMarker,
     inspectActiveProductionDeliveryOperation,
+    inspectProductionDeliveryExecutorOwner,
     inspectProductionDeliveryOperation,
     parseProductionDeliveryExecutorArguments,
     prepareProductionDeliveryOperation,
@@ -61,21 +66,31 @@ const checksum = "e".repeat(64);
 
 afterEach(async () => {
     for (const directory of temporaryDirectories.splice(0)) {
+        await restoreOwnerWrite(directory);
         await rm(directory, { force: true, recursive: true });
     }
 });
 
-function operationCapsule(): DeliveryProductionOperationCapsule {
+async function restoreOwnerWrite(directory: string): Promise<void> {
+    const status = await lstat(directory).catch(() => null);
+    if (!status?.isDirectory()) return;
+    await chmod(directory, 0o700);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) await restoreOwnerWrite(entryPath);
+        else if (entry.isFile()) await chmod(entryPath, 0o600);
+    }
+}
+
+function operationCapsule(
+    release = publishedReleaseAuthority(targetReleaseId, "v1.2.3", targetRuntimeRevision)
+): DeliveryProductionOperationCapsule {
     const payload = {
         activationRevision: "1".repeat(64),
         checkoutRevision: "2".repeat(64),
         expectedMainHeadSha: targetReleaseId,
         operation: "deploy" as const,
-        release: publishedReleaseAuthority(
-            targetReleaseId,
-            "v1.2.3",
-            targetRuntimeRevision
-        ),
+        release,
         sourceRevision: "f".repeat(64),
     };
     return {
@@ -118,6 +133,37 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
         protocol: deliveryProductionProtocol,
         runId: operationTransitionId,
         transitionId: operationTransitionId,
+    };
+}
+
+function rollbackCapsule(): DeliveryProductionOperationCapsule {
+    const payload = {
+        activationRevision: "1".repeat(64),
+        operation: "rollback-release" as const,
+        sourceRevision: "f".repeat(64),
+        target: {
+            databaseSnapshotTransitionId: "019fd974-54a2-74dd-a64b-d4186f8d8806",
+            releaseId: targetReleaseId,
+            runtimeRevision: targetRuntimeRevision,
+        },
+    };
+    const deploy = operationCapsule();
+    return {
+        ...deploy,
+        cas: {
+            ...deploy.cas,
+            target: {
+                ...deploy.cas.target,
+                databaseSnapshotTransitionId: payload.target.databaseSnapshotTransitionId,
+            },
+        },
+        enqueue: {
+            ...deploy.enqueue,
+            payload,
+            payloadSha256: new Bun.CryptoHasher("sha256")
+                .update(JSON.stringify(payload))
+                .digest("hex"),
+        },
     };
 }
 
@@ -175,6 +221,102 @@ function artifact(
             executable: `/production/runtimes/bun/${runtimeRevision}/bun`,
             identity: { revision: runtimeRevision, version: "1.4.0" },
         }),
+    });
+}
+
+function describedArtifact(releaseId: string, runtimeRevision: string) {
+    const executable = Object.freeze({
+        bytes: 1,
+        path: "runtime/bun",
+        sha256: checksum,
+    });
+    const deliveryExecutor = Object.freeze({
+        bytes: 1,
+        path: "server/productionDelivery.js",
+        sha256: checksum,
+    });
+    return Object.freeze({
+        release: Object.freeze({
+            descriptor: parseProductionReleaseDescriptor({
+                artifacts: [executable, deliveryExecutor],
+                deliveryExecutor,
+                formatVersion: 1,
+                releaseId,
+                runtime: {
+                    executable,
+                    revision: runtimeRevision,
+                    version: "1.4.0",
+                },
+            }),
+            releaseRoot: `/production/releases/${releaseId}`,
+        }),
+        runtime: Object.freeze({
+            executable: `/production/runtimes/bun/${runtimeRevision}/bun`,
+            identity: { revision: runtimeRevision, version: "1.4.0" },
+        }),
+    });
+}
+
+function describedArtifactRecord(artifactPath: string, content: string) {
+    return {
+        bytes: Buffer.byteLength(content),
+        path: artifactPath,
+        sha256: new Bun.CryptoHasher("sha256").update(content).digest("hex"),
+    };
+}
+
+async function materializeDescribedRelease(
+    releaseRoot: string,
+    releaseId: string,
+    runtimeRevision: string
+): Promise<Readonly<{ descriptorSha256: string; manifestSha256: string }>> {
+    const runtimeBytes = "runtime";
+    const executorBytes = "executor";
+    const manifestBytes = "foreign-manifest";
+    const executable = describedArtifactRecord("runtime/bun", runtimeBytes);
+    const deliveryExecutor = describedArtifactRecord(
+        "server/productionDelivery.js",
+        executorBytes
+    );
+    const manifest = describedArtifactRecord("release-manifest.json", manifestBytes);
+    const descriptorBytes = serializeProductionReleaseDescriptor({
+        artifacts: [manifest, executable, deliveryExecutor],
+        deliveryExecutor,
+        formatVersion: 1,
+        releaseId,
+        runtime: {
+            executable,
+            revision: runtimeRevision,
+            version: "1.4.0",
+        },
+    });
+    await mkdir(releaseRoot, { recursive: true });
+    await Promise.all([
+        mkdir(path.join(releaseRoot, "runtime"), { recursive: true }),
+        mkdir(path.join(releaseRoot, "server"), { recursive: true }),
+    ]);
+    await Promise.all([
+        writeFile(path.join(releaseRoot, executable.path), runtimeBytes, {
+            mode: 0o500,
+        }),
+        writeFile(path.join(releaseRoot, deliveryExecutor.path), executorBytes, {
+            mode: 0o400,
+        }),
+        writeFile(path.join(releaseRoot, manifest.path), manifestBytes, { mode: 0o400 }),
+        writeFile(path.join(releaseRoot, "release-descriptor.json"), descriptorBytes, {
+            mode: 0o400,
+        }),
+    ]);
+    await Promise.all([
+        chmod(path.join(releaseRoot, "runtime"), 0o500),
+        chmod(path.join(releaseRoot, "server"), 0o500),
+    ]);
+    await chmod(releaseRoot, 0o500);
+    return Object.freeze({
+        descriptorSha256: new Bun.CryptoHasher("sha256")
+            .update(descriptorBytes)
+            .digest("hex"),
+        manifestSha256: manifest.sha256,
     });
 }
 
@@ -489,7 +631,9 @@ describe("production Delivery executor", () => {
                         },
                         verifySmoke: () => Promise.resolve(),
                     }),
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -603,7 +747,9 @@ describe("production Delivery executor", () => {
                 verifyReady: () => Promise.resolve(),
                 verifySmoke: () => Promise.resolve(),
             }),
-            loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+            loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+            loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                 Promise.resolve(artifact(releaseId, runtimeRevision)),
             nowMs: () => 10_000,
             verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -626,6 +772,12 @@ describe("production Delivery executor", () => {
             )
         ).toEqual(receipt);
         expect(
+            await clearProductionDeliveryOperationMarker(
+                options.projectRoot,
+                operationTransitionId
+            )
+        ).toEqual(receipt);
+        expect(
             await inspectActiveProductionDeliveryOperation(options.projectRoot)
         ).toEqual({ state: "missing" });
         expect(
@@ -639,6 +791,30 @@ describe("production Delivery executor", () => {
             prepareProductionDeliveryOperation(options.projectRoot, capsule, () => 3000)
         );
         expect(replayFailure.message).toBe("Production Delivery executor failed");
+    });
+
+    test("backfills the capsule executor owner when journal creation outlives owner commit", async () => {
+        const { options, paths } = await fixture();
+        const capsule = operationCapsule();
+        await withDeploymentLease(paths.stateDirectory, (lease) =>
+            createDeliveryProductionOperation(lease, paths, capsule, 1000)
+        );
+
+        const replay = await prepareProductionDeliveryOperation(
+            options.projectRoot,
+            capsule,
+            () => 2000
+        );
+
+        expect(replay.phase).toBe("intent-recorded");
+        expect(await inspectProductionDeliveryExecutorOwner(options.projectRoot)).toEqual(
+            {
+                formatVersion: 1,
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+                transitionId: operationTransitionId,
+            }
+        );
     });
 
     test("keeps recovery retryable when the normal runtime restart fails", async () => {
@@ -704,7 +880,9 @@ describe("production Delivery executor", () => {
                         verifyReady: () => Promise.resolve(),
                         verifySmoke: () => Promise.resolve(),
                     }),
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -804,7 +982,9 @@ describe("production Delivery executor", () => {
                         verifyReady: () => Promise.resolve(),
                         verifySmoke: () => Promise.resolve(),
                     }),
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
@@ -820,6 +1000,171 @@ describe("production Delivery executor", () => {
         });
     });
 
+    test("hands a descriptor-verified target to its own executor before activation", async () => {
+        const { options, paths } = await fixture();
+        const releaseRoot = path.join(paths.releasesDirectory, targetReleaseId);
+        const authority = await materializeDescribedRelease(
+            releaseRoot,
+            targetReleaseId,
+            targetRuntimeRevision
+        );
+        const targetRuntime = artifact(targetReleaseId, targetRuntimeRevision).runtime;
+
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                operationCapsule({
+                    ...publishedReleaseAuthority(
+                        targetReleaseId,
+                        "v1.2.3",
+                        targetRuntimeRevision
+                    ),
+                    releaseDescriptorSha256: authority.descriptorSha256,
+                    releaseManifestSha256: authority.manifestSha256,
+                }),
+                1000
+            );
+            const handoff = await rejectionError(
+                runProductionDeliveryExecutorUnderLease(lease, paths, options, {
+                    installRuntime: (_lease, _paths, identity, dependencies) => {
+                        expect(identity).toEqual(targetRuntime.identity);
+                        expect(dependencies?.sourceExecutable).toBe(
+                            path.join(releaseRoot, "runtime/bun")
+                        );
+                        return Promise.resolve(targetRuntime);
+                    },
+                    nowMs: () => 2000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                })
+            );
+            expect(handoff.name).toBe("TargetExecutorHandoff");
+            expect(await inspectDeliveryProductionOperation(lease, paths)).toMatchObject({
+                record: { phase: "target-executor-owner-transferred" },
+                state: "in-progress",
+            });
+        });
+        expect(await inspectProductionDeliveryExecutorOwner(options.projectRoot)).toEqual(
+            {
+                formatVersion: 1,
+                releaseId: targetReleaseId,
+                runtimeRevision: targetRuntimeRevision,
+                transitionId: operationTransitionId,
+            }
+        );
+    });
+
+    test.each(["descriptor", "manifest"] as const)(
+        "rejects retained deploy authority with a mismatched %s before handoff",
+        async (mismatch) => {
+            const { options, paths } = await fixture();
+            const releaseRoot = path.join(paths.releasesDirectory, targetReleaseId);
+            const authority = await materializeDescribedRelease(
+                releaseRoot,
+                targetReleaseId,
+                targetRuntimeRevision
+            );
+            const published = publishedReleaseAuthority(
+                targetReleaseId,
+                "v1.2.3",
+                targetRuntimeRevision
+            );
+            const capsule = operationCapsule({
+                ...published,
+                releaseDescriptorSha256:
+                    mismatch === "descriptor"
+                        ? "0".repeat(64)
+                        : authority.descriptorSha256,
+                releaseManifestSha256:
+                    mismatch === "manifest" ? "0".repeat(64) : authority.manifestSha256,
+            });
+            let installed = false;
+
+            await withDeploymentLease(paths.stateDirectory, async (lease) => {
+                await createDeliveryProductionOperation(lease, paths, capsule, 1000);
+                const receipt = await runProductionDeliveryExecutorUnderLease(
+                    lease,
+                    paths,
+                    options,
+                    {
+                        installRuntime: () => {
+                            installed = true;
+                            return Promise.resolve(
+                                artifact(targetReleaseId, targetRuntimeRevision).runtime
+                            );
+                        },
+                        verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                    }
+                );
+                expect(receipt).toMatchObject({
+                    phase: "terminal",
+                    result: { outcome: "unknown-outcome" },
+                });
+                expect(
+                    await inspectDeliveryProductionOperation(lease, paths)
+                ).toMatchObject({ record: { phase: "terminal" }, state: "terminal" });
+            });
+            expect(installed).toBe(false);
+            expect(
+                await inspectProductionDeliveryExecutorOwner(options.projectRoot)
+            ).toMatchObject({
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+            });
+        }
+    );
+
+    test("rejects an incompatible rollback target without transferring execution", async () => {
+        const { options, paths } = await fixture();
+        await materializeDescribedRelease(
+            path.join(paths.releasesDirectory, targetReleaseId),
+            targetReleaseId,
+            targetRuntimeRevision
+        );
+        let installed = false;
+        const current = describedArtifact(currentReleaseId, currentRuntimeRevision);
+
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                rollbackCapsule(),
+                1000
+            );
+            const receipt = await runProductionDeliveryExecutorUnderLease(
+                lease,
+                paths,
+                options,
+                {
+                    createServices: () => ({
+                        prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
+                        settle: () => Promise.resolve(),
+                        start: () => Promise.resolve(),
+                        stop: () => Promise.resolve(),
+                        verifyReady: () => Promise.resolve(),
+                        verifySmoke: () => Promise.resolve(),
+                    }),
+                    installRuntime: () => {
+                        installed = true;
+                        return Promise.resolve(current.runtime);
+                    },
+                    loadCurrentArtifacts: () => Promise.resolve(current),
+                    nowMs: () => 2000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                }
+            );
+            expect(receipt.result).toMatchObject({ outcome: "unknown-outcome" });
+        });
+        expect(installed).toBe(false);
+        expect(
+            await inspectProductionDeliveryExecutorOwner(options.projectRoot)
+        ).toMatchObject({
+            releaseId: currentReleaseId,
+            runtimeRevision: currentRuntimeRevision,
+        });
+    });
+
     test("builds, capacity-admits, installs, and publishes an exact clean target", async () => {
         const { options, paths } = await fixture();
         await withDeploymentLease(paths.stateDirectory, async (lease) => {
@@ -829,7 +1174,7 @@ describe("production Delivery executor", () => {
                 operationCapsule(),
                 1000
             );
-            const current = artifact(currentReleaseId, currentRuntimeRevision);
+            const current = describedArtifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
             const candidateRuntimeExecutable = `${options.projectRoot}/production/checkout/dist/releases/${targetReleaseId}/runtime/bun`;
@@ -910,7 +1255,7 @@ describe("production Delivery executor", () => {
                     paths,
                     options.projectRoot,
                     record,
-                    artifact(currentReleaseId, currentRuntimeRevision),
+                    describedArtifact(currentReleaseId, currentRuntimeRevision),
                     "published-release",
                     {}
                 )
@@ -938,7 +1283,7 @@ describe("production Delivery executor", () => {
                     paths,
                     options.projectRoot,
                     record,
-                    artifact(currentReleaseId, currentRuntimeRevision),
+                    describedArtifact(currentReleaseId, currentRuntimeRevision),
                     "retained",
                     {
                         preparePublishedRelease: () => {
@@ -967,7 +1312,7 @@ describe("production Delivery executor", () => {
                 operationCapsule(),
                 1000
             );
-            const current = artifact(currentReleaseId, currentRuntimeRevision);
+            const current = describedArtifact(currentReleaseId, currentRuntimeRevision);
             const target = artifact(targetReleaseId, targetRuntimeRevision);
             const calls: string[] = [];
             const checkoutRoot = `${options.projectRoot}/production/checkout`;
@@ -1052,7 +1397,7 @@ describe("production Delivery executor", () => {
                     paths,
                     options.projectRoot,
                     record,
-                    artifact(currentReleaseId, currentRuntimeRevision),
+                    describedArtifact(currentReleaseId, currentRuntimeRevision),
                     "published-release",
                     {
                         preparationCapacityAdmission: () =>
@@ -1118,7 +1463,9 @@ describe("production Delivery executor", () => {
                 paths,
                 options,
                 {
-                    loadArtifacts: (_paths, releaseId, runtimeRevision) =>
+                    loadCurrentArtifacts: (_paths, releaseId, runtimeRevision) =>
+                        Promise.resolve(describedArtifact(releaseId, runtimeRevision)),
+                    loadTargetArtifacts: (_paths, releaseId, runtimeRevision) =>
                         Promise.resolve(artifact(releaseId, runtimeRevision)),
                     nowMs: () => 10_000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),

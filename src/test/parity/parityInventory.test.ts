@@ -468,7 +468,7 @@ describe("reviewed pre-cutover parity inventory", () => {
         ).toContain("fixed Docker shell");
     });
 
-    test("closes the reviewed Delivery route and all fourteen Delivery procedures", async () => {
+    test("closes the reviewed Delivery route and procedure inventory", async () => {
         const reviewed = await loadReviewedParityInventory();
         const deliveryRoute = reviewed.frontend.routes.find(
             ({ path }) => path === "/delivery"

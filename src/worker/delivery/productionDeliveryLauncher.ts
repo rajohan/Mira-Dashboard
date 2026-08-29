@@ -5,8 +5,11 @@ import path from "node:path";
 import * as v from "valibot";
 
 import { healthReadinessPath } from "../../contracts/system.ts";
-import { deliveryProductionProtocol } from "../../shared/deliveryProductionOperation.ts";
-import { parseReleaseManifest } from "../../shared/releaseManifest.ts";
+import {
+    maximumProductionReleaseDescriptorBytes,
+    parseProductionReleaseDescriptor,
+    productionReleaseDescriptorFileName,
+} from "../../shared/productionReleaseDescriptor.ts";
 import { fullCommitShaSchema, lowercaseUuidV7Schema } from "../../shared/validation.ts";
 
 const launcherFailureMessage = "Production Delivery executor launch failed";
@@ -17,7 +20,6 @@ const systemctlExecutable = "/usr/bin/systemctl";
 const envExecutable = "/usr/bin/env";
 const dopplerExecutable = "/usr/local/bin/doppler";
 const dopplerConfigurationDirectory = "/home/ubuntu/.doppler";
-const maximumManifestBytes = 4 * 1024 * 1024;
 const maximumExecutorBytes = 64 * 1024 * 1024;
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const absoluteProjectRootSchema = v.pipe(
@@ -190,7 +192,8 @@ async function closeFile(file: FileHandle | undefined): Promise<boolean> {
 
 async function readStableImmutableFile(
     filePath: string,
-    maximumBytes: number
+    maximumBytes: number,
+    expectedMode: bigint
 ): Promise<Uint8Array> {
     if (typeof process.getuid !== "function") throw failure();
     let file: FileHandle | undefined;
@@ -208,7 +211,7 @@ async function readStableImmutableFile(
             before.isSymbolicLink() ||
             before.nlink !== 1n ||
             before.uid !== BigInt(process.getuid()) ||
-            (before.mode & 0o7777n) !== 0o400n ||
+            (before.mode & 0o7777n) !== expectedMode ||
             before.size <= 0n ||
             before.size > BigInt(maximumBytes)
         ) {
@@ -225,7 +228,7 @@ async function readStableImmutableFile(
             !sameFile(before, named) ||
             named.nlink !== 1n ||
             named.uid !== before.uid ||
-            (named.mode & 0o7777n) !== 0o400n
+            (named.mode & 0o7777n) !== expectedMode
         ) {
             throw failure();
         }
@@ -237,35 +240,37 @@ async function readStableImmutableFile(
     return bytes;
 }
 
-async function requireManifestVerifiedExecutor(
+async function requireDescriptorVerifiedExecutor(
     releaseRoot: string,
     releaseId: string,
     runtimeRevision: string,
-    executor: string
+    executor: string,
+    runtimeExecutable: string
 ): Promise<void> {
     try {
-        const manifestBytes = await readStableImmutableFile(
-            path.join(releaseRoot, "release-manifest.json"),
-            maximumManifestBytes
+        const descriptorBytes = await readStableImmutableFile(
+            path.join(releaseRoot, productionReleaseDescriptorFileName),
+            maximumProductionReleaseDescriptorBytes,
+            0o400n
         );
-        const manifestText = new TextDecoder("utf-8", { fatal: true }).decode(
-            manifestBytes
+        const descriptorText = new TextDecoder("utf-8", { fatal: true }).decode(
+            descriptorBytes
         );
-        const manifest = parseReleaseManifest(JSON.parse(manifestText) as unknown);
-        const executorBytes = await readStableImmutableFile(
-            executor,
-            maximumExecutorBytes
+        const descriptor = parseProductionReleaseDescriptor(
+            JSON.parse(descriptorText) as unknown
         );
-        const artifact = manifest.artifacts.find(
-            ({ path: artifactPath }) => artifactPath === "server/productionDelivery.js"
-        );
+        const [executorBytes, runtimeBytes] = await Promise.all([
+            readStableImmutableFile(executor, maximumExecutorBytes, 0o400n),
+            readStableImmutableFile(runtimeExecutable, maximumExecutorBytes, 0o500n),
+        ]);
         if (
-            manifest.source.commitSha !== releaseId ||
-            manifest.runtime.revision !== runtimeRevision ||
-            !manifest.processRoles.includes("production-delivery") ||
-            !manifest.deliveryProtocols.includes(deliveryProductionProtocol) ||
-            artifact?.bytes !== executorBytes.byteLength ||
-            artifact.sha256 !==
+            descriptor.releaseId !== releaseId ||
+            descriptor.runtime.revision !== runtimeRevision ||
+            descriptor.runtime.executable.bytes !== runtimeBytes.byteLength ||
+            descriptor.runtime.executable.sha256 !==
+                new Bun.CryptoHasher("sha256").update(runtimeBytes).digest("hex") ||
+            descriptor.deliveryExecutor.bytes !== executorBytes.byteLength ||
+            descriptor.deliveryExecutor.sha256 !==
                 new Bun.CryptoHasher("sha256").update(executorBytes).digest("hex")
         ) {
             throw failure();
@@ -314,11 +319,12 @@ export async function resolveVerifiedProductionDeliveryExecutor(
     const executor = path.join(releaseRoot, "server/productionDelivery.js");
     await Promise.all([
         requireExactArtifact(runtimeExecutable, 0o500n),
-        requireManifestVerifiedExecutor(
+        requireDescriptorVerifiedExecutor(
             releaseRoot,
             options.executorReleaseId,
             options.runtimeRevision,
-            executor
+            executor,
+            runtimeExecutable
         ),
     ]);
     return Object.freeze({ executor, releaseRoot, runtimeExecutable });
