@@ -9,6 +9,8 @@ const invalidArtifactTreeMessage = "Release artifact tree is invalid";
 export const maximumReleaseArtifactBytes = 64 * 1024 * 1024;
 export const maximumReleaseRuntimeBytes = 256 * 1024 * 1024;
 export const maximumReleaseArtifactCount = 4096;
+/** Manifest artifacts plus the manifest and descriptor identity files. */
+export const maximumReleaseArtifactTreeFileCount = maximumReleaseArtifactCount + 2;
 export const maximumReleaseArtifactDirectoryCount = 512;
 const maximumArtifactDepth = 16;
 const artifactPathSegmentPattern = /^[A-Za-z0-9.@_+-]+$/u;
@@ -152,7 +154,10 @@ export async function inventoryReleaseArtifactTree(
                     await visit(relativePath, depth + 1);
                     continue;
                 }
-                if (!entry.isFile() || records.length >= maximumReleaseArtifactCount) {
+                if (
+                    !entry.isFile() ||
+                    records.length >= maximumReleaseArtifactTreeFileCount
+                ) {
                     throw invalidArtifactTree();
                 }
 

@@ -917,104 +917,120 @@ export async function runProductionDeliveryExecutorUnderLease(
     }
     if (record.phase === "intent-recorded") throw failure();
 
-    const targetIdentity = record.capsule.cas.target;
-    const currentOwner = ownerState.owner;
-    if (
-        dependencies.loadTargetArtifacts === undefined &&
-        record.capsule.enqueue.payload.operation === "deploy" &&
-        (currentOwner?.releaseId !== targetIdentity.releaseId ||
-            currentOwner.runtimeRevision !== targetIdentity.runtimeRevision)
-    ) {
-        const publishedRoot = path.join(
-            paths.releasesDirectory,
-            targetIdentity.releaseId
-        );
-        let described;
-        if ((await pathState(publishedRoot)) === "present") {
-            await verifyRetainedDeployAuthority(
-                publishedRoot,
-                record.capsule.enqueue.payload.release
-            );
-            described = await loadDescribedPublishedProductionReleaseById(
-                paths,
+    let services: ProductionServiceController | undefined;
+    try {
+        const targetIdentity = record.capsule.cas.target;
+        const currentOwner = ownerState.owner;
+        if (
+            dependencies.loadTargetArtifacts === undefined &&
+            record.capsule.enqueue.payload.operation === "deploy" &&
+            (currentOwner?.releaseId !== targetIdentity.releaseId ||
+                currentOwner.runtimeRevision !== targetIdentity.runtimeRevision)
+        ) {
+            const publishedRoot = path.join(
+                paths.releasesDirectory,
                 targetIdentity.releaseId
             );
-        } else {
+            let described;
+            if ((await pathState(publishedRoot)) === "present") {
+                await verifyRetainedDeployAuthority(
+                    publishedRoot,
+                    record.capsule.enqueue.payload.release
+                );
+                described = await loadDescribedPublishedProductionReleaseById(
+                    paths,
+                    targetIdentity.releaseId
+                );
+            } else {
+                if (
+                    options.artifactSource !== "published-release" ||
+                    record.capsule.enqueue.payload.operation !== "deploy"
+                ) {
+                    throw failure();
+                }
+                const checkoutRoot = path.join(
+                    options.projectRoot,
+                    "production/checkout"
+                );
+                await (
+                    dependencies.preparationCapacityAdmission ??
+                    ((root) =>
+                        admitProductionReleasePreparation(
+                            root,
+                            productionHostProvisioningRoot
+                        ))
+                )(checkoutRoot);
+                const admitted = await (
+                    dependencies.preparePublishedRelease ??
+                    preparePublishedProductionRelease
+                )(
+                    targetIdentity.releaseId,
+                    checkoutRoot,
+                    productionBootstrapDependencies,
+                    undefined,
+                    undefined,
+                    record.capsule.enqueue.payload.release,
+                    { stageRootAuthority: false }
+                );
+                try {
+                    described = await (
+                        dependencies.publishDescribedRelease ??
+                        publishDescribedProductionRelease
+                    )(lease, paths, admitted.releaseRoot);
+                } finally {
+                    await (
+                        dependencies.discardCandidate ??
+                        discardOwnedProductionReleaseCandidate
+                    )(
+                        path.dirname(admitted.releaseRoot),
+                        admitted.releaseRoot,
+                        targetIdentity.releaseId
+                    );
+                }
+            }
             if (
-                options.artifactSource !== "published-release" ||
-                record.capsule.enqueue.payload.operation !== "deploy"
+                described.descriptor.releaseId !== targetIdentity.releaseId ||
+                described.descriptor.runtime.revision !== targetIdentity.runtimeRevision
             ) {
                 throw failure();
             }
-            const checkoutRoot = path.join(options.projectRoot, "production/checkout");
-            await (
-                dependencies.preparationCapacityAdmission ??
-                ((root) =>
-                    admitProductionReleasePreparation(
-                        root,
-                        productionHostProvisioningRoot
-                    ))
-            )(checkoutRoot);
-            const admitted = await (
-                dependencies.preparePublishedRelease ?? preparePublishedProductionRelease
-            )(
-                targetIdentity.releaseId,
-                checkoutRoot,
-                productionBootstrapDependencies,
-                undefined,
-                undefined,
-                record.capsule.enqueue.payload.release,
-                { stageRootAuthority: false }
+            await (dependencies.installRuntime ?? installProductionRuntime)(
+                lease,
+                paths,
+                {
+                    revision: described.descriptor.runtime.revision,
+                    version: described.descriptor.runtime.version,
+                },
+                { sourceExecutable: path.join(described.releaseRoot, "runtime/bun") }
             );
-            try {
-                described = await (
-                    dependencies.publishDescribedRelease ??
-                    publishDescribedProductionRelease
-                )(lease, paths, admitted.releaseRoot);
-            } finally {
-                await (
-                    dependencies.discardCandidate ??
-                    discardOwnedProductionReleaseCandidate
-                )(
-                    path.dirname(admitted.releaseRoot),
-                    admitted.releaseRoot,
-                    targetIdentity.releaseId
-                );
-            }
+            record = await advanceTo(
+                lease,
+                paths,
+                record,
+                "target-executor-admitted",
+                nowMs
+            );
+            ownerState = await commitProductionDeliveryExecutorOwner(
+                lease,
+                paths,
+                ownerState,
+                {
+                    formatVersion: 1,
+                    releaseId: targetIdentity.releaseId,
+                    runtimeRevision: targetIdentity.runtimeRevision,
+                    transitionId: record.capsule.transitionId,
+                }
+            );
+            await advanceTo(
+                lease,
+                paths,
+                record,
+                "target-executor-owner-transferred",
+                nowMs
+            );
+            throw new TargetExecutorHandoff();
         }
-        if (
-            described.descriptor.releaseId !== targetIdentity.releaseId ||
-            described.descriptor.runtime.revision !== targetIdentity.runtimeRevision
-        ) {
-            throw failure();
-        }
-        await (dependencies.installRuntime ?? installProductionRuntime)(
-            lease,
-            paths,
-            {
-                revision: described.descriptor.runtime.revision,
-                version: described.descriptor.runtime.version,
-            },
-            { sourceExecutable: path.join(described.releaseRoot, "runtime/bun") }
-        );
-        record = await advanceTo(lease, paths, record, "target-executor-admitted", nowMs);
-        ownerState = await commitProductionDeliveryExecutorOwner(
-            lease,
-            paths,
-            ownerState,
-            {
-                formatVersion: 1,
-                releaseId: targetIdentity.releaseId,
-                runtimeRevision: targetIdentity.runtimeRevision,
-                transitionId: record.capsule.transitionId,
-            }
-        );
-        await advanceTo(lease, paths, record, "target-executor-owner-transferred", nowMs);
-        throw new TargetExecutorHandoff();
-    }
 
-    let services: ProductionServiceController | undefined;
-    try {
         services =
             dependencies.createServices?.(lease, paths, options.readinessUrl) ??
             createSystemdProductionServiceController(lease, paths, {
@@ -1169,7 +1185,8 @@ export async function runProductionDeliveryExecutorUnderLease(
             services,
             dependencies
         );
-    } catch {
+    } catch (error) {
+        if (error instanceof TargetExecutorHandoff) throw error;
         const terminal = await inspectDeliveryProductionOperation(lease, paths);
         if (terminal.state === "terminal") throw failure();
         const recovery = await loadActivation(lease, paths).catch(() => null);

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { rejectionError } from "../testSupport/rejection.ts";
-import { inventoryReleaseArtifactTree } from "./releaseArtifactInventory.ts";
+import {
+    inventoryReleaseArtifactTree,
+    maximumReleaseArtifactTreeFileCount,
+} from "./releaseArtifactInventory.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -60,6 +63,27 @@ describe("release artifact inventory", () => {
             "mira-dashboard-log-maintenance@.service"
         );
         await writeFile(path.join(root, "invalid name.service"), "invalid");
+        expect(inventoryReleaseArtifactTree(root)).rejects.toThrow(
+            "Release artifact tree is invalid"
+        );
+    });
+
+    test("reserves inventory entries for both release identity files", async () => {
+        const root = await mkdtemp(path.join(tmpdir(), "mira-release-tree-limit-"));
+        temporaryDirectories.push(root);
+        await Promise.all(
+            Array.from({ length: maximumReleaseArtifactTreeFileCount }, (_, index) =>
+                writeFile(
+                    path.join(root, `artifact-${String(index).padStart(4, "0")}`),
+                    "x"
+                )
+            )
+        );
+
+        expect(await inventoryReleaseArtifactTree(root)).toHaveLength(
+            maximumReleaseArtifactTreeFileCount
+        );
+        await writeFile(path.join(root, "overflow"), "x");
         expect(inventoryReleaseArtifactTree(root)).rejects.toThrow(
             "Release artifact tree is invalid"
         );

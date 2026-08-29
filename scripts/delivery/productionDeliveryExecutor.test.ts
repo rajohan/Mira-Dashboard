@@ -1082,8 +1082,11 @@ describe("production Delivery executor", () => {
 
             await withDeploymentLease(paths.stateDirectory, async (lease) => {
                 await createDeliveryProductionOperation(lease, paths, capsule, 1000);
-                const rejection = await rejectionError(
-                    runProductionDeliveryExecutorUnderLease(lease, paths, options, {
+                const receipt = await runProductionDeliveryExecutorUnderLease(
+                    lease,
+                    paths,
+                    options,
+                    {
                         installRuntime: () => {
                             installed = true;
                             return Promise.resolve(
@@ -1091,12 +1094,15 @@ describe("production Delivery executor", () => {
                             );
                         },
                         verifyPreviewTailscaleOperator: () => Promise.resolve(),
-                    })
+                    }
                 );
-                expect(rejection.message).toBe("Production Delivery executor failed");
+                expect(receipt).toMatchObject({
+                    phase: "terminal",
+                    result: { outcome: "unknown-outcome" },
+                });
                 expect(
                     await inspectDeliveryProductionOperation(lease, paths)
-                ).toMatchObject({ record: { phase: "executor-confirmed" } });
+                ).toMatchObject({ record: { phase: "terminal" }, state: "terminal" });
             });
             expect(installed).toBe(false);
             expect(
