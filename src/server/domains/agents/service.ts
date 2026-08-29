@@ -399,7 +399,6 @@ export function createAgentService(
             ) {
                 return [];
             }
-            const generation = (nextGatewayObservationGeneration += 1);
             const previous = observedGatewayAvailability.get(projection.agentId);
             const taskRun =
                 projection.state === "working" &&
@@ -412,6 +411,18 @@ export function createAgentService(
                           task: projection.currentTask,
                       }
                     : undefined;
+            if (
+                projection.gatewayAvailability === "idle" &&
+                previous?.availability === "idle" &&
+                previous.fallbackFrom !== undefined &&
+                taskRun !== undefined &&
+                previous.fallbackFrom.task === taskRun.task &&
+                previous.fallbackFrom.startedAtMs === taskRun.startedAtMs &&
+                previous.fallbackFrom.lastActivityAtMs === taskRun.lastActivityAtMs
+            ) {
+                return [];
+            }
+            const generation = (nextGatewayObservationGeneration += 1);
             if (projection.gatewayAvailability === "active") {
                 observedGatewayAvailability.set(projection.agentId, {
                     availability: "active",

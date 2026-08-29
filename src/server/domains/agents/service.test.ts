@@ -381,6 +381,11 @@ describe("agent service", () => {
             hasActiveRun = false;
             const olderIdleRead = runAgentEffect(service.getStatus({ id: "main" }));
             await writeWaiting.promise;
+            const duplicateIdle = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(duplicateIdle).toMatchObject({
+                gatewayAvailability: "idle",
+                state: "working",
+            });
             hasActiveRun = true;
             const active = await runAgentEffect(service.getStatus({ id: "main" }));
             expect(active).toMatchObject({
