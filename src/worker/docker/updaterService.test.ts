@@ -51,6 +51,7 @@ interface HarnessOptions {
     readonly failService?: string;
     readonly finalGit?: DockerUpdaterGitSyncResult;
     readonly headVerificationFails?: boolean;
+    readonly invalidateStatusesAfterMutation?: boolean;
     readonly manualSecondService?: boolean;
     readonly preUpdateReplicaDrift?: boolean;
     readonly preflightGit?: DockerUpdaterGitSyncResult;
@@ -235,10 +236,12 @@ function createHarness(options: HarnessOptions = {}) {
             updaterEvents: [...(prior?.updaterEvents ?? [])],
             updaterServices: services.map((service) => {
                 const previousService = previousById.get(service.id);
-                const status: DockerUpdaterStatus =
-                    previousService?.currentImage === service.imageReference
-                        ? previousService.status
-                        : { state: "unavailable" };
+                let status: DockerUpdaterStatus = { state: "unavailable" };
+                if (options.invalidateStatusesAfterMutation && contentVersion > 10) {
+                    status = { state: "not-checked" };
+                } else if (previousService?.currentImage === service.imageReference) {
+                    status = previousService.status;
+                }
                 return {
                     currentImage: service.imageReference,
                     id: service.id,
@@ -478,6 +481,32 @@ describe("Docker updater service", () => {
         expect(manual.updateCommands.map(({ service }) => service)).toEqual([
             "one",
             "two",
+        ]);
+    });
+
+    test("retains checked status for unchanged services after one source update", async () => {
+        const harness = createHarness({
+            invalidateStatusesAfterMutation: true,
+            manualSecondService: true,
+        });
+        const initial = harness.currentPayload();
+
+        const result = await harness.updater.run({
+            automaticOnly: true,
+            previous: initial,
+        });
+
+        expect(result).toMatchObject({
+            failedCount: 0,
+            outcome: "completed",
+            updatedCount: 1,
+        });
+        expect(result.payload.updaterServices.map(({ status }) => status)).toEqual([
+            { state: "current" },
+            {
+                candidateImage: "ghcr.io/example/two:2.1.0",
+                state: "update-available",
+            },
         ]);
     });
 
@@ -1265,12 +1294,16 @@ describe("Docker updater service", () => {
         expect(JSON.stringify(result)).not.toContain(composePath);
     });
 
-    test("returns sanitized unknown outcome when Git settlement throws after mutation", async () => {
-        const harness = createHarness({ finalGitThrows: true, serviceCount: 1 });
+    test("returns sanitized unknown outcome and retains untouched statuses when Git settlement throws", async () => {
+        const harness = createHarness({
+            finalGitThrows: true,
+            manualSecondService: true,
+            serviceCount: 2,
+        });
         const initial = harness.currentPayload();
 
         const result = await harness.updater.run({
-            expectedSourceRevision: initial.sourceRevision,
+            automaticOnly: true,
             previous: initial,
         });
 
@@ -1281,6 +1314,10 @@ describe("Docker updater service", () => {
             updatedCount: 1,
         });
         expect(result.payload.updaterServices[0]?.status).toEqual({ state: "current" });
+        expect(result.payload.updaterServices[1]?.status).toEqual({
+            candidateImage: "ghcr.io/example/two:2.1.0",
+            state: "update-available",
+        });
         expect(eventKinds(result)).toContain("update-outcome-unknown");
         expect(JSON.stringify(result)).not.toContain(
             "raw private Git settlement diagnostic"

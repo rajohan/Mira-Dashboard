@@ -4,9 +4,11 @@ import { count, eq } from "drizzle-orm";
 
 import { agentTaskRuns } from "../../database/schema/agentTaskRuns.ts";
 import { realtimeEvents } from "../../database/schema/realtime.ts";
+import { testImmediateDatabaseWriteAdmission } from "../../test/support/databaseWriteAdmission.ts";
 import type { GatewaySessionsProvider } from "../gatewaySessions/provider.ts";
 import { createGatewaySessionsService } from "../gatewaySessions/service.ts";
 import { AgentNotFoundError } from "./errors.ts";
+import { createAgentRepository, type AgentRepository } from "./repository.ts";
 import {
     agentServiceFor,
     agentTestUuid,
@@ -98,6 +100,317 @@ describe("agent service", () => {
                 state: "working",
             });
         } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("ends only the current-task interval after a fresh Gateway active-to-idle transition", async () => {
+        const database = await openFreshMigratedDatabase();
+        let hasActiveRun = true;
+        let currentTimeMs = 10_000;
+        let wakeups = 0;
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: unexpectedGatewaySessionControl,
+            deleteSessionTranscript: unexpectedGatewaySessionControl,
+            listCurrentSessions: () =>
+                Promise.resolve({
+                    sessions: [
+                        {
+                            displayName: "Mira",
+                            hasActiveRun,
+                            key: "agent:main:main",
+                            kind: "main" as const,
+                            totalTokensFresh: false,
+                            updatedAtMs: hasActiveRun ? 9000 : 10_000,
+                        },
+                    ],
+                    truncated: false,
+                }),
+            resetSession: unexpectedGatewaySessionControl,
+        });
+        const service = agentServiceFor(database, {
+            gatewaySessionsService: createGatewaySessionsService({
+                nowMs: () => currentTimeMs,
+                provider,
+            }),
+            nowMs: () => currentTimeMs,
+            wakeEventPump: () => {
+                wakeups += 1;
+            },
+        });
+
+        try {
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Keep taskboard ownership separate",
+                })
+            );
+            const active = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(active).toMatchObject({
+                currentTask: "Keep taskboard ownership separate",
+                gatewayAvailability: "active",
+                state: "working",
+            });
+
+            currentTimeMs = 11_000;
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Keep taskboard ownership separate",
+                })
+            );
+            hasActiveRun = false;
+            const idle = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(idle).toMatchObject({
+                agentId: "main",
+                gatewayAvailability: "idle",
+                state: "idle",
+            });
+            expect(idle).not.toHaveProperty("currentTask");
+
+            const history = await runAgentEffect(
+                service.listTaskHistory({ agentId: "main", limit: 10 })
+            );
+            expect(history.runs).toEqual([
+                expect.objectContaining({
+                    completedAtMs: 11_000,
+                    status: "completed",
+                    task: "Keep taskboard ownership separate",
+                }),
+            ]);
+            expect(database.orm.select().from(agentTaskRuns).get()).toMatchObject({
+                completedById: "gateway-session-fallback",
+                completedByKind: "automation",
+            });
+            expect(wakeups).toBe(2);
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("retries an idle fallback after write admission recovers", async () => {
+        const database = await openFreshMigratedDatabase();
+        let hasActiveRun = true;
+        let rejectNextWrite = false;
+        const baseRepository = createAgentRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const repository: AgentRepository = {
+            findActiveRun: (agentId) => baseRepository.findActiveRun(agentId),
+            findLatestRun: (agentId) => baseRepository.findLatestRun(agentId),
+            listActiveRuns: (agentIds) => baseRepository.listActiveRuns(agentIds),
+            listTaskRuns: (input) => baseRepository.listTaskRuns(input),
+            withImmediateTransaction: (callback) => {
+                if (rejectNextWrite) {
+                    rejectNextWrite = false;
+                    return Promise.reject(new Error("temporary write admission failure"));
+                }
+                return baseRepository.withImmediateTransaction(callback);
+            },
+            withReadTransaction: (callback) =>
+                baseRepository.withReadTransaction(callback),
+        };
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: unexpectedGatewaySessionControl,
+            deleteSessionTranscript: unexpectedGatewaySessionControl,
+            listCurrentSessions: () =>
+                Promise.resolve({
+                    sessions: [
+                        {
+                            displayName: "Mira",
+                            hasActiveRun,
+                            key: "agent:main:main",
+                            kind: "main" as const,
+                            totalTokensFresh: false,
+                        },
+                    ],
+                    truncated: false,
+                }),
+            resetSession: unexpectedGatewaySessionControl,
+        });
+        const service = agentServiceFor(database, {
+            gatewaySessionsService: createGatewaySessionsService({ provider }),
+            repository,
+        });
+
+        try {
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Retry fallback",
+                })
+            );
+            await runAgentEffect(service.getStatus({ id: "main" }));
+            hasActiveRun = false;
+            rejectNextWrite = true;
+            const rejected = await runAgentEffect(service.getStatus({ id: "main" })).then(
+                () => null,
+                (error: unknown) => error
+            );
+            expect(rejected).toBeInstanceOf(Error);
+            expect(rejected).toHaveProperty(
+                "message",
+                "temporary write admission failure"
+            );
+
+            const idle = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(idle).toMatchObject({ state: "idle" });
+            const history = await runAgentEffect(
+                service.listTaskHistory({ agentId: "main", limit: 10 })
+            );
+            expect(history).toMatchObject({ runs: [{ status: "completed" }] });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("does not close a replacement task that was never observed active", async () => {
+        const database = await openFreshMigratedDatabase();
+        let hasActiveRun = true;
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: unexpectedGatewaySessionControl,
+            deleteSessionTranscript: unexpectedGatewaySessionControl,
+            listCurrentSessions: () =>
+                Promise.resolve({
+                    sessions: [
+                        {
+                            displayName: "Mira",
+                            hasActiveRun,
+                            key: "agent:main:main",
+                            kind: "main" as const,
+                            totalTokensFresh: false,
+                        },
+                    ],
+                    truncated: false,
+                }),
+            resetSession: unexpectedGatewaySessionControl,
+        });
+        const service = agentServiceFor(database, {
+            gatewaySessionsService: createGatewaySessionsService({ provider }),
+        });
+
+        try {
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Observed active task",
+                })
+            );
+            await runAgentEffect(service.getStatus({ id: "main" }));
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Replacement task",
+                })
+            );
+            hasActiveRun = false;
+
+            const idle = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(idle).toMatchObject({
+                currentTask: "Replacement task",
+                gatewayAvailability: "idle",
+                state: "working",
+            });
+            const history = await runAgentEffect(
+                service.listTaskHistory({ agentId: "main", limit: 10 })
+            );
+            expect(history).toMatchObject({
+                runs: [
+                    { status: "active", task: "Replacement task" },
+                    { status: "completed", task: "Observed active task" },
+                ],
+            });
+        } finally {
+            database.sqlite.close(true);
+        }
+    });
+
+    test("does not let an older idle fallback override a newer active observation", async () => {
+        const database = await openFreshMigratedDatabase();
+        let hasActiveRun = true;
+        let holdNextWrite = false;
+        const writeWaiting = Promise.withResolvers<void>();
+        const writeRelease = Promise.withResolvers<void>();
+        const baseRepository = createAgentRepository(
+            database.orm,
+            testImmediateDatabaseWriteAdmission
+        );
+        const repository: AgentRepository = {
+            findActiveRun: (agentId) => baseRepository.findActiveRun(agentId),
+            findLatestRun: (agentId) => baseRepository.findLatestRun(agentId),
+            listActiveRuns: (agentIds) => baseRepository.listActiveRuns(agentIds),
+            listTaskRuns: (input) => baseRepository.listTaskRuns(input),
+            withImmediateTransaction: async (callback) => {
+                if (holdNextWrite) {
+                    holdNextWrite = false;
+                    writeWaiting.resolve();
+                    await writeRelease.promise;
+                }
+                return baseRepository.withImmediateTransaction(callback);
+            },
+            withReadTransaction: (callback) =>
+                baseRepository.withReadTransaction(callback),
+        };
+        const provider: GatewaySessionsProvider = Object.freeze({
+            compactSession: unexpectedGatewaySessionControl,
+            deleteSessionTranscript: unexpectedGatewaySessionControl,
+            listCurrentSessions: () =>
+                Promise.resolve({
+                    sessions: [
+                        {
+                            displayName: "Mira",
+                            hasActiveRun,
+                            key: "agent:main:main",
+                            kind: "main" as const,
+                            totalTokensFresh: false,
+                        },
+                    ],
+                    truncated: false,
+                }),
+            resetSession: unexpectedGatewaySessionControl,
+        });
+        const service = agentServiceFor(database, {
+            gatewaySessionsService: createGatewaySessionsService({ provider }),
+            repository,
+        });
+
+        try {
+            await runAgentEffect(
+                service.updateMetadata(agentTestPrincipal, {
+                    agentId: "main",
+                    currentTask: "Generation-fenced fallback",
+                })
+            );
+            await runAgentEffect(service.getStatus({ id: "main" }));
+
+            holdNextWrite = true;
+            hasActiveRun = false;
+            const olderIdleRead = runAgentEffect(service.getStatus({ id: "main" }));
+            await writeWaiting.promise;
+            const duplicateIdle = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(duplicateIdle).toMatchObject({
+                gatewayAvailability: "idle",
+                state: "working",
+            });
+            hasActiveRun = true;
+            const active = await runAgentEffect(service.getStatus({ id: "main" }));
+            expect(active).toMatchObject({
+                gatewayAvailability: "active",
+                state: "working",
+            });
+            writeRelease.resolve();
+            await olderIdleRead;
+
+            const history = await runAgentEffect(
+                service.listTaskHistory({ agentId: "main", limit: 10 })
+            );
+            expect(history).toMatchObject({
+                runs: [{ status: "active", task: "Generation-fenced fallback" }],
+            });
+        } finally {
+            writeRelease.resolve();
             database.sqlite.close(true);
         }
     });

@@ -31,11 +31,12 @@ import {
     positiveSafeIntegerSchema,
 } from "../../../shared/validation.ts";
 import { isDatabaseRuntimeWriteUnavailableError } from "../../database/runtime/databaseErrors.ts";
+import { GatewaySessionsUnavailableError } from "../gatewaySessions/errors.ts";
 import type { GatewaySessionsService } from "../gatewaySessions/service.ts";
 import { defaultRealtimeRetentionMilliseconds } from "../realtime/retention.ts";
 import { dashboardAgentConfiguration, findDashboardAgent } from "./directory.ts";
 import { AgentNotFoundError, type AgentOperationError } from "./errors.ts";
-import { readAgentGatewayAvailability } from "./gatewayAvailability.ts";
+import { projectAgentGatewayAvailability } from "./gatewayAvailability.ts";
 import type {
     AgentRepository,
     AgentRepositoryUnitOfWork,
@@ -47,6 +48,27 @@ const clockSchema = timestampMillisecondsSchema("Agent clock is invalid");
 const realtimeRetentionSchema = positiveSafeIntegerSchema(
     "Agent realtime retention must be a positive integer"
 );
+const gatewaySessionFallbackActor: AgentRunActor = Object.freeze({
+    id: "gateway-session-fallback",
+    kind: "automation",
+});
+
+interface GatewayObservedTaskRun {
+    readonly startedAtMs: number;
+    readonly task: string;
+}
+
+type GatewayAvailabilityObservation =
+    | Readonly<{
+          availability: "active";
+          generation: number;
+          taskRun?: GatewayObservedTaskRun;
+      }>
+    | Readonly<{
+          availability: "idle";
+          fallbackFrom?: GatewayObservedTaskRun;
+          generation: number;
+      }>;
 
 class AgentUnexpectedOperationError extends Data.TaggedError(
     "AgentUnexpectedOperationError"
@@ -347,6 +369,173 @@ export function createAgentService(
         dependencies.realtimeRetentionMs ?? defaultRealtimeRetentionMilliseconds
     );
     const now = () => toDate(v.parse(clockSchema, nowMs()));
+    const observedGatewayAvailability = new Map<string, GatewayAvailabilityObservation>();
+    let nextGatewayObservationGeneration = 0;
+
+    async function statusesWithGatewayAvailability(
+        statuses: readonly AgentStatus[],
+        signal?: AbortSignal
+    ): Promise<AgentStatusProjection[]> {
+        let snapshot;
+        try {
+            snapshot = await dependencies.gatewaySessionsService.list(
+                { filter: "ALL" },
+                signal
+            );
+        } catch (error) {
+            if (error instanceof GatewaySessionsUnavailableError) {
+                return projectAgentGatewayAvailability(statuses);
+            }
+            throw error;
+        }
+
+        const projections = projectAgentGatewayAvailability(statuses, snapshot);
+        const transitionedToIdle = projections.flatMap((projection) => {
+            if (
+                projection.freshness !== "fresh" ||
+                (projection.gatewayAvailability !== "active" &&
+                    projection.gatewayAvailability !== "idle")
+            ) {
+                return [];
+            }
+            const previous = observedGatewayAvailability.get(projection.agentId);
+            const taskRun =
+                projection.state === "working" &&
+                projection.currentTask !== undefined &&
+                projection.startedAtMs !== undefined
+                    ? {
+                          startedAtMs: projection.startedAtMs,
+                          task: projection.currentTask,
+                      }
+                    : undefined;
+            if (
+                projection.gatewayAvailability === "idle" &&
+                previous?.availability === "idle" &&
+                previous.fallbackFrom !== undefined &&
+                taskRun !== undefined &&
+                previous.fallbackFrom.task === taskRun.task &&
+                previous.fallbackFrom.startedAtMs === taskRun.startedAtMs
+            ) {
+                return [];
+            }
+            const generation = (nextGatewayObservationGeneration += 1);
+            if (projection.gatewayAvailability === "active") {
+                observedGatewayAvailability.set(projection.agentId, {
+                    availability: "active",
+                    generation,
+                    ...(taskRun === undefined ? {} : { taskRun }),
+                });
+                return [];
+            }
+            const previousActive =
+                previous?.availability === "active" ? previous : undefined;
+            const fallbackFrom =
+                previousActive?.taskRun !== undefined &&
+                taskRun !== undefined &&
+                previousActive.taskRun.task === taskRun.task &&
+                previousActive.taskRun.startedAtMs === taskRun.startedAtMs
+                    ? previousActive.taskRun
+                    : undefined;
+            observedGatewayAvailability.set(projection.agentId, {
+                availability: "idle",
+                ...(fallbackFrom === undefined ? {} : { fallbackFrom }),
+                generation,
+            });
+            return fallbackFrom === undefined || previousActive === undefined
+                ? []
+                : [
+                      {
+                          fallbackFrom,
+                          generation,
+                          projection,
+                          previous: previousActive,
+                      },
+                  ];
+        });
+        if (transitionedToIdle.length === 0) return projections;
+
+        let fallbackCompleted: boolean;
+        try {
+            fallbackCompleted = await dependencies.repository.withImmediateTransaction(
+                (unit) => {
+                    let changed = false;
+                    for (const {
+                        fallbackFrom,
+                        generation,
+                        projection,
+                    } of transitionedToIdle) {
+                        const currentObservation = observedGatewayAvailability.get(
+                            projection.agentId
+                        );
+                        if (
+                            currentObservation?.availability !== "idle" ||
+                            currentObservation.generation !== generation ||
+                            currentObservation.fallbackFrom !== fallbackFrom
+                        ) {
+                            continue;
+                        }
+                        const active = unit.findActiveRun(projection.agentId);
+                        if (
+                            active === undefined ||
+                            active.task !== fallbackFrom.task ||
+                            getTime(active.startedAt) !== fallbackFrom.startedAtMs
+                        ) {
+                            continue;
+                        }
+                        const occurredAt = maximumDate([
+                            now(),
+                            active.lastActivityAt,
+                            ...(projection.observedAtMs === undefined
+                                ? []
+                                : [toDate(projection.observedAtMs)]),
+                        ]);
+                        requiredWrite(
+                            unit.completeRun(
+                                active.id,
+                                occurredAt,
+                                gatewaySessionFallbackActor
+                            ),
+                            "Gateway-idle task-run completion"
+                        );
+                        appendRealtimeEvent(
+                            unit,
+                            projection.agentId,
+                            occurredAt,
+                            retentionMs
+                        );
+                        changed = true;
+                    }
+                    return changed;
+                }
+            );
+        } catch (error) {
+            for (const { generation, previous, projection } of transitionedToIdle) {
+                const current = observedGatewayAvailability.get(projection.agentId);
+                if (
+                    current?.availability === "idle" &&
+                    current.generation === generation
+                ) {
+                    observedGatewayAvailability.set(projection.agentId, previous);
+                }
+            }
+            throw error;
+        }
+        if (!fallbackCompleted) return projections;
+        if (dependencies.wakeEventPump !== undefined) {
+            try {
+                await dependencies.wakeEventPump();
+            } catch {
+                // SQLite remains authoritative; adaptive polling recovers the wakeup.
+            }
+        }
+        const requestedAgentIds = new Set(statuses.map(({ agentId }) => agentId));
+        return projectAgentGatewayAvailability(
+            listTaskStatuses(dependencies.repository).filter(({ agentId }) =>
+                requestedAgentIds.has(agentId)
+            ),
+            snapshot
+        );
+    }
 
     return AgentService.of({
         getConfiguration: () => Effect.succeed(dashboardAgentConfiguration),
@@ -362,9 +551,8 @@ export function createAgentService(
             }).pipe(
                 Effect.flatMap((status) =>
                     Effect.promise(async () => {
-                        const [projection] = await readAgentGatewayAvailability(
+                        const [projection] = await statusesWithGatewayAvailability(
                             [status],
-                            dependencies.gatewaySessionsService,
                             signal
                         );
                         if (projection === undefined) {
@@ -379,9 +567,8 @@ export function createAgentService(
                 Effect.flatMap((statuses) =>
                     Effect.promise(async () =>
                         v.parse(listAgentStatusesResultSchema, {
-                            statuses: await readAgentGatewayAvailability(
+                            statuses: await statusesWithGatewayAvailability(
                                 statuses,
-                                dependencies.gatewaySessionsService,
                                 signal
                             ),
                         })

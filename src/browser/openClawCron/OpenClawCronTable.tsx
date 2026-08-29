@@ -48,6 +48,7 @@ export function OpenClawCronTable({
 
     return (
         <VirtualizedList
+            className="h-full xl:max-h-none"
             estimateSize={() => 112}
             getKey={(job) => job.id}
             itemClassName="pb-2"

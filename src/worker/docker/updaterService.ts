@@ -5,6 +5,8 @@ import {
     dockerUpdaterEventMaximum,
     type DockerOverviewCachePayload,
     type DockerUpdaterEvent,
+    type DockerUpdaterPolicy,
+    type DockerUpdaterService as DockerUpdaterServiceSnapshot,
 } from "../../contracts/docker.ts";
 import {
     type DockerJobProgressReporter,
@@ -45,6 +47,62 @@ const dockerImageTagDeadlineMs = 30_000;
 const dockerImageTagOutputMaximumBytes = 64 * 1024;
 const dockerOperationDeadlineMs = 35 * 60_000;
 const dockerRecoveryDeadlineMs = 35 * 60_000;
+
+function updaterPoliciesMatch(
+    left: DockerUpdaterPolicy,
+    right: DockerUpdaterPolicy
+): boolean {
+    if (left.state !== right.state) return false;
+    if (left.state === "inventory-only") {
+        return right.state === "inventory-only" && left.reason === right.reason;
+    }
+    return (
+        right.state === "managed" &&
+        left.automatic === right.automatic &&
+        left.track === right.track
+    );
+}
+
+function hasEligibleRuntime(
+    payload: DockerOverviewCachePayload,
+    service: DockerUpdaterServiceSnapshot
+): boolean {
+    const containers = payload.containers.filter(
+        (container) =>
+            container.project === service.project && container.service === service.service
+    );
+    if (containers.length === 0) return false;
+    const imageIds = new Set(containers.map(({ imageId }) => imageId));
+    return (
+        imageIds.size === 1 &&
+        containers.every(
+            ({ health, state }) =>
+                state === "running" && health !== "starting" && health !== "unhealthy"
+        )
+    );
+}
+
+function retainUnchangedScannedStatuses(
+    scanned: DockerOverviewCachePayload,
+    settled: DockerOverviewCachePayload,
+    successfulIds: ReadonlySet<string>
+): readonly DockerUpdaterServiceSnapshot[] {
+    const scannedById = new Map(
+        scanned.updaterServices.map((service) => [service.id, service])
+    );
+    return settled.updaterServices.map((service) => {
+        if (successfulIds.has(service.id)) {
+            return { ...service, status: { state: "current" as const } };
+        }
+        const prior = scannedById.get(service.id);
+        return prior !== undefined &&
+            prior.currentImage === service.currentImage &&
+            updaterPoliciesMatch(prior.policy, service.policy) &&
+            hasEligibleRuntime(settled, service)
+            ? { ...service, status: prior.status }
+            : service;
+    });
+}
 
 export type DockerUpdaterRunOutcome =
     | "completed"
@@ -491,6 +549,7 @@ export function createDockerUpdaterService(
             { ...scanOptions, reportProgress }
         );
         let payload = scanResult.payload;
+        const scannedPayload = payload;
         const selected = payload.updaterServices.filter((service) => {
             if (service.status.state !== "update-available") return false;
             if (service.policy.state !== "managed") return false;
@@ -1151,6 +1210,14 @@ export function createDockerUpdaterService(
             if (successful.length === 0) fail(error);
             for (const update of applied) update.result.settle();
             const successfulIds = new Set(successful.map(({ id }) => id));
+            payload = v.parse(dockerOverviewCachePayloadSchema, {
+                ...payload,
+                updaterServices: retainUnchangedScannedStatuses(
+                    scannedPayload,
+                    payload,
+                    successfulIds
+                ),
+            });
             return unknownMutationResult({
                 addedEvents,
                 affectedServices: successful,
@@ -1262,10 +1329,10 @@ export function createDockerUpdaterService(
         const successfulIds = new Set(successful.map(({ id }) => id));
         payload = v.parse(dockerOverviewCachePayloadSchema, {
             ...payload,
-            updaterServices: payload.updaterServices.map((service) =>
-                successfulIds.has(service.id)
-                    ? { ...service, status: { state: "current" as const } }
-                    : service
+            updaterServices: retainUnchangedScannedStatuses(
+                scannedPayload,
+                payload,
+                successfulIds
             ),
         });
         const settlementKind = updateSettlementEventKind(outcome);
