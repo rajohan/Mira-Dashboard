@@ -143,7 +143,7 @@ function record(section: DeliveryOverviewSectionId, value = payload()) {
     };
 }
 
-function fixture(value = payload()) {
+function fixture(value = payload(), onAudit?: (event: unknown) => void) {
     const audits: unknown[] = [];
     const queued: unknown[] = [];
     let currentRecords = Object.fromEntries(
@@ -156,6 +156,7 @@ function fixture(value = payload()) {
         auditWriter: {
             record(event) {
                 audits.push(event);
+                onAudit?.(event);
                 return Promise.resolve();
             },
         },
@@ -459,6 +460,53 @@ describe("Delivery service", () => {
                 operation: "deploy",
                 settlement: "failed",
             },
+        ]);
+    });
+
+    test("settles an attempted automation deploy when cancellation wins", async () => {
+        const remoteHeadSha = "d".repeat(40);
+        const value = payload();
+        value.checkout = { ...value.checkout, remoteHeadSha };
+        value.releases = {
+            ...value.releases,
+            candidate: publishedReleaseAuthority(remoteHeadSha),
+        };
+        const controller = new AbortController();
+        const next = fixture(value, (event) => {
+            if (
+                typeof event === "object" &&
+                event !== null &&
+                "settlement" in event &&
+                event.settlement === "attempted"
+            ) {
+                controller.abort();
+            }
+        });
+
+        const failure = await next.service
+            .deployCurrent(
+                {
+                    confirmation: "deploy-delivery-main",
+                    idempotencyKey: "A".repeat(43),
+                },
+                {
+                    actor: {
+                        authenticatorId: "018f6f50-6a9e-7b88-8000-000000000012",
+                        id: "production-deploy",
+                        kind: "automation",
+                    },
+                    reauthorize() {},
+                    requestId: "automation-deploy-cancelled",
+                },
+                controller.signal
+            )
+            .catch((error: unknown) => error);
+
+        expect(failure).toMatchObject({ name: "AbortError" });
+        expect(next.queued).toHaveLength(0);
+        expect(next.audits).toEqual([
+            expect.objectContaining({ settlement: "attempted" }),
+            expect.objectContaining({ settlement: "failed" }),
         ]);
     });
 

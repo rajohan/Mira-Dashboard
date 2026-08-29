@@ -82,17 +82,15 @@ async function restoreOwnerWrite(directory: string): Promise<void> {
     }
 }
 
-function operationCapsule(): DeliveryProductionOperationCapsule {
+function operationCapsule(
+    release = publishedReleaseAuthority(targetReleaseId, "v1.2.3", targetRuntimeRevision)
+): DeliveryProductionOperationCapsule {
     const payload = {
         activationRevision: "1".repeat(64),
         checkoutRevision: "2".repeat(64),
         expectedMainHeadSha: targetReleaseId,
         operation: "deploy" as const,
-        release: publishedReleaseAuthority(
-            targetReleaseId,
-            "v1.2.3",
-            targetRuntimeRevision
-        ),
+        release,
         sourceRevision: "f".repeat(64),
     };
     return {
@@ -135,6 +133,37 @@ function operationCapsule(): DeliveryProductionOperationCapsule {
         protocol: deliveryProductionProtocol,
         runId: operationTransitionId,
         transitionId: operationTransitionId,
+    };
+}
+
+function rollbackCapsule(): DeliveryProductionOperationCapsule {
+    const payload = {
+        activationRevision: "1".repeat(64),
+        operation: "rollback-release" as const,
+        sourceRevision: "f".repeat(64),
+        target: {
+            databaseSnapshotTransitionId: "019fd974-54a2-74dd-a64b-d4186f8d8806",
+            releaseId: targetReleaseId,
+            runtimeRevision: targetRuntimeRevision,
+        },
+    };
+    const deploy = operationCapsule();
+    return {
+        ...deploy,
+        cas: {
+            ...deploy.cas,
+            target: {
+                ...deploy.cas.target,
+                databaseSnapshotTransitionId: payload.target.databaseSnapshotTransitionId,
+            },
+        },
+        enqueue: {
+            ...deploy.enqueue,
+            payload,
+            payloadSha256: new Bun.CryptoHasher("sha256")
+                .update(JSON.stringify(payload))
+                .digest("hex"),
+        },
     };
 }
 
@@ -240,14 +269,27 @@ async function materializeDescribedRelease(
     releaseRoot: string,
     releaseId: string,
     runtimeRevision: string
-): Promise<void> {
+): Promise<Readonly<{ descriptorSha256: string; manifestSha256: string }>> {
     const runtimeBytes = "runtime";
     const executorBytes = "executor";
+    const manifestBytes = "foreign-manifest";
     const executable = describedArtifactRecord("runtime/bun", runtimeBytes);
     const deliveryExecutor = describedArtifactRecord(
         "server/productionDelivery.js",
         executorBytes
     );
+    const manifest = describedArtifactRecord("release-manifest.json", manifestBytes);
+    const descriptorBytes = serializeProductionReleaseDescriptor({
+        artifacts: [manifest, executable, deliveryExecutor],
+        deliveryExecutor,
+        formatVersion: 1,
+        releaseId,
+        runtime: {
+            executable,
+            revision: runtimeRevision,
+            version: "1.4.0",
+        },
+    });
     await mkdir(releaseRoot, { recursive: true });
     await Promise.all([
         mkdir(path.join(releaseRoot, "runtime"), { recursive: true }),
@@ -260,27 +302,22 @@ async function materializeDescribedRelease(
         writeFile(path.join(releaseRoot, deliveryExecutor.path), executorBytes, {
             mode: 0o400,
         }),
-        writeFile(
-            path.join(releaseRoot, "release-descriptor.json"),
-            serializeProductionReleaseDescriptor({
-                artifacts: [executable, deliveryExecutor],
-                deliveryExecutor,
-                formatVersion: 1,
-                releaseId,
-                runtime: {
-                    executable,
-                    revision: runtimeRevision,
-                    version: "1.4.0",
-                },
-            }),
-            { mode: 0o400 }
-        ),
+        writeFile(path.join(releaseRoot, manifest.path), manifestBytes, { mode: 0o400 }),
+        writeFile(path.join(releaseRoot, "release-descriptor.json"), descriptorBytes, {
+            mode: 0o400,
+        }),
     ]);
     await Promise.all([
         chmod(path.join(releaseRoot, "runtime"), 0o500),
         chmod(path.join(releaseRoot, "server"), 0o500),
     ]);
     await chmod(releaseRoot, 0o500);
+    return Object.freeze({
+        descriptorSha256: new Bun.CryptoHasher("sha256")
+            .update(descriptorBytes)
+            .digest("hex"),
+        manifestSha256: manifest.sha256,
+    });
 }
 
 async function fixture() {
@@ -966,7 +1003,7 @@ describe("production Delivery executor", () => {
     test("hands a descriptor-verified target to its own executor before activation", async () => {
         const { options, paths } = await fixture();
         const releaseRoot = path.join(paths.releasesDirectory, targetReleaseId);
-        await materializeDescribedRelease(
+        const authority = await materializeDescribedRelease(
             releaseRoot,
             targetReleaseId,
             targetRuntimeRevision
@@ -977,7 +1014,15 @@ describe("production Delivery executor", () => {
             await createDeliveryProductionOperation(
                 lease,
                 paths,
-                operationCapsule(),
+                operationCapsule({
+                    ...publishedReleaseAuthority(
+                        targetReleaseId,
+                        "v1.2.3",
+                        targetRuntimeRevision
+                    ),
+                    releaseDescriptorSha256: authority.descriptorSha256,
+                    releaseManifestSha256: authority.manifestSha256,
+                }),
                 1000
             );
             const handoff = await rejectionError(
@@ -1007,6 +1052,111 @@ describe("production Delivery executor", () => {
                 transitionId: operationTransitionId,
             }
         );
+    });
+
+    test.each(["descriptor", "manifest"] as const)(
+        "rejects retained deploy authority with a mismatched %s before handoff",
+        async (mismatch) => {
+            const { options, paths } = await fixture();
+            const releaseRoot = path.join(paths.releasesDirectory, targetReleaseId);
+            const authority = await materializeDescribedRelease(
+                releaseRoot,
+                targetReleaseId,
+                targetRuntimeRevision
+            );
+            const published = publishedReleaseAuthority(
+                targetReleaseId,
+                "v1.2.3",
+                targetRuntimeRevision
+            );
+            const capsule = operationCapsule({
+                ...published,
+                releaseDescriptorSha256:
+                    mismatch === "descriptor"
+                        ? "0".repeat(64)
+                        : authority.descriptorSha256,
+                releaseManifestSha256:
+                    mismatch === "manifest" ? "0".repeat(64) : authority.manifestSha256,
+            });
+            let installed = false;
+
+            await withDeploymentLease(paths.stateDirectory, async (lease) => {
+                await createDeliveryProductionOperation(lease, paths, capsule, 1000);
+                const rejection = await rejectionError(
+                    runProductionDeliveryExecutorUnderLease(lease, paths, options, {
+                        installRuntime: () => {
+                            installed = true;
+                            return Promise.resolve(
+                                artifact(targetReleaseId, targetRuntimeRevision).runtime
+                            );
+                        },
+                        verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                    })
+                );
+                expect(rejection.message).toBe("Production Delivery executor failed");
+                expect(
+                    await inspectDeliveryProductionOperation(lease, paths)
+                ).toMatchObject({ record: { phase: "executor-confirmed" } });
+            });
+            expect(installed).toBe(false);
+            expect(
+                await inspectProductionDeliveryExecutorOwner(options.projectRoot)
+            ).toMatchObject({
+                releaseId: currentReleaseId,
+                runtimeRevision: currentRuntimeRevision,
+            });
+        }
+    );
+
+    test("rejects an incompatible rollback target without transferring execution", async () => {
+        const { options, paths } = await fixture();
+        await materializeDescribedRelease(
+            path.join(paths.releasesDirectory, targetReleaseId),
+            targetReleaseId,
+            targetRuntimeRevision
+        );
+        let installed = false;
+        const current = describedArtifact(currentReleaseId, currentRuntimeRevision);
+
+        await withDeploymentLease(paths.stateDirectory, async (lease) => {
+            await createDeliveryProductionOperation(
+                lease,
+                paths,
+                rollbackCapsule(),
+                1000
+            );
+            const receipt = await runProductionDeliveryExecutorUnderLease(
+                lease,
+                paths,
+                options,
+                {
+                    createServices: () => ({
+                        prepare: () => Promise.resolve(),
+                        provision: () => Promise.resolve(),
+                        settle: () => Promise.resolve(),
+                        start: () => Promise.resolve(),
+                        stop: () => Promise.resolve(),
+                        verifyReady: () => Promise.resolve(),
+                        verifySmoke: () => Promise.resolve(),
+                    }),
+                    installRuntime: () => {
+                        installed = true;
+                        return Promise.resolve(current.runtime);
+                    },
+                    loadCurrentArtifacts: () => Promise.resolve(current),
+                    nowMs: () => 2000,
+                    verifyPreviewTailscaleOperator: () => Promise.resolve(),
+                }
+            );
+            expect(receipt.result).toMatchObject({ outcome: "unknown-outcome" });
+        });
+        expect(installed).toBe(false);
+        expect(
+            await inspectProductionDeliveryExecutorOwner(options.projectRoot)
+        ).toMatchObject({
+            releaseId: currentReleaseId,
+            runtimeRevision: currentRuntimeRevision,
+        });
     });
 
     test("builds, capacity-admits, installs, and publishes an exact clean target", async () => {

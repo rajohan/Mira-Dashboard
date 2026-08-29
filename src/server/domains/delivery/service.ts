@@ -635,11 +635,12 @@ export function createDeliveryService(options: DeliveryServiceOptions): Delivery
         attemptedAuditRecorded = false
     ): Promise<DeliveryRequestOperationResult> {
         const parsed = v.parse(deliveryRequestOperationInputSchema, input);
-        signal?.throwIfAborted();
         if (!attemptedAuditRecorded) {
+            signal?.throwIfAborted();
             await recordAttemptedAudit(parsed.operation, context);
         }
         try {
+            signal?.throwIfAborted();
             const result = await options.operationQueue.enqueue({
                 actor: context.actor,
                 authorizeDispatch: () => {

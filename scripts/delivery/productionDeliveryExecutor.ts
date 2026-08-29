@@ -272,6 +272,34 @@ export function releaseManifestMatchesAuthority(
     );
 }
 
+async function verifyRetainedDeployAuthority(
+    publishedRoot: string,
+    authority: Readonly<{
+        releaseDescriptorSha256: string;
+        releaseManifestSha256: string;
+    }>
+): Promise<void> {
+    let descriptorBytes: Uint8Array;
+    let manifestBytes: Uint8Array;
+    try {
+        [descriptorBytes, manifestBytes] = await Promise.all([
+            readFile(path.join(publishedRoot, "release-descriptor.json")),
+            readFile(path.join(publishedRoot, "release-manifest.json")),
+        ]);
+    } catch {
+        throw failure();
+    }
+    if (
+        !releaseManifestMatchesAuthority(
+            descriptorBytes,
+            authority.releaseDescriptorSha256
+        ) ||
+        !releaseManifestMatchesAuthority(manifestBytes, authority.releaseManifestSha256)
+    ) {
+        throw failure();
+    }
+}
+
 function hasValidProductionRunState(run: ProductionRunRow): boolean {
     if (run.state === "queued") {
         return (
@@ -600,28 +628,10 @@ export async function prepareProductionDeliveryTargetUnderLease(
     const publishedRoot = path.join(paths.releasesDirectory, target.releaseId);
     if ((await pathState(publishedRoot)) === "present") {
         if (record.capsule.enqueue.payload.operation === "deploy") {
-            let descriptorBytes: Uint8Array;
-            let manifestBytes: Uint8Array;
-            try {
-                [descriptorBytes, manifestBytes] = await Promise.all([
-                    readFile(path.join(publishedRoot, "release-descriptor.json")),
-                    readFile(path.join(publishedRoot, "release-manifest.json")),
-                ]);
-            } catch {
-                throw failure();
-            }
-            if (
-                !releaseManifestMatchesAuthority(
-                    descriptorBytes,
-                    record.capsule.enqueue.payload.release.releaseDescriptorSha256
-                ) ||
-                !releaseManifestMatchesAuthority(
-                    manifestBytes,
-                    record.capsule.enqueue.payload.release.releaseManifestSha256
-                )
-            ) {
-                throw failure();
-            }
+            await verifyRetainedDeployAuthority(
+                publishedRoot,
+                record.capsule.enqueue.payload.release
+            );
         }
         return loadExactArtifacts(paths, target.releaseId, target.runtimeRevision);
     }
@@ -825,11 +835,10 @@ async function restartNormalRuntime(
     services: ProductionServiceController,
     dependencies: ProductionDeliveryExecutorDependencies
 ): Promise<void> {
-    const active = await loadExecutorArtifacts(
+    const active = await (dependencies.loadCurrentArtifacts ?? loadCurrentArtifacts)(
         paths,
         activation.current.releaseId,
-        activation.current.runtimeRevision,
-        dependencies
+        activation.current.runtimeRevision
     );
     await services.settle?.(active.release, active.runtime);
     await services.prepare(active.release, active.runtime);
@@ -912,6 +921,7 @@ export async function runProductionDeliveryExecutorUnderLease(
     const currentOwner = ownerState.owner;
     if (
         dependencies.loadTargetArtifacts === undefined &&
+        record.capsule.enqueue.payload.operation === "deploy" &&
         (currentOwner?.releaseId !== targetIdentity.releaseId ||
             currentOwner.runtimeRevision !== targetIdentity.runtimeRevision)
     ) {
@@ -921,6 +931,10 @@ export async function runProductionDeliveryExecutorUnderLease(
         );
         let described;
         if ((await pathState(publishedRoot)) === "present") {
+            await verifyRetainedDeployAuthority(
+                publishedRoot,
+                record.capsule.enqueue.payload.release
+            );
             described = await loadDescribedPublishedProductionReleaseById(
                 paths,
                 targetIdentity.releaseId
