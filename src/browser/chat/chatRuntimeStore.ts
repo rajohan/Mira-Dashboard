@@ -1419,12 +1419,18 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                     (left, right) => right.lastObservedAtMs - left.lastObservedAtMs
                 )[0];
             const retainedPlan = generationChanged ? undefined : session.lastPlan;
-            const lastPlan =
-                retainedPlan === undefined && newestPlanRun?.plan !== undefined
-                    ? {
+            const snapshotPlan =
+                newestPlanRun?.plan === undefined
+                    ? undefined
+                    : {
                           plan: newestPlanRun.plan,
                           updatedAtMs: newestPlanRun.lastObservedAtMs,
-                      }
+                      };
+            const lastPlan =
+                snapshotPlan !== undefined &&
+                (retainedPlan === undefined ||
+                    snapshotPlan.updatedAtMs > retainedPlan.updatedAtMs)
+                    ? snapshotPlan
                     : retainedPlan;
             return {
                 ...state,
@@ -1546,13 +1552,19 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             const newestPlanRun = Object.values(installed)
                 .filter((run) => run.lifecycle === "active" && run.plan !== undefined)
                 .toSorted((left, right) => right.updatedAtMs - left.updatedAtMs)[0];
-            const lastPlan =
+            const externalPlan =
                 newestPlanRun?.plan === undefined
-                    ? session.lastPlan
+                    ? undefined
                     : {
                           plan: newestPlanRun.plan,
                           updatedAtMs: newestPlanRun.updatedAtMs,
                       };
+            const lastPlan =
+                externalPlan !== undefined &&
+                (session.lastPlan === undefined ||
+                    externalPlan.updatedAtMs > session.lastPlan.updatedAtMs)
+                    ? externalPlan
+                    : session.lastPlan;
             return {
                 ...state,
                 sessions: {

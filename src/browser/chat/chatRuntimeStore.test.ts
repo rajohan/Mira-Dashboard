@@ -124,6 +124,94 @@ describe("chat runtime store", () => {
         );
     });
 
+    test("replaces retained progress from a newer authoritative reset snapshot", () => {
+        const store = createChatRuntimeStore();
+        store.apply(
+            event(1, {
+                explanation: "Older realtime plan.",
+                kind: "plan",
+                steps: [{ status: "completed", text: "Older task" }],
+            })
+        );
+        store.installSnapshots(
+            sessionKey,
+            [
+                {
+                    lastSequence: 2,
+                    message: {
+                        attachments: [],
+                        id: `runtime:${sessionKey}:run-2`,
+                        parts: [],
+                        role: "assistant",
+                        runId: "run-2",
+                        sequence: 2,
+                        sessionKey,
+                    },
+                    phase: "completed",
+                    plan: {
+                        description: "Newer snapshot plan.",
+                        items: [
+                            { id: "newer", label: "Newer task", status: "completed" },
+                        ],
+                        runId: "run-2",
+                        title: "Task progress",
+                    },
+                    reconciliation: "runtime-authoritative",
+                    runId: "run-2",
+                    updatedAtMs: occurredAtMs + 10,
+                },
+            ],
+            2,
+            true
+        );
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Newer snapshot plan."
+        );
+    });
+
+    test("does not replace newer retained progress with an older external plan", () => {
+        const store = createChatRuntimeStore();
+        store.apply(
+            event(1, {
+                explanation: "Newer realtime plan.",
+                kind: "plan",
+                steps: [{ status: "in_progress", text: "Newer task" }],
+            })
+        );
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "complete",
+                lifecycle: "active",
+                hasUnprojectedActivity: false,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:older`,
+                    parts: [],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs - 10,
+                plan: {
+                    description: "Older external plan.",
+                    items: [{ id: "older", label: "Older task", status: "in-progress" }],
+                    runId: "provider:older",
+                    title: "Task progress",
+                },
+                projectionTruncated: false,
+                providerRunId: "older",
+                source: "provider-runtime",
+                updatedAtMs: occurredAtMs - 10,
+            },
+        ]);
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Newer realtime plan."
+        );
+    });
+
     test("renders a provider user event before any following provider activity", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
