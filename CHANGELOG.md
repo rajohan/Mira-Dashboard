@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.2...v0.5.3) (2026-08-29)
+
+
+### Bug Fixes
+
+* **delivery:** stabilize cross-generation release handoff ([#504](https://github.com/rajohan/Mira-Dashboard/issues/504)) ([5cf41b0](https://github.com/rajohan/Mira-Dashboard/commit/5cf41b02e5ea7328dfd77acbb7bc6c18a0e815f8))
+
 ## [0.5.2](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.1...v0.5.2) (2026-08-28)
 
 
