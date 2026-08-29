@@ -173,6 +173,8 @@ export interface ChatExternalRunProjection {
     readonly observationEpoch: number;
     readonly observedAtMs: number;
     readonly plan?: ChatActivePlanView;
+    /** Publication time for plan ordering; unlike updatedAtMs this does not advance on unrelated activity. */
+    readonly planUpdatedAtMs?: number;
     readonly projectionTruncated: boolean;
     readonly providerRunId: string;
     /** Provider-ordered assistant lanes split at steer/user boundaries. */
@@ -1513,6 +1515,14 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                     const plan =
                         projection.plan ??
                         (projection.projectionTruncated ? existing.plan : undefined);
+                    let planUpdatedAtMs: number | undefined;
+                    if (projection.plan !== undefined) {
+                        planUpdatedAtMs =
+                            projection.planUpdatedAtMs ?? projection.updatedAtMs;
+                    } else if (projection.projectionTruncated) {
+                        planUpdatedAtMs =
+                            existing.planUpdatedAtMs ?? existing.updatedAtMs;
+                    }
                     const preserved = withExternalSegments(
                         {
                             ...projection,
@@ -1532,6 +1542,7 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
                                 projection.updatedAtMs
                             ),
                             ...(plan === undefined ? {} : { plan }),
+                            ...(planUpdatedAtMs === undefined ? {} : { planUpdatedAtMs }),
                             ...(streamResets === undefined ? {} : { streamResets }),
                         },
                         reconciledSegments
@@ -1551,13 +1562,18 @@ export class ChatRuntimeStore extends Store<ChatRuntimeState> {
             });
             const newestPlanRun = Object.values(installed)
                 .filter((run) => run.plan !== undefined)
-                .toSorted((left, right) => right.updatedAtMs - left.updatedAtMs)[0];
+                .toSorted(
+                    (left, right) =>
+                        (right.planUpdatedAtMs ?? right.updatedAtMs) -
+                        (left.planUpdatedAtMs ?? left.updatedAtMs)
+                )[0];
             const externalPlan =
                 newestPlanRun?.plan === undefined
                     ? undefined
                     : {
                           plan: newestPlanRun.plan,
-                          updatedAtMs: newestPlanRun.updatedAtMs,
+                          updatedAtMs:
+                              newestPlanRun.planUpdatedAtMs ?? newestPlanRun.updatedAtMs,
                       };
             const lastPlan =
                 externalPlan !== undefined &&

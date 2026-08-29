@@ -247,6 +247,73 @@ describe("chat runtime store", () => {
         );
     });
 
+    test("does not republish a retained external plan on unrelated activity", () => {
+        const store = createChatRuntimeStore();
+        const olderPlan = {
+            description: "Older external plan.",
+            items: [{ id: "older", label: "Older task", status: "in-progress" as const }],
+            runId: "provider:older",
+            title: "Task progress",
+        };
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "complete",
+                lifecycle: "active",
+                hasUnprojectedActivity: false,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:older`,
+                    parts: [],
+                    role: "assistant",
+                    sequence: 1,
+                    sessionKey,
+                },
+                observationEpoch: 1,
+                observedAtMs: occurredAtMs,
+                plan: olderPlan,
+                projectionTruncated: false,
+                providerRunId: "older",
+                source: "provider-runtime",
+                updatedAtMs: occurredAtMs,
+            },
+        ]);
+        store.apply({
+            ...event(2, {
+                explanation: "Newer realtime plan.",
+                kind: "plan",
+                steps: [{ status: "in_progress", text: "Newer task" }],
+            }),
+            occurredAtMs: occurredAtMs + 10,
+            runId: "run-2",
+            sequence: 1,
+        });
+        store.installExternalRuns(sessionKey, [
+            {
+                continuity: "interrupted",
+                lifecycle: "active",
+                hasUnprojectedActivity: true,
+                message: {
+                    attachments: [],
+                    id: `external:${sessionKey}:older`,
+                    parts: [{ kind: "text", text: "Unrelated later activity" }],
+                    role: "assistant",
+                    sequence: 2,
+                    sessionKey,
+                },
+                observationEpoch: 2,
+                observedAtMs: occurredAtMs + 20,
+                projectionTruncated: true,
+                providerRunId: "older",
+                source: "provider-in-flight",
+                updatedAtMs: occurredAtMs + 20,
+            },
+        ]);
+
+        expect(chatRuntimePlans(store.state, sessionKey)[0]?.description).toBe(
+            "Newer realtime plan."
+        );
+    });
+
     test("renders a provider user event before any following provider activity", () => {
         const store = createChatRuntimeStore();
         store.installExternalRuns(sessionKey, [
