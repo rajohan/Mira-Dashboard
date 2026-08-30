@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { Redacted } from "effect";
@@ -100,6 +100,7 @@ describe("live managed Preview rehearsal", () => {
             };
             const ingressSocket = path.join(root, "preview", "ingress", "preview.sock");
             let published = false;
+            let publishedSocket = ingressSocket;
             const origin = "https://preview.example.test:3445";
             const hostConfiguration = {
                 bunExecutable: process.execPath,
@@ -137,27 +138,28 @@ describe("live managed Preview rehearsal", () => {
                             }),
                     },
                     tailscale: {
-                        inspect: () =>
+                        inspect: (socket) =>
                             Promise.resolve({
                                 enabled: published,
                                 origin,
-                                target: `unix:${ingressSocket}`,
+                                target: `unix:${published ? publishedSocket : socket}`,
                             }),
-                        start: async (_socket, _origin, beforeMutation) => {
+                        start: async (socket, _origin, beforeMutation) => {
                             await beforeMutation();
                             published = true;
+                            publishedSocket = socket;
                             return {
                                 enabled: true,
                                 origin,
-                                target: `unix:${ingressSocket}`,
+                                target: `unix:${socket}`,
                             };
                         },
-                        stopOwned: () => {
+                        stopOwned: (socket) => {
                             published = false;
                             return Promise.resolve({
                                 enabled: false,
                                 origin,
-                                target: `unix:${ingressSocket}`,
+                                target: `unix:${socket}`,
                             });
                         },
                     },
@@ -186,7 +188,7 @@ describe("live managed Preview rehearsal", () => {
                 "--noproxy",
                 "*",
                 "--unix-socket",
-                ingressSocket,
+                publishedSocket,
                 "--header",
                 "Host: preview.example.test:3445",
                 "http://127.0.0.1/",
@@ -200,12 +202,15 @@ describe("live managed Preview rehearsal", () => {
                 "--noproxy",
                 "*",
                 "--unix-socket",
-                ingressSocket,
+                publishedSocket,
                 "--header",
                 "Host: preview.example.test:3445",
                 "http://127.0.0.1/api/health/ready",
             ]);
             expect(readiness.exitCode, readiness.stderr).toBe(0);
+            const poisonedSocket = publishedSocket;
+            await rm(poisonedSocket, { force: true });
+            await mkdir(poisonedSocket);
             await host.stop({
                 number: 42,
                 operationId: Bun.randomUUIDv7(),
@@ -217,6 +222,7 @@ describe("live managed Preview rehearsal", () => {
                 previewRevision: "b".repeat(64),
             });
             expect(rebuilt.status.status).toBe("running");
+            expect(publishedSocket).not.toBe(poisonedSocket);
             await host.stop({
                 number: 42,
                 operationId: Bun.randomUUIDv7(),
