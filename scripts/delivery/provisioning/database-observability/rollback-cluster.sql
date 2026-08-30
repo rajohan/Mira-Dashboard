@@ -30,6 +30,8 @@ BEGIN;
 
 REVOKE pg_monitor FROM mira_dashboard_observer;
 REVOKE pg_read_all_stats FROM mira_dashboard_observer;
+REVOKE SET ON PARAMETER pg_stat_statements.track
+  FROM mira_dashboard_observer;
 REVOKE pg_monitor FROM mira_dashboard_observability_capability_owner;
 REVOKE pg_read_all_stats FROM mira_dashboard_observability_capability_owner;
 

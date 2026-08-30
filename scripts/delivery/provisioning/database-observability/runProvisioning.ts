@@ -13,9 +13,9 @@ const composeRootConfig = "/opt/docker/compose.yaml";
 const containerShellExecutable = "/bin/sh";
 const containerOperatingSystemUser = "postgres";
 const containerPsqlProbeLauncher =
-    ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 1 3 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"';
+    ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGOPTIONS="-c pg_stat_statements.track=none" PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 1 3 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"';
 const containerPsqlLauncher =
-    ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 2 45 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"';
+    ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGOPTIONS="-c pg_stat_statements.track=none" PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 2 45 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"';
 const capabilityLabel = "mira.dashboard.database-observability";
 const capabilityValue = "pgbouncer-psql-v1";
 const administrativeServiceLabel =
@@ -82,6 +82,7 @@ const provisioningSqlArtifactNames = Object.freeze([
     "disable-observer.sql",
     "enable-approved-collection.sql",
     "prepare-approved-collection.sql",
+    "reconcile-observer-parameter-policy.sql",
     "reconcile-database-access.sql",
     "rollback-cluster.sql",
     "rollback-control-database-capability.sql",
@@ -1078,6 +1079,8 @@ BEGIN
     SELECT controls.system_identifier::text
     FROM pg_catalog.pg_control_system() AS controls
     ) IS DISTINCT FROM '${target.systemIdentifier}'
+    OR pg_catalog.current_setting('pg_stat_statements.track', true)
+      IS DISTINCT FROM 'none'
   THEN
     RAISE EXCEPTION USING MESSAGE = 'Database observability execution identity changed';
   END IF;
@@ -1527,6 +1530,16 @@ export async function runDatabaseObservabilityProvisioning(
                     artifactRoot
                 );
             }
+            await runSqlArtifact(
+                run,
+                target,
+                provisioningControlDatabase,
+                "reconcile-observer-parameter-policy.sql",
+                [],
+                deadline,
+                dependencies.afterSqlArtifactDescriptorStat,
+                artifactRoot
+            );
             await runSqlArtifact(
                 run,
                 target,

@@ -173,8 +173,10 @@ function fixtureRows(database: string, sql: string): readonly Row[] {
                     "default_transaction_read_only=on",
                     "idle_in_transaction_session_timeout=60s",
                     "idle_session_timeout=60s",
+                    "pg_stat_statements.track=none",
                     "statement_timeout=5s",
                 ],
+                statementTracking: "none",
             },
         ];
     }
@@ -402,10 +404,10 @@ describe("Bun SQL database observability collector", () => {
                 .filter((candidate) => candidate.startsWith(`query:${database}:`));
             expect(queries.slice(0, 5)).toEqual([
                 `query:${database}:BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`,
+                `query:${database}:SET LOCAL pg_stat_statements.track = 'none'`,
                 `query:${database}:SET LOCAL statement_timeout = '5s'`,
                 `query:${database}:SET LOCAL search_path = pg_catalog, public`,
                 expect.stringContaining(`query:${database}:WITH role_oids AS`),
-                `query:${database}:SET LOCAL search_path = pg_catalog`,
             ]);
         }
         expect(
@@ -422,12 +424,15 @@ describe("Bun SQL database observability collector", () => {
                 `query:${database}:BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`
             );
             expect(queries[1]).toBe(
-                `query:${database}:SET LOCAL statement_timeout = '5s'`
+                `query:${database}:SET LOCAL pg_stat_statements.track = 'none'`
             );
             expect(queries[2]).toBe(
+                `query:${database}:SET LOCAL statement_timeout = '5s'`
+            );
+            expect(queries[3]).toBe(
                 `query:${database}:SET LOCAL search_path = pg_catalog, public`
             );
-            expect(queries[4]).toBe(
+            expect(queries[5]).toBe(
                 `query:${database}:SET LOCAL search_path = pg_catalog`
             );
             expect(
@@ -550,6 +555,7 @@ describe("Bun SQL database observability collector", () => {
             { bypassRowLevelSecurity: true },
             { connectionLimit: databaseObservabilityObserverConnectionLimit + 1 },
             { roleConfiguration: ["statement_timeout=5s"] },
+            { statementTracking: "all" },
             { databaseRoleConfiguration: ["statement_timeout=60s"] },
             { directMemberships: ["pg_monitor"] },
             { directMemberships: ["pg_read_all_stats"] },

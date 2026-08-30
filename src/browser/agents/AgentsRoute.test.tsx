@@ -5,7 +5,10 @@ import { act } from "react";
 
 import type { AgentStatusProjection } from "../../contracts/agentModel.ts";
 import type { AuthStatus } from "../../contracts/auth.ts";
-import { liveHistoryArchiveQueryKey } from "../api/liveHistory.ts";
+import {
+    liveHistoryArchiveQueryKey,
+    liveHistoryHeadQueryKey,
+} from "../api/liveHistory.ts";
 import { createDashboardQueryClient } from "../api/queryClient.ts";
 import {
     createDashboardTrpcClient,
@@ -270,11 +273,15 @@ function renderAgentRoute(
 }
 
 describe("Dashboard agents route", () => {
-    test("renders the live history head when the archive fails", async () => {
+    test("renders available history when one history projection fails", async () => {
         const transport = new PartialAgentHistoryTransport();
         const queryClient = createDashboardQueryClient();
         queryClient.setQueryDefaults(
             liveHistoryArchiveQueryKey([...agentQueryKey, "history"]),
+            { retry: false }
+        );
+        queryClient.setQueryDefaults(
+            liveHistoryHeadQueryKey([...agentQueryKey, "history"]),
             { retry: false }
         );
         renderAgentRoute(transport, queryClient);

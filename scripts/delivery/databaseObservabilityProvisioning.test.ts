@@ -349,6 +349,7 @@ describe("database observability provisioning", () => {
             reconciliation: {
                 frequency: "every approved prepared open before one-use enable",
                 operations: [
+                    "transactionally advance the observer to the exact five-setting role profile and one non-grantable SET capability",
                     "reconcile exact database ACLs through the pinned administrative boundary",
                     "strictly apply and verify cluster and control capabilities; isolate application-database apply or policy drift for collector-level unavailable details",
                     "reject catalog, approval, policy-digest, PostgreSQL identity, or Docker identity races",
@@ -441,7 +442,13 @@ describe("database observability provisioning", () => {
         const accessVerify = await readProvisioningFile(
             "verify-database-access-reconciler.sql"
         );
+        const parameterPolicyReconciliation = await readProvisioningFile(
+            "reconcile-observer-parameter-policy.sql"
+        );
         const cluster = await readProvisioningFile("verify-cluster.sql");
+        const prepare = await readProvisioningFile("prepare-approved-collection.sql");
+        const enable = await readProvisioningFile("enable-approved-collection.sql");
+        const rollback = await readProvisioningFile("rollback-cluster.sql");
         const database = await readProvisioningFile("verify-database.sql");
         expect(apply).toContain(
             `NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${String(databaseObservabilityObserverConnectionLimit)}`
@@ -449,6 +456,39 @@ describe("database observability provisioning", () => {
         expect(apply).toContain("ALTER ROLE mira_dashboard_observer RESET ALL;");
         expect(apply).toContain("SET default_transaction_read_only = on;");
         expect(apply).toContain("SET statement_timeout = '5s';");
+        expect(apply).toContain(
+            "ALTER ROLE mira_dashboard_observer\n    SET pg_stat_statements.track = 'none'"
+        );
+        expect(parameterPolicyReconciliation).toContain(
+            "ALTER ROLE mira_dashboard_observer\n  SET pg_stat_statements.track = 'none'"
+        );
+        expect(parameterPolicyReconciliation).toContain(
+            "GRANT SET ON PARAMETER pg_stat_statements.track"
+        );
+        expect(parameterPolicyReconciliation).toContain(
+            String.raw`\ir verify-cluster.sql`
+        );
+        expect(parameterPolicyReconciliation).not.toContain(
+            "ALTER ROLE mira_dashboard_observer PASSWORD"
+        );
+        expect(parameterPolicyReconciliation).not.toContain(
+            "ALTER ROLE mira_dashboard_observer RESET ALL"
+        );
+        for (const policy of [apply, cluster, prepare, enable]) {
+            expect(policy).toContain(
+                "pg_catalog.cardinality(observer_config) IS DISTINCT FROM 5"
+            );
+            expect(policy).toContain("'pg_stat_statements.track=none'");
+            expect(policy).toContain("pg_catalog.pg_parameter_acl");
+            expect(policy).toContain("grants.grantee = 0");
+            expect(policy).toContain(
+                "pg_catalog.pg_has_role(observer.oid, grants.grantee, 'USAGE')"
+            );
+            expect(policy).toContain("grants.grantee = observer.oid");
+            expect(policy).toContain("grants.privilege_type = 'SET'");
+            expect(policy).toContain("NOT grants.is_grantable");
+        }
+        expect(rollback).toContain("REVOKE SET ON PARAMETER pg_stat_statements.track");
         expect(apply).toContain("pg_terminate_backend(reserved_session.pid, 5000)");
         expect(apply).toContain("observer_inbound_membership_count <> 0");
         expect(apply).toContain("admin_option OR NOT inherit_option OR NOT set_option");
@@ -619,8 +659,8 @@ describe("database observability provisioning", () => {
         );
         const requestSql = psqlRequests.map(({ stdin }) => stdin ?? "");
         const acceptedLaunchers = new Set([
-            ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 2 45 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"',
-            ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 1 3 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"',
+            ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGOPTIONS="-c pg_stat_statements.track=none" PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 2 45 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"',
+            ': "${POSTGRES_USER:?}"; exec /usr/bin/env -i HOME=/var/lib/postgresql LANG=C LC_ALL=C PATH=/usr/local/bin:/usr/bin:/bin PGOPTIONS="-c pg_stat_statements.track=none" PGUSER="$POSTGRES_USER" /usr/bin/timeout -s TERM -k 1 3 /usr/local/bin/psql --host=/var/run/postgresql --username="$POSTGRES_USER" --no-psqlrc --set=ON_ERROR_STOP=1 "$@"',
         ]);
         expect(
             composeRequests.every(
@@ -651,6 +691,11 @@ describe("database observability provisioning", () => {
             )
         ).toBe(true);
         expect(
+            composeRequests.every(({ argv }) =>
+                (argv[15] ?? "").includes('PGOPTIONS="-c pg_stat_statements.track=none"')
+            )
+        ).toBe(true);
+        expect(
             composeRequests.every(
                 ({ argv }) =>
                     argv[0] === "--file" &&
@@ -665,22 +710,37 @@ describe("database observability provisioning", () => {
                 ({ stdin }) =>
                     stdin?.includes("controls.system_identifier::text") &&
                     stdin.includes("roles.oid = '10'::pg_catalog.oid") &&
-                    stdin.includes("CURRENT_USER IS DISTINCT FROM SESSION_USER")
+                    stdin.includes("CURRENT_USER IS DISTINCT FROM SESSION_USER") &&
+                    stdin.includes("current_setting('pg_stat_statements.track', true)")
             )
         ).toBe(true);
         expect(requestSql.some((sql) => sql.includes("$approval_and_preflight$"))).toBe(
             true
         );
+        expect(
+            requestSql.some(
+                (sql) =>
+                    sql.includes("$qualify_observer_parameter_policy$") &&
+                    sql.includes("SET pg_stat_statements.track = 'none'") &&
+                    sql.includes(
+                        "Disabled database observability observer role is invalid"
+                    )
+            )
+        ).toBe(true);
         expect(requestSql.some((sql) => sql.includes("CREATE EXTENSION"))).toBe(true);
         expect(requestSql.every((sql) => !/^[ \t]*\\ir[ \t]/mu.test(sql))).toBe(true);
-        const reconcileIndex = requestSql.findIndex((sql) =>
+        const parameterPolicyIndex = requestSql.findIndex((sql) =>
+            sql.includes("$qualify_observer_parameter_policy$")
+        );
+        const databaseAccessReconcileIndex = requestSql.findIndex((sql) =>
             sql.includes("mira_dashboard_database_access.reconcile()")
         );
-        const clusterVerifyIndex = requestSql.findIndex((sql) =>
+        const finalClusterVerifyIndex = requestSql.findLastIndex((sql) =>
             sql.includes("Database observability view owner is invalid")
         );
-        expect(reconcileIndex).toBeGreaterThan(-1);
-        expect(reconcileIndex).toBeLessThan(clusterVerifyIndex);
+        expect(parameterPolicyIndex).toBeGreaterThan(-1);
+        expect(parameterPolicyIndex).toBeLessThan(databaseAccessReconcileIndex);
+        expect(databaseAccessReconcileIndex).toBeLessThan(finalClusterVerifyIndex);
         const capabilityApplyIndex = requestSql.findIndex((sql) =>
             sql.includes("$approval_and_preflight$")
         );

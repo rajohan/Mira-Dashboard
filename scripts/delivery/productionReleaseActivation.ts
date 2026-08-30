@@ -1,6 +1,9 @@
 import { Effect, Schema } from "effect";
 
-import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
+import {
+    productionRollbackCompatibilityEpoch,
+    type ProductionActivationRecord,
+} from "../../src/shared/productionActivationRecord.ts";
 import {
     parseProductionActivationTransition,
     type ProductionActivationPreviousDatabase,
@@ -176,7 +179,7 @@ async function settleServices(
     await services.settle?.(artifacts.release, artifacts.runtime);
 }
 
-function sameRecord(
+export function productionActivationRecordsEqual(
     left: ProductionActivationRecord | null | undefined,
     right: ProductionActivationRecord | null | undefined
 ): boolean {
@@ -192,10 +195,14 @@ function sameRecord(
             : left.previous.databaseSnapshotTransitionId ===
                   right.previous.databaseSnapshotTransitionId &&
               left.previous.releaseId === right.previous.releaseId &&
+              (left.previous.rollbackCompatibilityEpoch ?? 0) ===
+                  (right.previous.rollbackCompatibilityEpoch ?? 0) &&
               left.previous.runtimeRevision === right.previous.runtimeRevision;
     return (
         left.formatVersion === right.formatVersion &&
         left.transitionId === right.transitionId &&
+        (left.rollbackCompatibilityEpoch ?? 0) ===
+            (right.rollbackCompatibilityEpoch ?? 0) &&
         left.current.releaseId === right.current.releaseId &&
         left.current.runtimeRevision === right.current.runtimeRevision &&
         samePrevious
@@ -402,9 +409,12 @@ function nextActivationRecord(
             ? {
                   databaseSnapshotTransitionId: transitionId,
                   releaseId: activation.record.current.releaseId,
+                  rollbackCompatibilityEpoch:
+                      activation.record.rollbackCompatibilityEpoch ?? 0,
                   runtimeRevision: activation.record.current.runtimeRevision,
               }
             : null,
+        rollbackCompatibilityEpoch: productionRollbackCompatibilityEpoch,
         transitionId,
     };
 }
@@ -419,7 +429,9 @@ async function reconcileActivationCommit(
         return await commitProductionActivationState(lease, paths, expected, next);
     } catch {
         const observed = await loadProductionActivationState(lease, paths);
-        if (!sameRecord(observed.record, next)) throw activationError();
+        if (!productionActivationRecordsEqual(observed.record, next)) {
+            throw activationError();
+        }
         return observed;
     }
 }
@@ -439,7 +451,7 @@ async function reconcileActivationRollback(
         );
     } catch {
         const observed = await loadProductionActivationState(lease, paths);
-        if (!sameRecord(observed.record, previous ?? undefined)) {
+        if (!productionActivationRecordsEqual(observed.record, previous ?? undefined)) {
             throw activationError();
         }
         return observed;
@@ -517,7 +529,7 @@ async function rollbackTransition(
     dependencies: ProductionReleaseActivationDependencies
 ): Promise<ProductionActivationState> {
     const candidateCommitted = activationMatchesCandidate(activation, journal);
-    const previousAuthoritative = sameRecord(
+    const previousAuthoritative = productionActivationRecordsEqual(
         activation.record,
         journal.previousActivation
     );
@@ -820,7 +832,7 @@ async function activateRelease(
                 throw activationError();
             }
             const recovered = await recoverExistingTransition(lease, paths, dependencies);
-            if (sameRecord(recovered.record, expectedCommitted)) {
+            if (productionActivationRecordsEqual(recovered.record, expectedCommitted)) {
                 await retainCommittedDatabaseSnapshots(lease, paths, recovered);
                 await retainCommittedProductionArtifacts(
                     lease,
@@ -832,7 +844,9 @@ async function activateRelease(
             }
             throw activationError();
         }
-        if (sameRecord(observedActivation.record, expectedCommitted)) {
+        if (
+            productionActivationRecordsEqual(observedActivation.record, expectedCommitted)
+        ) {
             await discardTransitionWorkspace(lease, paths, transitionId, workspace);
             await retainCommittedDatabaseSnapshots(lease, paths, observedActivation);
             await retainCommittedProductionArtifacts(

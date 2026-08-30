@@ -412,7 +412,7 @@ function activationRevision(input: {
 function rollbackProjection(
     record: ProductionActivationRecord | undefined,
     actionActive: boolean,
-    previousSupportsProductionProtocol: boolean
+    releasesAreRollbackCompatible: boolean
 ): DeliveryReleases["rollback"] {
     if (record?.previous === null || record?.previous === undefined) {
         return Object.freeze({
@@ -428,7 +428,7 @@ function rollbackProjection(
             reason: "action-active",
         });
     }
-    if (!previousSupportsProductionProtocol) {
+    if (!releasesAreRollbackCompatible) {
         return Object.freeze({
             actor: "mira",
             available: false,
@@ -590,7 +590,9 @@ export function createDeliveryProductionAuthorityReader(
                 rollback: rollbackProjection(
                     record,
                     actionActiveAfter,
-                    previousProjection?.supportsProductionProtocol === true
+                    previousProjection?.supportsProductionProtocol === true &&
+                        (record?.rollbackCompatibilityEpoch ?? 0) ===
+                            (record?.previous?.rollbackCompatibilityEpoch ?? 0)
                 ),
             };
             result = Object.freeze({

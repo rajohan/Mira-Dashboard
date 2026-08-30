@@ -1,8 +1,14 @@
 import * as v from "valibot";
 
-import { fullCommitShaSchema, lowercaseUuidV7Schema } from "./validation.ts";
+import {
+    fullCommitShaSchema,
+    lowercaseUuidV7Schema,
+    nonnegativeSafeIntegerSchema,
+} from "./validation.ts";
 
 const invalidActivationRecord = "Production activation record is invalid";
+/** Epoch shared only by activations that may safely restore one another's host policy. */
+export const productionRollbackCompatibilityEpoch = 1;
 const releaseRuntimeSchema = v.strictObject({
     releaseId: fullCommitShaSchema(invalidActivationRecord),
     runtimeRevision: fullCommitShaSchema(invalidActivationRecord),
@@ -16,8 +22,14 @@ export const productionActivationRecordSchema = v.strictObject({
         v.strictObject({
             databaseSnapshotTransitionId: lowercaseUuidV7Schema(invalidActivationRecord),
             releaseId: fullCommitShaSchema(invalidActivationRecord),
+            rollbackCompatibilityEpoch: v.optional(
+                nonnegativeSafeIntegerSchema(invalidActivationRecord)
+            ),
             runtimeRevision: fullCommitShaSchema(invalidActivationRecord),
         })
+    ),
+    rollbackCompatibilityEpoch: v.optional(
+        nonnegativeSafeIntegerSchema(invalidActivationRecord)
     ),
     transitionId: lowercaseUuidV7Schema(invalidActivationRecord),
 });

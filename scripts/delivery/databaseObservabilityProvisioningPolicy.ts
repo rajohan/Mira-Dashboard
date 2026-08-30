@@ -14,6 +14,7 @@ export const databaseObservabilityProvisioningReleaseArtifactPaths = Object.free
         "enable-approved-collection.sql",
         "manifest.json",
         "prepare-approved-collection.sql",
+        "reconcile-observer-parameter-policy.sql",
         "reconcile-database-access.sql",
         "rollback-cluster.sql",
         "rollback-control-database-capability.sql",

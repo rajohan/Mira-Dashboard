@@ -199,6 +199,43 @@ describe("Delivery production authority reader", () => {
         });
     });
 
+    test("does not offer a retained release from an older rollback compatibility epoch", async () => {
+        const paths = await fixture();
+        await writeFile(
+            path.join(paths.stateDirectory, "activation.json"),
+            serializeProductionActivationRecord({
+                current: {
+                    releaseId: currentReleaseId,
+                    runtimeRevision: currentRuntime,
+                },
+                formatVersion: 1,
+                previous: {
+                    databaseSnapshotTransitionId: transitionId,
+                    releaseId: previousReleaseId,
+                    rollbackCompatibilityEpoch: 0,
+                    runtimeRevision: previousRuntime,
+                },
+                rollbackCompatibilityEpoch: 1,
+                transitionId,
+            }),
+            { mode: 0o600 }
+        );
+
+        const result = await createDeliveryProductionAuthorityReader({
+            readActionActive: () => Promise.resolve(false),
+            ...paths,
+        }).read();
+
+        expect(result.releases.previous).toMatchObject({
+            releaseId: previousReleaseId,
+        });
+        expect(result.releases.rollback).toEqual({
+            actor: "mira",
+            available: false,
+            reason: "incompatible",
+        });
+    });
+
     test("fails closed when the current release lacks the production protocol", async () => {
         const paths = await fixture();
         await replaceManifest(

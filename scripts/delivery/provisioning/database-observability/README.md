@@ -53,6 +53,12 @@ an approved database-admin session, a current backup, and a tested rollback wind
   `queryid`, or other reversible statement identity. Exact routine shape, source body, dependency,
   owner, source ACL, schema ACL, and output columns all fail closed on drift. Review compatibility
   before applying because principals that relied on stock `PUBLIC` access lose that raw access.
+- Both fixed administrative psql launchers set `pg_stat_statements.track=none`. The observer's
+  exact five-setting role profile also defaults that parameter to `none`; one exact non-grantable
+  `SET` capability lets every snapshot enforce it as the first transaction-local command before
+  any inspection SQL. Provisioning, verification, and collection therefore cannot populate the application
+  statement metrics they assess, while unrelated application sessions retain the host's configured
+  tracking policy. This forward-only policy change retires the previous four-setting role profile.
 - `bitmagnet` and `comet` are the sole named application exceptions. Their optional owner-rights
   `torrent_count` views live in those application databases and remain independent of the fixed
   control database. No other application, database, container, service, project, or port name is
