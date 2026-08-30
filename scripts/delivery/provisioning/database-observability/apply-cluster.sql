@@ -61,6 +61,8 @@ BEGIN
     SET idle_session_timeout = '60s';
   ALTER ROLE mira_dashboard_observer
     SET idle_in_transaction_session_timeout = '60s';
+  ALTER ROLE mira_dashboard_observer
+    SET pg_stat_statements.track = 'none';
 END
 $quarantine$;
 
@@ -210,6 +212,8 @@ REVOKE pg_monitor FROM mira_dashboard_observability_capability_owner;
 REVOKE pg_read_all_stats FROM mira_dashboard_observability_capability_owner;
 GRANT pg_read_all_stats TO mira_dashboard_observability_capability_owner
   WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT SET ON PARAMETER pg_stat_statements.track
+  TO mira_dashboard_observer;
 
 -- Commit only an exact, disabled principal with no password. Per-database and
 -- view verification remains mandatory before the separate activation step.
@@ -257,13 +261,30 @@ BEGIN
     OR observer.rolpassword IS NOT NULL
     OR observer.rolvaliduntil IS DISTINCT FROM
       '1970-01-01 00:00:00+00'::timestamp with time zone
-    OR pg_catalog.cardinality(observer_config) IS DISTINCT FROM 4
+    OR (
+      SELECT pg_catalog.count(*)
+      FROM pg_catalog.pg_parameter_acl AS parameters
+      CROSS JOIN LATERAL pg_catalog.aclexplode(parameters.paracl) AS grants
+      WHERE grants.grantee = 0
+        OR pg_catalog.pg_has_role(observer.oid, grants.grantee, 'USAGE')
+    ) IS DISTINCT FROM 1::bigint
+    OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_parameter_acl AS parameters
+      CROSS JOIN LATERAL pg_catalog.aclexplode(parameters.paracl) AS grants
+      WHERE parameters.parname = 'pg_stat_statements.track'
+        AND grants.grantee = observer.oid
+        AND grants.privilege_type = 'SET'
+        AND NOT grants.is_grantable
+    )
+    OR pg_catalog.cardinality(observer_config) IS DISTINCT FROM 5
     OR NOT COALESCE(
       observer_config @> ARRAY[
         'default_transaction_read_only=on',
         'statement_timeout=5s',
         'idle_session_timeout=60s',
-        'idle_in_transaction_session_timeout=60s'
+        'idle_in_transaction_session_timeout=60s',
+        'pg_stat_statements.track=none'
       ]::text[],
       false
     )

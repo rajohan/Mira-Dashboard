@@ -7,6 +7,8 @@ import {
 
 const token = `${"a".repeat(32)}.${"b".repeat(64)}`;
 const runId = "019fc968-1a9b-7765-8f1b-d5b863b0e7b4";
+const mismatchedRunId = "019fc968-1a9b-7765-8f1b-d5b863b0e7b5";
+const agentGeneratedRunId = "96e09c87-25d1-41bb-bd37-f876c489e093";
 
 const heartbeat = Object.freeze({
     cache: {
@@ -130,7 +132,6 @@ const snapshot = Object.freeze({
         summary: "HEARTBEAT_OK",
         title: "HEARTBEAT_OK",
     },
-    runId,
     startedAtMs: 2000,
 });
 
@@ -177,6 +178,7 @@ describe("OpenClaw heartbeat automation wrapper", () => {
         };
         const dependencies = {
             fetch,
+            generateRunId: () => runId,
             readCredential: () => Promise.resolve(token),
             writeStandardOutput: (value: string) => output.push(value),
         } as const;
@@ -199,7 +201,9 @@ describe("OpenClaw heartbeat automation wrapper", () => {
         expect(calls[0]?.init?.method).toBe("GET");
         expect(calls[1]?.url.search).toBe("");
         expect(calls[1]?.init?.method).toBe("POST");
-        expect(JSON.parse(requestBody(calls[1]?.init))).toEqual({ json: snapshot });
+        expect(JSON.parse(requestBody(calls[1]?.init))).toEqual({
+            json: { ...snapshot, runId },
+        });
         for (const call of calls) {
             expect(new Headers(call.init?.headers).get("authorization")).toBe(
                 `Bearer ${token}`
@@ -239,6 +243,106 @@ describe("OpenClaw heartbeat automation wrapper", () => {
         }
         await Promise.allSettled(rejectedCommands);
         expect(calls).toBe(0);
+    });
+
+    test("replaces a caller-provided run id with one wrapper-owned UUIDv7", async () => {
+        const requestBodies: string[] = [];
+        let generatedRunIds = 0;
+        const fetch = (_input: string | URL | Request, init?: RequestInit) => {
+            requestBodies.push(requestBody(init));
+            return Promise.resolve(
+                response({
+                    result: {
+                        data: {
+                            json: {
+                                createdIncidents: 0,
+                                duplicateRunId: false,
+                                observedIncidents: 0,
+                                reopenedIncidents: 0,
+                                reportId: null,
+                                resolvedIncidents: 0,
+                                realtimeEvents: 0,
+                                runId,
+                                status: "accepted",
+                            },
+                        },
+                    },
+                })
+            );
+        };
+
+        await runOpenClawHeartbeatCommand(["report"], {
+            fetch,
+            generateRunId: () => {
+                generatedRunIds += 1;
+                return runId;
+            },
+            readCredential: () => Promise.resolve(token),
+            readStandardInput: () =>
+                Promise.resolve(
+                    JSON.stringify({ ...snapshot, runId: agentGeneratedRunId })
+                ),
+            writeStandardOutput: () => {},
+        });
+
+        expect(generatedRunIds).toBe(1);
+        expect(JSON.parse(requestBodies[0]!)).toEqual({
+            json: { ...snapshot, runId },
+        });
+    });
+
+    test("rejects an invalid wrapper-generated run id before transport", async () => {
+        let calls = 0;
+        const report = runOpenClawHeartbeatCommand(["report"], {
+            fetch: () => {
+                calls += 1;
+                return Promise.resolve(response({}));
+            },
+            generateRunId: () => agentGeneratedRunId,
+            readCredential: () => Promise.resolve(token),
+            readStandardInput: () => Promise.resolve(JSON.stringify(snapshot)),
+            writeStandardOutput: () => {},
+        });
+
+        expect(report).rejects.toThrow("OpenClaw heartbeat automation failed");
+        await Promise.allSettled([report]);
+        expect(calls).toBe(0);
+    });
+
+    test("rejects a report response with a different causal run id", async () => {
+        let calls = 0;
+        const report = runOpenClawHeartbeatCommand(["report"], {
+            fetch: () => {
+                calls += 1;
+                return Promise.resolve(
+                    response({
+                        result: {
+                            data: {
+                                json: {
+                                    createdIncidents: 0,
+                                    duplicateRunId: false,
+                                    observedIncidents: 0,
+                                    reopenedIncidents: 0,
+                                    reportId: null,
+                                    resolvedIncidents: 0,
+                                    realtimeEvents: 0,
+                                    runId: mismatchedRunId,
+                                    status: "accepted",
+                                },
+                            },
+                        },
+                    })
+                );
+            },
+            generateRunId: () => runId,
+            readCredential: () => Promise.resolve(token),
+            readStandardInput: () => Promise.resolve(JSON.stringify(snapshot)),
+            writeStandardOutput: () => {},
+        });
+
+        expect(report).rejects.toThrow("OpenClaw heartbeat automation failed");
+        await Promise.allSettled([report]);
+        expect(calls).toBe(1);
     });
 
     test("rejects the legacy credential format before transport", async () => {

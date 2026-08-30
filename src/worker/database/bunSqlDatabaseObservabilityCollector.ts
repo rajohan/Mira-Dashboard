@@ -104,6 +104,7 @@ interface ObserverPolicyRow {
     isViewOwner: unknown;
     roleName: unknown;
     roleConfiguration: unknown;
+    statementTracking: unknown;
 }
 
 interface TableHealthRow {
@@ -393,6 +394,10 @@ async function withReadOnlySnapshot<T>(
         signal
     );
     try {
+        await executeQuery(
+            client<never[]>`SET LOCAL pg_stat_statements.track = 'none'`,
+            signal
+        );
         await executeQuery(client<never[]>`SET LOCAL statement_timeout = '5s'`, signal);
         await executeQuery(
             // Function-body hashes are provisioned in this exact deparser context.
@@ -918,6 +923,10 @@ function observerPolicyRowsQuery(client: DatabaseObservabilitySqlClient) {
                  ),
                  ARRAY[]::text[]
                ) AS "roleConfiguration",
+               pg_catalog.current_setting(
+                 'pg_stat_statements.track',
+                 true
+               ) AS "statementTracking",
                COALESCE(
                  (
                    SELECT settings.setconfig
@@ -1166,8 +1175,10 @@ function assertObserverPolicy(
                 "default_transaction_read_only=on",
                 "idle_in_transaction_session_timeout=60s",
                 "idle_session_timeout=60s",
+                "pg_stat_statements.track=none",
                 "statement_timeout=5s",
             ]) &&
+            name(row.statementTracking) === "none" &&
             exactNames(row.databaseRoleConfiguration, []) &&
             exactNames(row.directMemberships, []) &&
             !booleanValue(row.hasInvalidMembershipOptions) &&

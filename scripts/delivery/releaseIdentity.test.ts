@@ -250,6 +250,7 @@ describe("release identity", () => {
             "scripts/delivery/provisioning/database-observability/manifest.json",
             "scripts/delivery/provisioning/database-observability/prepare-approved-collection.sql",
             "scripts/delivery/provisioning/database-observability/reconcile-database-access.sql",
+            "scripts/delivery/provisioning/database-observability/reconcile-observer-parameter-policy.sql",
             "scripts/delivery/provisioning/database-observability/rollback-cluster.sql",
             "scripts/delivery/provisioning/database-observability/rollback-control-database-capability.sql",
             "scripts/delivery/provisioning/database-observability/rollback-control-database.sql",

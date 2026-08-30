@@ -55,6 +55,7 @@ export interface OpenClawHeartbeatDependencies {
     readonly readCredential?: () => Promise<string>;
     readonly readStandardInput?: () => Promise<string>;
     readonly writeStandardOutput?: (value: string) => void;
+    readonly generateRunId?: () => string;
 }
 
 function failure(): Error {
@@ -172,12 +173,23 @@ async function readStandardInput(): Promise<string> {
     }
 }
 
-function parseSnapshot(value: string): CompleteMonitoringSnapshotInput {
+function parseSnapshot(
+    value: string,
+    generateRunId: () => string
+): CompleteMonitoringSnapshotInput {
     try {
-        return v.parse(
-            completeMonitoringSnapshotInputSchema,
-            JSON.parse(value) as unknown
-        );
+        const agentSnapshot = JSON.parse(value) as unknown;
+        if (
+            typeof agentSnapshot !== "object" ||
+            agentSnapshot === null ||
+            Array.isArray(agentSnapshot)
+        ) {
+            throw failure();
+        }
+        return v.parse(completeMonitoringSnapshotInputSchema, {
+            ...agentSnapshot,
+            runId: generateRunId(),
+        });
     } catch {
         throw failure();
     }
@@ -302,7 +314,10 @@ export async function runOpenClawHeartbeatCommand(
     }
     if (arguments_[0] === "report") {
         const readInput = dependencies.readStandardInput ?? readStandardInput;
-        const snapshot = parseSnapshot(await readInput());
+        const snapshot = parseSnapshot(
+            await readInput(),
+            dependencies.generateRunId ?? (() => Bun.randomUUIDv7())
+        );
         write(
             `${JSON.stringify(await reportOpenClawHeartbeat(snapshot, dependencies))}\n`
         );

@@ -62,6 +62,7 @@
             "reconciliation": {
                 "frequency": "every approved prepared open before one-use enable",
                 "operations": [
+                    "transactionally advance the observer to the exact five-setting role profile and one non-grantable SET capability",
                     "reconcile exact database ACLs through the pinned administrative boundary",
                     "strictly apply and verify cluster and control capabilities; isolate application-database apply or policy drift for collector-level unavailable details",
                     "reject catalog, approval, policy-digest, PostgreSQL identity, or Docker identity races"

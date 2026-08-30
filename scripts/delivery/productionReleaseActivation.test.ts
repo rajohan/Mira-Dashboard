@@ -23,7 +23,10 @@ import path from "node:path";
 
 import { Effect } from "effect";
 
-import type { ProductionActivationRecord } from "../../src/shared/productionActivationRecord.ts";
+import {
+    productionRollbackCompatibilityEpoch,
+    type ProductionActivationRecord,
+} from "../../src/shared/productionActivationRecord.ts";
 import { parseProductionActivationTransition } from "../../src/shared/productionActivationTransition.ts";
 import {
     createLocalReleaseFixture,
@@ -58,6 +61,7 @@ import type { ProductionArtifactReference } from "./productionArtifactRetention.
 import { prepareProductionDeliveryDirectories } from "./productionDeliveryFilesystem.ts";
 import {
     activatePublishedProductionRelease,
+    productionActivationRecordsEqual,
     type ProductionServiceController,
     type ProductionReleaseActivationTestHooks,
 } from "./productionReleaseActivation.ts";
@@ -359,6 +363,46 @@ function readMigrationReleaseId(databaseFile: string): string {
 }
 
 describe("production release activation", () => {
+    test("includes normalized rollback compatibility epochs in record equality", () => {
+        const legacy = initialActivationFixture();
+        const legacyWithoutEpochs = {
+            ...legacy,
+            previous: {
+                databaseSnapshotTransitionId: legacy.transitionId,
+                releaseId: legacy.current.releaseId,
+                runtimeRevision: legacy.current.runtimeRevision,
+            },
+            rollbackCompatibilityEpoch: undefined,
+        };
+        const explicitBaseline = {
+            ...legacyWithoutEpochs,
+            previous: {
+                ...legacyWithoutEpochs.previous,
+                rollbackCompatibilityEpoch: 0,
+            },
+            rollbackCompatibilityEpoch: 0,
+        };
+
+        expect(
+            productionActivationRecordsEqual(legacyWithoutEpochs, explicitBaseline)
+        ).toBe(true);
+        expect(
+            productionActivationRecordsEqual(legacyWithoutEpochs, {
+                ...explicitBaseline,
+                rollbackCompatibilityEpoch: 1,
+            })
+        ).toBe(false);
+        expect(
+            productionActivationRecordsEqual(explicitBaseline, {
+                ...explicitBaseline,
+                previous: {
+                    ...explicitBaseline.previous,
+                    rollbackCompatibilityEpoch: 1,
+                },
+            })
+        ).toBe(false);
+    });
+
     test("commits initial and upgraded release/database pairs under one lease", async () => {
         const projectRoot = await createProjectFixture(false);
         const state = await prepareProtectedProductionStatePath(projectRoot);
@@ -405,6 +449,7 @@ describe("production release activation", () => {
             expect(upgraded.previous).toEqual({
                 databaseSnapshotTransitionId: upgraded.transitionId,
                 releaseId: firstReleaseId,
+                rollbackCompatibilityEpoch: productionRollbackCompatibilityEpoch,
                 runtimeRevision: runtimeIdentity.revision,
             });
             expect(services.settledReleaseIds).toEqual([firstReleaseId, secondReleaseId]);
@@ -519,8 +564,10 @@ describe("production release activation", () => {
                 previous: {
                     databaseSnapshotTransitionId: rollbackTransitionId,
                     releaseId: secondReleaseId,
+                    rollbackCompatibilityEpoch: productionRollbackCompatibilityEpoch,
                     runtimeRevision: runtimeIdentity.revision,
                 },
+                rollbackCompatibilityEpoch: productionRollbackCompatibilityEpoch,
                 transitionId: rollbackTransitionId,
             });
 
@@ -542,6 +589,7 @@ describe("production release activation", () => {
             expect(returned.previous).toEqual({
                 databaseSnapshotTransitionId: returnTransitionId,
                 releaseId: firstReleaseId,
+                rollbackCompatibilityEpoch: productionRollbackCompatibilityEpoch,
                 runtimeRevision: runtimeIdentity.revision,
             });
         });

@@ -1009,6 +1009,7 @@ describe("production Delivery executor", () => {
             targetRuntimeRevision
         );
         const targetRuntime = artifact(targetReleaseId, targetRuntimeRevision).runtime;
+        let activationReads = 0;
 
         await withDeploymentLease(paths.stateDirectory, async (lease) => {
             await createDeliveryProductionOperation(
@@ -1034,6 +1035,12 @@ describe("production Delivery executor", () => {
                         );
                         return Promise.resolve(targetRuntime);
                     },
+                    loadActivation: () => {
+                        activationReads += 1;
+                        return Promise.reject(
+                            new Error("activation must remain target-owned")
+                        );
+                    },
                     nowMs: () => 2000,
                     verifyPreviewTailscaleOperator: () => Promise.resolve(),
                 })
@@ -1044,6 +1051,7 @@ describe("production Delivery executor", () => {
                 state: "in-progress",
             });
         });
+        expect(activationReads).toBe(0);
         expect(await inspectProductionDeliveryExecutorOwner(options.projectRoot)).toEqual(
             {
                 formatVersion: 1,

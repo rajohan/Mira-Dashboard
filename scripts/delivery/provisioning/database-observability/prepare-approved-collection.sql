@@ -36,12 +36,29 @@ BEGIN
     OR observer.rolvaliduntil IS DISTINCT FROM
       '1970-01-01 00:00:00+00'::timestamp with time zone
     OR pg_catalog.shobj_description(observer.oid, 'pg_authid') IS NOT NULL
-    OR pg_catalog.cardinality(observer_config) IS DISTINCT FROM 4
+    OR (
+      SELECT pg_catalog.count(*)
+      FROM pg_catalog.pg_parameter_acl AS parameters
+      CROSS JOIN LATERAL pg_catalog.aclexplode(parameters.paracl) AS grants
+      WHERE grants.grantee = 0
+        OR pg_catalog.pg_has_role(observer.oid, grants.grantee, 'USAGE')
+    ) IS DISTINCT FROM 1::bigint
+    OR NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_parameter_acl AS parameters
+      CROSS JOIN LATERAL pg_catalog.aclexplode(parameters.paracl) AS grants
+      WHERE parameters.parname = 'pg_stat_statements.track'
+        AND grants.grantee = observer.oid
+        AND grants.privilege_type = 'SET'
+        AND NOT grants.is_grantable
+    )
+    OR pg_catalog.cardinality(observer_config) IS DISTINCT FROM 5
     OR NOT COALESCE(observer_config @> ARRAY[
       'default_transaction_read_only=on',
       'statement_timeout=5s',
       'idle_session_timeout=60s',
-      'idle_in_transaction_session_timeout=60s'
+      'idle_in_transaction_session_timeout=60s',
+      'pg_stat_statements.track=none'
     ]::text[], false)
     OR EXISTS (
       SELECT 1
