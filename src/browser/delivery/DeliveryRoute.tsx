@@ -356,7 +356,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 >
                     {availableReleases === undefined ? null : (
                         <ProductionReleasesPanel
-                            busy={operations.busy}
+                            busy={operations.busy || operations.productionBusy}
                             checkout={
                                 checkoutFresh ? availableCheckout?.checkout : undefined
                             }
@@ -403,7 +403,7 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                 >
                     {availablePreview === undefined ? null : (
                         <PreviewPanel
-                            busy={operations.busy}
+                            busy={operations.busy || operations.previewBusy}
                             controlsFresh={previewFresh && !availablePreview.actionActive}
                             onStop={() => {
                                 const prompt = stopPreviewPrompt(
@@ -433,8 +433,13 @@ export function DeliveryRoute({ client }: DeliveryRouteProps) {
                     >
                         {availablePullRequests === undefined ? null : (
                             <PullRequestBrowser
+                                actionBusy={(action) =>
+                                    operations.busy ||
+                                    (action.action === "preview-start"
+                                        ? operations.previewBusy
+                                        : operations.githubBusy)
+                                }
                                 actionState={actionState}
-                                busy={operations.busy}
                                 groups={availablePullRequests.groups}
                                 onAction={requestPullRequestAction}
                                 preview={availablePreview?.preview}

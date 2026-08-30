@@ -1,3 +1,6 @@
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
+
 import { Effect } from "effect";
 
 import type { DeliveryExpectedHead } from "../../contracts/delivery.ts";
@@ -300,11 +303,23 @@ export function createPreviewHost(
     let mutation: Promise<void> = Promise.resolve();
     const paths = () =>
         (pathsPromise ??= resolvePreviewStatePaths(configuration.previewRoot));
-    const ingress = (operationId: string) =>
+    const ingressDirectory = (operationId: string) =>
+        path.join(`${configuration.ingressSocket}.d`, operationId);
+    const ingressSocket = (operationId: string) =>
+        path.join(ingressDirectory(operationId), "preview.sock");
+    const prepareIngress = async (operationId: string): Promise<void> => {
+        const directory = ingressDirectory(operationId);
+        await rm(directory, { force: true, recursive: true });
+        await mkdir(directory, { mode: 0o700, recursive: true });
+    };
+    const removeIngress = (operationId: string) =>
+        rm(ingressDirectory(operationId), { force: true, recursive: true });
+    const ingress = (operationId: string, publicOrigin: string) =>
         buildPreviewIngressSpecification({
-            listenUnixSocket: configuration.ingressSocket,
+            listenUnixSocket: ingressSocket(operationId),
             operationId,
             previewPort: 3205,
+            publicOrigin,
         });
     const stopRuntime = async (
         record: PreviewDurableRecord,
@@ -313,13 +328,13 @@ export function createPreviewHost(
         let failure: unknown;
         if (record.ownsTailscaleServe) {
             await dependencies.tailscale
-                .stopOwned(configuration.ingressSocket, record.publicOrigin, signal)
+                .stopOwned(ingressSocket(record.operationId), record.publicOrigin, signal)
                 .catch((error: unknown) => {
                     failure = error;
                 });
         }
         await dependencies.runtime.ingress
-            .stop(ingress(record.operationId), signal)
+            .stop(ingress(record.operationId, record.publicOrigin), signal)
             .catch((error: unknown) => {
                 failure ??= error;
             });
@@ -328,6 +343,9 @@ export function createPreviewHost(
             .catch((error: unknown) => {
                 failure ??= error;
             });
+        await removeIngress(record.operationId).catch((error: unknown) => {
+            failure ??= error;
+        });
         if (failure !== undefined) fail("operation-failed");
     };
     const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -344,7 +362,10 @@ export function createPreviewHost(
             .inspect(unitName(record.operationId), signal)
             .catch(noValue);
         const publication = record.ownsTailscaleServe
-            ? await dependencies.tailscale.inspect(configuration.ingressSocket, signal)
+            ? await dependencies.tailscale.inspect(
+                  ingressSocket(record.operationId),
+                  signal
+              )
             : undefined;
         return statusFromRecord(record, now(), runtime, publication);
     };
@@ -405,6 +426,7 @@ export function createPreviewHost(
                     .inspect(unitName(current.operationId), signal)
                     .catch(noValue);
                 if (runtime?.active === true) {
+                    const requiresRuntimeRecovery = runtime.ready !== true;
                     const capability = buildPreviewGatewaySocketSpecification(
                         await createPreviewGatewayCapability({
                             capabilityRoot: await ensurePreviewPrGatewayRoot(
@@ -418,16 +440,22 @@ export function createPreviewHost(
                         capability,
                         signal
                     );
+                    if (requiresRuntimeRecovery) {
+                        await dependencies.runtime.ingress.start(
+                            ingress(current.operationId, current.publicOrigin),
+                            signal
+                        );
+                    }
                     runtime = await dependencies.runtime
                         .inspect(unitName(current.operationId), signal)
                         .catch(noValue);
                     let publication = await dependencies.tailscale.inspect(
-                        configuration.ingressSocket,
+                        ingressSocket(current.operationId),
                         signal
                     );
                     if (!publication.enabled && current.ownsTailscaleServe) {
                         publication = await dependencies.tailscale.start(
-                            configuration.ingressSocket,
+                            ingressSocket(current.operationId),
                             current.publicOrigin,
                             () => Promise.resolve(),
                             signal
@@ -459,7 +487,7 @@ export function createPreviewHost(
                 await stopRuntime(current, signal);
             }
             const publicationBefore = await dependencies.tailscale.inspect(
-                configuration.ingressSocket,
+                ingressSocket(request.operationId),
                 signal
             );
             if (publicationBefore.enabled) fail("slot-conflict");
@@ -517,14 +545,16 @@ export function createPreviewHost(
                     bunExecutable: configuration.bunExecutable,
                     capabilitySocket: capability.socketPath,
                     expectedHeadSha: request.expectedHeads.at(-1)!.headSha,
+                    ingressSocket: ingressSocket(request.operationId),
                     operationId: request.operationId,
                     publicOrigin: starting.publicOrigin,
                     stateRoot: prStateRoot,
                     worktreePath,
                 });
+                await prepareIngress(request.operationId);
                 await dependencies.runtime.start(launch, capability, signal);
                 await dependencies.runtime.ingress.start(
-                    ingress(request.operationId),
+                    ingress(request.operationId, starting.publicOrigin),
                     signal
                 );
                 const runtime = await dependencies.runtime.inspect(
@@ -535,7 +565,7 @@ export function createPreviewHost(
                     fail("operation-failed");
                 }
                 const publication = await dependencies.tailscale.start(
-                    configuration.ingressSocket,
+                    ingressSocket(request.operationId),
                     starting.publicOrigin,
                     async () => {
                         starting = { ...starting, ownsTailscaleServe: true };
@@ -705,13 +735,16 @@ export function createPreviewHost(
                 await dependencies.runtime
                     .bindGateway(unitName(current.operationId), capability, signal)
                     .catch(() => {});
+                await dependencies.runtime.ingress
+                    .start(ingress(current.operationId, current.publicOrigin), signal)
+                    .catch(() => {});
                 runtime = await dependencies.runtime
                     .inspect(unitName(current.operationId), signal)
                     .catch(() => ({ active: false, ready: false }));
             }
             let publication = current.ownsTailscaleServe
                 ? await dependencies.tailscale.inspect(
-                      configuration.ingressSocket,
+                      ingressSocket(current.operationId),
                       signal
                   )
                 : undefined;
@@ -723,7 +756,7 @@ export function createPreviewHost(
                 runtime.ready
             ) {
                 publication = await dependencies.tailscale.start(
-                    configuration.ingressSocket,
+                    ingressSocket(current.operationId),
                     current.publicOrigin,
                     () => Promise.resolve(),
                     signal

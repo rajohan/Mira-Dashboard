@@ -263,7 +263,9 @@ export function ProductionReleasesPanel({
                                 : "delivery-deploy-disabled-reason"
                         }
                         className="w-full sm:w-auto"
-                        disabled={!deployAvailable || busy}
+                        busy={busy}
+                        busyLabel="Production delivery in progress…"
+                        disabled={!deployAvailable}
                         onClick={onDeploy}
                         title={deployReason}
                     >
@@ -275,7 +277,9 @@ export function ProductionReleasesPanel({
                     <Button
                         aria-describedby={rollbackDescriptionId}
                         className="w-full shrink-0 sm:w-auto"
-                        disabled={!rollbackAvailable || busy}
+                        busy={busy}
+                        busyLabel="Production delivery in progress…"
+                        disabled={!rollbackAvailable}
                         onClick={onRollback}
                         variant="danger"
                     >

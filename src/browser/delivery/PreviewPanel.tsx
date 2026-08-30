@@ -70,7 +70,7 @@ export function PreviewPanel({
                                 controlsFresh ? undefined : "delivery-preview-stop-reason"
                             }
                             busy={busy}
-                            busyLabel="Queueing preview stop…"
+                            busyLabel="Preview delivery in progress…"
                             className="w-full sm:w-auto"
                             disabled={!controlsFresh || transitional}
                             onClick={onStop}

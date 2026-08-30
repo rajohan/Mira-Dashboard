@@ -158,6 +158,14 @@ const upstreamHistorySchema = v.object({
     sessionId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(256))),
     sessionKey: v.pipe(v.string(), v.minLength(1), v.maxLength(512)),
 });
+const upstreamProgressCardSchema = v.object({
+    card: v.nullable(
+        v.object({
+            markdown: v.optional(chatPlanExplanationSchema),
+            sessionKey: v.pipe(v.string(), v.minLength(1), v.maxLength(512)),
+        })
+    ),
+});
 const inlineRasterAttachmentMimeTypes: ReadonlySet<string> = new Set([
     "image/avif",
     "image/bmp",
@@ -1721,6 +1729,33 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
         if (upstream.messages.length > request.limit) {
             throw new ChatProviderUnavailableError();
         }
+        let progressCardMarkdown: string | undefined;
+        if (
+            request.offset === 0 &&
+            upstream.inFlightRun?.plan !== undefined &&
+            upstream.inFlightRun.plan.steps.length > 0 &&
+            upstream.inFlightRun.plan.explanation === undefined &&
+            upstream.inFlightRun.plan.markdown === undefined
+        ) {
+            try {
+                const progressCard = parseOrUnavailable(
+                    upstreamProgressCardSchema,
+                    await requestRead(
+                        this.#transport,
+                        "progressCard.get",
+                        { sessionKey: request.sessionKey },
+                        { signal, timeoutMs: persistentGatewayChatReadTimeoutMs }
+                    )
+                ).card;
+                if (progressCard?.sessionKey === request.sessionKey) {
+                    progressCardMarkdown = progressCard.markdown;
+                }
+            } catch {
+                signal?.throwIfAborted();
+                // Progress-card prose enriches the task list; history remains usable
+                // when an older Gateway does not expose the dedicated read method.
+            }
+        }
         const hasMore = upstream.hasMore === true;
         if (
             hasMore &&
@@ -1746,13 +1781,17 @@ class PersistentGatewayChatProviderImplementation implements ChatProvider {
                                     plan: Object.freeze({
                                         ...(upstream.inFlightRun.plan.explanation ===
                                             undefined &&
-                                        upstream.inFlightRun.plan.markdown === undefined
+                                        upstream.inFlightRun.plan.markdown ===
+                                            undefined &&
+                                        progressCardMarkdown === undefined
                                             ? {}
                                             : {
                                                   explanation:
                                                       upstream.inFlightRun.plan
                                                           .explanation ??
-                                                      upstream.inFlightRun.plan.markdown,
+                                                      upstream.inFlightRun.plan
+                                                          .markdown ??
+                                                      progressCardMarkdown,
                                               }),
                                         steps: projectPlanSteps(
                                             upstream.inFlightRun.plan.steps

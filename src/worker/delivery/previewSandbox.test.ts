@@ -15,6 +15,7 @@ describe("preview sandbox specifications", () => {
                 bunExecutable: "/opt/mira/runtime/bun",
                 capabilitySocket: "/srv/mira-preview/gateways/pr-42/gateway.sock",
                 expectedHeadSha: "b".repeat(40),
+                ingressSocket: "/srv/mira-preview/ingress/preview.sock",
                 operationId,
                 publicOrigin: "https://preview.example.test",
                 stateRoot: "/srv/mira-preview/states/pr-42",
@@ -36,6 +37,7 @@ describe("preview sandbox specifications", () => {
                 bunExecutable: "/opt/mira/runtime/bun",
                 capabilitySocket: "/srv/mira-preview/gateways/pr-42/gateway.sock",
                 expectedHeadSha: "b".repeat(40),
+                ingressSocket: "/srv/mira-preview/ingress/preview.sock",
                 operationId,
                 publicOrigin: "https://preview.example.test",
                 stateRoot: "/srv/mira-preview/states/pr-42",
@@ -44,7 +46,7 @@ describe("preview sandbox specifications", () => {
             1234
         );
 
-        expect(specification.argv).toContain("--property=PrivateNetwork=yes");
+        expect(specification.argv).toContain("--unshare-all");
         expect(specification.argv).toContain("--property=RuntimeMaxSec=4h");
         expect(specification.argv).toContain("--property=UMask=0077");
         expect(specification.argv).toContain("--clearenv");
@@ -59,7 +61,8 @@ describe("preview sandbox specifications", () => {
             "/srv/mira-preview/gateways/pr-42"
         );
         expect(specification.argv[gatewayRootIndex - 1]).toBe("--ro-bind");
-        expect(specification.argv).toContain("--share-net");
+        expect(specification.argv).not.toContain("--share-net");
+        expect(specification.argv).toContain("/run/mira-preview/ingress/preview.sock");
         expect(specification.argv.join(" ")).not.toContain("DOPPLER");
         expect(specification.argv.join(" ")).not.toContain("GITHUB_TOKEN");
         expect(specification.argv.join(" ")).not.toContain("/opt/docker");
@@ -79,6 +82,7 @@ describe("preview sandbox specifications", () => {
             listenUnixSocket: "/run/user/1000/mira-preview.sock",
             operationId,
             previewPort: 5173,
+            publicOrigin: "https://preview.example.test:3445",
         });
 
         expect(specification.argv).toContain(
@@ -91,6 +95,7 @@ describe("preview sandbox specifications", () => {
         );
         expect(specification.argv).toContain("--socket-property=SocketMode=0600");
         expect(specification.listenUnixSocket).toBe("/run/user/1000/mira-preview.sock");
+        expect(specification.publicOrigin).toBe("https://preview.example.test:3445");
         expect(specification.serviceUnitName).toBe(
             `mira-dashboard-preview-ingress-${operationId}.service`
         );

@@ -20,6 +20,10 @@ import type {
 import { publishedReleaseAuthority } from "../../testSupport/publishedReleaseAuthority.ts";
 import { DashboardRealtimeProvider } from "../api/realtimeContext.tsx";
 import { parseJobsRouteSearch } from "../jobs/jobRouteSearch.ts";
+import {
+    OperationTrackerContext,
+    type OperationTrackerValue,
+} from "../operations/operationTrackerContextValue.ts";
 import { noOpDashboardRealtimeClient } from "../test/realtime.ts";
 import type { DeliveryClient } from "./deliveryClient.ts";
 import {
@@ -270,7 +274,8 @@ function createClient(overrides: DeliveryClientOverrides = {}) {
 
 function renderDelivery(
     client: DeliveryClient,
-    initializeQueryClient?: (queryClient: QueryClient) => void
+    initializeQueryClient?: (queryClient: QueryClient) => void,
+    activeOperationKeys: readonly string[] = []
 ) {
     const queryClient = new QueryClient({
         defaultOptions: {
@@ -295,15 +300,31 @@ function renderDelivery(
         history: createMemoryHistory({ initialEntries: ["/delivery"] }),
         routeTree: rootRoute.addChildren([deliveryRoute, jobsRoute]),
     });
-    const view = render(
+    const tree = (operationKeys: readonly string[]) => (
         <DashboardRealtimeProvider client={noOpDashboardRealtimeClient}>
             <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
+                <OperationTrackerContext
+                    value={
+                        {
+                            dismiss: () => {},
+                            operationIsActive: (key) => operationKeys.includes(key),
+                            operations: [],
+                            settle: () => {},
+                            track: () => {},
+                        } satisfies OperationTrackerValue
+                    }
+                >
+                    <RouterProvider router={router} />
+                </OperationTrackerContext>
             </QueryClientProvider>
         </DashboardRealtimeProvider>
     );
+    const view = render(tree(activeOperationKeys));
     return {
         queryClient,
+        setActiveOperationKeys(operationKeys: readonly string[]) {
+            view.rerender(tree(operationKeys));
+        },
         unmount() {
             view.unmount();
             queryClient.clear();
@@ -312,6 +333,93 @@ function renderDelivery(
 }
 
 describe("DeliveryRoute", () => {
+    test("projects backend-active Delivery jobs into disabled animated action buttons", async () => {
+        const baseGroup = pullRequestsResult.groups[0];
+        const basePullRequest = baseGroup.members[0];
+        const harness = createClient({
+            pullRequests: {
+                ...pullRequestsResult,
+                groups: [
+                    {
+                        ...baseGroup,
+                        members: [
+                            {
+                                ...basePullRequest,
+                                actions: [
+                                    ...basePullRequest.actions,
+                                    {
+                                        action: "reject",
+                                        actor: "mira",
+                                        available: true,
+                                        scope: "self",
+                                    },
+                                    {
+                                        action: "update-branch",
+                                        actor: "mira",
+                                        available: true,
+                                        scope: "self",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+        const view = renderDelivery(harness.client, undefined, [
+            "job:delivery.github",
+            "job:delivery.preview",
+            "job:delivery.production.v1",
+        ]);
+        try {
+            const familyBusyButtons = await screen.findAllByRole("button", {
+                name: "Another Delivery action is in progress…",
+            });
+            expect(familyBusyButtons).toHaveLength(5);
+            for (const button of familyBusyButtons) {
+                expect(button).toBeDisabled();
+                expect(button).toHaveAttribute("aria-busy", "true");
+            }
+            const stopPreview = await screen.findByRole("button", {
+                name: "Preview delivery in progress…",
+            });
+            expect(stopPreview).toBeDisabled();
+            expect(stopPreview).toHaveAttribute("aria-busy", "true");
+            const productionButtons = screen.getAllByRole("button", {
+                name: "Production delivery in progress…",
+            });
+            expect(productionButtons).toHaveLength(2);
+            for (const button of productionButtons) {
+                expect(button).toBeDisabled();
+                expect(button).toHaveAttribute("aria-busy", "true");
+            }
+        } finally {
+            view.unmount();
+        }
+    });
+
+    test("blocks an open confirmation when another device starts any Delivery job", async () => {
+        const harness = createClient();
+        const view = renderDelivery(harness.client);
+        try {
+            const user = userEvent.setup();
+            await user.click(await screen.findByRole("button", { name: "Approve PR" }));
+            expect(screen.getByRole("button", { name: "Queue approval" })).toBeEnabled();
+
+            view.setActiveOperationKeys(["job:delivery.production.v1"]);
+
+            const confirm = screen.getByRole("button", {
+                name: "Queue approval…",
+            });
+            expect(confirm).toBeDisabled();
+            expect(confirm).toHaveAttribute("aria-busy", "true");
+            await user.click(confirm);
+            expect(harness.mutation).not.toHaveBeenCalled();
+        } finally {
+            view.unmount();
+        }
+    });
+
     test("surfaces and retries an initial production checkout failure", async () => {
         const harness = createClient({ checkout: new Error("private provider detail") });
         const view = renderDelivery(harness.client);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -263,6 +263,36 @@ describe("preview host", () => {
         }
     });
 
+    test("isolates and removes a candidate-poisoned ingress path before rebuild", async () => {
+        const context = await fixture();
+        try {
+            await context.host.start(request());
+            const firstSocket = context.tailscaleStarts[0]!;
+            await mkdir(firstSocket);
+
+            await context.host.stop({
+                number: 42,
+                operationId: firstOperation,
+                previewRevision: revision,
+            });
+            expect(
+                await access(path.dirname(firstSocket)).then(
+                    () => true,
+                    () => false
+                )
+            ).toBeFalse();
+
+            await context.host.start(request(42, secondOperation));
+            const secondSocket = context.tailscaleStarts[1]!;
+            expect(secondSocket).not.toBe(firstSocket);
+            expect(secondSocket).toContain(secondOperation);
+            const secondIngressDirectory = await lstat(path.dirname(secondSocket));
+            expect(secondIngressDirectory.isDirectory()).toBeTrue();
+        } finally {
+            await context.remove();
+        }
+    });
+
     test("keeps stopped per-PR checkout when another PR takes the runtime slot", async () => {
         const context = await fixture();
         try {
@@ -334,6 +364,10 @@ describe("preview host", () => {
             expect(status.status).toBe("running");
             expect(context.gatewayBinds).toEqual([
                 `mira-dashboard-preview-${firstOperation}.service`,
+            ]);
+            expect(context.ingressStarts).toEqual([
+                `mira-dashboard-preview-ingress-${firstOperation}.socket`,
+                `mira-dashboard-preview-ingress-${firstOperation}.socket`,
             ]);
         } finally {
             await context.remove();

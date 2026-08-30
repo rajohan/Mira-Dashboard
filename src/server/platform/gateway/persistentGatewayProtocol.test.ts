@@ -192,6 +192,7 @@ describe("persistent Gateway protocol-v4 boundary", () => {
             "chat.history",
             "chat.message.get",
             "models.list",
+            "progressCard.get",
             "sessions.companion.state",
         ]);
         expect(persistentGatewayChatReadMutationMethods).toEqual([
@@ -233,6 +234,17 @@ describe("persistent Gateway protocol-v4 boundary", () => {
         expect(isPersistentGatewayOpenClawServiceActionMethod("config.patch")).toBe(
             false
         );
+    });
+
+    test("validates progress-card reads at the least-privilege boundary", () => {
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("progressCard.get", {
+                sessionKey: "agent:main:main",
+            })
+        ).not.toThrow();
+        expect(() =>
+            assertPersistentGatewayChatReadParameters("progressCard.get", {})
+        ).toThrow("Persistent Gateway chat read parameters are invalid");
     });
 
     test("keeps persistent web reads object-bound and all controls admin-only", () => {

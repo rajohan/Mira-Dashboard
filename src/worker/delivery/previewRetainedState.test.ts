@@ -73,6 +73,12 @@ describe("preview retained state", () => {
             await writeFile(path.join(first, "nested", "state.db"), "private\n", {
                 mode: 0o600,
             });
+            const socketPath = path.join(first, "nested", "runtime.sock");
+            const socket = Bun.serve({
+                fetch: () => new Response(null),
+                unix: socketPath,
+            });
+            await socket.stop(true);
             await mkdir(second, { mode: 0o700 });
             await mkdir(path.join(context.paths.gatewaysRoot, "pr-42"), {
                 mode: 0o700,
@@ -92,6 +98,7 @@ describe("preview retained state", () => {
             expect(
                 await Bun.file(path.join(first, "nested", "state.db")).exists()
             ).toBeFalse();
+            expect(await Bun.file(socketPath).exists()).toBeFalse();
             expect(await Bun.file(path.join(second, "kept")).exists()).toBeTrue();
             expect(await readdir(context.paths.gatewaysRoot)).not.toContain("pr-42");
             expect(

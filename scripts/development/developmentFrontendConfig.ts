@@ -11,6 +11,7 @@ const stableDnsNamePattern =
 export interface DevelopmentFrontendConfiguration extends DevelopmentProxyConfiguration {
     readonly host: "127.0.0.1";
     readonly hotReload: boolean;
+    readonly ingressSocket?: string;
     readonly port: number;
     readonly remoteProxyPort?: number;
 }
@@ -99,6 +100,14 @@ export function resolveDevelopmentFrontendConfiguration(
     }
     const port = configuredPort("PORT", environment.PORT, defaultFrontendPort);
     const api = loopbackApiTarget(environment.DASHBOARD_API_TARGET);
+    const ingressSocket = environment.MIRA_DASHBOARD_DEV_INGRESS_SOCKET?.trim();
+    if (
+        ingressSocket !== undefined &&
+        ingressSocket !== "" &&
+        ingressSocket !== "/run/mira-preview/ingress/preview.sock"
+    ) {
+        throw new TypeError("Managed Preview ingress socket is invalid");
+    }
     const resolvedPublicOrigin = publicOrigin(
         environment.MIRA_DASHBOARD_DEV_PUBLIC_ORIGIN,
         port
@@ -126,6 +135,7 @@ export function resolveDevelopmentFrontendConfiguration(
         cookieNamespace,
         host,
         hotReload: hotReloadFlag(environment.MIRA_DASHBOARD_DEV_HOT_RELOAD),
+        ...(ingressSocket ? { ingressSocket } : {}),
         port,
         publicOrigin: resolvedPublicOrigin,
         ...(remoteProxyPort === undefined ? {} : { remoteProxyPort }),

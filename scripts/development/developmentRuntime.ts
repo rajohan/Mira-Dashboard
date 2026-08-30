@@ -189,12 +189,17 @@ async function startDevelopmentChildren(
         { cwd: config.repositoryRoot, env: environments.worker }
     );
     stopController.children.push(worker);
+    const frontendEnvironment = developmentFrontendEnvironment(
+        config,
+        profile === "managed-preview" ? {} : (dependencies.environment ?? process.env)
+    );
+    if (profile === "managed-preview") {
+        frontendEnvironment.MIRA_DASHBOARD_DEV_INGRESS_SOCKET =
+            "/run/mira-preview/ingress/preview.sock";
+    }
     const frontend = dependencies.spawn([bun, "scripts/developmentFrontend.ts"], {
         cwd: config.repositoryRoot,
-        env: developmentFrontendEnvironment(
-            config,
-            profile === "managed-preview" ? {} : (dependencies.environment ?? process.env)
-        ),
+        env: frontendEnvironment,
     });
     stopController.children.push(frontend);
     return [frontend, web, worker];

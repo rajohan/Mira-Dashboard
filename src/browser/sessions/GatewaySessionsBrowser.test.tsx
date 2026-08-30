@@ -349,7 +349,12 @@ describe("Gateway sessions browser", () => {
                     screen.queryByRole("dialog", { name: "Reset session?" })
                 ).toBeNull()
             );
-            await user.click(screen.getByRole("button", { name: "Try refresh again" }));
+            await user.click(
+                within(screen.getByRole("region", { name: "Session metrics" })).getByRole(
+                    "button",
+                    { name: "Try refresh again" }
+                )
+            );
 
             expect(
                 await within(sessionsTable).findByText(

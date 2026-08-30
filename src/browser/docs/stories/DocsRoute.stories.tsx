@@ -19,13 +19,16 @@ const focusedFixtures = {
     queries: {
         ...fixtures.queries,
         "system.documentationReference": dashboardStoryValue(
-            generatedDocuments.filter(({ path }) =>
-                [
-                    "generated/openapi.raw-http.json",
-                    "generated/procedures.md",
-                    "generated/schemas/accountSecurity.beginTotpEnrollment.input.schema.json",
-                ].includes(path)
-            )
+            generatedDocuments
+                .filter(({ path }) => path === "generated/openapi.raw-http.json")
+                .map((document) => ({
+                    ...document,
+                    content: JSON.stringify(
+                        { info: { title: "Mira Dashboard raw HTTP API" } },
+                        null,
+                        2
+                    ),
+                }))
         ),
     },
 };

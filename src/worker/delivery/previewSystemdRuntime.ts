@@ -19,7 +19,7 @@ const systemctlExecutable = "/usr/bin/systemctl";
 const bubblewrapExecutable = "/usr/bin/bwrap";
 const socketProxydExecutable = "/usr/lib/systemd/systemd-socket-proxyd";
 const processDeadlineMs = 30_000;
-const readinessDeadlineMs = 90_000;
+const defaultReadinessDeadlineMs = 90_000;
 const readinessPollMs = 250;
 const processOutputMaximumBytes = 64 * 1024;
 const commandMaximumBytes = 64 * 1024;
@@ -57,6 +57,7 @@ export type PreviewSystemdProcessRunner = (
 
 export type PreviewIngressReadinessProbe = (
     socketPath: string,
+    publicOrigin: string,
     signal: AbortSignal
 ) => Promise<boolean>;
 
@@ -80,6 +81,7 @@ export interface PreviewSystemdRuntimeDependencies {
     readonly gatewayPort: PreviewGatewayProxyPort;
     readonly ingressReadinessProbe?: PreviewIngressReadinessProbe;
     readonly processRunner?: PreviewSystemdProcessRunner;
+    readonly readinessDeadlineMs?: number;
     readonly runtimeUserId?: number;
     readonly startGatewayBroker?: (
         options: PreviewGatewayBrokerOptions
@@ -154,7 +156,6 @@ function assertLaunchSpecification(
         !specification.argv.includes("--user") ||
         !specification.argv.includes("--collect") ||
         !specification.argv.includes("--quiet") ||
-        !specification.argv.includes("--property=PrivateNetwork=yes") ||
         !specification.argv.includes("--property=RuntimeMaxSec=4h") ||
         !specification.argv.includes("--property=UMask=0077") ||
         specification.argv.some((argument) => argument.startsWith("--setenv="))
@@ -166,7 +167,7 @@ function assertLaunchSpecification(
         delimiter < 1 ||
         specification.argv[delimiter + 1] !== bubblewrapExecutable ||
         !specification.argv.slice(delimiter + 1).includes("--clearenv") ||
-        !specification.argv.slice(delimiter + 1).includes("--share-net")
+        specification.argv.slice(delimiter + 1).includes("--share-net")
     ) {
         fail();
     }
@@ -377,10 +378,13 @@ function parseUnitState(bytes: Uint8Array): PreviewRuntimeState {
 
 async function defaultIngressReadinessProbe(
     socketPath: string,
+    publicOrigin: string,
     signal: AbortSignal
 ): Promise<boolean> {
     try {
-        const response = await fetch("http://localhost/api/health/ready", {
+        const origin = new URL(publicOrigin);
+        origin.protocol = "http:";
+        const response = await fetch(new URL("/api/health/ready", origin), {
             method: "HEAD",
             redirect: "error",
             signal,
@@ -445,11 +449,16 @@ export function createPreviewSystemdRuntime(
     const environment = managerEnvironment(userId);
     const runner = dependencies.processRunner ?? defaultProcessRunner;
     const delay = dependencies.delay ?? defaultDelay;
+    const readinessDeadlineMs =
+        dependencies.readinessDeadlineMs ?? defaultReadinessDeadlineMs;
     const gatewayBrokerStarter =
         dependencies.startGatewayBroker ?? startPreviewGatewayBroker;
     const ingressReadinessProbe =
         dependencies.ingressReadinessProbe ?? defaultIngressReadinessProbe;
     let activeGatewayBroker: PreviewGatewayBroker | undefined;
+    let activeIngress:
+        | Readonly<{ operationId: string; publicOrigin: string; socketPath: string }>
+        | undefined;
 
     const inspectUnit = async (
         unitName: string,
@@ -476,12 +485,35 @@ export function createPreviewSystemdRuntime(
         if (!state.ready || activeGatewayBroker?.operationId !== operationId) {
             return Object.freeze({ ...state, ready: false });
         }
-        const ingressState = await inspectUnit(
-            `mira-dashboard-preview-ingress-${operationId}.socket`,
-            ingressSocketPattern,
-            signal
-        );
-        return Object.freeze({ ...state, ready: ingressState.ready });
+        const ingress = activeIngress;
+        let ingressReady = false;
+        if (ingress !== undefined && ingress.operationId === operationId) {
+            const scope = abortScope(signal, readinessDeadlineMs);
+            try {
+                const aborted = new Promise<false>((resolve) => {
+                    if (scope.signal.aborted) resolve(false);
+                    else
+                        scope.signal.addEventListener("abort", () => resolve(false), {
+                            once: true,
+                        });
+                });
+                ingressReady = await Promise.race([
+                    ingressReadinessProbe(
+                        ingress.socketPath,
+                        ingress.publicOrigin,
+                        scope.signal
+                    ),
+                    aborted,
+                ]);
+                signal?.throwIfAborted();
+            } finally {
+                scope.dispose();
+            }
+        }
+        return Object.freeze({
+            ...state,
+            ready: ingressReady,
+        });
     };
 
     const stopUnit = async (
@@ -574,25 +606,20 @@ export function createPreviewSystemdRuntime(
         signal
     ) => {
         assertIngressSpecification(specification);
-        const result = await runProcess(runner, specification.argv, environment, signal);
-        if (
-            result.exitCode !== 0 ||
-            result.stdout.byteLength !== 0 ||
-            result.stderr.byteLength !== 0
-        ) {
-            fail();
-        }
+        const operationId = ingressSocketPattern.exec(specification.socketUnitName)?.[1];
+        if (operationId === undefined) fail();
+        activeIngress = Object.freeze({
+            operationId,
+            publicOrigin: specification.publicOrigin,
+            socketPath: specification.listenUnixSocket,
+        });
         try {
-            await waitUntilReady(
-                specification.socketUnitName,
-                ingressSocketPattern,
-                signal
-            );
             const scope = abortScope(signal, readinessDeadlineMs);
             try {
                 while (
                     !(await ingressReadinessProbe(
                         specification.listenUnixSocket,
+                        specification.publicOrigin,
                         scope.signal
                     ))
                 ) {
@@ -602,23 +629,17 @@ export function createPreviewSystemdRuntime(
                 scope.dispose();
             }
         } catch (error) {
-            await stopUnit(specification.serviceUnitName, ingressServicePattern).catch(
-                () => {}
-            );
-            await stopUnit(specification.socketUnitName, ingressSocketPattern).catch(
-                () => {}
-            );
+            activeIngress = undefined;
             throw error;
         }
     };
 
-    const stopIngress: PreviewIngressRuntimePort["stop"] = async (
-        specification,
-        signal
-    ) => {
+    const stopIngress: PreviewIngressRuntimePort["stop"] = (specification, signal) => {
         assertIngressSpecification(specification);
-        await stopUnit(specification.serviceUnitName, ingressServicePattern, signal);
-        await stopUnit(specification.socketUnitName, ingressSocketPattern, signal);
+        signal?.throwIfAborted();
+        const operationId = ingressSocketPattern.exec(specification.socketUnitName)?.[1];
+        if (activeIngress?.operationId === operationId) activeIngress = undefined;
+        return Promise.resolve();
     };
     const stop: PreviewRuntimePort["stop"] = async (unitName, signal) => {
         const operationId = previewUnitPattern.exec(unitName)?.[1];

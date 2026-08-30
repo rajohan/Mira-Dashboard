@@ -438,7 +438,8 @@ export function createWorkerDeliveryProcessComposition({
                     checkoutRoot: layout.production.checkout,
                     ingressSocket: path.join(
                         layout.production.state.previews,
-                        "ingress.sock"
+                        "ingress",
+                        "preview.sock"
                     ),
                     previewRoot: layout.production.state.previews,
                 },

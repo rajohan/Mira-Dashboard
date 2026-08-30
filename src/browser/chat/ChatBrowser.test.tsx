@@ -890,7 +890,7 @@ describe("chat browser", () => {
                                   hasUnprojectedActivity: true,
                                   plan: {
                                       explanation:
-                                          "This explanation remains visible during catch-up.",
+                                          "## Real Preview boundaries\n\nThis explanation remains visible during catch-up.\n\n![tracking](https://example.test/pixel.png)",
                                       phase: "update" as const,
                                       steps: [
                                           {
@@ -917,10 +917,17 @@ describe("chat browser", () => {
         });
         try {
             expect(
-                await screen.findByText(
-                    "This explanation remains visible during catch-up."
-                )
+                await screen.findByRole("heading", {
+                    name: "Real Preview boundaries",
+                })
             ).toBeVisible();
+            expect(
+                screen.getByText("This explanation remains visible during catch-up.")
+            ).toBeVisible();
+            expect(screen.getByText("[External image blocked: tracking]")).toBeVisible();
+            expect(
+                document.querySelector('img[src="https://example.test/pixel.png"]')
+            ).toBeNull();
             const completed = screen.getByRole("listitem", {
                 name: "Read stored snapshot, completed",
             });

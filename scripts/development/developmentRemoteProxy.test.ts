@@ -1,5 +1,8 @@
 import { describe, expect, jest, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { createConnection, createServer, type Socket } from "node:net";
+import path from "node:path";
 
 import type { ServerWebSocket } from "bun";
 
@@ -8,10 +11,96 @@ import {
     developmentRemoteProxyCloseCode,
     developmentRemoteProxyMessageMaximumBytes,
     developmentRemoteProxyQueuedMessageMaximum,
+    developmentUnixProxyAdmissionAvailable,
+    developmentUnixProxyConnectionMaximum,
     type DevelopmentRemoteProxySocketData,
     developmentRemoteWebSocketHandler,
     startDevelopmentRemoteProxy,
+    startDevelopmentUnixProxy,
 } from "./developmentRemoteProxy.ts";
+
+test("caps combined HTTP and WebSocket activity at the Unix ingress boundary", () => {
+    expect(
+        developmentUnixProxyAdmissionAvailable({
+            pendingRequests: developmentUnixProxyConnectionMaximum - 4,
+            pendingWebSockets: 4,
+        })
+    ).toBeTrue();
+    expect(
+        developmentUnixProxyAdmissionAvailable({
+            pendingRequests: developmentUnixProxyConnectionMaximum - 3,
+            pendingWebSockets: 4,
+        })
+    ).toBeFalse();
+});
+
+function requestUnix(socketPath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const request = httpRequest(
+            {
+                headers: { host: publicHost },
+                method: "GET",
+                path: "/",
+                socketPath,
+            },
+            (response) => {
+                response.resume();
+                response.once("end", () => resolve(response.statusCode ?? 0));
+            }
+        );
+        request.once("error", reject);
+        request.end();
+    });
+}
+
+test("rejects a seventeenth live Unix ingress request before it reaches Preview", async () => {
+    const root = await mkdtemp("/tmp/mdp-cap-");
+    const socketPath = path.join(root, "preview.sock");
+    let reached = 0;
+    let releaseUpstream: (() => void) | undefined;
+    const upstreamReleased = new Promise<void>((resolve) => {
+        releaseUpstream = resolve;
+    });
+    let capacityReached: (() => void) | undefined;
+    const atCapacity = new Promise<void>((resolve) => {
+        capacityReached = resolve;
+    });
+    const upstream = Bun.serve({
+        async fetch() {
+            reached += 1;
+            if (reached === developmentUnixProxyConnectionMaximum) {
+                capacityReached?.();
+            }
+            await upstreamReleased;
+            return new Response("ok");
+        },
+        hostname: "127.0.0.1",
+        port: 0,
+    });
+    const proxy = startDevelopmentUnixProxy({
+        frontendTarget: upstream.url.origin,
+        publicOrigin,
+        unix: socketPath,
+    });
+    try {
+        const admitted = Array.from(
+            { length: developmentUnixProxyConnectionMaximum },
+            () => requestUnix(socketPath)
+        );
+        await atCapacity;
+        expect(await requestUnix(socketPath)).toBe(503);
+        expect(reached).toBe(developmentUnixProxyConnectionMaximum);
+        releaseUpstream?.();
+        expect(await Promise.all(admitted)).toEqual(
+            Array.from({ length: developmentUnixProxyConnectionMaximum }, () => 200)
+        );
+    } finally {
+        releaseUpstream?.();
+        await proxy.stop(true);
+        await upstream.stop(true);
+        await rm(root, { force: true, recursive: true });
+    }
+});
 
 const publicOrigin = "https://dashboard.magicdns.test:3445";
 const publicHost = new URL(publicOrigin).host;

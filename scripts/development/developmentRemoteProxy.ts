@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { ServerWebSocket } from "bun";
 
 const loopbackListenerHost = "127.0.0.1";
@@ -26,6 +28,7 @@ const standardProxyCloseCodes = new Set([
 export const developmentRemoteProxyMessageMaximumBytes = 16 * 1024 * 1024;
 export const developmentRemoteProxyBufferedMaximumBytes = 16 * 1024 * 1024;
 export const developmentRemoteProxyQueuedMessageMaximum = 1024;
+export const developmentUnixProxyConnectionMaximum = 16;
 
 type DevelopmentRemoteProxyMessage = string | Uint8Array;
 
@@ -33,6 +36,12 @@ export interface DevelopmentRemoteProxyConfiguration {
     readonly frontendTarget: string;
     readonly port: number;
     readonly publicOrigin: string;
+}
+
+export interface DevelopmentUnixProxyConfiguration {
+    readonly frontendTarget: string;
+    readonly publicOrigin: string;
+    readonly unix: string;
 }
 
 export interface DevelopmentRemoteProxySocketData {
@@ -46,6 +55,16 @@ export interface DevelopmentRemoteProxySocketData {
     upstreamPendingBytes: number;
     upstreamPendingMessages: DevelopmentRemoteProxyMessage[];
     readonly upstreamUrl: string;
+}
+
+/** @returns Whether the Unix ingress can admit one current HTTP or WebSocket request. */
+export function developmentUnixProxyAdmissionAvailable(
+    server: Readonly<Pick<Bun.Server<unknown>, "pendingRequests" | "pendingWebSockets">>
+): boolean {
+    return (
+        server.pendingRequests + server.pendingWebSockets <=
+        developmentUnixProxyConnectionMaximum
+    );
 }
 
 interface ResolvedDevelopmentRemoteProxyConfiguration {
@@ -563,6 +582,53 @@ export function startDevelopmentRemoteProxy(
         },
         hostname: loopbackListenerHost,
         port: resolved.port,
+        websocket: developmentRemoteWebSocketHandler(),
+    });
+}
+
+/**
+ * Starts the same transparent frontend proxy on one private Unix socket.
+ * @param configuration Fixed frontend target, public origin, and absolute socket.
+ * @returns The active Bun proxy server. Call `stop()` during stack shutdown.
+ */
+export function startDevelopmentUnixProxy(
+    configuration: DevelopmentUnixProxyConfiguration
+): Bun.Server<DevelopmentRemoteProxySocketData> {
+    if (
+        !path.isAbsolute(configuration.unix) ||
+        path.normalize(configuration.unix) !== configuration.unix ||
+        configuration.unix.includes("\0")
+    ) {
+        throw new TypeError("Development Unix proxy socket must be absolute");
+    }
+    const resolved = resolvedConfiguration({
+        frontendTarget: configuration.frontendTarget,
+        port: 0,
+        publicOrigin: configuration.publicOrigin,
+    });
+    return Bun.serve<DevelopmentRemoteProxySocketData>({
+        fetch(request, server) {
+            server.timeout(request, 0);
+            if (!developmentUnixProxyAdmissionAvailable(server)) {
+                return new Response("Preview ingress capacity reached", {
+                    headers: { connection: "close" },
+                    status: 503,
+                });
+            }
+            if (!hasExpectedPublicHost(request, resolved.publicOrigin)) {
+                return new Response("Invalid development host", { status: 421 });
+            }
+            if (request.headers.has("upgrade")) {
+                return upgradeWebSocket(
+                    request,
+                    server,
+                    resolved.frontendTarget,
+                    resolved.publicOrigin
+                );
+            }
+            return proxyHttp(request, resolved.frontendTarget);
+        },
+        unix: configuration.unix,
         websocket: developmentRemoteWebSocketHandler(),
     });
 }
