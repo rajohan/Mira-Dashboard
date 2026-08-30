@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.8](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.7...v0.5.8) (2026-08-30)
+
+
+### Bug Fixes
+
+* **monitoring:** isolate dashboard-owned PostgreSQL work ([#514](https://github.com/rajohan/Mira-Dashboard/issues/514)) ([4d9d57f](https://github.com/rajohan/Mira-Dashboard/commit/4d9d57f3b86158814d75a34ed0f93e749d8ce06b))
+
 ## [0.5.7](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.6...v0.5.7) (2026-08-30)
 
 
