@@ -474,6 +474,12 @@ describe("database observability provisioning", () => {
         expect(parameterPolicyReconciliation).not.toContain(
             "ALTER ROLE mira_dashboard_observer RESET ALL"
         );
+        expect(parameterPolicyReconciliation).toContain(
+            "observer.rolpassword IS NOT NULL"
+        );
+        expect(parameterPolicyReconciliation).not.toContain(
+            "observer.rolpassword NOT LIKE"
+        );
         for (const policy of [apply, cluster, prepare, enable]) {
             expect(policy).toContain(
                 "pg_catalog.cardinality(observer_config) IS DISTINCT FROM 5"

@@ -21,8 +21,7 @@ BEGIN
     OR observer.rolreplication
     OR observer.rolbypassrls
     OR observer.rolconnlimit IS DISTINCT FROM 64
-    OR observer.rolpassword IS NULL
-    OR observer.rolpassword NOT LIKE 'SCRAM-SHA-256$%'
+    OR observer.rolpassword IS NOT NULL
     OR observer.rolvaliduntil IS DISTINCT FROM
       '1970-01-01 00:00:00+00'::timestamp with time zone
     OR pg_catalog.shobj_description(observer.oid, 'pg_authid') IS NOT NULL
