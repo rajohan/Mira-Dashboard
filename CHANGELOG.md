@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.7](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.6...v0.5.7) (2026-08-30)
+
+
+### Bug Fixes
+
+* **delivery:** prove durable deploy and preview state ([#512](https://github.com/rajohan/Mira-Dashboard/issues/512)) ([6b2db9f](https://github.com/rajohan/Mira-Dashboard/commit/6b2db9f4fe701dd64288f6f56851133e4d6002cd))
+
 ## [0.5.6](https://github.com/rajohan/Mira-Dashboard/compare/v0.5.5...v0.5.6) (2026-08-29)
 
 
