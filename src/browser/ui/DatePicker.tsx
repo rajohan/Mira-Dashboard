@@ -149,6 +149,7 @@ export function DatePicker({
                             >
                                 <DayPicker
                                     classNames={calendarClassNames}
+                                    defaultMonth={dateAtLocalNoon(value)}
                                     disabled={
                                         minimumDate === undefined
                                             ? undefined
