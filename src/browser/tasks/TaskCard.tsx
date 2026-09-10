@@ -3,7 +3,9 @@ import { GripVertical, UserRound } from "lucide-react";
 
 import type { OpenClawCronJob } from "../../contracts/openClawCron.ts";
 import type { TaskSummary } from "../../contracts/taskModel.ts";
+import { useNow } from "../hooks/useNow.ts";
 import { cn } from "../lib/classNames.ts";
+import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { openClawCronOperationalStatus } from "../openClawCron/presentation.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -27,6 +29,7 @@ export function TaskCardContent({
     overlay = false,
     task,
 }: TaskCardContentProps) {
+    const nowMs = useNow();
     const automationStatus =
         automationJob === undefined
             ? undefined
@@ -86,8 +89,9 @@ export function TaskCardContent({
                 <time
                     className="shrink-0"
                     dateTime={new Date(task.updatedAtMs).toISOString()}
+                    title={formatDashboardDateTimeToMinute(task.updatedAtMs)}
                 >
-                    {taskRelativeTime(task.updatedAtMs)}
+                    {taskRelativeTime(task.updatedAtMs, nowMs)}
                 </time>
             </div>
         </div>

@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useDashboardTrpcClient } from "../api/trpcContextValue.ts";
 import { dashboardBrowserFailureMessage } from "../api/trpcError.ts";
+import { useNow } from "../hooks/useNow.ts";
 import { formatDashboardDateTimeToMinute } from "../lib/formatDateTime.ts";
 import { Alert } from "../ui/Alert.tsx";
 import { Badge } from "../ui/Badge.tsx";
@@ -43,6 +44,7 @@ export function TaskDetailModal({
     const queryClient = useQueryClient();
     const task = useQuery(taskDetailQueryOptions(client, taskId));
     const deleteTask = useDeleteTaskMutation(onClose);
+    const nowMs = useNow();
     const [editing, setEditing] = useState(false);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     let modalTitle = "Task details";
@@ -72,7 +74,7 @@ export function TaskDetailModal({
                                     task.data.updatedAtMs
                                 )}
                             >
-                                Updated {taskRelativeTime(task.data.updatedAtMs)}
+                                Updated {taskRelativeTime(task.data.updatedAtMs, nowMs)}
                             </time>
                         </span>
                         {task.data.labels.length > 0 && (

@@ -8,9 +8,27 @@ const { render, screen } = await import("@testing-library/react");
 const userEventModule = await import("@testing-library/user-event");
 const userEvent = userEventModule.default;
 
+const fixtureNow = new Date();
+
+// Noon on the given day of the current month, so the fixture never depends on a hardcoded month.
+function fixtureDate(dayOfMonth: number): Date {
+    return new Date(fixtureNow.getFullYear(), fixtureNow.getMonth(), dayOfMonth, 12);
+}
+
+function formattedFixtureDate(date: Date): string {
+    return [
+        date.getDate().toString().padStart(2, "0"),
+        (date.getMonth() + 1).toString().padStart(2, "0"),
+        date.getFullYear().toString(),
+    ].join(".");
+}
+
+const initialDateLabel = `Choose Disabled until date, selected ${formattedFixtureDate(fixtureDate(8))}`;
+const selectedDateLabel = `Choose Disabled until date, selected ${formattedFixtureDate(fixtureDate(10))}`;
+
 function ControlledDateTimePicker({ error }: { readonly error?: string }) {
     const [value, setValue] = useState<DateTimePickerValue>({
-        date: new Date(2026, 7, 8, 12),
+        date: fixtureDate(8),
         time: "05:30",
     });
     return (
@@ -30,18 +48,18 @@ describe("DateTimePicker", () => {
 
         await user.click(
             screen.getByRole("button", {
-                name: "Choose Disabled until date, selected 08.08.2026",
+                name: initialDateLabel,
             })
         );
         const day = screen
             .getAllByRole("button")
             .find((button) => button.textContent?.trim() === "10");
-        if (day === undefined) throw new Error("The August 10 calendar day is missing.");
+        if (day === undefined) throw new Error("The 10th calendar day is missing.");
         await user.click(day);
 
         expect(
             screen.getByRole("button", {
-                name: "Choose Disabled until date, selected 10.08.2026",
+                name: selectedDateLabel,
             })
         ).toBeTruthy();
         expect(
@@ -70,7 +88,7 @@ describe("DateTimePicker", () => {
         ).toContain(error.id);
         expect(
             screen.getByRole("button", {
-                name: "Choose Disabled until date, selected 08.08.2026",
+                name: initialDateLabel,
             })
         ).toHaveAttribute("aria-invalid", "true");
     });

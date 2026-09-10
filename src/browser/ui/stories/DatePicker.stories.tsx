@@ -8,6 +8,24 @@ import { DatePicker } from "../DatePicker.tsx";
 
 type DatePickerProperties = ComponentProps<typeof DatePicker>;
 
+const fixtureNow = new Date();
+
+// Noon on the given day of the current month, so the fixture never depends on a hardcoded month.
+function fixtureDate(dayOfMonth: number): Date {
+    return new Date(fixtureNow.getFullYear(), fixtureNow.getMonth(), dayOfMonth, 12);
+}
+
+function formattedFixtureDate(date: Date): string {
+    return [
+        date.getDate().toString().padStart(2, "0"),
+        (date.getMonth() + 1).toString().padStart(2, "0"),
+        date.getFullYear().toString(),
+    ].join(".");
+}
+
+const initialDateLabel = `Choose Maintenance date, selected ${formattedFixtureDate(fixtureDate(8))}`;
+const selectedDateLabel = `Choose Maintenance date, selected ${formattedFixtureDate(fixtureDate(10))}`;
+
 interface ControlledDatePickerProperties {
     readonly properties: DatePickerProperties;
     readonly updateProperties: (properties: Partial<DatePickerProperties>) => void;
@@ -50,7 +68,7 @@ const meta = {
     args: {
         label: "Maintenance date",
         onChange: fn(),
-        value: new Date(2026, 7, 8, 12),
+        value: fixtureDate(8),
     },
     component: DatePicker,
     parameters: { layout: "padded" },
@@ -65,7 +83,7 @@ export const Default: Story = {
     play: async ({ args, canvasElement }) => {
         const canvas = within(canvasElement);
         const trigger = canvas.getByRole("button", {
-            name: "Choose Maintenance date, selected 08.08.2026",
+            name: initialDateLabel,
         });
         await userEvent.click(trigger);
         const panelId = await waitFor(() => {
@@ -82,12 +100,12 @@ export const Default: Story = {
         const day = within(panel)
             .getAllByRole("button")
             .find((button) => button.textContent?.trim() === "10");
-        if (day === undefined) throw new Error("The August 10 calendar day is missing.");
+        if (day === undefined) throw new Error("The 10th calendar day is missing.");
         await userEvent.click(day);
 
         await expect(
             canvas.getByRole("button", {
-                name: "Choose Maintenance date, selected 10.08.2026",
+                name: selectedDateLabel,
             })
         ).toBeVisible();
         await expect(args.onChange).toHaveBeenCalled();
@@ -96,12 +114,12 @@ export const Default: Story = {
 
 export const MinimumDate: Story = {
     args: {
-        minimumDate: new Date(2026, 7, 8, 12),
+        minimumDate: fixtureDate(8),
     },
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement);
         const trigger = canvas.getByRole("button", {
-            name: "Choose Maintenance date, selected 08.08.2026",
+            name: initialDateLabel,
         });
 
         await userEvent.click(trigger);

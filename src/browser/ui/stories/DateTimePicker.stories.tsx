@@ -8,6 +8,24 @@ import { DateTimePicker, type DateTimePickerValue } from "../DateTimePicker.tsx"
 
 type DateTimePickerProperties = ComponentProps<typeof DateTimePicker>;
 
+const fixtureNow = new Date();
+
+// Noon on the given day of the current month, so the fixture never depends on a hardcoded month.
+function fixtureDate(dayOfMonth: number): Date {
+    return new Date(fixtureNow.getFullYear(), fixtureNow.getMonth(), dayOfMonth, 12);
+}
+
+function formattedFixtureDate(date: Date): string {
+    return [
+        date.getDate().toString().padStart(2, "0"),
+        (date.getMonth() + 1).toString().padStart(2, "0"),
+        date.getFullYear().toString(),
+    ].join(".");
+}
+
+const initialDateLabel = `Choose Disabled until date, selected ${formattedFixtureDate(fixtureDate(8))}`;
+const selectedDateLabel = `Choose Disabled until date, selected ${formattedFixtureDate(fixtureDate(10))}`;
+
 interface ControlledDateTimePickerProperties {
     readonly properties: DateTimePickerProperties;
     readonly updateProperties: (properties: Partial<DateTimePickerProperties>) => void;
@@ -47,7 +65,7 @@ function RenderControlledDateTimePicker(properties: DateTimePickerProperties) {
 }
 
 const initialValue: DateTimePickerValue = {
-    date: new Date(2026, 7, 8, 12),
+    date: fixtureDate(8),
     time: "05:30",
 };
 
@@ -70,7 +88,7 @@ export const Default: Story = {
     play: async ({ args, canvasElement }) => {
         const canvas = within(canvasElement);
         const dateTrigger = canvas.getByRole("button", {
-            name: "Choose Disabled until date, selected 08.08.2026",
+            name: initialDateLabel,
         });
 
         await userEvent.click(dateTrigger);
@@ -88,10 +106,10 @@ export const Default: Story = {
         const day = within(panel)
             .getAllByRole("button")
             .find((button) => button.textContent?.trim() === "10");
-        if (day === undefined) throw new Error("The August 10 calendar day is missing.");
+        if (day === undefined) throw new Error("The 10th calendar day is missing.");
         await userEvent.click(day);
 
-        const selectedDate = new Date(2026, 7, 10, 12);
+        const selectedDate = fixtureDate(10);
         const hour = canvas.getByRole("button", {
             name: "Time (24-hour), hour",
         });
@@ -100,7 +118,7 @@ export const Default: Story = {
         });
         await expect(
             canvas.getByRole("button", {
-                name: "Choose Disabled until date, selected 10.08.2026",
+                name: selectedDateLabel,
             })
         ).toBeVisible();
         await expect(hour).toHaveTextContent("05");
@@ -135,7 +153,7 @@ export const Default: Story = {
 
         await expect(
             canvas.getByRole("button", {
-                name: "Choose Disabled until date, selected 10.08.2026",
+                name: selectedDateLabel,
             })
         ).toBeVisible();
         await expect(hour).toHaveTextContent("21");
