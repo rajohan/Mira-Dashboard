@@ -75,7 +75,7 @@
         "@vitest/coverage-v8": "4.1.11",
         "bun-plugin-tailwind": "^0.1.2",
         "bun-types": "*",
-        "drizzle-kit": "^1.0.0-rc.5-ab785fc",
+        "drizzle-kit": "^1.0.0-rc.5-5935859",
         "eslint-plugin-react-you-might-not-need-an-effect": "^1.0.2",
         "eslint-plugin-storybook": "10.6.0-beta.0",
         "eventsource": "5.1.1",
