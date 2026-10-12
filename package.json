@@ -20,8 +20,8 @@
         "@daypicker/react": "10.0.1",
         "@dnd-kit/react": "^0.5.0",
         "@headlessui/react": "^2.2.10",
-        "@simplewebauthn/browser": "13.3.0",
-        "@simplewebauthn/server": "13.3.3",
+        "@simplewebauthn/browser": "14.0.0",
+        "@simplewebauthn/server": "14.0.3",
         "@tailwindcss/typography": "^0.5.20",
         "@tanstack/query-core": "5.102.8",
         "@tanstack/query-db-collection": "1.2.11",
@@ -71,8 +71,8 @@
         "@types/react-syntax-highlighter": "^15.5.13",
         "@typescript-eslint/scope-manager": "8.68.0",
         "@valibot/to-json-schema": "1.7.1",
-        "@vitest/browser-playwright": "4.1.11",
-        "@vitest/coverage-v8": "4.1.11",
+        "@vitest/browser-playwright": "5.0.3",
+        "@vitest/coverage-v8": "5.0.3",
         "bun-plugin-tailwind": "^0.1.2",
         "bun-types": "*",
         "drizzle-kit": "^1.0.0-rc.5-ab785fc",
@@ -93,7 +93,7 @@
         "tailwindcss": "^4.3.3",
         "typescript": "^7.0.2",
         "vite": "8.2.2",
-        "vitest": "4.1.11"
+        "vitest": "5.0.3"
     },
     "browserslist": [
         "Chrome >= 140",
